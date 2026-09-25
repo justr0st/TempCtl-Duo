@@ -1,0 +1,123 @@
+// Host-side tests. Build & run on a PC:
+//   g++ -std=c++17 -I../src host_test.cpp ../src/program.cpp -o host_test && ./host_test
+#include <cassert>
+#include <cmath>
+#include <cstdio>
+#include "modbus_frame.h"
+#include "program.h"
+
+static int fails = 0;
+#define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++fails; } } while (0)
+static bool near(float a, float b, float e = 0.01f) { return fabsf(a - b) <= e; }
+
+static void testCrc() {
+  // Classic reference frame: 01 03 00 00 00 02 -> CRC C4 0B
+  uint8_t f[8];
+  mbBuildRead(f, 1, 3, 0, 2);
+  CHECK(f[6] == 0xC4 && f[7] == 0x0B);
+  CHECK(mbCheckCrc(f, 8));
+  // PMA manual example: read addr 650 (0x028A), 2 words from slave 17
+  mbBuildRead(f, 0x11, 3, 650, 2);
+  CHECK(f[2] == 0x02 && f[3] == 0x8A && f[5] == 0x02);
+}
+
+static void testParse() {
+  // Response: 11 03 04 00 DE 01 4D + CRC  -> 222, 333 (from PMA manual)
+  uint8_t r[9] = {0x11, 0x03, 0x04, 0x00, 0xDE, 0x01, 0x4D};
+  mbAppendCrc(r, 7);
+  int16_t v[2];
+  CHECK(mbParse(r, 9, 0x11, 3, 2, v, nullptr) == MbResult::Ok);
+  CHECK(v[0] == 222 && v[1] == 333);
+  r[4] ^= 1;
+  CHECK(mbParse(r, 9, 0x11, 3, 2, v, nullptr) == MbResult::CrcError);
+  // Exception: 11 90 02
+  uint8_t e[5] = {0x11, 0x90, 0x02};
+  mbAppendCrc(e, 3);
+  uint8_t ex = 0;
+  CHECK(mbParse(e, 5, 0x11, 16, 1, nullptr, &ex) == MbResult::Exception && ex == 2);
+  // Negative value -31000 (sensor fault)
+  uint8_t n[7] = {1, 3, 2, 0x86, 0xE8};
+  mbAppendCrc(n, 5);
+  CHECK(mbParse(n, 7, 1, 3, 1, v, nullptr) == MbResult::Ok && v[0] == -31000);
+  // FC6 echo
+  uint8_t w[8];
+  mbBuildWrite6(w, 0x11, 650, 123);
+  CHECK(w[4] == 0x00 && w[5] == 0x7B);
+  CHECK(mbParse(w, 8, 0x11, 6, 1, nullptr, nullptr) == MbResult::Ok);
+  uint8_t w16[11];
+  mbBuildWrite16(w16, 1, 100, -5);
+  CHECK(w16[1] == 16 && w16[6] == 2 && w16[7] == 0xFF && w16[8] == 0xFB && mbCheckCrc(w16, 11));
+}
+
+static Program demo() {
+  Program p{};
+  p.s[0] = {1, 100, 10, 5};   // ramp 10 min to 100, hold 5
+  p.s[1] = {1, 200, 0, 10};   // jump to 200, hold 10
+  p.s[2] = {0, 999, 1, 1};    // disabled
+  p.s[3] = {1, 50, 15, 0};    // ramp down 15 min, no hold
+  return p;
+}
+
+static void testPlan() {
+  Program p = demo();
+  CHECK(near(ProgramEngine::plannedTotal(p), (10 + 5 + 0 + 10 + 15) * 60));
+  CHECK(near(ProgramEngine::plannedAt(p, 20, 0), 20));
+  CHECK(near(ProgramEngine::plannedAt(p, 20, 300), 60));      // halfway ramp 20->100
+  CHECK(near(ProgramEngine::plannedAt(p, 20, 700), 100));     // hold
+  CHECK(near(ProgramEngine::plannedAt(p, 20, 900), 200));     // step 2 hold
+  CHECK(near(ProgramEngine::plannedAt(p, 20, 1500 + 450), 125));  // halfway 200->50
+  CHECK(near(ProgramEngine::plannedAt(p, 20, 99999), 50));
+}
+
+static void testRun() {
+  Program p = demo();
+  ProgramEngine e;
+  CHECK(e.start(p, 20));
+  CHECK(e.state() == RunState::Running && e.step() == 0 && e.phase() == Phase::Ramp);
+  CHECK(near(e.setpoint(), 20));
+  for (int i = 0; i < 300; ++i) e.tick(1, 0, true, false, 5);
+  CHECK(near(e.setpoint(), 60));
+  e.pause();
+  uint32_t g = e.generation();
+  for (int i = 0; i < 100; ++i) e.tick(1, 0, true, false, 5);
+  CHECK(near(e.setpoint(), 60));  // frozen
+  e.resume();
+  CHECK(e.generation() != g);
+  for (int i = 0; i < 300; ++i) e.tick(1, 0, true, false, 5);
+  CHECK(e.phase() == Phase::Hold && e.step() == 0 && near(e.setpoint(), 100));
+  // guaranteed soak: PV far away -> hold time doesn't advance
+  for (int i = 0; i < 1000; ++i) e.tick(1, 40, true, true, 5);
+  CHECK(e.phase() == Phase::Hold && e.step() == 0 && e.soakWaiting());
+  for (int i = 0; i < 300; ++i) e.tick(1, 98, true, true, 5);
+  // step 1 has zero ramp -> directly hold at 200
+  CHECK(e.step() == 1 && e.phase() == Phase::Hold && near(e.setpoint(), 200));
+  CHECK(near(e.elapsed(), 900, 1.5f));
+  e.skip();  // skip the hold -> step 3 ramp (step 2 disabled)
+  CHECK(e.step() == 3 && e.phase() == Phase::Ramp && near(e.setpoint(), 200));
+  for (int i = 0; i < 450; ++i) e.tick(1, 0, true, false, 5);
+  CHECK(near(e.setpoint(), 125, 0.5f));
+  for (int i = 0; i < 460; ++i) e.tick(1, 0, true, false, 5);
+  CHECK(e.state() == RunState::Finished && near(e.setpoint(), 50));
+  CHECK(near(e.elapsed(), e.total()));
+
+  // abort keeps the last setpoint
+  ProgramEngine a;
+  a.start(p, 20);
+  for (int i = 0; i < 150; ++i) a.tick(1, 0, true, false, 5);
+  a.stop();
+  CHECK(a.state() == RunState::Aborted && near(a.setpoint(), 40));
+
+  // empty program refuses to start
+  Program none{};
+  ProgramEngine z;
+  CHECK(!z.start(none, 20) && z.state() == RunState::Idle);
+}
+
+int main() {
+  testCrc();
+  testParse();
+  testPlan();
+  testRun();
+  printf(fails ? "%d FAILED\n" : "all tests passed\n", fails);
+  return fails ? 1 : 0;
+}
