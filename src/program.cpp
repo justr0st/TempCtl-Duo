@@ -1,5 +1,7 @@
 #include "program.h"
 #include <math.h>
+#include <stdio.h>
+#include <string.h>
 
 const char* runStateName(RunState s) {
   switch (s) {
@@ -20,36 +22,70 @@ const char* phaseName(Phase p) {
   }
 }
 
-static float clampMin(float m) { return (m > 0 && !isnan(m)) ? m * 60.0f : 0.0f; }
+// ------------------------------------------------------------ editing helpers
 
-float ProgramEngine::rampSec(int i) const { return (i >= 0 && i < NUM_STEPS) ? clampMin(p_.s[i].rampMin) : 0; }
-float ProgramEngine::holdSec(int i) const { return (i >= 0 && i < NUM_STEPS) ? clampMin(p_.s[i].holdMin) : 0; }
-
-int ProgramEngine::nextEnabled(int from) const {
-  for (int i = from; i < NUM_STEPS; ++i)
-    if (p_.s[i].enabled) return i;
-  return -1;
+void programClear(Program& p, const char* name) {
+  memset(&p, 0, sizeof(p));
+  snprintf(p.name, sizeof(p.name), "%s", name ? name : "");
 }
 
-int ProgramEngine::enabledCount(const Program& p) {
-  int n = 0;
-  for (int i = 0; i < NUM_STEPS; ++i) n += p.s[i].enabled ? 1 : 0;
-  return n;
+bool programInsertStep(Program& p, int at, const Step& st) {
+  if (p.count >= MAX_STEPS || at < 0 || at > p.count) return false;
+  memmove(&p.s[at + 1], &p.s[at], sizeof(Step) * (p.count - at));
+  p.s[at] = st;
+  ++p.count;
+  return true;
 }
+
+bool programRemoveStep(Program& p, int idx) {
+  if (idx < 0 || idx >= p.count) return false;
+  memmove(&p.s[idx], &p.s[idx + 1], sizeof(Step) * (p.count - idx - 1));
+  --p.count;
+  memset(&p.s[p.count], 0, sizeof(Step));
+  return true;
+}
+
+bool programMoveStep(Program& p, int from, int to) {
+  if (from < 0 || from >= p.count || to < 0 || to >= p.count) return false;
+  if (from == to) return true;
+  const Step st = p.s[from];
+  if (from < to) memmove(&p.s[from], &p.s[from + 1], sizeof(Step) * (to - from));
+  else memmove(&p.s[to + 1], &p.s[to], sizeof(Step) * (from - to));
+  p.s[to] = st;
+  return true;
+}
+
+void programSanitize(Program& p, float spMin, float spMax) {
+  p.name[PROG_NAME_LEN - 1] = 0;
+  if (p.count > MAX_STEPS) p.count = MAX_STEPS;
+  for (int i = 0; i < p.count; ++i) {
+    Step& s = p.s[i];
+    if (isnan(s.target)) s.target = spMin;
+    if (s.target < spMin) s.target = spMin;
+    if (s.target > spMax) s.target = spMax;
+    if (s.rampSec > MAX_STEP_SEC) s.rampSec = MAX_STEP_SEC;
+    if (s.holdSec > MAX_STEP_SEC) s.holdSec = MAX_STEP_SEC;
+  }
+}
+
+// ------------------------------------------------------------ engine
+
+float ProgramEngine::rampSec(int i) const { return (i >= 0 && i < p_.count) ? (float)p_.s[i].rampSec : 0.0f; }
+float ProgramEngine::holdSec(int i) const { return (i >= 0 && i < p_.count) ? (float)p_.s[i].holdSec : 0.0f; }
 
 float ProgramEngine::plannedTotal(const Program& p) {
   float t = 0;
-  for (int i = 0; i < NUM_STEPS; ++i)
-    if (p.s[i].enabled) t += clampMin(p.s[i].rampMin) + clampMin(p.s[i].holdMin);
+  const int n = p.count > MAX_STEPS ? MAX_STEPS : p.count;
+  for (int i = 0; i < n; ++i) t += (float)p.s[i].rampSec + (float)p.s[i].holdSec;
   return t;
 }
 
 float ProgramEngine::plannedAt(const Program& p, float startTemp, float t) {
   float prev = startTemp;
   if (t < 0) return startTemp;
-  for (int i = 0; i < NUM_STEPS; ++i) {
-    if (!p.s[i].enabled) continue;
-    const float r = clampMin(p.s[i].rampMin), h = clampMin(p.s[i].holdMin);
+  const int n = p.count > MAX_STEPS ? MAX_STEPS : p.count;
+  for (int i = 0; i < n; ++i) {
+    const float r = (float)p.s[i].rampSec, h = (float)p.s[i].holdSec;
     const float tgt = p.s[i].target;
     if (t < r) return prev + (tgt - prev) * (t / r);
     t -= r;
@@ -61,8 +97,8 @@ float ProgramEngine::plannedAt(const Program& p, float startTemp, float t) {
 }
 
 bool ProgramEngine::start(const Program& p, float startTemp) {
+  if (p.count == 0 || p.count > MAX_STEPS) return false;
   p_ = p;
-  if (enabledCount(p_) == 0) return false;
   st_ = RunState::Running;
   ph_ = Phase::None;
   step_ = -1;
@@ -88,8 +124,8 @@ void ProgramEngine::advance() {
       // no hold: fall through to next step
     } else {
       if (ph_ == Phase::Hold) done_ += holdSec(step_);
-      const int n = nextEnabled(step_ + 1);
-      if (n < 0) { finish(); return; }
+      const int n = step_ + 1;
+      if (n >= p_.count) { finish(); return; }
       if (step_ >= 0) prev_ = p_.s[step_].target;
       step_ = n;
       ph_ = Phase::Ramp;
@@ -118,7 +154,7 @@ void ProgramEngine::resume() {
 }
 
 void ProgramEngine::stop() {
-  if (st_ == RunState::Running || st_ == RunState::Paused) {
+  if (active()) {
     lastSp_ = setpoint();
     st_ = RunState::Aborted;
     ph_ = Phase::None;
@@ -128,7 +164,7 @@ void ProgramEngine::stop() {
 }
 
 void ProgramEngine::skip() {
-  if (st_ == RunState::Running || st_ == RunState::Paused) {
+  if (active()) {
     const RunState keep = st_;
     advance();
     if (st_ != RunState::Finished) st_ = keep;

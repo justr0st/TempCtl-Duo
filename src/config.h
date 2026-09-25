@@ -1,7 +1,7 @@
 // Board configuration for the ESP32-2432S028R ("Cheap Yellow Display", CYD).
 #pragma once
 
-#define FW_VERSION "1.0.0"
+#define FW_VERSION "1.1.0"
 
 // ---- RS485 transceiver (UART2) ----
 // CYD free pins: CN1 = GPIO22, GPIO27 (+3.3V, GND); P3 = GPIO21(backlight!), GPIO22, GPIO35.
@@ -25,7 +25,8 @@
 #define SCREEN_W 320
 #define SCREEN_H 240
 
-// Number of points in the run/live history (chart resolution)
-#define HIST_N 240
-// Live (idle) chart sample interval in seconds -> 240 * 5 s = 20 min window
-#define LIVE_SAMPLE_SEC 5
+// Chart resolution (points). Idle: one sample per second -> 300 s = 5 min
+// rolling window. Running: the program timeline (plus some spare time) is
+// divided into CHART_N bins.
+#define CHART_N 300
+#define LIVE_SAMPLE_SEC 1

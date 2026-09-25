@@ -77,6 +77,13 @@ input[type=checkbox]{width:20px;height:20px}
 code{font-size:13px}
 @media (max-width:560px){.readout{grid-template-columns:1fr}main{padding:10px}.panel{padding:12px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+.pill{display:inline-block;padding:2px 10px;border-radius:12px;font-size:13px;border:1px solid var(--rule);color:var(--muted)}
+.pill.on{background:var(--ok);border-color:var(--ok);color:#fff}
+.inl{display:inline-flex;gap:6px;align-items:center}
+.inl input{max-width:90px}.inl select{max-width:72px}
+td .b{padding:5px 9px;font-size:14px}
+tr.sel td{background:color-mix(in srgb,var(--set) 10%,transparent)}
+#progSel{max-width:260px}#progName{max-width:260px}
 </style>
 </head>
 <body>
@@ -86,24 +93,22 @@ code{font-size:13px}
   <span id="net"></span>
 </header>
 <nav role="tablist">
-  <button role="tab" data-v="run" aria-selected="true">Run</button>
+  <button role="tab" data-v="main" aria-selected="true">Main</button>
   <button role="tab" data-v="prog">Program</button>
+  <button role="tab" data-v="sys">System</button>
   <button role="tab" data-v="ctrl">Controller</button>
-  <button role="tab" data-v="conn">Connection</button>
   <button role="tab" data-v="tools">Tools</button>
-  <button role="tab" data-v="wifi">Wi-Fi</button>
 </nav>
 <main>
 
-<section id="v-run" class="on">
-  <div id="spWarn" class="warn hide">The setpoint register address is not set, so programs cannot run yet.
-    Open <a href="#" data-go="conn">Connection</a> or use <a href="#" data-go="tools">Tools</a> to find it.</div>
+<section id="v-main" class="on">
+  <div id="spWarn" class="warn hide">The setpoint register address is not set, so programs and the manual
+    setpoint cannot work yet. Open <a href="#" data-go="ctrl">Controller</a> or use <a href="#" data-go="tools">Tools</a> to find it.</div>
   <div class="panel">
     <div class="readout">
       <div><div class="cap">Process value</div><div class="pv" id="pv">---.-</div></div>
       <div><div class="cap">Setpoint in controller</div><div class="sp" id="sp">---.-</div></div>
     </div>
-    <div class="strip" id="strip"><span id="marker"></span></div>
     <div class="facts">
       <div><span class="cap">State</span><b id="state">-</b></div>
       <div><span class="cap">Step</span><b id="step">-</b></div>
@@ -114,53 +119,81 @@ code{font-size:13px}
     </div>
   </div>
   <div class="panel">
+    <h2>Manual setpoint</h2>
+    <p class="note">On: the ESP32 writes this setpoint and switches the controller outputs on. Off: the outputs are
+      switched off (if the outputs-off register is set). Starting a program ends manual mode.</p>
+    <div class="row"><label class="inl cap">Setpoint <input id="manSp" type="number" step="0.1"></label>
+      <button class="b" id="bManSet">Set</button>
+      <button class="b" id="bManOn">Switch on</button><button class="b" id="bManOff">Switch off</button>
+      <span class="pill" id="manState">off</span></div>
+  </div>
+  <div class="panel">
+    <h2>Program</h2>
+    <div class="row"><select id="mainProg" aria-label="Program"></select>
+      <button class="b primary" id="bStart">Start program</button>
+      <button class="b" id="bPause">Pause</button>
+      <button class="b" id="bSkip">Skip to next phase</button>
+      <button class="b danger" id="bStop">Stop program</button></div>
+    <div class="strip" id="strip"><span id="marker"></span></div>
+  </div>
+  <div class="panel">
     <canvas id="chart"></canvas>
-    <div class="legend"><span><i style="background:var(--plan)"></i>Planned</span>
+    <div class="legend"><span><i style="background:var(--heat)"></i>Process value</span>
       <span><i style="background:var(--set)"></i>Setpoint</span>
-      <span><i style="background:var(--heat)"></i>Process value</span>
+      <span><i style="background:var(--plan)"></i>Program</span>
+      <span>broken line = not active</span>
       <span id="chartSpan"></span></div>
   </div>
-  <div class="row">
-    <button class="b primary" id="bStart">Start program</button>
-    <button class="b" id="bPause">Pause</button>
-    <button class="b" id="bSkip">Skip to next phase</button>
-    <button class="b danger" id="bStop">Stop program</button>
-    <a class="b" href="/api/log.csv">Download log (CSV)</a>
-  </div>
+  <div class="row"><a class="b" href="/api/log.csv">Download log (CSV)</a></div>
   <div id="msg"></div>
 </section>
 
 <section id="v-prog">
   <div class="panel">
-    <h2>Program steps</h2>
+    <h2>Programs</h2>
+    <div class="grid">
+      <label>Program<select id="progSel"></select></label>
+      <label>Name<input id="progName" maxlength="23"></label>
+    </div>
     <p class="note">Each step ramps from the previous temperature to its target, then holds. The first ramp starts
-      at the temperature measured when you press Start. Times are in minutes; a ramp of 0 jumps directly.</p>
-    <table><thead><tr><th>Step</th><th>On</th><th>Target</th><th>Ramp (min)</th><th>Hold (min)</th></tr></thead>
+      at the temperature measured when the program starts. A ramp of 0 jumps directly. Up to 100 steps.</p>
+    <table><thead><tr><th>Step</th><th>Target</th><th>Ramp</th><th>Hold</th><th></th></tr></thead>
       <tbody id="progRows"></tbody></table>
-    <p class="note" id="progTotal"></p>
-    <canvas id="progChart" style="height:200px"></canvas>
+    <div class="row" style="margin-top:10px"><button class="b" id="bAddStep">Add step</button>
+      <span class="cap" id="progTotal"></span></div>
+    <canvas id="progChart" style="height:200px;margin-top:12px"></canvas>
     <div class="row" style="margin-top:12px"><button class="b primary" id="bSaveProg">Save program</button>
-      <span id="progMsg" class="cap"></span></div>
+      <button class="b" id="bRevertProg">Revert</button><span id="progMsg" class="cap"></span></div>
+  </div>
+</section>
+
+<section id="v-sys">
+  <div class="panel">
+    <h2>Display</h2>
+    <div class="grid">
+      <label>Rotate screen 180°<select id="rotate180"><option value="false">No</option><option value="true">Yes</option></select></label>
+      <label>Brightness (10-255)<input id="brightness" type="number" min="10" max="255"></label>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="b primary" id="bSaveSys">Save display settings</button>
+      <span id="sysMsg" class="cap"></span></div>
+  </div>
+  <div class="panel">
+    <h2>Wi-Fi</h2>
+    <p class="note">Leave the network name empty to run as an access point only. If the device cannot join the
+      network within 20 s it also opens its own access point. The host name takes effect after a restart.</p>
+    <div class="grid">
+      <label>Network name<input id="ssid" maxlength="32"></label>
+      <label>Password (empty = keep)<input id="pass" type="password" maxlength="64"></label>
+      <label>Access point password (8+ characters, empty = keep)<input id="apPass" type="password" maxlength="32"></label>
+      <label>Host name (http://name.local)<input id="hostname" maxlength="23"></label>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="b primary" id="bSaveWifi">Save and connect</button>
+      <span id="wifiMsg" class="cap"></span></div>
+    <p class="note" id="sysInfo"></p>
   </div>
 </section>
 
 <section id="v-ctrl">
-  <div class="panel">
-    <h2>Controller parameters</h2>
-    <p class="note" id="ctrlNote">Reads the PID and alarm parameters of the PMA KS 4x-1. Values are written one at a
-      time; the controller rejects values outside its limits.</p>
-    <div class="row"><button class="b" id="bReadParams">Read from controller</button></div>
-    <table style="margin-top:12px"><thead><tr><th>Name</th><th>Meaning</th><th>Value</th><th></th></tr></thead>
-      <tbody id="paramRows"></tbody></table>
-  </div>
-  <div class="panel">
-    <h2>Actions</h2>
-    <div class="row" id="actions"></div>
-    <div id="actMsg" class="cap" style="margin-top:8px"></div>
-  </div>
-</section>
-
-<section id="v-conn">
   <div class="panel">
     <h2>Serial link</h2>
     <div class="grid">
@@ -218,10 +251,22 @@ code{font-size:13px}
       <label>Pause after link loss (s, 0 = never)<input id="commLossSec" type="number"></label>
       <label>Lowest allowed setpoint<input id="spMin" type="number" step="0.1"></label>
       <label>Highest allowed setpoint<input id="spMax" type="number" step="0.1"></label>
-      <label>Display brightness (10-255)<input id="brightness" type="number"></label>
     </div>
-    <div class="row" style="margin-top:12px"><button class="b primary" id="bSaveConn">Save connection settings</button>
+    <div class="row" style="margin-top:12px"><button class="b primary" id="bSaveConn">Save controller settings</button>
       <span id="connMsg" class="cap"></span></div>
+  </div>
+  <div class="panel">
+    <h2>Controller parameters</h2>
+    <p class="note" id="ctrlNote">Reads the PID and alarm parameters of the PMA KS 4x-1. Values are written one at a
+      time; the controller rejects values outside its limits.</p>
+    <div class="row"><button class="b" id="bReadParams">Read from controller</button></div>
+    <table style="margin-top:12px"><thead><tr><th>Name</th><th>Meaning</th><th>Value</th><th></th></tr></thead>
+      <tbody id="paramRows"></tbody></table>
+  </div>
+  <div class="panel">
+    <h2>Actions</h2>
+    <div class="row" id="actions"></div>
+    <div id="actMsg" class="cap" style="margin-top:8px"></div>
   </div>
 </section>
 
@@ -254,22 +299,6 @@ code{font-size:13px}
     <div id="wrOut" class="cap" style="margin-top:10px"></div>
   </div>
 </section>
-
-<section id="v-wifi">
-  <div class="panel">
-    <h2>Wi-Fi</h2>
-    <p class="note">Leave the network name empty to run as an access point only. The device restarts after saving.
-      If it cannot join the network within 20 s it also opens its own access point.</p>
-    <div class="grid">
-      <label>Network name<input id="ssid" maxlength="32"></label>
-      <label>Password<input id="pass" type="password" maxlength="64"></label>
-      <label>Access point password (8+ characters)<input id="apPass" type="password" maxlength="32"></label>
-      <label>Host name (http://name.local)<input id="hostname" maxlength="23"></label>
-    </div>
-    <div class="row" style="margin-top:12px"><button class="b primary" id="bSaveWifi">Save and restart</button>
-      <span id="wifiMsg" class="cap"></span></div>
-  </div>
-</section>
 </main>
 
 <script>
@@ -277,19 +306,23 @@ const $=id=>document.getElementById(id);
 const api=async(p,body)=>{const o=body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)};
   const r=await fetch(p,o);return r.json();};
 const f1=v=>v==null?'---.-':Number(v).toFixed(1);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const dur=s=>{s=Math.max(0,Math.round(s||0));const h=Math.floor(s/3600),m=Math.floor(s/60)%60,x=s%60;
   return h?`${h}:${String(m).padStart(2,'0')}:${String(x).padStart(2,'0')}`:`${m}:${String(x).padStart(2,'0')}`;};
 const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-let settings=null,program=null,status=null,view='run';
+const spanFor=t=>t<=0?60:t+Math.max(t*0.1,30);
+let settings=null,programs=null,status=null,view='main',edit=null,editIdx=0,dirty=false,selRow=-1;
 
 // ---------- navigation
 function show(v){view=v;document.querySelectorAll('nav button').forEach(b=>b.setAttribute('aria-selected',b.dataset.v===v));
   document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id==='v-'+v));
-  if(v==='prog')loadProgram();if(v==='conn'||v==='tools'||v==='wifi')loadSettings();if(v==='ctrl')loadParamsInfo();}
+  if(v==='prog')loadPrograms().then(()=>{if(!dirty)loadProgram(programs.sel);});
+  if(v==='sys'||v==='ctrl'||v==='tools')loadSettings();if(v==='ctrl')loadParamsInfo();if(v==='main')pollHistory();}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>show(b.dataset.v));
 document.querySelectorAll('[data-go]').forEach(a=>a.onclick=e=>{e.preventDefault();show(a.dataset.go);});
 
 // ---------- chart
+// d: {pv,sp,plan (arrays), binSec, mode:'live'|'run', planActive, spActive, planSpan}
 function drawChart(cv,d){
   const dpr=window.devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight;cv.width=W*dpr;cv.height=H*dpr;
   const g=cv.getContext('2d');g.scale(dpr,dpr);g.clearRect(0,0,W,H);
@@ -302,31 +335,40 @@ function drawChart(cv,d){
   for(let v=lo;v<=hi+st/2;v+=st){const yy=Math.round(y(v))+.5;g.beginPath();g.moveTo(L,yy);g.lineTo(W-R,yy);g.stroke();
     g.textAlign='right';g.fillText(+v.toFixed(1),L-6,yy+4);}
   const span=(n-1)*d.binSec,maxLbl=Math.max(2,Math.floor((W-L-R)/80));
-  const ts=[60,300,600,900,1800,3600,7200,10800,14400,21600,43200,86400].find(v=>span/v<=maxLbl)||86400;
-  const lab=s=>{const a=Math.abs(s),h=Math.floor(a/3600),m=Math.round(a%3600/60);
-    return(s<0?'-':'')+(h?`${h}:${String(m).padStart(2,'0')} h`:`${m} min`);};
+  const ts=[10,30,60,120,300,600,900,1800,3600,7200,10800,14400,21600,43200,86400].find(v=>span/v<=maxLbl)||86400;
+  const lab=s=>{const a=Math.abs(s),h=Math.floor(a/3600),m=Math.floor(a%3600/60),x=Math.round(a%60);
+    return(s<0?'-':'')+(h?`${h}:${String(m).padStart(2,'0')} h`:(a<600&&x?`${m}:${String(x).padStart(2,'0')}`:`${m} min`));};
   for(let t=0;t<=span+1;t+=ts){const i=t/d.binSec,xx=x(d.mode==='live'?(n-1)-i:i);
     g.textAlign=xx>W-R-30?'right':xx<L+30?'left':'center';g.fillText(d.mode==='live'?lab(-t):lab(t),xx,H-8);}
-  const line=(arr,col,w,dash)=>{g.strokeStyle=col;g.lineWidth=w;g.setLineDash(dash||[]);g.beginPath();let pen=false;
+  const line=(arr,col,w,dash)=>{g.strokeStyle=col;g.lineWidth=w;g.setLineDash(dash?[7,5]:[]);g.beginPath();let pen=false;
     arr.forEach((v,i)=>{if(v==null){pen=false;return;}pen?g.lineTo(x(i),y(v)):g.moveTo(x(i),y(v));pen=true;});g.stroke();};
-  line(d.plan,css('--plan'),2,[6,4]);line(d.sp,css('--set'),1.5);line(d.pv,css('--heat'),2.5);g.setLineDash([]);
+  line(d.plan,css('--plan'),2,!d.planActive);line(d.sp,css('--set'),1.5,!d.spActive);line(d.pv,css('--heat'),2.5,false);
+  g.setLineDash([]);
 }
 
-function planOf(steps,start,N){const tot=steps.reduce((a,s)=>a+(s.on?(s.r+s.h)*60:0),0);const bin=Math.max(1,tot/N);
-  const at=t=>{let prev=start;for(const s of steps){if(!s.on)continue;const r=s.r*60,h=s.h*60;
-    if(t<r)return prev+(s.t-prev)*t/r;t-=r;if(t<h)return s.t;t-=h;prev=s.t;}return prev;};
-  return{plan:Array.from({length:N},(_,i)=>at((i+.5)*bin)),binSec:bin,total:tot};}
+function planOf(steps,start,N){const tot=steps.reduce((a,s)=>a+s.r+s.h,0);const sp=spanFor(tot),bin=sp/(N-1);
+  const at=t=>{let prev=start;for(const s of steps){if(t<s.r)return prev+(s.t-prev)*t/s.r;t-=s.r;if(t<s.h)return s.t;t-=s.h;prev=s.t;}return prev;};
+  return{plan:Array.from({length:N},(_,i)=>i*bin<=tot?at(i*bin):null),binSec:bin,total:tot};}
 
-// ---------- run view
-function renderStrip(steps,st){
+// ---------- main view
+async function loadPrograms(){programs=await api('/api/programs');fillProgSelect($('mainProg'),programs.sel);
+  if(view==='prog')fillProgSelect($('progSel'),editIdx);return programs;}
+function fillProgSelect(sel,cur){if(!programs)return;const keep=document.activeElement===sel;
+  const html=programs.programs.map((p,i)=>`<option value="${i}">${i+1} ${esc(p.name)}${p.steps?` (${p.steps} steps, ${dur(p.total)})`:' (empty)'}</option>`).join('');
+  if(sel.dataset.h!==html&&!keep){sel.innerHTML=html;sel.dataset.h=html;}if(!keep)sel.value=String(cur);}
+
+function renderStrip(st){
   const el=$('strip');el.querySelectorAll('div').forEach(d=>d.remove());
-  const tot=steps.reduce((a,s)=>a+(s.on?s.r+s.h:0),0)||1;
-  steps.forEach((s,i)=>{if(!s.on)return;[['ramp',s.r],['hold',s.h]].forEach(([k,m])=>{if(m<=0)return;
-    const d=document.createElement('div');d.className=k;d.style.width=(100*m/tot)+'%';
-    d.textContent=k==='ramp'?`${i+1} → ${s.t}`:`${i+1} hold`;d.title=`Step ${i+1}: ${k} ${m} min, target ${s.t}`;
-    if(st&&st.step===i&&st.phase===k&&(st.state==='running'||st.state==='paused'))d.classList.add('cur');
+  const steps=st.active&&runSteps?runSteps:(selSteps||[]);
+  const tot=steps.reduce((a,s)=>a+s.r+s.h,0)||1;
+  steps.forEach((s,i)=>{[['ramp',s.r],['hold',s.h]].forEach(([k,sec])=>{if(sec<=0)return;
+    const d=document.createElement('div');d.className=k;d.style.width=(100*sec/tot)+'%';
+    d.textContent=k==='ramp'?`${i+1} → ${s.t}`:`${i+1} hold`;d.title=`Step ${i+1}: ${k} ${dur(sec)}, target ${s.t}`;
+    if(st.active&&st.step===i&&st.phase===k)d.classList.add('cur');
     el.insertBefore(d,$('marker'));});});
 }
+let selSteps=null,selStepsIdx=-1,runSteps=null,runStepsIdx=-1;
+async function stepsOf(i){return(await api('/api/program?i='+i)).steps;}
 
 async function pollStatus(){
   try{status=await api('/api/status');}catch(e){$('link').style.background=css('--bad');return;}
@@ -335,60 +377,111 @@ async function pollStatus(){
   $('net').textContent=s.net;
   $('pv').textContent=s.pv!=null?f1(s.pv):(s.comm.ok&&s.pvFlag!=='ok'?s.pvFlag:'---.-');
   $('sp').textContent=f1(s.spEff);
-  $('state').textContent=r.state[0].toUpperCase()+r.state.slice(1)+(r.soakWait?' (waiting for band)':'');
-  $('step').textContent=active?`${r.step+1} of 6, ${r.phase} to ${f1(r.target)}`:'-';
+  let stTxt=r.state[0].toUpperCase()+r.state.slice(1)+(r.soakWait?' (waiting for band)':'');
+  if(!active&&s.manual.on)stTxt='Manual';
+  $('state').textContent=stTxt;
+  $('step').textContent=active?`${r.step+1} of ${r.steps}, ${r.phase} to ${f1(r.target)}`:'-';
   $('phLeft').textContent=active?dur(r.phaseDur-r.phaseEl):'-';
-  $('totLeft').textContent=active?dur(r.total-r.elapsed):dur(s.plannedTotal)+' planned';
+  $('totLeft').textContent=active?`${dur(r.total-r.elapsed)} (${r.name})`:`${dur(s.plannedTotal)} planned (${s.selName})`;
   $('out').textContent=s.out!=null?Math.round(s.out)+' %':'-';
   $('mode').textContent=s.mode||'-';
   $('spWarn').classList.toggle('hide',s.spConfigured);
   $('bStart').textContent=r.state==='paused'?'Resume program':'Start program';
   $('bStart').disabled=r.state==='running';$('bPause').disabled=r.state!=='running';
-  $('bSkip').disabled=!active;$('bStop').disabled=!active;
+  $('bSkip').disabled=!active;$('bStop').disabled=!active;$('mainProg').disabled=active;
+  $('manState').textContent=s.manual.on?(s.manual.synced?'on':'on, writing...'):'off';
+  $('manState').classList.toggle('on',s.manual.on);
+  $('bManOn').disabled=active||s.manual.on;$('bManOff').disabled=!s.manual.on;
+  if(document.activeElement!==$('manSp'))$('manSp').value=s.manual.sp;
+  if(programs&&programs.sel!==s.sel){programs.sel=s.sel;fillProgSelect($('mainProg'),s.sel);}
   const m=$('marker');m.style.display=active?'block':'none';if(r.total>0)m.style.left=(100*r.elapsed/r.total)+'%';
-  const err=!s.comm.ok||(active&&!r.spSynced);$('msg').className=err?'bad':'';
+  const err=!s.comm.ok||((active||s.manual.on)&&!r.spSynced);$('msg').className=err?'bad':'';
   $('msg').textContent=err?s.comm.err:(r.msg+(active?` (setpoint writes this run: ${r.spWrites})`:''));
-  if(program)renderStrip(program.steps,r);
+  if(view==='main'){
+    if(selStepsIdx!==s.sel||pollStatus.n++%10===0){selStepsIdx=s.sel;selSteps=await stepsOf(s.sel);}
+    if(active&&runStepsIdx!==r.prog){runStepsIdx=r.prog;runSteps=r.prog>=0?await stepsOf(r.prog):null;}
+    if(!active)runStepsIdx=-1;
+    renderStrip({active,step:r.step,phase:r.phase});
+  }
 }
+pollStatus.n=0;
 
 async function pollHistory(){
-  if(view!=='run')return;
-  try{const h=await api('/api/history');drawChart($('chart'),h);
-    $('chartSpan').textContent=h.mode==='live'?`Last ${dur(h.binSec*h.plan.length)}`:`Program run, ${dur(h.total)}`;}catch(e){}
+  if(view!=='main')return;
+  try{const h=await api('/api/history');
+    if(h.mode==='live'){ // program preview uses its own time scale across the full width
+      drawChart($('chart'),h);
+      $('chartSpan').textContent=`Last ${dur(h.span)}. Preview of “${h.name}”: ${dur(h.planTotal)} over the full width`;
+    }else{drawChart($('chart'),h);$('chartSpan').textContent=`“${h.name}”: ${dur(h.elapsed)} of ${dur(h.planTotal)}`;}
+  }catch(e){}
 }
-const cmd=c=>api('/api/cmd',{cmd:c}).then(pollStatus);
-$('bStart').onclick=()=>cmd(status&&status.run.state==='paused'?'resume':'start');
+const cmd=(c,extra)=>api('/api/cmd',Object.assign({cmd:c},extra||{})).then(pollStatus);
+$('bStart').onclick=()=>status&&status.run.state==='paused'?cmd('resume'):cmd('start',{prog:+$('mainProg').value});
 $('bPause').onclick=()=>cmd('pause');
 $('bSkip').onclick=()=>confirm('Skip to the next phase?')&&cmd('skip');
-$('bStop').onclick=()=>confirm('Stop the program? The end action from Connection settings is applied.')&&cmd('stop');
+$('bStop').onclick=()=>confirm('Stop the program? The end action from the Controller settings is applied.')&&cmd('stop');
+$('mainProg').onchange=async()=>{await api('/api/select',{i:+$('mainProg').value});await loadPrograms();pollStatus();pollHistory();};
+$('bManSet').onclick=async()=>{await api('/api/manual',{sp:+$('manSp').value});$('manSp').blur();pollStatus();};
+$('manSp').onkeydown=e=>{if(e.key==='Enter')$('bManSet').click();};
+$('bManOn').onclick=async()=>{await api('/api/manual',{sp:+$('manSp').value,on:true});setTimeout(pollStatus,600);};
+$('bManOff').onclick=async()=>{if(!confirm('Switch manual mode off? The controller outputs are switched off.'))return;
+  await api('/api/manual',{on:false});setTimeout(pollStatus,600);};
 
-// ---------- program
-async function loadProgram(){
-  program=await api('/api/program');const tb=$('progRows');tb.innerHTML='';
-  program.steps.forEach((s,i)=>{const tr=document.createElement('tr');
-    tr.innerHTML=`<td class="n">${i+1}</td><td><input type="checkbox" ${s.on?'checked':''} aria-label="Step ${i+1} on"></td>
-      <td><input type="number" step="0.1" min="${program.spMin}" max="${program.spMax}" value="${s.t}" aria-label="Step ${i+1} target"></td>
-      <td><input type="number" step="0.1" min="0" value="${s.r}" aria-label="Step ${i+1} ramp minutes"></td>
-      <td><input type="number" step="0.1" min="0" value="${s.h}" aria-label="Step ${i+1} hold minutes"></td>`;
-    tr.querySelectorAll('input').forEach(inp=>inp.oninput=previewProgram);tb.appendChild(tr);});
-  previewProgram();
-}
-function readProgram(){return[...$('progRows').children].map(tr=>{const q=tr.querySelectorAll('input');
-  return{on:q[0].checked,t:+q[1].value,r:+q[2].value,h:+q[3].value};});}
-function previewProgram(){const steps=readProgram();const start=status&&status.pv!=null?status.pv:20;
-  const p=planOf(steps,start,240);$('progTotal').textContent=`Total ${dur(p.total)}. Preview starts at ${f1(start)}.`;
-  drawChart($('progChart'),{plan:p.plan,sp:[],pv:[],binSec:p.binSec,mode:'run'});}
-$('bSaveProg').onclick=async()=>{program=await api('/api/program',{steps:readProgram()});
-  $('progMsg').textContent='Program saved. A running program keeps its old steps until the next start.';loadProgram();};
+// ---------- program editor
+const unitOf=sec=>sec>0&&sec%60!==0?'s':'min';
+async function loadProgram(i){edit=await api('/api/program?i='+i);editIdx=i;dirty=false;selRow=-1;
+  fillProgSelect($('progSel'),i);$('progName').value=edit.name;renderRows();$('progMsg').textContent='';}
+function timeCell(sec,label){const u=unitOf(sec);const v=u==='min'?sec/60:sec;
+  return`<span class="inl"><input type="number" min="0" step="any" value="${v}" aria-label="${label}">
+    <select aria-label="${label} unit"><option ${u==='min'?'selected':''}>min</option><option ${u==='s'?'selected':''}>s</option></select></span>`;}
+function renderRows(){const tb=$('progRows');tb.innerHTML='';
+  edit.steps.forEach((s,i)=>{const tr=document.createElement('tr');if(i===selRow)tr.className='sel';
+    tr.innerHTML=`<td class="n">${i+1}</td>
+      <td><input type="number" step="0.1" min="${edit.spMin}" max="${edit.spMax}" value="${s.t}" aria-label="Step ${i+1} target"></td>
+      <td>${timeCell(s.r,`Step ${i+1} ramp`)}</td><td>${timeCell(s.h,`Step ${i+1} hold`)}</td>
+      <td style="white-space:nowrap"><button class="b" title="Move up" ${i?'':'disabled'}>↑</button>
+        <button class="b" title="Move down" ${i<edit.steps.length-1?'':'disabled'}>↓</button>
+        <button class="b" title="Insert a step below">+</button>
+        <button class="b danger" title="Remove step">✕</button></td>`;
+    tr.querySelectorAll('input,select').forEach(el=>{el.oninput=()=>{readRows();markDirty();};el.onfocus=()=>{selRow=i;}});
+    const [bu,bd,bi,bx]=tr.querySelectorAll('button');
+    bu.onclick=()=>moveStep(i,-1);bd.onclick=()=>moveStep(i,1);bi.onclick=()=>addStep(i+1);bx.onclick=()=>{edit.steps.splice(i,1);selRow=Math.min(i,edit.steps.length-1);markDirty();renderRows();};
+    tb.appendChild(tr);});
+  if(!edit.steps.length)tb.innerHTML='<tr><td colspan="5" class="cap">No steps yet. Use “Add step”.</td></tr>';
+  $('bAddStep').disabled=edit.steps.length>=edit.maxSteps;previewProgram();}
+function readRows(){edit.steps=[...$('progRows').children].filter(tr=>tr.querySelector('input')).map(tr=>{
+  const q=tr.querySelectorAll('input'),u=tr.querySelectorAll('select');
+  const sec=(k)=>Math.max(0,Math.round(+q[k].value*(u[k-1].value==='min'?60:1)));
+  return{t:+q[0].value,r:sec(1),h:sec(2)};});edit.name=$('progName').value;}
+function markDirty(){dirty=true;$('progMsg').textContent='Unsaved changes';previewProgram();}
+function moveStep(i,d){const j=i+d;if(j<0||j>=edit.steps.length)return;const a=edit.steps;[a[i],a[j]]=[a[j],a[i]];selRow=j;markDirty();renderRows();}
+function addStep(at){if(edit.steps.length>=edit.maxSteps)return;const ref=edit.steps[Math.min(at,edit.steps.length)-1];
+  const s=ref?{...ref}:{t:Math.min(Math.max(100,edit.spMin),edit.spMax),r:600,h:0};edit.steps.splice(at,0,s);selRow=at;markDirty();renderRows();}
+function previewProgram(){const start=status&&status.pv!=null?status.pv:20;const p=planOf(edit.steps,start,300);
+  $('progTotal').textContent=`${edit.steps.length}/${edit.maxSteps} steps, total ${dur(p.total)}. Preview starts at ${f1(start)}.`;
+  drawChart($('progChart'),{plan:p.plan,sp:[],pv:[],binSec:p.binSec,mode:'run',planActive:true});}
+$('bAddStep').onclick=()=>addStep(selRow>=0?selRow+1:edit.steps.length);
+$('progName').oninput=()=>{edit.name=$('progName').value;markDirty();};
+$('progSel').onchange=async()=>{const i=+$('progSel').value;
+  if(dirty&&!confirm(`Discard the unsaved changes to “${edit.name}”?`)){$('progSel').value=String(editIdx);return;}
+  await api('/api/select',{i});await loadProgram(i);loadPrograms();};
+$('bSaveProg').onclick=async()=>{readRows();const r=await api('/api/program',{i:editIdx,name:edit.name,steps:edit.steps});
+  if(r.err){$('progMsg').textContent=r.err;return;}
+  edit=r;dirty=false;renderRows();$('progName').value=edit.name;await loadPrograms();
+  $('progMsg').textContent=status&&status.run.prog===editIdx&&['running','paused'].includes(status.run.state)?
+    'Saved. The running program keeps its old steps until the next start.':'Saved.';};
+$('bRevertProg').onclick=()=>loadProgram(editIdx);
 
 // ---------- settings
 const regKeys=['pv','spEff','out','status','alarm','sp','spLo','spHi','rampRate','ctrlOff','remote','scale','readFn','writeFn','offRaw'];
 const topKeys=['profile','slaveId','baud','parity','stopBits','timeoutMs','pollMs','rampMode','minStep','minWriteSec',
-  'guaranteedSoak','soakBand','endAction','endSp','lockFront','commLossSec','spMin','spMax','brightness'];
+  'guaranteedSoak','soakBand','endAction','endSp','lockFront','commLossSec','spMin','spMax'];
 async function loadSettings(){settings=await api('/api/settings');
   topKeys.forEach(k=>$(k).value=String(settings[k]));regKeys.forEach(k=>$('r_'+k).value=settings.reg[k]);
   $('scanFrom').value=settings.scanFrom;$('scanTo').value=settings.scanTo;
-  $('ssid').value=settings.ssid;$('hostname').value=settings.hostname;}
+  $('rotate180').value=String(settings.rotate180);$('brightness').value=settings.brightness;
+  $('ssid').value=settings.ssid;$('hostname').value=settings.hostname;
+  $('sysInfo').textContent=status?`${status.net}  ·  firmware ${status.fw}`:'';}
 function collectSettings(){const o={reg:{}};topKeys.forEach(k=>{const v=$(k).value;o[k]=v==='true'?true:v==='false'?false:+v;});
   regKeys.forEach(k=>o.reg[k]=+$('r_'+k).value);
   if(o.profile!==settings.profile)delete o.reg; // new type: start from its defaults
@@ -396,6 +489,11 @@ function collectSettings(){const o={reg:{}};topKeys.forEach(k=>{const v=$(k).val
 $('bSaveConn').onclick=async()=>{await api('/api/settings',collectSettings());$('connMsg').textContent='Saved. The serial link was reopened.';loadSettings();};
 $('bDefaults').onclick=async()=>{if(!confirm('Replace all register addresses with the defaults for this controller type?'))return;
   await api('/api/settings',{profile:+$('profile').value,loadDefaults:true});loadSettings();$('connMsg').textContent='Defaults loaded.';};
+$('bSaveSys').onclick=async()=>{await api('/api/settings',{rotate180:$('rotate180').value==='true',brightness:+$('brightness').value});
+  $('sysMsg').textContent='Saved.';loadSettings();};
+$('bSaveWifi').onclick=async()=>{const o={ssid:$('ssid').value};if($('pass').value||!$('ssid').value)o.pass=$('pass').value;
+  if($('apPass').value)o.apPass=$('apPass').value;
+  await api('/api/settings',{hostname:$('hostname').value});const r=await api('/api/wifi',o);$('wifiMsg').textContent=r.msg||r.err;};
 
 // ---------- tools
 $('bScan').onclick=async()=>{const o=$('scanOut');o.textContent='Scanning, this takes a few seconds...';
@@ -427,12 +525,9 @@ $('bReadParams').onclick=async()=>{const tb=$('paramRows');tb.innerHTML='<tr><td
   const ac=$('actions');ac.innerHTML='';r.actions.forEach((l,i)=>{const b=document.createElement('button');b.className='b';b.textContent=l;
     b.onclick=async()=>{if(!confirm(l+'?'))return;const w=await api('/api/action',{i});$('actMsg').textContent=w.ok?l+': done.':w.err;};ac.appendChild(b);});};
 
-// ---------- wifi
-$('bSaveWifi').onclick=async()=>{const o={ssid:$('ssid').value,pass:$('pass').value};if($('apPass').value)o.apPass=$('apPass').value;
-  await api('/api/settings',{hostname:$('hostname').value});const r=await api('/api/wifi',o);$('wifiMsg').textContent=r.msg||r.err;};
-
-api('/api/program').then(p=>{program=p;pollStatus();});
-setInterval(pollStatus,1000);setInterval(pollHistory,5000);pollHistory();
+window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
+loadPrograms().then(pollStatus);
+setInterval(pollStatus,1000);setInterval(pollHistory,2000);pollHistory();
 </script>
 </body>
 </html>)HTML";

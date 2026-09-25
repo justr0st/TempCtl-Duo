@@ -68,11 +68,17 @@ struct Settings {
   // Setpoint-address finder range
   uint16_t scanFrom, scanTo;
 
-  Program program;
+  // ---- added in version 3 (everything above keeps the version 2 layout) ----
+  uint8_t rotate180;   // display turned upside down
+  uint8_t selProgram;  // program selected on the Main screen (0..MAX_PROGRAMS-1)
+  float manualSp;      // last manual setpoint
 };
 
 void regMapDefaults(RegMap& r, uint8_t profile);
 void settingsDefaults(Settings& s);
-bool settingsLoad(Settings& s);
+// Returns false if defaults were loaded. If an older (version 2) settings
+// blob was migrated, its 6-step program is converted into *legacy and
+// *haveLegacy is set.
+bool settingsLoad(Settings& s, Program* legacy = nullptr, bool* haveLegacy = nullptr);
 void settingsSave(const Settings& s);
 uint32_t serialConfigFor(const Settings& s);

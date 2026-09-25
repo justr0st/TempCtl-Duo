@@ -1,11 +1,21 @@
-# TempCtl: 6-step temperature programmer for ESP32-CYD + Modbus RTU
+# TempCtl: ramp/soak temperature programmer for ESP32-CYD + Modbus RTU
 
 Firmware for the ESP32-2432S028R ("Cheap Yellow Display") that drives a **PMA KS 40-1 / 41-1 / 42-1**
-(or another Modbus RTU temperature controller) over RS485 and runs a **6-step ramp/soak program**.
+(or another Modbus RTU temperature controller) over RS485. It stores **up to 10 named programs with up to
+100 ramp/soak steps each** and can also hold a **manual setpoint**.
 
-- LVGL 8.3 touch GUI: Run, Program (6 × target / ramp / hold), Chart (planned vs. setpoint vs. actual), Setup
+- LVGL 8.3 touch GUI:
+  - **Main**: live values, manual setpoint (numeric entry + on/off), program selection and Start / Pause / Stop / Skip
+  - **Program**: pick one of 10 programs, rename it with the on-screen keyboard, add / remove / move steps
+    (only configured steps are shown), times in minutes or seconds
+  - **Chart**: updated every second. Idle: rolling 5-minute window (PV scrolls from right to left) plus a
+    preview of the selected program on its own time scale. Running: fixed time axis covering the whole program
+    plus spare time; the program curve and the PV trace grow from the left. Program and setpoint lines are
+    solid while active and dashed while not active.
+  - **Setup → System**: rotate the screen by 180°, brightness, Wi-Fi (scan, password, AP password)
+  - **Setup → Controller**: controller type, serial link, ramp mode, soak, front-panel lock, end action
 - Web interface with the same functions plus controller parameters (PID, limits, self-tuning), full register
-  map, register read/write tools, a setpoint-address finder, Wi-Fi setup and CSV log download
+  map, register read/write tools, a setpoint-address finder and CSV log download
 - The controller keeps doing the PID control; the ESP32 only feeds it setpoints
 
 ## 1. What the PMA interface description tells us
@@ -36,7 +46,7 @@ Registers used by default (1dP = value × 10):
 | Setpoint gradient | SEtP/PArA `r.SP` (per minute, 0.01…9999 or off) | 11295 |
 
 **Why the ESP32 runs the program:** the KS 4x-1's built-in programmer (ProG, addresses 14292…14299) has only
-**4 segments** (`SP.01…SP.04`, `Pt.01…Pt.04`), so a 6-step profile has to be driven from outside by writing `SP`.
+**4 segments** (`SP.01…SP.04`, `Pt.01…Pt.04`), so longer profiles have to be driven from outside by writing `SP`.
 
 **EEPROM:** the interface description says the `SP` value in RAM is updated immediately, while storing it to
 EEPROM is timed (about one write per half hour). Frequent setpoint writes over Modbus are therefore safe on
@@ -49,15 +59,32 @@ firmware reads both and refuses to start if an enabled step's target lies outsid
 
 - **Controller ramps (r.SP)**, default: per segment the ESP32 writes the start value, the gradient
   (|ΔT| / remaining minutes) and the target. About 4 writes per phase; the controller ramps smoothly.
-  Ramps slower than 0.1 °/min (the 1dP resolution) fall back to host stepping for that segment.
+  Ramps slower than 0.1 °/min (the 1dP resolution) or faster than the register can hold (3000 °/min at 1dP)
+  fall back to host stepping for that segment.
 - **ESP32 writes setpoint steps**: writes a new setpoint when it has moved by *minimum step* (default 0.5)
   and at least *minimum seconds* (default 5) have passed. Works with any controller.
 
-The Run page shows the number of setpoint writes in the current run.
+The web *Main* page shows the number of setpoint writes in the current run.
 
 ### Program behaviour
 
-- Each step: target, ramp minutes (0 = jump), hold minutes. The first ramp starts at the PV measured at Start.
+- Up to 10 programs, each with a name (23 characters) and 1…100 steps. Stored on the LittleFS partition,
+  one file per program; settings stay in NVS.
+- Each step: target, ramp time (0 = jump), hold time. The first ramp starts at the PV measured at Start.
+- **Seconds:** times are stored in seconds. In the editors each time can be entered in minutes or seconds
+  (the table shows `30 min` or `45 s`). Second-resolution timing always works with *ESP32 writes setpoint
+  steps* (set *minimum seconds between writes* low enough, e.g. 1). With *Controller ramps (r.SP)* the
+  KS 4x-1 gradient is per minute, so a short ramp only uses the controller gradient if it fits the register
+  (see above); otherwise the ESP32 steps the setpoint itself.
+- Starting a program switches the controller outputs on (`C.Off` = 0) and ends manual mode.
+
+### Manual setpoint
+
+- *Main* has a manual setpoint and an on/off switch. **On:** the ESP32 switches the controller outputs on and
+  writes the setpoint (again whenever you change it). **Off:** the outputs are switched off (`C.Off` = 1). If
+  no outputs-off register is configured, *off* only stops the ESP32 from writing; the controller keeps its
+  last setpoint.
+- Manual mode is always off after a restart; the last value is remembered.
 - *Guaranteed soak*: hold time only counts while PV is within ± band of the target.
 - Pause freezes program time (and the controller ramp). Skip jumps to the next phase.
 - End/stop action: keep setpoint, set an end setpoint, or switch controller outputs off (`C.Off`).
@@ -110,7 +137,7 @@ the same Modbus master in this firmware can talk to it (it almost certainly uses
 a Modbus table. PMA addresses (13294 etc.) will not work on it. To use it:
 
 1. Get the communication manual from the seller/LCTC (address list for PV and SV, scaling, serial format).
-2. Select *Generic Modbus RTU* on *Connection*, enter baud/parity/address as set on the controller.
+2. Select *Generic Modbus RTU* on *Controller* (web), enter baud/parity/address as set on the controller.
 3. Enter the PV and SV addresses (*Tools → Find the setpoint address* helps once PV/SV reads work) and the divisor (1 or 10). If you only know the front-panel values, use
    *Tools → Read registers* over 0…60 and look for the PV and SV numbers (e.g. SV 148 appears as 148 or 1480).
 4. Use *ESP32 writes setpoint steps* (it probably has no gradient register) and keep *minimum step* ≥ 1 and
@@ -123,10 +150,14 @@ PMA-specific extras (status word, self-tuning, outputs off, parameter page) won'
 1. Install VS Code + PlatformIO.
 2. Open this folder, build and upload environment `cyd` (`pio run -t upload`).
 3. First start: no Wi-Fi configured → the CYD opens access point `TempCtl-XXXX`, password `tempctl123`.
-   Browse to `http://192.168.4.1`, set your Wi-Fi on the *Wi-Fi* page. Afterwards: `http://tempctl.local`
-   or the IP shown on the display's *Setup* tab.
-4. On *Connection*, check slave address, baud rate and parity match the controller (`ConF/othr`), then
-   check that the Run page shows the process value.
+   Either set Wi-Fi on the display (*Setup → System*: scan, pick the network, enter the password, *Save +
+   connect*) or browse to `http://192.168.4.1` and use the *System* page. Afterwards: `http://tempctl.local`
+   or the IP shown on *Setup → System*.
+4. On *Controller*, check slave address, baud rate and parity match the controller (`ConF/othr`), then
+   check that *Main* shows the process value.
+
+Updating from firmware 1.0: settings are migrated automatically and the old 6-step program becomes
+program 1 (enabled steps only).
 
 Touch calibration defaults (200…3700 / 240…3800) suit most CYDs. If touches land off, adjust `tsMinX…tsMaxY`
 through `POST /api/settings` and restart.
@@ -135,13 +166,16 @@ through `POST /api/settings` and restart.
 
 | Method | Path | Body / query |
 |---|---|---|
-| GET | `/api/status` | live values, run state |
-| GET | `/api/history` | 240 points: `pv`, `sp`, `plan` |
-| GET | `/api/log.csv` | history as CSV |
-| GET/POST | `/api/program` | `{"steps":[{"on":true,"t":100,"r":30,"h":60}, …6]}` |
-| POST | `/api/cmd` | `{"cmd":"start"|"pause"|"resume"|"stop"|"skip"}` |
-| GET/POST | `/api/settings` | partial updates allowed; `{"profile":0,"loadDefaults":true}` |
-| POST | `/api/wifi` | `{"ssid","pass","apPass"}` then restart |
+| GET | `/api/status` | live values, run state, manual setpoint, selected program |
+| GET | `/api/history` | chart data (300 points): `pv`, `sp`, `plan`, `mode` = `live`/`run`, `planActive`, `spActive` |
+| GET | `/api/log.csv` | last program run (or the live window) as CSV |
+| GET | `/api/programs` | names, step counts and durations of all 10 programs, `sel` |
+| GET/POST | `/api/program?i=0` | `{"i":0,"name":"Bisque","steps":[{"t":100,"r":1800,"h":600}, …]}` (r, h in seconds) |
+| POST | `/api/select` | `{"i":index}` select the program for Main / Chart |
+| POST | `/api/manual` | `{"sp":150}` and/or `{"on":true}` |
+| POST | `/api/cmd` | `{"cmd":"start"|"pause"|"resume"|"stop"|"skip", "prog":index}` |
+| GET/POST | `/api/settings` | partial updates allowed; `{"profile":0,"loadDefaults":true}`, `{"rotate180":true}` |
+| POST | `/api/wifi` | `{"ssid","pass","apPass"}`, reconnects without restart |
 | GET | `/api/mb/read?addr=&n=&fn=` | raw registers |
 | POST | `/api/mb/write` | `{"addr","value"}` raw |
 | POST | `/api/mb/findsp` | `{"from","to"}` |
@@ -156,13 +190,14 @@ The web UI has no login. Keep it on a trusted network.
 platformio.ini            board, libraries, TFT_eSPI pin setup
 include/lv_conf.h         LVGL configuration
 src/config.h              pins
-src/program.*             6-step ramp/soak engine (pure C++, unit-tested)
+src/program.*             ramp/soak engine + step editing helpers (pure C++, unit-tested)
+src/program_store.*       10 programs on LittleFS
 src/modbus_frame.h        Modbus RTU framing + CRC (pure C++, unit-tested)
 src/modbus_rtu.*          half-duplex Modbus master on UART2
 src/controller.*          scaling, special values, PMA parameter/action tables
-src/settings.*            defaults + NVS storage
-src/app_state.*           control task: polling, program, setpoint writes, history
-src/ui.*                  LVGL screens
+src/settings.*            defaults + NVS storage (+ migration from 1.0)
+src/app_state.*           control task: polling, program, manual setpoint, setpoint writes, chart history
+src/ui.*                  LVGL screens (Main, Program, Chart, Setup: System / Controller)
 src/web.*, web_page.h     HTTP server, JSON API, single-page web UI
 test/host_test.cpp        g++ -std=c++17 -Isrc test/host_test.cpp src/program.cpp && ./a.out
 ```
@@ -171,8 +206,9 @@ test/host_test.cpp        g++ -std=c++17 -Isrc test/host_test.cpp src/program.cp
 
 A software programmer must never be the only protection against overheating. Fit an independent
 over-temperature limiter (PMA recommends the TB 40-1 in the KS 4x-1 manual) and use the controller's own
-limit alarms and `SP.Hi` setpoint limit. Set *Highest allowed setpoint* on *Connection* to match `SP.Hi`.
+limit alarms and `SP.Hi` setpoint limit. Set *Highest allowed setpoint* on *Controller* to match `SP.Hi`.
 
-Status: the program engine and Modbus framing pass host unit tests; the firmware has not been
-compiled against the ESP32 toolchain or tested on hardware yet. Expect to adjust small details
+Status: the program engine and Modbus framing pass host unit tests. Firmware 1.1 compiles and links
+against Arduino-ESP32 2.0.17 (the `espressif32@6.9.0` platform) and the touch screens were checked in an
+LVGL desktop simulator, but it has not been tested on hardware yet. Expect to adjust small details
 (display variant, touch calibration, CN1 pin order) on first bring-up.

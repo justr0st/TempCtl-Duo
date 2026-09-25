@@ -1,10 +1,31 @@
 #include "settings.h"
 #include <Arduino.h>
 #include <Preferences.h>
+#include <math.h>
+#include <stddef.h>
 #include <string.h>
 
 static constexpr uint32_t SETTINGS_MAGIC = 0x54435331;  // "TCS1"
-static constexpr uint16_t SETTINGS_VERSION = 2;
+static constexpr uint16_t SETTINGS_VERSION = 3;
+
+// Version 2 layout (firmware 1.0.x): identical to Settings up to scanTo,
+// followed by a fixed 6-step program with times in minutes.
+namespace v2 {
+struct Step { uint8_t enabled; float target; float rampMin; float holdMin; };
+struct Program { Step s[6]; };
+struct Settings {
+  uint32_t magic; uint16_t version;
+  uint8_t slaveId; uint32_t baud; uint8_t parity; uint8_t stopBits; uint16_t timeoutMs; uint16_t pollMs;
+  uint8_t profile; RegMap reg;
+  uint8_t rampMode; float minStep; uint16_t minWriteSec; uint8_t guaranteedSoak; float soakBand;
+  uint8_t endAction; float endSp; uint8_t lockFront; uint16_t commLossSec; float spMin, spMax;
+  char ssid[33]; char pass[65]; char apPass[33]; char hostname[24];
+  uint8_t brightness; uint16_t tsMinX, tsMaxX, tsMinY, tsMaxY;
+  uint16_t scanFrom, scanTo;
+  Program program;
+};
+}  // namespace v2
+static_assert(offsetof(v2::Settings, scanTo) == offsetof(Settings, scanTo), "v2 prefix layout changed");
 
 // PMA KS 40-1/41-1/42-1 addresses from interface description 9499 040 63511.
 // Address layout: base + 8192 = integer with 1 decimal ("1dP"), which we use
@@ -84,22 +105,50 @@ void settingsDefaults(Settings& s) {
   s.scanFrom = 3100 + DP1;
   s.scanTo = 3199 + DP1;
 
-  // Example program: 6 steps (last two disabled)
-  s.program.s[0] = {1, 100, 30, 30};
-  s.program.s[1] = {1, 250, 60, 60};
-  s.program.s[2] = {1, 400, 60, 120};
-  s.program.s[3] = {1, 200, 90, 0};
-  s.program.s[4] = {0, 100, 60, 0};
-  s.program.s[5] = {0, 50, 30, 0};
+  s.rotate180 = 0;
+  s.selProgram = 0;
+  s.manualSp = 20;
 }
 
-bool settingsLoad(Settings& s) {
+static bool migrateV2(Preferences& p, Settings& s, Program* legacy, bool* haveLegacy) {
+  static v2::Settings old;  // static: keep ~400 bytes off the stack
+  if (p.getBytesLength("cfg") != sizeof(old)) return false;
+  if (p.getBytes("cfg", &old, sizeof(old)) != sizeof(old)) return false;
+  if (old.magic != SETTINGS_MAGIC || old.version != 2) return false;
+  settingsDefaults(s);
+  memcpy(&s, &old, offsetof(Settings, scanTo) + sizeof(s.scanTo));
+  s.version = SETTINGS_VERSION;
+  if (legacy) {
+    programClear(*legacy, "Program 1");
+    for (int i = 0; i < 6; ++i) {
+      const v2::Step& o = old.program.s[i];
+      if (!o.enabled) continue;
+      Step st;
+      st.target = o.target;
+      st.rampSec = o.rampMin > 0 ? (uint32_t)lroundf(o.rampMin * 60.0f) : 0;
+      st.holdSec = o.holdMin > 0 ? (uint32_t)lroundf(o.holdMin * 60.0f) : 0;
+      programInsertStep(*legacy, legacy->count, st);
+    }
+    if (haveLegacy) *haveLegacy = true;
+  }
+  return true;
+}
+
+bool settingsLoad(Settings& s, Program* legacy, bool* haveLegacy) {
+  if (haveLegacy) *haveLegacy = false;
   Preferences p;
   p.begin("tempctl", true);
-  Settings tmp;
+  static Settings tmp;
   const size_t n = p.getBytes("cfg", &tmp, sizeof(tmp));
+  bool ok = n == sizeof(tmp) && tmp.magic == SETTINGS_MAGIC && tmp.version == SETTINGS_VERSION;
+  bool migrated = false;
+  if (!ok) migrated = migrateV2(p, s, legacy, haveLegacy);
   p.end();
-  if (n != sizeof(tmp) || tmp.magic != SETTINGS_MAGIC || tmp.version != SETTINGS_VERSION) {
+  if (migrated) {
+    settingsSave(s);
+    return true;
+  }
+  if (!ok) {
     settingsDefaults(s);
     return false;
   }
@@ -109,6 +158,8 @@ bool settingsLoad(Settings& s) {
   s.pass[sizeof(s.pass) - 1] = 0;
   s.apPass[sizeof(s.apPass) - 1] = 0;
   s.hostname[sizeof(s.hostname) - 1] = 0;
+  if (s.selProgram >= MAX_PROGRAMS) s.selProgram = 0;
+  if (isnan(s.manualSp)) s.manualSp = 20;
   return true;
 }
 

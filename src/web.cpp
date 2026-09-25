@@ -81,7 +81,21 @@ static void handleStatus() {
   r["spSynced"] = L.spSynced;
   r["spWrites"] = L.spWrites;
   r["msg"] = L.runMsg;
-  d["plannedTotal"] = ProgramEngine::plannedTotal(S.program);
+  r["prog"] = L.runProg;
+  r["name"] = L.runName;
+  r["steps"] = L.stepCount;
+  JsonObject m = d["manual"].to<JsonObject>();
+  m["on"] = L.manualOn;
+  setNum(m["sp"], S.manualSp);
+  m["synced"] = L.manualSynced;
+  d["sel"] = S.selProgram;
+  {
+    Guard g;
+    const Program& p = gPrograms[S.selProgram < MAX_PROGRAMS ? S.selProgram : 0];
+    d["selName"] = p.name;
+    d["selSteps"] = p.count;
+    d["plannedTotal"] = ProgramEngine::plannedTotal(p);
+  }
   d["spConfigured"] = S.reg.sp != REG_UNSET;
   d["profile"] = S.profile;
   d["net"] = netInfo();
@@ -90,92 +104,186 @@ static void handleStatus() {
   sendJson(d);
 }
 
-static void handleHistory() {
-  String out;
-  out.reserve(9000);
+static void appendArray(String& out, const char* name, const float* v) {
   char num[16];
-  Guard g;
-  out += "{\"mode\":\"";
-  out += gHist.mode ? "run" : "live";
-  out += "\",\"binSec\":";
-  out += String(gHist.binSec, 2);
-  out += ",\"total\":";
-  out += String(gHist.total, 0);
-  const char* names[3] = {"pv", "sp", "plan"};
-  for (int k = 0; k < 3; ++k) {
-    out += ",\"";
-    out += names[k];
-    out += "\":[";
-    for (int i = 0; i < HIST_N; ++i) {
-      const float v = k == 0 ? gHist.pv[i] : k == 1 ? gHist.sp[i] : histPlanAt(i);
-      if (i) out += ',';
-      if (isnan(v)) out += "null";
-      else { snprintf(num, sizeof(num), "%.1f", v); out += num; }
-    }
-    out += ']';
+  out += ",\"";
+  out += name;
+  out += "\":[";
+  for (int i = 0; i < CHART_N; ++i) {
+    if (i) out += ',';
+    if (isnan(v[i])) out += "null";
+    else { snprintf(num, sizeof(num), "%.1f", v[i]); out += num; }
   }
+  out += ']';
+}
+
+static void handleHistory() {
+  static ChartData d;
+  chartSnapshot(d);
+  JsonDocument h;
+  h["mode"] = d.run ? "run" : "live";
+  h["planActive"] = d.planActive;
+  h["spActive"] = d.spActive;
+  h["binSec"] = d.binSec;
+  h["span"] = d.span;
+  h["planSpan"] = d.planSpan;
+  h["planTotal"] = d.planTotal;
+  h["elapsed"] = d.elapsed;
+  h["name"] = d.progName;
+  String out;
+  out.reserve(6500);
+  serializeJson(h, out);
+  out.remove(out.length() - 1);  // drop '}' and append the arrays
+  appendArray(out, "pv", d.pv);
+  appendArray(out, "sp", d.sp);
+  appendArray(out, "plan", d.plan);
   out += '}';
   server.send(200, "application/json", out);
 }
 
+// Log of the last program run (if there was one since boot), else the live window.
 static void handleCsv() {
   String out = "time_s,process_value,setpoint,planned\n";
+  out.reserve(CHART_N * 24 + 40);
   char line[64];
-  Guard g;
-  for (int i = 0; i < HIST_N; ++i) {
-    const float pv = gHist.pv[i], sp = gHist.sp[i], pl = histPlanAt(i);
-    if (isnan(pv) && isnan(sp)) continue;
-    const float t = gHist.mode ? i * gHist.binSec : -(HIST_N - 1 - i) * gHist.binSec;
-    snprintf(line, sizeof(line), "%.0f,%s,%s,%s\n", t, isnan(pv) ? "" : String(pv, 1).c_str(),
-             isnan(sp) ? "" : String(sp, 1).c_str(), isnan(pl) ? "" : String(pl, 1).c_str());
-    out += line;
+  bool run;
+  {
+    Guard g;  // build the text under the lock, send it afterwards
+    run = gHist->runValid;
+    for (int i = 0; i < CHART_N; ++i) {
+      const float pv = run ? gHist->runPv[i] : gHist->livePv[i];
+      const float sp = run ? gHist->runSp[i] : gHist->liveSp[i];
+      const float t = run ? i * gHist->runBin : -(float)(CHART_N - 1 - i) * LIVE_SAMPLE_SEC;
+      const float pl =
+          (run && t <= gHist->runTotal) ? ProgramEngine::plannedAt(gHist->runProg, gHist->runStart, t) : NAN;
+      if (isnan(pv) && isnan(sp)) continue;
+      snprintf(line, sizeof(line), "%.0f,%s,%s,%s\n", t, isnan(pv) ? "" : String(pv, 1).c_str(),
+               isnan(sp) ? "" : String(sp, 1).c_str(), isnan(pl) ? "" : String(pl, 1).c_str());
+      out += line;
+    }
   }
-  server.sendHeader("Content-Disposition", "attachment; filename=tempctl-log.csv");
+  server.sendHeader("Content-Disposition", run ? "attachment; filename=tempctl-run.csv"
+                                               : "attachment; filename=tempctl-live.csv");
   server.send(200, "text/csv", out);
 }
 
 // ------------------------------------------------------------ program / commands
-static void handleGetProgram() {
-  Program p;
+static void handleGetPrograms() {
+  JsonDocument d;
+  {
+    Guard g;
+    d["sel"] = gSettings.selProgram;
+    d["max"] = MAX_PROGRAMS;
+    d["maxSteps"] = MAX_STEPS;
+    d["spMin"] = gSettings.spMin;
+    d["spMax"] = gSettings.spMax;
+    JsonArray a = d["programs"].to<JsonArray>();
+    for (int i = 0; i < MAX_PROGRAMS; ++i) {
+      JsonObject o = a.add<JsonObject>();
+      o["name"] = gPrograms[i].name;
+      o["steps"] = gPrograms[i].count;
+      o["total"] = ProgramEngine::plannedTotal(gPrograms[i]);
+    }
+  }
+  sendJson(d);
+}
+
+static int progIndexArg(JsonVariantConst v) {
+  if (!v.isNull()) return v.as<int>();
+  if (server.hasArg("i")) return server.arg("i").toInt();
+  Guard g;
+  return gSettings.selProgram;
+}
+
+static void sendProgram(int i) {
+  static Program p;
   float lo, hi;
   {
     Guard g;
-    p = gSettings.program;
+    p = gPrograms[i];
     lo = gSettings.spMin;
     hi = gSettings.spMax;
   }
   JsonDocument d;
-  JsonArray a = d["steps"].to<JsonArray>();
-  for (int i = 0; i < NUM_STEPS; ++i) {
-    JsonObject o = a.add<JsonObject>();
-    o["on"] = p.s[i].enabled != 0;
-    o["t"] = p.s[i].target;
-    o["r"] = p.s[i].rampMin;
-    o["h"] = p.s[i].holdMin;
-  }
+  d["i"] = i;
+  d["name"] = p.name;
   d["spMin"] = lo;
   d["spMax"] = hi;
+  d["maxSteps"] = MAX_STEPS;
+  JsonArray a = d["steps"].to<JsonArray>();
+  for (int k = 0; k < p.count; ++k) {
+    JsonObject o = a.add<JsonObject>();
+    o["t"] = p.s[k].target;
+    o["r"] = p.s[k].rampSec;
+    o["h"] = p.s[k].holdSec;
+  }
   sendJson(d);
 }
 
+static void handleGetProgram() {
+  const int i = progIndexArg(JsonVariantConst());
+  if (i < 0 || i >= MAX_PROGRAMS) return sendError("Program index out of range");
+  sendProgram(i);
+}
+
+// Body: {"i":0,"name":"Bisque","steps":[{"t":100,"r":1800,"h":600}, ...]}  (r, h in seconds)
 static void handlePostProgram() {
   JsonDocument d;
   if (!parseBody(d)) return sendError("Invalid JSON");
+  const int i = progIndexArg(d["i"]);
+  if (i < 0 || i >= MAX_PROGRAMS) return sendError("Program index out of range");
   JsonArrayConst a = d["steps"].as<JsonArrayConst>();
-  if (a.isNull() || a.size() != NUM_STEPS) return sendError("Expected 6 steps");
+  if (a.isNull()) return sendError("Missing steps");
+  if (a.size() > (size_t)MAX_STEPS) return sendError("Too many steps (max 100)");
+  static Program p;
   {
     Guard g;
-    Program& p = gSettings.program;
-    for (int i = 0; i < NUM_STEPS; ++i) {
-      JsonObjectConst o = a[i];
-      p.s[i].enabled = o["on"] | false;
-      p.s[i].target = constrain(o["t"] | 0.0f, gSettings.spMin, gSettings.spMax);
-      p.s[i].rampMin = constrain(o["r"] | 0.0f, 0.0f, 9999.0f);
-      p.s[i].holdMin = constrain(o["h"] | 0.0f, 0.0f, 9999.0f);
-    }
+    p = gPrograms[i];
   }
-  saveSettingsAndNotify();
-  handleGetProgram();
+  if (d["name"].is<const char*>()) {
+    const char* n = d["name"];
+    while (*n == ' ') ++n;
+    if (*n) strlcpy(p.name, n, sizeof(p.name));
+  }
+  p.count = 0;
+  for (JsonObjectConst o : a) {
+    Step st;
+    st.target = o["t"] | 0.0f;
+    const float r = o["r"] | 0.0f, h = o["h"] | 0.0f;
+    st.rampSec = r > 0 ? (uint32_t)lroundf(fminf(r, (float)MAX_STEP_SEC)) : 0;
+    st.holdSec = h > 0 ? (uint32_t)lroundf(fminf(h, (float)MAX_STEP_SEC)) : 0;
+    programInsertStep(p, p.count, st);
+  }
+  {
+    Guard g;
+    gPrograms[i] = p;
+  }
+  if (!saveProgram(i)) return sendError("Writing the program to flash failed", 500);
+  sendProgram(i);
+}
+
+static void handleSelect() {
+  JsonDocument d;
+  if (!parseBody(d)) return sendError("Invalid JSON");
+  const int i = d["i"] | -1;
+  if (i < 0 || i >= MAX_PROGRAMS) return sendError("Program index out of range");
+  selectProgram(i);
+  JsonDocument r;
+  r["ok"] = true;
+  r["sel"] = i;
+  sendJson(r);
+}
+
+// Body: {"sp":150.0} and/or {"on":true|false}
+static void handleManual() {
+  JsonDocument d;
+  if (!parseBody(d)) return sendError("Invalid JSON");
+  if (!d["sp"].isNull()) setManualSp(d["sp"].as<float>());
+  bool ok = true;
+  if (!d["on"].isNull()) ok = sendCmd(d["on"].as<bool>() ? CMD_MANUAL_ON : CMD_MANUAL_OFF);
+  JsonDocument r;
+  r["ok"] = ok;
+  sendJson(r);
 }
 
 static void handleCmd() {
@@ -183,6 +291,7 @@ static void handleCmd() {
   if (!parseBody(d)) return sendError("Invalid JSON");
   const String c = d["cmd"] | "";
   CmdType t;
+  int arg = d["prog"] | -1;
   if (c == "start") t = CMD_START;
   else if (c == "pause") t = CMD_PAUSE;
   else if (c == "resume") t = CMD_RESUME;
@@ -190,7 +299,7 @@ static void handleCmd() {
   else if (c == "skip") t = CMD_SKIP;
   else return sendError("Unknown command");
   JsonDocument r;
-  r["ok"] = sendCmd(t);
+  r["ok"] = sendCmd(t, arg);
   sendJson(r);
 }
 
@@ -237,6 +346,7 @@ static void handleGetSettings() {
   d["spMin"] = S.spMin;
   d["spMax"] = S.spMax;
   d["brightness"] = S.brightness;
+  d["rotate180"] = S.rotate180 != 0;
   d["hostname"] = S.hostname;
   d["ssid"] = S.ssid;
   d["scanFrom"] = S.scanFrom;
@@ -308,6 +418,7 @@ static void handlePostSettings() {
     upd<float>(d["spMax"], S.spMax, -1999.0f, 9999.0f);
     if (S.spMax < S.spMin) S.spMax = S.spMin;
     upd<uint8_t>(d["brightness"], S.brightness, 10, 255);
+    if (!d["rotate180"].isNull()) S.rotate180 = d["rotate180"].as<bool>();
     if (d["hostname"].is<const char*>()) strlcpy(S.hostname, d["hostname"], sizeof(S.hostname));
     upd<uint16_t>(d["scanFrom"], S.scanFrom, 0, 65534);
     upd<uint16_t>(d["scanTo"], S.scanTo, 0, 65534);
@@ -332,13 +443,13 @@ static void handleWifi() {
       if (strlen(ap) >= 8) strlcpy(gSettings.apPass, ap, sizeof(gSettings.apPass));
     }
   }
-  saveSettingsAndNotify();
+  saveSettingsQuiet();
   JsonDocument r;
   r["ok"] = true;
-  r["msg"] = "Saved. Restarting in 2 seconds.";
+  r["msg"] = "Saved. Connecting... If the address changes, reopen the page at the new IP or http://<host name>.local";
   sendJson(r);
-  delay(2000);
-  ESP.restart();
+  delay(300);  // let the response go out before the station reconnects
+  netApplyWifi();
 }
 
 // ------------------------------------------------------------ bus tools
@@ -485,8 +596,11 @@ void webBegin() {
   server.on("/api/status", HTTP_GET, handleStatus);
   server.on("/api/history", HTTP_GET, handleHistory);
   server.on("/api/log.csv", HTTP_GET, handleCsv);
+  server.on("/api/programs", HTTP_GET, handleGetPrograms);
   server.on("/api/program", HTTP_GET, handleGetProgram);
   server.on("/api/program", HTTP_POST, handlePostProgram);
+  server.on("/api/select", HTTP_POST, handleSelect);
+  server.on("/api/manual", HTTP_POST, handleManual);
   server.on("/api/cmd", HTTP_POST, handleCmd);
   server.on("/api/settings", HTTP_GET, handleGetSettings);
   server.on("/api/settings", HTTP_POST, handlePostSettings);

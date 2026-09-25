@@ -1,20 +1,31 @@
-// Ramp/soak profile engine with 6 steps. Pure C++ (no Arduino deps) so it
-// can be unit-tested on a PC (see test/host_test.cpp).
+// Ramp/soak profile engine. Pure C++ (no Arduino deps) so it can be
+// unit-tested on a PC (see test/host_test.cpp).
 #pragma once
 #include <stdint.h>
 
-constexpr int NUM_STEPS = 6;
+constexpr int MAX_PROGRAMS = 10;    // stored programs
+constexpr int MAX_STEPS = 100;      // steps per program
+constexpr int PROG_NAME_LEN = 24;   // including the terminating 0
+constexpr uint32_t MAX_STEP_SEC = 9999UL * 60UL;  // longest ramp/hold
 
 struct Step {
-  uint8_t enabled;   // 0/1
-  float   target;    // target temperature
-  float   rampMin;   // minutes to ramp from previous value to target (0 = jump)
-  float   holdMin;   // minutes to hold at target (0 = no hold)
+  float target;       // target temperature
+  uint32_t rampSec;   // seconds to ramp from the previous value to target (0 = jump)
+  uint32_t holdSec;   // seconds to hold at target (0 = no hold)
 };
 
 struct Program {
-  Step s[NUM_STEPS];
+  char name[PROG_NAME_LEN];
+  uint8_t count;      // number of used steps (0..MAX_STEPS)
+  Step s[MAX_STEPS];
 };
+
+// Program editing helpers (bounds-checked; return false if not possible)
+void programClear(Program& p, const char* name);
+bool programInsertStep(Program& p, int at, const Step& st);  // at = 0..count
+bool programRemoveStep(Program& p, int idx);
+bool programMoveStep(Program& p, int from, int to);
+void programSanitize(Program& p, float spMin, float spMax);  // clamp values, fix count/name
 
 enum class RunState : uint8_t { Idle = 0, Running, Paused, Finished, Aborted };
 enum class Phase : uint8_t { None = 0, Ramp, Hold };
@@ -25,7 +36,7 @@ const char* phaseName(Phase p);
 class ProgramEngine {
  public:
   // Start a program. The first ramp starts at startTemp (normally the current PV).
-  // Returns false if no step is enabled.
+  // Returns false if the program has no steps.
   bool start(const Program& p, float startTemp);
   void pause();
   void resume();
@@ -37,8 +48,10 @@ class ProgramEngine {
   void tick(float dtSec, float pv, bool pvValid, bool guaranteedSoak, float band);
 
   RunState state() const { return st_; }
+  bool active() const { return st_ == RunState::Running || st_ == RunState::Paused; }
   Phase phase() const { return ph_; }
-  int step() const { return step_; }              // 0..5, -1 if none
+  int step() const { return step_; }              // 0..count-1, -1 if none
+  int stepCount() const { return p_.count; }
   float setpoint() const;                          // current (host-computed) setpoint
   float target() const;                            // target of current step
   float phaseElapsed() const { return phEl_; }     // seconds
@@ -53,12 +66,10 @@ class ProgramEngine {
 
   static float plannedTotal(const Program& p);
   static float plannedAt(const Program& p, float startTemp, float tSec);
-  static int enabledCount(const Program& p);
 
  private:
   void advance();
   void finish();
-  int nextEnabled(int from) const;
   float rampSec(int i) const;
   float holdSec(int i) const;
 
