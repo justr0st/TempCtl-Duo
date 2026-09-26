@@ -22,12 +22,17 @@ static void startAp(const Settings& s) {
   apStarted = true;
 }
 
+// Set by the Wi-Fi event task when the station got an IP address after the
+// last netApplyWifi() (so the UI can close its "Connecting..." message).
+static volatile bool gotIpSinceApply = false;
+
 void netBegin() {
   Settings s;
   {
     Guard g;
     s = gSettings;
   }
+  WiFi.onEvent([](arduino_event_id_t) { gotIpSinceApply = true; }, ARDUINO_EVENT_WIFI_STA_GOT_IP);
   WiFi.persistent(false);
   WiFi.setHostname(s.hostname);
   haveSta = s.ssid[0] != 0;
@@ -83,6 +88,7 @@ void netApplyWifi() {
   }
   if (apStarted) startAp(s);  // new AP password, if any
   haveSta = s.ssid[0] != 0;
+  gotIpSinceApply = false;
   WiFi.disconnect();
   if (haveSta) {
     WiFi.mode(apStarted ? WIFI_AP_STA : WIFI_STA);
@@ -195,3 +201,7 @@ int netScanResult(char* out, size_t n) {
   scanFinish();
   return count;
 }
+
+bool netConnectedSinceApply() { return gotIpSinceApply && WiFi.status() == WL_CONNECTED; }
+
+String netStaIp() { return WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String(""); }

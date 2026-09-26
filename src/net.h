@@ -6,6 +6,9 @@ String netInfo();   // human-readable: mode, SSID, IP
 // Re-apply the Wi-Fi settings from gSettings without restarting (joins the
 // new network; updates the access point password if the AP is running).
 void netApplyWifi();
+// true once the station has an IP address after the last netApplyWifi()
+bool netConnectedSinceApply();
+String netStaIp();  // "" if not connected
 // Asynchronous network scan for the touch UI. Pauses a failing station
 // connection attempt during the scan (it blocks scanning) and resumes it.
 void netScanStart();

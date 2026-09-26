@@ -1,0 +1,55 @@
+<!-- Chart page. The firmware writes the data every second:
+     series 1 = process value, 2 = setpoint, 3 = program curve (keep this
+     order: LVGL draws the first series last, so the PV ends up on top).
+     Values are temperature x 10; the scales are updated to match.
+     Broken (dashed) lines for inactive curves are made by the firmware. -->
+<component>
+	<view extends="lv_obj" width="100%" height="100%" scrollable="false">
+		<style name="style_plain" />
+
+		<!-- temperature axis: labels in degrees (range set by firmware) -->
+		<lv_scale name="chart_yscale" x="0" y="4" width="34" height="138" mode="vertical_left" min_value="0"
+			max_value="600" total_tick_count="6" major_tick_every="1" label_show="true" style_text_font="font_12">
+			<style name="style_scale_minor" selector="items" />
+			<style name="style_scale_ticks" selector="indicator" />
+			<style name="style_scale_line" />
+		</lv_scale>
+
+		<lv_chart name="chart" x="36" y="0" width="262" height="146" type="line" point_count="150"
+			hor_div_line_count="5" ver_div_line_count="6" update_mode="circular" style_pad_all="4">
+			<style name="style_panel" />
+			<style name="style_chart_line" selector="items" />
+			<style name="style_no_points" selector="indicator" />
+			<lv_chart-axis axis="primary_y" min_value="0" max_value="6000" />
+			<lv_chart-series color="#color_pv" axis="primary_y" values="1400 1420 1470 1510 1490 1500" />
+			<lv_chart-series color="#color_sp" axis="primary_y" values="1500 1500 1500 1500 1500 1500" />
+			<lv_chart-series color="#color_plan" axis="primary_y"
+				values="1000 1500 2000 2500 2500 2500 4000 4000 4000 4000 5000 5500 6000 5500 5000 4500" />
+		</lv_chart>
+
+		<!-- time axis: labels written by firmware (-5:00 .. 0:00 or 0:00 .. end) -->
+		<lv_scale name="chart_xscale" x="40" y="146" width="254" height="20" mode="horizontal_bottom" min_value="0"
+			max_value="5" total_tick_count="6" major_tick_every="1" label_show="true" style_text_font="font_12">
+			<style name="style_scale_minor" selector="items" />
+			<style name="style_scale_ticks" selector="indicator" />
+			<style name="style_scale_line" />
+		</lv_scale>
+
+		<!-- legend -->
+		<lv_label x="2" y="170" text="PV" style_text_color="#color_pv">
+			<style name="style_small" />
+		</lv_label>
+		<lv_label x="30" y="170" text="SP" style_text_color="#color_sp">
+			<style name="style_small" />
+		</lv_label>
+		<lv_label x="58" y="170" text="Program" style_text_color="#color_plan">
+			<style name="style_small" />
+		</lv_label>
+		<lv_label x="120" y="170" text="(dashed = not active)">
+			<style name="style_caption" />
+		</lv_label>
+		<lv_label name="chart_info" x="2" y="186" width="312" long_mode="dots" text="Last 5 min. Preview: Example (10:18:05)">
+			<style name="style_small" />
+		</lv_label>
+	</view>
+</component>

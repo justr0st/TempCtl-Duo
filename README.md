@@ -4,7 +4,7 @@ Firmware for the ESP32-2432S028R ("Cheap Yellow Display") that drives a **PMA KS
 (or another Modbus RTU temperature controller) over RS485. It stores **up to 10 named programs with up to
 100 ramp/soak steps each** and can also hold a **manual setpoint**.
 
-- LVGL 8.3 touch GUI:
+- LVGL 9.4 touch GUI, designed as an **LVGL Pro Editor** project (`ui/`, see section 4a):
   - **Main**: live values, manual setpoint (numeric entry + on/off), program selection and Start / Pause / Stop / Skip
   - **Program**: pick one of 10 programs, rename it with the on-screen keyboard, add / remove / move steps
     (only configured steps are shown), times in minutes or seconds
@@ -159,8 +159,48 @@ PMA-specific extras (status word, self-tuning, outputs off, parameter page) won'
 Updating from firmware 1.0: settings are migrated automatically and the old 6-step program becomes
 program 1 (enabled steps only).
 
+Updating from firmware 1.1: the UI moved from LVGL 8.3 to LVGL 9.4. PlatformIO downloads the new library
+automatically; if an old build misbehaves, delete the `.pio` folder once.
+
 Touch calibration defaults (200…3700 / 240…3800) suit most CYDs. If touches land off, adjust `tsMinX…tsMaxY`
 through `POST /api/settings` and restart.
+
+## 4a. Editing the touch UI with LVGL Pro Editor
+
+The screen layout lives in `ui/` as an [LVGL Pro](https://lvgl.io/pro) project (`project.xml`,
+`globals.xml`, `components/`, `screens/`, target 320×240, LVGL 9.4.0). Open the **`ui` folder** (not the
+repository root) in LVGL Pro Editor to see and edit the screens.
+
+How it gets into the firmware: before each build `scripts/embed_ui_xml.py` packs the XML files into
+`src/ui_xml_data.h`, and at start-up LVGL's XML loader (LVGL 9.4, `LV_USE_XML`) creates the screen from
+them. So after editing: save in the editor, then build and upload with PlatformIO. There is no code
+export step.
+
+| File | Contents |
+|---|---|
+| `ui/globals.xml` | colours, spacing, fonts, shared styles |
+| `ui/screens/main.xml` | the tab view with the four pages |
+| `ui/components/main_page.xml` | Main: values, manual setpoint, program selection, run buttons |
+| `ui/components/program_page.xml` | Program editor: selection, name, step table, step buttons |
+| `ui/components/chart_page.xml` | chart, axes and legend |
+| `ui/components/setup_page.xml`, `system_panel.xml`, `controller_panel.xml`, `setting_row.xml` | Setup |
+
+Rules so the firmware keeps working:
+
+- **Keep the `name` attributes** of widgets the firmware updates (e.g. `main_pv`, `prog_table`,
+  `chart`); `src/ui.cpp` finds them with `lv_obj_find_by_name`. A missing name is reported on the
+  serial monitor as `[ui] widget '…' not found`.
+- **Keep the `event_cb` callbacks** (`ui_on_…`); they are implemented in `src/ui.cpp`.
+- The chart must keep its three series in the order PV, SP, program.
+- Dropdown options in *Controller* are matched by position (baud rates, formats, …).
+- Fonts: `font_12/14/20/48` and `font_icons_14/20` are mapped to LVGL's built-in Montserrat fonts in
+  `src/ui.cpp` (`uiRegisterFonts`). The TTF/WOFF files in `ui/fonts/` are only for the editor preview.
+  Adding a new font size needs a line there and the size enabled in `include/lv_conf.h`.
+- Stay with LVGL 9.4 features: 9.5 moved the runtime XML loader out of the open-source library.
+- Everything that changes at runtime (texts, table rows, chart data, dialogs, keyboards) is done by the
+  firmware; the XML only holds placeholder values for the preview.
+
+XML errors are printed on the serial monitor at start-up (`[Warn] … lv_xml…`).
 
 ## 5. Web API
 
@@ -188,7 +228,9 @@ The web UI has no login. Keep it on a trusted network.
 
 ```
 platformio.ini            board, libraries, TFT_eSPI pin setup
-include/lv_conf.h         LVGL configuration
+include/lv_conf.h         LVGL 9.4 configuration
+ui/                       LVGL Pro Editor project: touch UI layout (XML), fonts for the preview
+scripts/embed_ui_xml.py   packs ui/*.xml into src/ui_xml_data.h before each build
 src/config.h              pins
 src/program.*             ramp/soak engine + step editing helpers (pure C++, unit-tested)
 src/program_store.*       10 programs on LittleFS
@@ -197,7 +239,7 @@ src/modbus_rtu.*          half-duplex Modbus master on UART2
 src/controller.*          scaling, special values, PMA parameter/action tables
 src/settings.*            defaults + NVS storage (+ migration from 1.0)
 src/app_state.*           control task: polling, program, manual setpoint, setpoint writes, chart history
-src/ui.*                  LVGL screens (Main, Program, Chart, Setup: System / Controller)
+src/ui.*                  touch UI behaviour: loads the XML, drivers, event callbacks, dialogs
 src/web.*, web_page.h     HTTP server, JSON API, single-page web UI
 test/host_test.cpp        g++ -std=c++17 -Isrc test/host_test.cpp src/program.cpp && ./a.out
 ```
@@ -208,7 +250,8 @@ A software programmer must never be the only protection against overheating. Fit
 over-temperature limiter (PMA recommends the TB 40-1 in the KS 4x-1 manual) and use the controller's own
 limit alarms and `SP.Hi` setpoint limit. Set *Highest allowed setpoint* on *Controller* to match `SP.Hi`.
 
-Status: the program engine and Modbus framing pass host unit tests. Firmware 1.1 compiles and links
-against Arduino-ESP32 2.0.17 (the `espressif32@6.9.0` platform) and the touch screens were checked in an
-LVGL desktop simulator, but it has not been tested on hardware yet. Expect to adjust small details
+Status: the program engine and Modbus framing pass host unit tests. Firmware 1.2 compiles and links
+against Arduino-ESP32 2.0.17 (the `espressif32@6.9.0` platform) with LVGL 9.4, the XML UI loads without
+warnings in LVGL's XML loader, and the touch screens were checked in an LVGL desktop simulator, but it has
+not been tested on hardware yet. Expect to adjust small details
 (display variant, touch calibration, CN1 pin order) on first bring-up.

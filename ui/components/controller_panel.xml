@@ -1,0 +1,82 @@
+<!-- Setup > Controller: serial link and program behaviour of the
+     temperature controller. Dropdown option order matters (see src/ui.cpp). -->
+<component>
+	<view extends="lv_obj" width="100%" height="content" flex_flow="column" scrollable="false" style_pad_row="2">
+		<style name="style_plain" />
+
+		<lv_label text="Serial link" style_pad_top="6">
+			<style name="style_caption" />
+		</lv_label>
+		<setting_row label="Type">
+			<lv_dropdown name="ctl_profile" width="170" options="PMA KS 4x-1&#10;Generic / LCTC">
+				<style name="style_panel" />
+				<event_cb callback="ui_on_controller_changed" trigger="value_changed" />
+			</lv_dropdown>
+		</setting_row>
+		<setting_row label="Slave address">
+			<lv_button name="ctl_slave" width="80" height="32">
+				<event_cb callback="ui_on_slave" trigger="clicked" />
+				<lv_label name="ctl_slave_text" align="center" text="1" />
+			</lv_button>
+		</setting_row>
+		<setting_row label="Baud rate">
+			<lv_dropdown name="ctl_baud" width="110" options="2400&#10;4800&#10;9600&#10;19200&#10;38400" selected="2">
+				<style name="style_panel" />
+				<event_cb callback="ui_on_controller_changed" trigger="value_changed" />
+			</lv_dropdown>
+		</setting_row>
+		<setting_row label="Format">
+			<lv_dropdown name="ctl_format" width="110" options="8N1&#10;8E1&#10;8O1&#10;8N2" selected="1">
+				<style name="style_panel" />
+				<event_cb callback="ui_on_controller_changed" trigger="value_changed" />
+			</lv_dropdown>
+		</setting_row>
+
+		<lv_label text="Program behaviour" style_pad_top="6">
+			<style name="style_caption" />
+		</lv_label>
+		<setting_row label="Setpoint ramp">
+			<lv_dropdown name="ctl_ramp" width="170" options="ESP32 steps&#10;Controller r.SP" selected="1">
+				<style name="style_panel" />
+				<event_cb callback="ui_on_controller_changed" trigger="value_changed" />
+			</lv_dropdown>
+		</setting_row>
+		<setting_row label="Guaranteed soak">
+			<lv_switch name="ctl_soak">
+				<event_cb callback="ui_on_controller_changed" trigger="value_changed" />
+			</lv_switch>
+		</setting_row>
+		<setting_row label="Soak band +/-">
+			<lv_button name="ctl_band" width="80" height="32">
+				<event_cb callback="ui_on_band" trigger="clicked" />
+				<lv_label name="ctl_band_text" align="center" text="5.0" />
+			</lv_button>
+		</setting_row>
+		<setting_row label="Lock front panel in run">
+			<lv_switch name="ctl_lock">
+				<event_cb callback="ui_on_controller_changed" trigger="value_changed" />
+			</lv_switch>
+		</setting_row>
+		<setting_row label="At end">
+			<lv_dropdown name="ctl_end" width="170" options="Keep setpoint&#10;Set end SP&#10;Outputs off">
+				<style name="style_panel" />
+				<event_cb callback="ui_on_controller_changed" trigger="value_changed" />
+			</lv_dropdown>
+		</setting_row>
+
+		<lv_label name="ctl_info" width="100%" text="Registers (edit on the web page): SP 11372,&#10;ramp r.SP 11295, outputs off 1086">
+			<style name="style_small" />
+		</lv_label>
+
+		<setting_row label="">
+			<lv_button name="ctl_test" width="130" height="36">
+				<event_cb callback="ui_on_test_link" trigger="clicked" />
+				<lv_label align="center" text="Test link" />
+			</lv_button>
+			<lv_button name="ctl_save" width="110" height="36">
+				<event_cb callback="ui_on_controller_save" trigger="clicked" />
+				<lv_label align="center" text="Save" />
+			</lv_button>
+		</setting_row>
+	</view>
+</component>

@@ -1,0 +1,12 @@
+<!-- One settings line: caption on the left, the control(s) added as children
+     are laid out to its right. -->
+<component>
+	<api>
+		<prop name="label" type="string" default="" />
+	</api>
+	<view extends="lv_obj" width="100%" height="content" flex_flow="row" scrollable="false"
+		style_flex_main_place="space_between" style_flex_cross_place="center">
+		<style name="style_row" />
+		<lv_label text="$label" />
+	</view>
+</component>

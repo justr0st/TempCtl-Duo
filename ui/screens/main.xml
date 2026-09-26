@@ -1,0 +1,31 @@
+<!-- The only screen: a tab view with the four pages. Each page is its own
+     component in components/. Widgets with a `name` are looked up by the
+     firmware (src/ui.cpp); keep those names when you restyle or move things.
+     event_cb callbacks are implemented in src/ui.cpp (ui_on_...). -->
+<screen permanent="true">
+	<view>
+		<style name="style_screen" />
+		<lv_tabview name="tabs" width="100%" height="100%" tab_bar_position="top">
+			<event_cb callback="ui_on_tab_changed" trigger="value_changed" />
+			<lv_tabview-tab_bar height="#tab_bar_height">
+				<style name="style_tab_bar" />
+			</lv_tabview-tab_bar>
+			<lv_tabview-tab text="Main">
+				<style name="style_page" />
+				<main_page />
+			</lv_tabview-tab>
+			<lv_tabview-tab text="Program">
+				<style name="style_page" />
+				<program_page />
+			</lv_tabview-tab>
+			<lv_tabview-tab text="Chart">
+				<style name="style_page" />
+				<chart_page />
+			</lv_tabview-tab>
+			<lv_tabview-tab text="Setup">
+				<style name="style_plain" />
+				<setup_page />
+			</lv_tabview-tab>
+		</lv_tabview>
+	</view>
+</screen>

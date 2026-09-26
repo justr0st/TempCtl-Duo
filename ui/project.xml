@@ -1,0 +1,11 @@
+<!-- LVGL Pro project for the TempCtl touch UI (ESP32-2432S028R, 320x240).
+     Open this folder in LVGL Pro Editor. The firmware embeds these XML files
+     and loads them at start-up with LVGL's XML loader (LV_USE_XML), so after
+     editing just rebuild and flash - no code export needed. -->
+<project name="tempctl_ui" lvgl_version="9.4.0" theme="default">
+	<targets>
+		<target name="cyd">
+			<display width="320" height="240" />
+		</target>
+	</targets>
+</project>

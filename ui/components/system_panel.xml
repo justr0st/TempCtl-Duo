@@ -1,0 +1,60 @@
+<!-- Setup > System: display and Wi-Fi settings of the ESP32. -->
+<component>
+	<view extends="lv_obj" width="100%" height="content" flex_flow="column" scrollable="false" style_pad_row="2">
+		<style name="style_plain" />
+
+		<lv_label text="Display" style_pad_top="6">
+			<style name="style_caption" />
+		</lv_label>
+		<setting_row label="Rotate 180 deg">
+			<lv_switch name="sys_rotate">
+				<event_cb callback="ui_on_rotate" trigger="value_changed" />
+			</lv_switch>
+		</setting_row>
+		<setting_row label="Brightness" style_pad_right="14">
+			<lv_slider name="sys_bright" width="140" min_value="10" max_value="255" value="200">
+				<event_cb callback="ui_on_brightness" trigger="value_changed" />
+				<event_cb callback="ui_on_brightness_done" trigger="released" />
+			</lv_slider>
+		</setting_row>
+
+		<lv_label text="Wi-Fi" style_pad_top="6">
+			<style name="style_caption" />
+		</lv_label>
+		<setting_row label="Network">
+			<lv_obj width="196" height="content" scrollable="false">
+				<style name="style_plain" />
+				<lv_button name="sys_ssid" x="0" y="0" width="140" height="#row_height">
+					<event_cb callback="ui_on_ssid" trigger="clicked" />
+					<lv_label name="sys_ssid_text" align="center" width="132" long_mode="dots" text="(none: AP only)" />
+				</lv_button>
+				<lv_button name="sys_scan" x="144" y="0" width="50" height="#row_height">
+					<event_cb callback="ui_on_scan" trigger="clicked" />
+					<lv_label align="center" text="&#xF021;" style_text_font="font_icons_14" />
+				</lv_button>
+			</lv_obj>
+		</setting_row>
+		<setting_row label="Password">
+			<lv_button name="sys_pass" width="140" height="#row_height">
+				<event_cb callback="ui_on_pass" trigger="clicked" />
+				<lv_label name="sys_pass_text" align="center" text="(none)" />
+			</lv_button>
+		</setting_row>
+		<setting_row label="AP password">
+			<lv_button name="sys_ap_pass" width="140" height="#row_height">
+				<event_cb callback="ui_on_ap_pass" trigger="clicked" />
+				<lv_label name="sys_ap_pass_text" align="center" text="********" />
+			</lv_button>
+		</setting_row>
+		<setting_row label="">
+			<lv_button name="sys_connect" width="200" height="36">
+				<event_cb callback="ui_on_connect" trigger="clicked" />
+				<lv_label align="center" text="Save + connect" />
+			</lv_button>
+		</setting_row>
+
+		<lv_label name="sys_info" width="100%" text="Wi-Fi Workshop  192.168.1.57&#10;http://tempctl.local   firmware 1.2.0">
+			<style name="style_small" />
+		</lv_label>
+	</view>
+</component>

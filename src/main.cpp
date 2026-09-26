@@ -13,6 +13,7 @@ void setup() {
   netBegin();         // Wi-Fi STA (or AP fallback)
   webBegin();         // HTTP UI + JSON API
   controlTaskStart(); // Modbus + program engine on core 0
+  Serial.printf("[mem] free heap %u bytes, largest block %u\n", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 }
 
 void loop() {

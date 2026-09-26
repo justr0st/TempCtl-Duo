@@ -1,0 +1,87 @@
+<!-- Program editor: program selection, rename, step table and step tools.
+     The firmware fills the table (one row per configured step). -->
+<component>
+	<view extends="lv_obj" width="100%" height="100%" scrollable="false">
+		<style name="style_plain" />
+
+		<lv_dropdown name="prog_select" x="0" y="0" width="196" height="32" options="1 Example" style_pad_all="7">
+			<style name="style_panel" />
+			<event_cb callback="ui_on_edit_prog" trigger="value_changed" />
+		</lv_dropdown>
+		<lv_button name="prog_rename" x="200" y="0" width="116" height="32">
+			<event_cb callback="ui_on_rename" trigger="clicked" />
+			<lv_label align="center" text="Name" />
+		</lv_button>
+
+		<!-- fixed header above the scrolling table; x = column start + 5 -->
+		<lv_label x="5" y="36" text="No">
+			<style name="style_caption" />
+		</lv_label>
+		<lv_label x="39" y="36" text="Target C">
+			<style name="style_caption" />
+		</lv_label>
+		<lv_label x="133" y="36" text="Ramp">
+			<style name="style_caption" />
+		</lv_label>
+		<lv_label x="227" y="36" text="Hold">
+			<style name="style_caption" />
+		</lv_label>
+
+		<!-- column widths: 34 / 94 / 94 / 92 -->
+		<lv_table name="prog_table" x="0" y="52" width="316" height="104" column_count="4" row_count="3"
+			send_draw_task_events="true" style_pad_all="0">
+			<style name="style_panel" />
+			<style name="style_panel" selector="items" />
+			<style name="style_table_cell" selector="items" />
+			<event_cb callback="ui_on_table" trigger="value_changed" />
+			<lv_table-column column="0" width="34" />
+			<lv_table-column column="1" width="94" />
+			<lv_table-column column="2" width="94" />
+			<lv_table-column column="3" width="92" />
+			<lv_table-cell row="0" column="0" value="1" />
+			<lv_table-cell row="0" column="1" value="100.0" />
+			<lv_table-cell row="0" column="2" value="30 min" />
+			<lv_table-cell row="0" column="3" value="30 min" />
+			<lv_table-cell row="1" column="0" value="2" />
+			<lv_table-cell row="1" column="1" value="250.0" />
+			<lv_table-cell row="1" column="2" value="60 min" />
+			<lv_table-cell row="1" column="3" value="45 s" />
+			<lv_table-cell row="2" column="0" value="3" />
+			<lv_table-cell row="2" column="1" value="400.0" />
+			<lv_table-cell row="2" column="2" value="0" />
+			<lv_table-cell row="2" column="3" value="120 min" />
+		</lv_table>
+
+		<lv_label name="prog_info" x="2" y="158" text="3/100 steps  total 4:45:45">
+			<style name="style_small" />
+		</lv_label>
+		<lv_label name="prog_unsaved" x="200" y="158" text="unsaved" style_text_color="#color_warn">
+			<style name="style_small" />
+		</lv_label>
+
+		<lv_button name="prog_add" x="0" y="174" width="40" height="30">
+			<event_cb callback="ui_on_add_step" trigger="clicked" />
+			<lv_label align="center" text="&#xF067;" style_text_font="font_icons_14" />
+		</lv_button>
+		<lv_button name="prog_del" x="44" y="174" width="40" height="30">
+			<event_cb callback="ui_on_del_step" trigger="clicked" />
+			<lv_label align="center" text="&#xF068;" style_text_font="font_icons_14" />
+		</lv_button>
+		<lv_button name="prog_up" x="88" y="174" width="40" height="30">
+			<event_cb callback="ui_on_step_up" trigger="clicked" />
+			<lv_label align="center" text="&#xF077;" style_text_font="font_icons_14" />
+		</lv_button>
+		<lv_button name="prog_down" x="132" y="174" width="40" height="30">
+			<event_cb callback="ui_on_step_down" trigger="clicked" />
+			<lv_label align="center" text="&#xF078;" style_text_font="font_icons_14" />
+		</lv_button>
+		<lv_button name="prog_revert" x="176" y="174" width="62" height="30">
+			<event_cb callback="ui_on_prog_revert" trigger="clicked" />
+			<lv_label align="center" text="Revert" />
+		</lv_button>
+		<lv_button name="prog_save" x="242" y="174" width="74" height="30">
+			<event_cb callback="ui_on_prog_save" trigger="clicked" />
+			<lv_label align="center" text="Save" />
+		</lv_button>
+	</view>
+</component>

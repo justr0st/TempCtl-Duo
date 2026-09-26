@@ -1,7 +1,7 @@
 // Board configuration for the ESP32-2432S028R ("Cheap Yellow Display", CYD).
 #pragma once
 
-#define FW_VERSION "1.1.0"
+#define FW_VERSION "1.2.0"
 
 // ---- RS485 transceiver (UART2) ----
 // CYD free pins: CN1 = GPIO22, GPIO27 (+3.3V, GND); P3 = GPIO21(backlight!), GPIO22, GPIO35.
