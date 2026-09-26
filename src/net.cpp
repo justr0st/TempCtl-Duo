@@ -93,12 +93,58 @@ void netApplyWifi() {
   }
 }
 
-void netScanStart() {
-  if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) return;
-  WiFi.scanDelete();
-  if (WiFi.getMode() == WIFI_AP) WiFi.mode(WIFI_AP_STA);  // scanning needs the station interface
-  WiFi.scanNetworks(true);
+// --- network scan
+// ESP-IDF refuses to start a scan while the station is busy trying to connect,
+// and the Arduino core retries a failing connection forever (wrong password,
+// network out of range). So pause those attempts for the scan and resume them
+// afterwards. Starting is retried a few times because the first attempt right
+// after the disconnect can still fail.
+static bool scanActive = false;
+static bool scanResume = false;  // reconnect the station when the scan ends
+static uint8_t scanTries = 0;
+static uint32_t scanRetryAt = 0;
+static constexpr uint8_t SCAN_MAX_TRIES = 6;
+static constexpr uint32_t SCAN_RETRY_MS = 500;
+
+static bool scanKick() {
+  const int16_t r = WiFi.scanNetworks(true, false, false, 300);
+  Serial.printf("[wifi] scan start #%u -> %d (sta status %d)\n", scanTries, r, (int)WiFi.status());
+  if (r == WIFI_SCAN_RUNNING) return true;
+  scanRetryAt = millis() + SCAN_RETRY_MS;
+  return false;
 }
+
+static void scanFinish() {
+  scanActive = false;
+  if (!scanResume) return;
+  scanResume = false;
+  Settings s;
+  {
+    Guard g;
+    s = gSettings;
+  }
+  WiFi.setAutoReconnect(true);
+  if (haveSta && s.ssid[0]) {
+    WiFi.begin(s.ssid, s.pass);
+    t0 = millis();
+  }
+}
+
+void netScanStart() {
+  if (scanActive) return;
+  WiFi.scanDelete();
+  if (WiFi.getMode() == WIFI_AP || WiFi.getMode() == WIFI_OFF) WiFi.mode(WIFI_AP_STA);  // scanning needs the station
+  scanResume = haveSta && WiFi.status() != WL_CONNECTED;
+  if (scanResume) {  // stop the endless connection attempts during the scan
+    WiFi.setAutoReconnect(false);
+    WiFi.disconnect();
+  }
+  scanActive = true;
+  scanTries = 1;
+  scanKick();
+}
+
+bool netScanBusy() { return scanActive; }
 
 static bool hasLine(const char* list, const char* name) {
   const size_t len = strlen(name);
@@ -113,14 +159,26 @@ static bool hasLine(const char* list, const char* name) {
 }
 
 int netScanResult(char* out, size_t n) {
+  if (!scanActive) return -2;
   const int16_t r = WiFi.scanComplete();
   if (r == WIFI_SCAN_RUNNING) return -1;
-  if (r < 0 || n == 0) return -2;
-  out[0] = 0;
+  if (r < 0) {  // failed to start or timed out
+    if (scanTries < SCAN_MAX_TRIES) {
+      if ((int32_t)(millis() - scanRetryAt) >= 0) {
+        ++scanTries;
+        scanKick();
+      }
+      return -1;
+    }
+    Serial.println("[wifi] scan failed");
+    scanFinish();
+    return -2;
+  }
+  if (n) out[0] = 0;
   int count = 0;
   const int total = r > 64 ? 64 : r;
   bool used[64] = {false};
-  for (int k = 0; k < total; ++k) {  // strongest first
+  for (int k = 0; k < total && n; ++k) {  // strongest first
     int best = -1;
     for (int i = 0; i < total; ++i)
       if (!used[i] && (best < 0 || WiFi.RSSI(i) > WiFi.RSSI(best))) best = i;
@@ -132,5 +190,8 @@ int netScanResult(char* out, size_t n) {
     strcat(out, ssid.c_str());
     ++count;
   }
+  Serial.printf("[wifi] scan done: %d networks (%d unique)\n", r, count);
+  WiFi.scanDelete();
+  scanFinish();
   return count;
 }

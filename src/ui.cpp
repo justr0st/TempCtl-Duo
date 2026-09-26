@@ -1041,7 +1041,7 @@ static void onScanCancel(lv_event_t*) { modalClose(); }
 
 static void showScanResult(const char* names, int count) {
   if (modal) return;
-  modalCreate(count > 0 ? "Pick a network" : "No networks found");
+  modalCreate(count > 0 ? "Pick a network" : count == 0 ? "No networks found" : "Scan failed - Wi-Fi busy, try again");
   lv_obj_t* list = lv_list_create(modal);
   lv_obj_set_size(list, SCREEN_W - 8, 172);
   lv_obj_set_pos(list, 0, 22);
@@ -1058,6 +1058,7 @@ static void showScanResult(const char* names, int count) {
 }
 
 static void onScan(lv_event_t*) {
+  if (scanWaiting) return;
   netScanStart();
   scanWaiting = true;
   lv_label_set_text(lblSysInfo, "Scanning for networks...");
@@ -1070,7 +1071,8 @@ static void pollScan() {
   if (n == -1) return;
   scanWaiting = false;
   updateSysInfo();
-  showScanResult(names, n < 0 ? 0 : n);
+  // only pop up the list if the user is still on the Setup tab
+  if (lv_tabview_get_tab_act(tabview) == TAB_SETUP) showScanResult(names, n);
 }
 
 static void onConnect(lv_event_t*) {
@@ -1339,8 +1341,8 @@ static void uiTimer(lv_timer_t*) {
     lastChart = millis();
     updateChart();
   }
+  pollScan();  // always: the scan must be collected so Wi-Fi can reconnect
   if (tab == TAB_SETUP) {
-    pollScan();
     if (!scanWaiting && millis() - lastInfo > 3000) {
       lastInfo = millis();
       updateSysInfo();
