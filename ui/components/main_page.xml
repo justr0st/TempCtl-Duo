@@ -34,12 +34,9 @@
 		<!-- manual setpoint -->
 		<lv_label x="2" y="100" text="Manual SP" />
 		<lv_button name="main_man_sp" x="90" y="92" width="92" height="#row_height">
-			<event_cb callback="ui_on_manual_sp" trigger="clicked" />
 			<lv_label name="main_man_sp_text" align="center" text="150.0" />
 		</lv_button>
-		<lv_switch name="main_man_sw" x="192" y="95" width="54" height="28">
-			<event_cb callback="ui_on_manual_switch" trigger="value_changed" />
-		</lv_switch>
+		<lv_switch name="main_man_sw" x="192" y="95" width="54" height="28" />
 		<lv_label x="254" y="102" text="on / off">
 			<style name="style_caption" />
 		</lv_label>
@@ -47,23 +44,18 @@
 		<!-- program selection and run controls -->
 		<lv_dropdown name="main_prog" x="0" y="132" width="140" height="36" options="1 Example" style_pad_all="8">
 			<style name="style_panel" />
-			<event_cb callback="ui_on_main_prog" trigger="value_changed" />
 		</lv_dropdown>
 		<lv_button name="main_start" x="144" y="132" width="46" height="36">
-			<event_cb callback="ui_on_start" trigger="clicked" />
 			<lv_label align="center" text="&#xF04B;" style_text_font="font_icons_14" />
 		</lv_button>
 		<lv_button name="main_pause" x="194" y="132" width="38" height="36">
-			<event_cb callback="ui_on_pause" trigger="clicked" />
 			<lv_label align="center" text="&#xF04C;" style_text_font="font_icons_14" />
 		</lv_button>
 		<lv_button name="main_stop" x="236" y="132" width="38" height="36">
 			<style name="style_danger" />
-			<event_cb callback="ui_on_stop" trigger="clicked" />
 			<lv_label align="center" text="&#xF04D;" style_text_font="font_icons_14" />
 		</lv_button>
 		<lv_button name="main_skip" x="278" y="132" width="38" height="36">
-			<event_cb callback="ui_on_skip" trigger="clicked" />
 			<lv_label align="center" text="&#xF051;" style_text_font="font_icons_14" />
 		</lv_button>
 

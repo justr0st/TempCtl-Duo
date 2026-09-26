@@ -187,14 +187,15 @@ export step.
 
 Rules so the firmware keeps working:
 
-- **Keep the `name` attributes** of widgets the firmware updates (e.g. `main_pv`, `prog_table`,
-  `chart`); `src/ui.cpp` finds them with `lv_obj_find_by_name`. A missing name is reported on the
-  serial monitor as `[ui] widget '…' not found`.
-- **Keep the `event_cb` callbacks** (`ui_on_…`); they are implemented in `src/ui.cpp`.
+- **Keep the `name` attributes** of widgets the firmware uses (e.g. `main_pv`, `main_start`,
+  `prog_table`, `chart`). `src/ui.cpp` finds them with `lv_obj_find_by_name`, updates them and attaches
+  the touch handlers to them (`UI_EVENTS` table). A missing name is reported on the serial monitor as
+  `[ui] widget '…' not found`. The XML itself contains no `event_cb`s, so the editor preview has nothing
+  unresolved.
 - The chart must keep its three series in the order PV, SP, program.
 - Dropdown options in *Controller* are matched by position (baud rates, formats, …).
-- Fonts: `font_12/14/20/48` and `font_icons_14/20` are mapped to LVGL's built-in Montserrat fonts in
-  `src/ui.cpp` (`uiRegisterFonts`). The TTF/WOFF files in `ui/fonts/` are only for the editor preview.
+- Fonts: `font_12/14/20/48` and `font_icons_14` are mapped to LVGL's built-in Montserrat fonts in
+  `src/ui.cpp` (`uiRegisterFonts`). The TTF files in `ui/fonts/` are only for the editor preview.
   Adding a new font size needs a line there and the size enabled in `include/lv_conf.h`.
 - Stay with LVGL 9.4 features: 9.5 moved the runtime XML loader out of the open-source library.
 - Everything that changes at runtime (texts, table rows, chart data, dialogs, keyboards) is done by the

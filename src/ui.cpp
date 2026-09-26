@@ -3,9 +3,9 @@
 // The screen layout is an LVGL Pro project in ui/ (XML). It is embedded into
 // the firmware at build time (scripts/embed_ui_xml.py -> ui_xml_data.h) and
 // created with LVGL's XML loader. This file only contains the behaviour:
-// it looks widgets up by their `name` and implements the event callbacks the
-// XML refers to (ui_on_...). Modal editors, keyboards and message boxes are
-// created here in code.
+// it looks widgets up by their `name`, attaches the event handlers (UI_EVENTS)
+// and updates them. Modal editors, keyboards and message boxes are created
+// here in code.
 #include "ui.h"
 #include <SPI.h>
 #include <TFT_eSPI.h>
@@ -826,6 +826,9 @@ static void bindChart() {
   chartYScale = find("chart_yscale");
   chartXScale = find("chart_xscale");
   lblChartInfo = find("chart_info");
+  // numbers are off in the XML (LVGL Pro Editor preview crash, see chart_page.xml)
+  if (chartYScale) lv_scale_set_label_show(chartYScale, true);
+  if (chartXScale) lv_scale_set_label_show(chartXScale, true);
   if (!chart) return;
   // series order in the XML: process value, setpoint, program
   serPv = lv_chart_get_series_next(chart, nullptr);
@@ -1264,44 +1267,64 @@ static void uiTimer(lv_timer_t*) {
 }
 
 // ------------------------------------------------------------ XML loading
-struct UiCallback {
-  const char* name;
+// Event handlers, attached to the XML widgets by name after the screen has
+// been created. (They are not declared in the XML, so the LVGL Pro Editor
+// preview has nothing unresolved to complain about.)
+struct UiEvent {
+  const char* widget;
+  lv_event_code_t code;
   lv_event_cb_t cb;
 };
 
-// every event_cb callback used in ui/*.xml
-static const UiCallback UI_CALLBACKS[] = {
-    {"ui_on_tab_changed", ui_on_tab_changed},
-    {"ui_on_start", ui_on_start},
-    {"ui_on_pause", ui_on_pause},
-    {"ui_on_stop", ui_on_stop},
-    {"ui_on_skip", ui_on_skip},
-    {"ui_on_main_prog", ui_on_main_prog},
-    {"ui_on_manual_sp", ui_on_manual_sp},
-    {"ui_on_manual_switch", ui_on_manual_switch},
-    {"ui_on_edit_prog", ui_on_edit_prog},
-    {"ui_on_rename", ui_on_rename},
-    {"ui_on_table", ui_on_table},
-    {"ui_on_add_step", ui_on_add_step},
-    {"ui_on_del_step", ui_on_del_step},
-    {"ui_on_step_up", ui_on_step_up},
-    {"ui_on_step_down", ui_on_step_down},
-    {"ui_on_prog_revert", ui_on_prog_revert},
-    {"ui_on_prog_save", ui_on_prog_save},
-    {"ui_on_rotate", ui_on_rotate},
-    {"ui_on_brightness", ui_on_brightness},
-    {"ui_on_brightness_done", ui_on_brightness_done},
-    {"ui_on_ssid", ui_on_ssid},
-    {"ui_on_scan", ui_on_scan},
-    {"ui_on_pass", ui_on_pass},
-    {"ui_on_ap_pass", ui_on_ap_pass},
-    {"ui_on_connect", ui_on_connect},
-    {"ui_on_controller_changed", ui_on_controller_changed},
-    {"ui_on_slave", ui_on_slave},
-    {"ui_on_band", ui_on_band},
-    {"ui_on_test_link", ui_on_test_link},
-    {"ui_on_controller_save", ui_on_controller_save},
+static const UiEvent UI_EVENTS[] = {
+    {"tabs", LV_EVENT_VALUE_CHANGED, ui_on_tab_changed},
+    // Main
+    {"main_man_sp", LV_EVENT_CLICKED, ui_on_manual_sp},
+    {"main_man_sw", LV_EVENT_VALUE_CHANGED, ui_on_manual_switch},
+    {"main_prog", LV_EVENT_VALUE_CHANGED, ui_on_main_prog},
+    {"main_start", LV_EVENT_CLICKED, ui_on_start},
+    {"main_pause", LV_EVENT_CLICKED, ui_on_pause},
+    {"main_stop", LV_EVENT_CLICKED, ui_on_stop},
+    {"main_skip", LV_EVENT_CLICKED, ui_on_skip},
+    // Program
+    {"prog_select", LV_EVENT_VALUE_CHANGED, ui_on_edit_prog},
+    {"prog_rename", LV_EVENT_CLICKED, ui_on_rename},
+    {"prog_table", LV_EVENT_VALUE_CHANGED, ui_on_table},
+    {"prog_add", LV_EVENT_CLICKED, ui_on_add_step},
+    {"prog_del", LV_EVENT_CLICKED, ui_on_del_step},
+    {"prog_up", LV_EVENT_CLICKED, ui_on_step_up},
+    {"prog_down", LV_EVENT_CLICKED, ui_on_step_down},
+    {"prog_revert", LV_EVENT_CLICKED, ui_on_prog_revert},
+    {"prog_save", LV_EVENT_CLICKED, ui_on_prog_save},
+    // Setup > System
+    {"sys_rotate", LV_EVENT_VALUE_CHANGED, ui_on_rotate},
+    {"sys_bright", LV_EVENT_VALUE_CHANGED, ui_on_brightness},
+    {"sys_bright", LV_EVENT_RELEASED, ui_on_brightness_done},
+    {"sys_ssid", LV_EVENT_CLICKED, ui_on_ssid},
+    {"sys_scan", LV_EVENT_CLICKED, ui_on_scan},
+    {"sys_pass", LV_EVENT_CLICKED, ui_on_pass},
+    {"sys_ap_pass", LV_EVENT_CLICKED, ui_on_ap_pass},
+    {"sys_connect", LV_EVENT_CLICKED, ui_on_connect},
+    // Setup > Controller
+    {"ctl_profile", LV_EVENT_VALUE_CHANGED, ui_on_controller_changed},
+    {"ctl_slave", LV_EVENT_CLICKED, ui_on_slave},
+    {"ctl_baud", LV_EVENT_VALUE_CHANGED, ui_on_controller_changed},
+    {"ctl_format", LV_EVENT_VALUE_CHANGED, ui_on_controller_changed},
+    {"ctl_ramp", LV_EVENT_VALUE_CHANGED, ui_on_controller_changed},
+    {"ctl_soak", LV_EVENT_VALUE_CHANGED, ui_on_controller_changed},
+    {"ctl_band", LV_EVENT_CLICKED, ui_on_band},
+    {"ctl_lock", LV_EVENT_VALUE_CHANGED, ui_on_controller_changed},
+    {"ctl_end", LV_EVENT_VALUE_CHANGED, ui_on_controller_changed},
+    {"ctl_test", LV_EVENT_CLICKED, ui_on_test_link},
+    {"ctl_save", LV_EVENT_CLICKED, ui_on_controller_save},
 };
+
+static void uiBindEvents() {
+  for (const UiEvent& ev : UI_EVENTS) {
+    lv_obj_t* o = find(ev.widget);
+    if (o) lv_obj_add_event_cb(o, ev.cb, ev.code, nullptr);
+  }
+}
 
 // Font names used in ui/globals.xml -> built-in fonts (which include the symbols)
 static void uiRegisterFonts() {
@@ -1310,12 +1333,10 @@ static void uiRegisterFonts() {
   lv_xml_register_font(nullptr, "font_20", &lv_font_montserrat_20);
   lv_xml_register_font(nullptr, "font_48", &lv_font_montserrat_48);
   lv_xml_register_font(nullptr, "font_icons_14", &lv_font_montserrat_14);
-  lv_xml_register_font(nullptr, "font_icons_20", &lv_font_montserrat_20);
 }
 
 static bool uiLoadXml() {
   uiRegisterFonts();
-  for (const UiCallback& c : UI_CALLBACKS) lv_xml_register_event_cb(nullptr, c.name, c.cb);
   bool ok = true;
   for (int i = 0; i < UI_XML_COUNT; ++i) {
     if (lv_xml_register_component_from_data(UI_XML_FILES[i].name, UI_XML_FILES[i].xml) != LV_RESULT_OK) {
@@ -1380,6 +1401,7 @@ void uiInit() {
     lv_obj_center(l);
     return;
   }
+  uiBindEvents();
   bindMain();
   bindProgram();
   bindChart();
