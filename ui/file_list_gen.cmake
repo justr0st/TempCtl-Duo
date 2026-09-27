@@ -1,0 +1,23 @@
+list(
+  APPEND
+  LV_EDITOR_PROJECT_SOURCES
+  ${CMAKE_CURRENT_LIST_DIR}/components/chart_page_gen.c
+  ${CMAKE_CURRENT_LIST_DIR}/components/controller_panel_gen.c
+  ${CMAKE_CURRENT_LIST_DIR}/components/main_page_gen.c
+  ${CMAKE_CURRENT_LIST_DIR}/components/popups/dialog_gen.c
+  ${CMAKE_CURRENT_LIST_DIR}/components/popups/num_editor_gen.c
+  ${CMAKE_CURRENT_LIST_DIR}/components/popups/text_editor_gen.c
+  ${CMAKE_CURRENT_LIST_DIR}/components/popups/wifi_item_gen.c
+  ${CMAKE_CURRENT_LIST_DIR}/components/popups/wifi_list_gen.c
+  ${CMAKE_CURRENT_LIST_DIR}/components/program_page_gen.c
+  ${CMAKE_CURRENT_LIST_DIR}/components/setting_row_gen.c
+  ${CMAKE_CURRENT_LIST_DIR}/components/setup_page_gen.c
+  ${CMAKE_CURRENT_LIST_DIR}/components/system_panel_gen.c
+  ${CMAKE_CURRENT_LIST_DIR}/fonts/font_12_data.c
+  ${CMAKE_CURRENT_LIST_DIR}/fonts/font_14_data.c
+  ${CMAKE_CURRENT_LIST_DIR}/fonts/font_20_data.c
+  ${CMAKE_CURRENT_LIST_DIR}/fonts/font_48_data.c
+  ${CMAKE_CURRENT_LIST_DIR}/fonts/font_icons_14_data.c
+  ${CMAKE_CURRENT_LIST_DIR}/screens/gui_gen.c
+  ${CMAKE_CURRENT_LIST_DIR}/tempctl_ui_gen.c
+  ${CMAKE_CURRENT_LIST_DIR}/tempctl_ui.c)
