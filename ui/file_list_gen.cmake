@@ -16,6 +16,8 @@ list(
   ${CMAKE_CURRENT_LIST_DIR}/fonts/font_12_data.c
   ${CMAKE_CURRENT_LIST_DIR}/fonts/font_14_data.c
   ${CMAKE_CURRENT_LIST_DIR}/fonts/font_20_data.c
+  ${CMAKE_CURRENT_LIST_DIR}/fonts/font_24_data.c
+  ${CMAKE_CURRENT_LIST_DIR}/fonts/font_32_data.c
   ${CMAKE_CURRENT_LIST_DIR}/fonts/font_48_data.c
   ${CMAKE_CURRENT_LIST_DIR}/fonts/font_icons_14_data.c
   ${CMAKE_CURRENT_LIST_DIR}/screens/gui_gen.c

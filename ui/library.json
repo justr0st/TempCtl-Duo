@@ -1,0 +1,25 @@
+{
+  "name": "tempctl_ui",
+  "version": "1.0.0",
+  "description": "TempCtl touch UI: C code exported by LVGL Pro Editor from the XML in this folder. Do not edit the *_gen files; change the XML and export again.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcDir": ".",
+    "includeDir": ".",
+    "srcFilter": [
+      "-<*>",
+      "+<*.c>",
+      "+<components/>",
+      "+<screens/>",
+      "+<fonts/>",
+      "-<preview-build/>",
+      "-<preview-bin/>",
+      "-<build/>"
+    ],
+    "flags": [
+      "-Wno-deprecated-declarations",
+      "-Wno-unused-function"
+    ]
+  }
+}

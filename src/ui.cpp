@@ -1,11 +1,10 @@
-// LVGL 9.4 user interface for the 320x240 CYD screen.
+// LVGL 9.6 user interface for the 320x240 CYD screen.
 //
-// The screen layout is an LVGL Pro project in ui/ (XML). It is embedded into
-// the firmware at build time (scripts/embed_ui_xml.py -> ui_xml_data.h) and
-// created with LVGL's XML loader. This file only contains the behaviour:
+// The screen layout is an LVGL Pro project in ui/ (XML). LVGL Pro exports it
+// as C code (ui/**/*_gen.c, compiled as the library in ui/library.json), which
+// creates the screen and the popups. This file only contains the behaviour:
 // it looks widgets up by their `name`, attaches the event handlers (UI_EVENTS)
-// and updates them. Modal editors, keyboards and message boxes are created
-// here in code.
+// and updates them.
 #include "ui.h"
 #include <SPI.h>
 #include <TFT_eSPI.h>
@@ -15,7 +14,7 @@
 #include "app_state.h"
 #include "controller.h"
 #include "net.h"
-#include "ui_xml_data.h"
+#include "ui_gen.h"  // UI code exported by LVGL Pro (ui/)
 
 // ------------------------------------------------------------ drivers
 static TFT_eSPI tft;
@@ -105,14 +104,6 @@ static const char* trf(char* out, size_t n, const char* tag, const char* a1 = nu
   return out;
 }
 
-// Color constant from ui/globals.xml ("0xRRGGBB"), or the fallback
-static lv_color_t xmlColor(const char* name, uint32_t fallback) {
-  const char* v = lv_xml_get_const(nullptr, name);
-  if (!v || !*v) return lv_color_hex(fallback);
-  if (*v == '#') ++v;
-  return lv_color_hex((uint32_t)strtoul(v, nullptr, 16));
-}
-
 // Step time as shown in the program table: whole minutes as "N min", else "N s".
 static void fmtStepTime(uint32_t sec, char* out, size_t n) {
   char num[12];
@@ -145,11 +136,12 @@ static void setText(lv_obj_t* label, const char* t) {
 
 static lv_obj_t* evTarget(lv_event_t* e) { return lv_event_get_target_obj(e); }
 
-// Popups are XML components (ui/components/popups), created on the top layer
-// when needed. Their definitions stay registered (see uiLoadXml).
-static lv_obj_t* popupCreate(const char* component) {
-  lv_obj_t* p = (lv_obj_t*)lv_xml_create(lv_layer_top(), component, nullptr);
-  if (!p) Serial.printf("[ui] popup '%s' could not be created\n", component);
+// Popups are LVGL Pro components (ui/components/popups), created on the top
+// layer with their generated create function when needed.
+typedef lv_obj_t* (*PopupCreate)(lv_obj_t* parent);
+static lv_obj_t* popupCreate(PopupCreate create) {
+  lv_obj_t* p = create(lv_layer_top());
+  if (!p) Serial.println("[ui] popup could not be created");
   else lv_obj_set_pos(p, 0, 0);
   return p;
 }
@@ -164,7 +156,7 @@ static void dialogCloseClicked(lv_event_t* e) { lv_obj_delete_async((lv_obj_t*)l
 // textOut. Close it with lv_obj_delete / lv_obj_delete_async.
 static lv_obj_t* msgBox(const char* title, const char* text, const char* const* buttons = nullptr,
                         lv_event_cb_t cb = nullptr, bool closeBtn = true, lv_obj_t** textOut = nullptr) {
-  lv_obj_t* m = popupCreate("dialog");
+  lv_obj_t* m = popupCreate(uiGenDialog);
   if (!m) return nullptr;
   setText(childByName(m, "dlg_title"), title);
   lv_obj_t* t = childByName(m, "dlg_text");
@@ -173,7 +165,7 @@ static lv_obj_t* msgBox(const char* title, const char* text, const char* const* 
   lv_obj_t* close = childByName(m, "dlg_close");
   if (close) {
     if (closeBtn) lv_obj_add_event_cb(close, dialogCloseClicked, LV_EVENT_CLICKED, m);
-    else lv_obj_add_flag(close, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_set_hidden(close, true);
   }
   int n = 0;
   for (int i = 1; i <= 3; ++i) {
@@ -183,7 +175,7 @@ static lv_obj_t* msgBox(const char* title, const char* text, const char* const* 
     if (!b) continue;
     const char* bt = (buttons && n == i - 1 && buttons[n] && buttons[n][0]) ? buttons[n] : nullptr;
     if (!bt) {
-      lv_obj_add_flag(b, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_hidden(b, true);
       continue;
     }
     ++n;
@@ -191,7 +183,7 @@ static lv_obj_t* msgBox(const char* title, const char* text, const char* const* 
     if (cb) lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, m);
   }
   lv_obj_t* footer = childByName(m, "dlg_footer");
-  if (n == 0 && footer) lv_obj_add_flag(footer, LV_OBJ_FLAG_HIDDEN);
+  if (n == 0 && footer) lv_obj_set_hidden(footer, true);
   return m;
 }
 
@@ -241,7 +233,7 @@ static void modalClose() {
   modalUnits = nullptr;
 }
 
-static lv_obj_t* modalCreate(const char* component, const char* titleName, const char* title) {
+static lv_obj_t* modalCreate(PopupCreate component, const char* titleName, const char* title) {
   modal = popupCreate(component);
   setText(childByName(modal, titleName), title);
   return modal;
@@ -270,7 +262,7 @@ static void numKbEvent(lv_event_t* e) {
 // timeSec: `cur` is in seconds and the user picks minutes or seconds.
 static void openNumEditor(const char* title, float cur, NumApply cb, int arg, bool timeSec = false) {
   if (modal) return;
-  if (!modalCreate("num_editor", "num_title", title)) return;
+  if (!modalCreate(uiGenNumEditor, "num_title", title)) return;
   numApply = cb;
   numArg = arg;
   modalTa = childByName(modal, "num_ta");
@@ -294,7 +286,7 @@ static void openNumEditor(const char* title, float cur, NumApply cb, int arg, bo
       lv_buttonmatrix_set_button_ctrl(modalUnits, mins ? 0 : 1, LV_BUTTONMATRIX_CTRL_CHECKED);
     }
   } else {
-    if (modalUnits) lv_obj_add_flag(modalUnits, LV_OBJ_FLAG_HIDDEN);
+    if (modalUnits) lv_obj_set_hidden(modalUnits, true);
     modalUnits = nullptr;
     snprintf(buf, sizeof(buf), "%.1f", cur);
     const size_t l = strlen(buf);  // drop a trailing ".0" for integer values
@@ -323,7 +315,7 @@ static void textKbEvent(lv_event_t* e) {
 static void openTextEditor(const char* title, const char* cur, uint16_t maxLen, bool password, TextApply cb,
                            int arg) {
   if (modal) return;
-  if (!modalCreate("text_editor", "text_title", title)) return;
+  if (!modalCreate(uiGenTextEditor, "text_title", title)) return;
   textApply = cb;
   textArg = arg;
   modalTa = childByName(modal, "text_ta");
@@ -789,8 +781,8 @@ extern "C" void ui_on_edit_prog(lv_event_t*) {
 }
 
 static void bindProgram() {
-  colRowSelected = xmlColor("color_row_selected", 0x1565C0);
-  colStepNo = xmlColor("color_muted", 0x9E9E9E);
+  colRowSelected = uiGenColor(UI_COLOR_ROW_SELECTED);  // constants from ui/globals.xml
+  colStepNo = uiGenColor(UI_COLOR_MUTED);
   ddEditProg = find("prog_select");
   table = find("prog_table");
   lblProgInfo = find("prog_info");
@@ -800,7 +792,7 @@ static void bindProgram() {
   btnUp = find("prog_up");
   btnDown = find("prog_down");
   if (table) {
-    lv_obj_add_flag(table, LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS);
+    lv_obj_set_send_draw_task_events(table, true);
     lv_obj_add_event_cb(table, onTableDraw, LV_EVENT_DRAW_TASK_ADDED, nullptr);
   }
   int sel;
@@ -1043,7 +1035,7 @@ static void onScanCancel(lv_event_t*) { modalClose(); }
 
 static void showScanResult(const char* names, int count) {
   if (modal) return;
-  if (!modalCreate("wifi_list", "scan_title",
+  if (!modalCreate(uiGenWifiList, "scan_title",
                    count > 0 ? T("scan_pick") : count == 0 ? T("scan_none") : T("scan_failed")))
     return;
   lv_obj_t* list = childByName(modal, "scan_list");
@@ -1056,8 +1048,7 @@ static void showScanResult(const char* names, int count) {
     const char* e = strchr(p, '\n');
     char name[33];
     snprintf(name, sizeof(name), "%.*s", (int)(e ? e - p : strlen(p)), p);
-    const char* attrs[] = {"ssid", name, nullptr};
-    lv_obj_t* b = (lv_obj_t*)lv_xml_create(list, "wifi_item", attrs);
+    lv_obj_t* b = uiGenWifiItem(list, name);
     if (b) lv_obj_add_event_cb(b, onScanPick, LV_EVENT_CLICKED, nullptr);
     p = e ? e + 1 : nullptr;
   }
@@ -1379,57 +1370,23 @@ static void uiBindEvents() {
   }
 }
 
-// Font names used in ui/globals.xml -> built-in fonts (which include the symbols)
-static void uiRegisterFonts() {
-  lv_xml_register_font(nullptr, "font_12", &lv_font_montserrat_12);
-  lv_xml_register_font(nullptr, "font_14", &lv_font_montserrat_14);
-  lv_xml_register_font(nullptr, "font_20", &lv_font_montserrat_20);
-  lv_xml_register_font(nullptr, "font_48", &lv_font_montserrat_48);
-  lv_xml_register_font(nullptr, "font_icons_14", &lv_font_montserrat_14);
-}
-
-static const char* const POPUPS[] = {"dialog", "num_editor", "text_editor", "wifi_list", "wifi_item"};
-static bool isPopup(const char* name) {
-  for (const char* p : POPUPS)
-    if (strcmp(p, name) == 0) return true;
-  return false;
-}
-
-static bool uiLoadXml() {
-  uiRegisterFonts();
-  bool ok = true;
-  for (int i = 0; i < UI_XML_COUNT; ++i) {
-    if (lv_xml_register_component_from_data(UI_XML_FILES[i].name, UI_XML_FILES[i].xml) != LV_RESULT_OK) {
-      Serial.printf("[ui] XML error in %s/%s.xml\n", UI_XML_FILES[i].kind, UI_XML_FILES[i].name);
-      ok = false;
-    }
-  }
-#if UI_TR_AVAILABLE
-  // ui/translations.xml (static tables in flash); the first language is used
-  lv_translation_add_static(UI_TR_LANGS, UI_TR_TAGS, UI_TR_TEXTS);
-  lv_translation_set_language(UI_TR_LANGS[0]);
-#endif
-
-  // theme colors and dark / light from the constants in ui/globals.xml
-  const char* dark = lv_xml_get_const(nullptr, "theme_dark");
-  lv_theme_t* th = lv_theme_default_init(disp, xmlColor("color_accent", 0x2196F3), xmlColor("color_accent2", 0xFF5722),
-                                         dark ? atoi(dark) != 0 : true, &lv_font_montserrat_14);
+static bool uiCreateScreen() {
+  // theme colors and dark / light from the constants in ui/globals.xml; set
+  // before the screen is created (tempctl_ui_init() creates it)
+  lv_theme_t* th = lv_theme_default_init(disp, uiGenColor(UI_COLOR_ACCENT), uiGenColor(UI_COLOR_ACCENT2),
+                                         uiGenThemeDark(), &lv_font_montserrat_14);
   lv_display_set_theme(disp, th);
 
-  screen = lv_xml_create_screen("gui");  // ui/screens/gui.xml
+  // styles, fonts, translations (ui/translations.xml) and the permanent
+  // screen `gui` (ui/screens/gui.xml)
+  screen = uiGenInit();
   if (!screen) {
-    Serial.println("[ui] could not create the screen from ui/screens/gui.xml");
+    Serial.println("[ui] the screen from ui/screens/gui.xml was not created");
     return false;
   }
   lv_screen_load(screen);
   tabview = find("tabs");
-  // The screen is created once, so the parsed page definitions are no longer
-  // needed (~20 kB). Kept: "globals" (owns the styles in use) and the popups,
-  // which are created each time they open.
-  for (int i = 0; i < UI_XML_COUNT; ++i)
-    if (strcmp(UI_XML_FILES[i].kind, "globals") != 0 && !isPopup(UI_XML_FILES[i].name))
-      lv_xml_component_unregister(UI_XML_FILES[i].name);
-  return ok;
+  return true;
 }
 
 // ------------------------------------------------------------ init
@@ -1464,10 +1421,10 @@ void uiInit() {
   lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(indev, touchCb);
 
-  uiLoadXml();
+  uiCreateScreen();
   if (!screen) {  // show something useful instead of a black screen
     lv_obj_t* l = lv_label_create(lv_screen_active());
-    lv_label_set_text(l, "UI XML could not be loaded.\nSee the serial log (115200 baud).");
+    lv_label_set_text(l, "UI could not be created.\nSee the serial log (115200 baud).");
     lv_obj_center(l);
     return;
   }

@@ -9,11 +9,21 @@
 			<style name="style_caption" />
 		</lv_label>
 		<lv_label name="main_pv" x="0" y="12" text="153.8" style_text_font="font_48" style_text_color="#color_pv" />
-		<lv_label name="main_sp" x="2" y="62" text="SP 150.0" style_text_font="font_20" style_text_color="#color_sp" />
+		<lv_label name="main_sp" x="2" y="62" text="SP 150.0" style_text_font="font_24" style_text_color="#color_sp" />
 
 		<!-- status column (set by firmware) -->
-		<lv_obj name="main_link" x="296" y="2" width="12" height="12" scrollable="false"
-			style_radius="6" style_border_width="0" style_bg_color="#color_ok" style_bg_opa="100%">
+		<lv_obj
+			name="main_link"
+			x="296"
+			y="2"
+			width="12"
+			height="12"
+			scrollable="false"
+			style_radius="6"
+			style_border_width="0"
+			style_bg_color="#color_ok"
+			style_bg_opa="100%"
+		>
 			<!-- state user_1 = no answer from the controller (set by firmware) -->
 			<style name="style_link_error" selector="user_1" />
 		</lv_obj>
@@ -35,14 +45,26 @@
 		</lv_label>
 
 		<!-- manual setpoint -->
-		<lv_label x="2" y="100" translation_tag="main_manual_sp" />
-		<lv_button name="main_man_sp" x="90" y="92" width="92" height="#row_height">
-			<lv_label name="main_man_sp_text" align="center" text="150.0" />
+		<lv_label x="156" y="101" translation_tag="main_manual_sp" />
+		<lv_button
+			name="main_man_sp"
+			x="0"
+			y="92"
+			width="92"
+			height="#row_height"
+			style_bg_opa="100"
+			style_border_color="#color_accent"
+			style_border_width="2"
+		>
+			<lv_label
+				name="main_man_sp_text"
+				align="center"
+				text="150.0"
+				style_text_font="font_32"
+				style_text_color="#color_accent"
+			/>
 		</lv_button>
-		<lv_switch name="main_man_sw" x="192" y="95" width="54" height="28" />
-		<lv_label x="254" y="102" translation_tag="main_on_off">
-			<style name="style_caption" />
-		</lv_label>
+		<lv_switch name="main_man_sw" x="96" y="92" width="54" height="32" />
 
 		<!-- program selection and run controls -->
 		<lv_dropdown name="main_prog" x="0" y="132" width="140" height="36" options="1 Example" style_pad_all="8">

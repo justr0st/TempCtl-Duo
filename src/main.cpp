@@ -8,9 +8,8 @@
 #include "web.h"
 
 // setup() and loop() run in the Arduino loop task, whose default stack is 8 kB.
-// Creating the UI from the XML nests several parsers (screen > page > panel >
-// row) and needs more than that; an overflow reboots the board right after the
-// display init. The stack is taken from the heap.
+// LVGL (creating the screen, drawing the keyboards and the chart) needs about
+// 14 kB; an overflow reboots the board. The stack is taken from the heap.
 SET_LOOP_TASK_STACK_SIZE(24 * 1024);
 
 void setup() {
