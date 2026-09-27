@@ -1,0 +1,18 @@
+<!-- Popup: number / time editor (full screen, on the top layer).
+     Opened by the firmware for setpoints, step values and settings; it sets
+     the title and the value. The min/s selector (num_units) is only shown for
+     times; keep its button order (min, s). Enter (checkmark) applies, the
+     keyboard key cancels. -->
+<component>
+	<previews>
+		<preview name="cyd" width="320" height="240" />
+	</previews>
+	<view extends="lv_obj" width="100%" height="100%" scrollable="false">
+		<style name="style_popup" />
+		<lv_label name="num_title" x="0" y="0" width="312" long_mode="dots" text="Step 4 ramp time (0 = jump)" />
+		<lv_textarea name="num_ta" x="0" y="24" width="160" one_line="true" text="90" />
+		<lv_buttonmatrix name="num_units" x="172" y="20" width="136" height="44" map="'min' 's'"
+			ctrl_map="checkable|checked checkable" one_checked="true" />
+		<lv_keyboard name="num_kb" width="312" height="150" align="bottom_mid" mode="number" />
+	</view>
+</component>

@@ -8,20 +8,20 @@
 			<style name="style_panel" />
 		</lv_dropdown>
 		<lv_button name="prog_rename" x="200" y="0" width="116" height="32">
-			<lv_label align="center" text="Name" />
+			<lv_label align="center" translation_tag="btn_name" />
 		</lv_button>
 
 		<!-- fixed header above the scrolling table; x = column start + 5 -->
-		<lv_label x="5" y="36" text="No">
+		<lv_label x="5" y="36" translation_tag="prog_col_no">
 			<style name="style_caption" />
 		</lv_label>
-		<lv_label x="39" y="36" text="Target C">
+		<lv_label x="39" y="36" translation_tag="prog_col_target">
 			<style name="style_caption" />
 		</lv_label>
-		<lv_label x="133" y="36" text="Ramp">
+		<lv_label x="133" y="36" translation_tag="prog_col_ramp">
 			<style name="style_caption" />
 		</lv_label>
-		<lv_label x="227" y="36" text="Hold">
+		<lv_label x="227" y="36" translation_tag="prog_col_hold">
 			<style name="style_caption" />
 		</lv_label>
 
@@ -69,10 +69,10 @@
 			<lv_label align="center" text="&#xF078;" style_text_font="font_icons_14" />
 		</lv_button>
 		<lv_button name="prog_revert" x="176" y="174" width="62" height="30">
-			<lv_label align="center" text="Revert" />
+			<lv_label align="center" translation_tag="btn_revert" />
 		</lv_button>
 		<lv_button name="prog_save" x="242" y="174" width="74" height="30">
-			<lv_label align="center" text="Save" />
+			<lv_label align="center" translation_tag="btn_save" />
 		</lv_button>
 	</view>
 </component>

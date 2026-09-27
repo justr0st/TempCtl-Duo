@@ -1,0 +1,21 @@
+<!-- Popup: Wi-Fi scan result. The firmware sets the title, removes the
+     example rows and adds one wifi_item per network found. -->
+<component>
+	<previews>
+		<preview name="cyd" width="320" height="240" />
+	</previews>
+	<view extends="lv_obj" width="100%" height="100%" scrollable="false">
+		<style name="style_popup" />
+		<lv_label name="scan_title" x="0" y="0" width="312" long_mode="dots" text="Pick a network" />
+		<lv_obj name="scan_list" x="0" y="22" width="312" height="172" flex_flow="column" style_pad_row="0">
+			<style name="style_panel" />
+			<style name="style_list" />
+			<wifi_item ssid="Workshop" />
+			<wifi_item ssid="FRITZ!Box 7590" />
+			<wifi_item ssid="Guest" />
+		</lv_obj>
+		<lv_button name="scan_cancel" x="220" y="198" width="92" height="34">
+			<lv_label align="center" translation_tag="btn_cancel" />
+		</lv_button>
+	</view>
+</component>

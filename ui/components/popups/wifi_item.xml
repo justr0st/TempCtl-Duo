@@ -1,0 +1,13 @@
+<!-- One network in the Wi-Fi scan list (wifi_list). The SSID label must keep
+     the name "wifi_ssid": the firmware reads it when a row is tapped. -->
+<component>
+	<api>
+		<prop name="ssid" type="string" default="Network" />
+	</api>
+	<view extends="lv_button" width="100%" height="36" flex_flow="row" style_flex_cross_place="center"
+		style_pad_column="10">
+		<style name="style_list_item" />
+		<lv_label text="&#xF1EB;" style_text_font="font_icons_14" />
+		<lv_label name="wifi_ssid" flex_grow="1" long_mode="dots" text="$ssid" />
+	</view>
+</component>

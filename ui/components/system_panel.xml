@@ -3,20 +3,20 @@
 	<view extends="lv_obj" width="100%" height="content" flex_flow="column" scrollable="false" style_pad_row="2">
 		<style name="style_plain" />
 
-		<lv_label text="Display" style_pad_top="6">
+		<lv_label translation_tag="sys_display" style_pad_top="6">
 			<style name="style_caption" />
 		</lv_label>
-		<setting_row label="Rotate 180 deg">
+		<setting_row label="sys_rotate">
 			<lv_switch name="sys_rotate" />
 		</setting_row>
-		<setting_row label="Brightness" style_pad_right="14">
+		<setting_row label="sys_brightness" style_pad_right="14">
 			<lv_slider name="sys_bright" width="140" min_value="10" max_value="255" value="200" />
 		</setting_row>
 
-		<lv_label text="Wi-Fi" style_pad_top="6">
+		<lv_label translation_tag="sys_wifi" style_pad_top="6">
 			<style name="style_caption" />
 		</lv_label>
-		<setting_row label="Network">
+		<setting_row label="sys_network">
 			<lv_obj width="196" height="content" scrollable="false">
 				<style name="style_plain" />
 				<lv_button name="sys_ssid" x="0" y="0" width="140" height="#row_height">
@@ -27,19 +27,19 @@
 				</lv_button>
 			</lv_obj>
 		</setting_row>
-		<setting_row label="Password">
+		<setting_row label="sys_password">
 			<lv_button name="sys_pass" width="140" height="#row_height">
 				<lv_label name="sys_pass_text" align="center" text="(none)" />
 			</lv_button>
 		</setting_row>
-		<setting_row label="AP password">
+		<setting_row label="sys_ap_password">
 			<lv_button name="sys_ap_pass" width="140" height="#row_height">
 				<lv_label name="sys_ap_pass_text" align="center" text="********" />
 			</lv_button>
 		</setting_row>
-		<setting_row label="">
+		<setting_row label="blank">
 			<lv_button name="sys_connect" width="200" height="36">
-				<lv_label align="center" text="Save + connect" />
+				<lv_label align="center" translation_tag="sys_connect" />
 			</lv_button>
 		</setting_row>
 

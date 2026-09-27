@@ -43,16 +43,16 @@
 		</lv_scale>
 
 		<!-- legend -->
-		<lv_label x="2" y="170" text="PV" style_text_color="#color_pv">
+		<lv_label x="2" y="170" translation_tag="chart_pv" style_text_color="#color_pv">
 			<style name="style_small" />
 		</lv_label>
-		<lv_label x="30" y="170" text="SP" style_text_color="#color_sp">
+		<lv_label x="30" y="170" translation_tag="chart_sp" style_text_color="#color_sp">
 			<style name="style_small" />
 		</lv_label>
-		<lv_label x="58" y="170" text="Program" style_text_color="#color_plan">
+		<lv_label x="58" y="170" translation_tag="chart_program" style_text_color="#color_plan">
 			<style name="style_small" />
 		</lv_label>
-		<lv_label x="120" y="170" text="(dashed = not active)">
+		<lv_label x="120" y="170" translation_tag="chart_dashed">
 			<style name="style_caption" />
 		</lv_label>
 		<lv_label name="chart_info" x="2" y="186" width="312" long_mode="dots" text="Last 5 min. Preview: Example (10:18:05)">

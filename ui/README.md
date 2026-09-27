@@ -7,6 +7,10 @@ creates the screen with LVGL's XML loader, so after editing just build and uploa
 with PlatformIO. Keep the widget `name`s (the firmware finds widgets and attaches
 its touch handlers by name); see section 4a of the main README for the rules.
 
+Pages are in `components/`, the popups (number / text entry, dialog, Wi-Fi list)
+in `components/popups/`.
+All texts are in `translations.xml`, colours and theme settings in `globals.xml`.
+
 Fonts in `fonts/` (Montserrat, Font Awesome 5 Free) are only used by the editor
 preview; licenses in `fonts/licenses/`. On the device the built-in LVGL
 Montserrat fonts are used.

@@ -1,12 +1,13 @@
 <!-- One settings line: caption on the left, the control(s) added as children
-     are laid out to its right. -->
+     are laid out to its right. `label` is a tag from translations.xml
+     ("blank" for no caption). -->
 <component>
 	<api>
-		<prop name="label" type="string" default="" />
+		<prop name="label" type="string" default="blank" />
 	</api>
 	<view extends="lv_obj" width="100%" height="content" flex_flow="row" scrollable="false"
 		style_flex_main_place="space_between" style_flex_cross_place="center">
 		<style name="style_row" />
-		<lv_label text="$label" />
+		<lv_label translation_tag="$label" />
 	</view>
 </component>

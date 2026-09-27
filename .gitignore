@@ -5,3 +5,5 @@
 .vscode/ipch
 # generated from ui/*.xml by scripts/embed_ui_xml.py
 src/ui_xml_data.h
+# LVGL Pro Editor workspace settings
+ui/.theia/

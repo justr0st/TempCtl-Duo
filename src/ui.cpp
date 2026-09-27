@@ -82,32 +82,49 @@ static void fmtTemp(bool valid, float v, char* out, size_t n) {
   else snprintf(out, n, "---.-");
 }
 
+// Text from ui/translations.xml (tag -> text of the current language)
+static const char* T(const char* tag) { return lv_tr(tag); }
+
+// Translated text with %1..%3 replaced by the given strings. The values are
+// formatted by the caller, so a changed text can never break the formatting.
+// (Not {1}: LVGL Pro Editor reads an attribute value in braces as an expression.)
+static const char* trf(char* out, size_t n, const char* tag, const char* a1 = nullptr, const char* a2 = nullptr,
+                       const char* a3 = nullptr) {
+  const char* args[3] = {a1, a2, a3};
+  const char* s = lv_tr(tag);
+  size_t o = 0;
+  while (*s && o + 1 < n) {
+    if (s[0] == '%' && s[1] >= '1' && s[1] <= '3') {
+      for (const char* a = args[s[1] - '1']; a && *a && o + 1 < n; ++a) out[o++] = *a;
+      s += 2;
+    } else {
+      out[o++] = *s++;
+    }
+  }
+  out[o] = 0;
+  return out;
+}
+
+// Color constant from ui/globals.xml ("0xRRGGBB"), or the fallback
+static lv_color_t xmlColor(const char* name, uint32_t fallback) {
+  const char* v = lv_xml_get_const(nullptr, name);
+  if (!v || !*v) return lv_color_hex(fallback);
+  if (*v == '#') ++v;
+  return lv_color_hex((uint32_t)strtoul(v, nullptr, 16));
+}
+
 // Step time as shown in the program table: whole minutes as "N min", else "N s".
 static void fmtStepTime(uint32_t sec, char* out, size_t n) {
-  if (sec == 0) snprintf(out, n, "0");
-  else if (sec % 60 == 0) snprintf(out, n, "%lu min", (unsigned long)(sec / 60));
-  else snprintf(out, n, "%lu s", (unsigned long)sec);
-}
-
-static lv_obj_t* mkLabel(lv_obj_t* parent, const lv_font_t* font, int x, int y, const char* txt) {
-  lv_obj_t* l = lv_label_create(parent);
-  lv_obj_set_style_text_font(l, font, 0);
-  lv_obj_set_pos(l, x, y);
-  lv_label_set_text(l, txt);
-  return l;
-}
-
-static lv_obj_t* mkButton(lv_obj_t* parent, const char* txt, int x, int y, int w, int h, lv_event_cb_t cb,
-                          void* ud = nullptr) {
-  lv_obj_t* b = lv_button_create(parent);
-  lv_obj_set_pos(b, x, y);
-  lv_obj_set_size(b, w, h);
-  lv_obj_set_style_pad_all(b, 2, 0);
-  lv_obj_t* l = lv_label_create(b);
-  lv_label_set_text(l, txt);
-  lv_obj_center(l);
-  if (cb) lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, ud);
-  return b;
+  char num[12];
+  if (sec == 0) {
+    snprintf(out, n, "0");
+  } else if (sec % 60 == 0) {
+    snprintf(num, sizeof(num), "%lu", (unsigned long)(sec / 60));
+    trf(out, n, "time_min", num);
+  } else {
+    snprintf(num, sizeof(num), "%lu", (unsigned long)sec);
+    trf(out, n, "time_s", num);
+  }
 }
 
 static void setEnabled(lv_obj_t* o, bool en) {
@@ -128,30 +145,62 @@ static void setText(lv_obj_t* label, const char* t) {
 
 static lv_obj_t* evTarget(lv_event_t* e) { return lv_event_get_target_obj(e); }
 
-// Message box with optional footer buttons ("" terminated list); the text
-// label is returned through textOut.
+// Popups are XML components (ui/components/popups), created on the top layer
+// when needed. Their definitions stay registered (see uiLoadXml).
+static lv_obj_t* popupCreate(const char* component) {
+  lv_obj_t* p = (lv_obj_t*)lv_xml_create(lv_layer_top(), component, nullptr);
+  if (!p) Serial.printf("[ui] popup '%s' could not be created\n", component);
+  else lv_obj_set_pos(p, 0, 0);
+  return p;
+}
+static lv_obj_t* childByName(lv_obj_t* parent, const char* name) {
+  return parent ? lv_obj_find_by_name(parent, name) : nullptr;
+}
+
+static void dialogCloseClicked(lv_event_t* e) { lv_obj_delete_async((lv_obj_t*)lv_event_get_user_data(e)); }
+
+// Message box (component "dialog") with up to 3 footer buttons ("" terminated
+// list); cb gets the dialog as user data. The text label is returned through
+// textOut. Close it with lv_obj_delete / lv_obj_delete_async.
 static lv_obj_t* msgBox(const char* title, const char* text, const char* const* buttons = nullptr,
                         lv_event_cb_t cb = nullptr, bool closeBtn = true, lv_obj_t** textOut = nullptr) {
-  lv_obj_t* m = lv_msgbox_create(nullptr);  // modal, on the top layer
-  lv_msgbox_add_title(m, title);
-  lv_obj_t* t = lv_msgbox_add_text(m, text);
+  lv_obj_t* m = popupCreate("dialog");
+  if (!m) return nullptr;
+  setText(childByName(m, "dlg_title"), title);
+  lv_obj_t* t = childByName(m, "dlg_text");
+  setText(t, text);
   if (textOut) *textOut = t;
-  if (closeBtn) lv_msgbox_add_close_button(m);
-  for (int i = 0; buttons && buttons[i] && buttons[i][0]; ++i) {
-    lv_obj_t* b = lv_msgbox_add_footer_button(m, buttons[i]);
+  lv_obj_t* close = childByName(m, "dlg_close");
+  if (close) {
+    if (closeBtn) lv_obj_add_event_cb(close, dialogCloseClicked, LV_EVENT_CLICKED, m);
+    else lv_obj_add_flag(close, LV_OBJ_FLAG_HIDDEN);
+  }
+  int n = 0;
+  for (int i = 1; i <= 3; ++i) {
+    char name[12];
+    snprintf(name, sizeof(name), "dlg_btn%d", i);
+    lv_obj_t* b = childByName(m, name);
+    if (!b) continue;
+    const char* bt = (buttons && n == i - 1 && buttons[n] && buttons[n][0]) ? buttons[n] : nullptr;
+    if (!bt) {
+      lv_obj_add_flag(b, LV_OBJ_FLAG_HIDDEN);
+      continue;
+    }
+    ++n;
+    setText(lv_obj_get_child(b, 0), bt);
     if (cb) lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, m);
   }
-  lv_obj_set_width(m, 290);
-  lv_obj_center(m);
+  lv_obj_t* footer = childByName(m, "dlg_footer");
+  if (n == 0 && footer) lv_obj_add_flag(footer, LV_OBJ_FLAG_HIDDEN);
   return m;
 }
 
 static void toast(const char* title, const char* text) { msgBox(title, text); }
 
-// text of the footer button that sent the event
-static const char* footerText(lv_event_t* e) {
-  lv_obj_t* l = lv_obj_get_child(evTarget(e), 0);
-  return l ? lv_label_get_text(l) : "";
+// which dialog button sent the event: 1..3 (dlg_btn1..3), 0 = other
+static int dialogButton(lv_event_t* e) {
+  const char* n = lv_obj_get_name(evTarget(e));
+  return (n && strncmp(n, "dlg_btn", 7) == 0) ? n[7] - '0' : 0;
 }
 
 static bool programActive(RunState s) { return s == RunState::Running || s == RunState::Paused; }
@@ -161,9 +210,9 @@ static void buildProgramOptions(char* out, size_t n) {
   out[0] = 0;
   Guard g;
   for (int i = 0; i < MAX_PROGRAMS; ++i) {
-    char line[48];
-    snprintf(line, sizeof(line), "%s%d %s%s", i ? "\n" : "", i + 1, gPrograms[i].name,
-             gPrograms[i].count ? "" : " (empty)");
+    char line[64];
+    snprintf(line, sizeof(line), "%s%d %s%s%s", i ? "\n" : "", i + 1, gPrograms[i].name,
+             gPrograms[i].count ? "" : " ", gPrograms[i].count ? "" : T("prog_empty"));
     strlcat(out, line, n);
   }
 }
@@ -192,16 +241,9 @@ static void modalClose() {
   modalUnits = nullptr;
 }
 
-static lv_obj_t* modalCreate(const char* title) {
-  modal = lv_obj_create(lv_layer_top());
-  lv_obj_set_size(modal, SCREEN_W, SCREEN_H);
-  lv_obj_set_pos(modal, 0, 0);
-  lv_obj_set_style_radius(modal, 0, 0);
-  lv_obj_set_style_pad_all(modal, 4, 0);
-  lv_obj_remove_flag(modal, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_t* l = mkLabel(modal, &lv_font_montserrat_14, 0, 0, title);
-  lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
-  lv_obj_set_width(l, SCREEN_W - 8);
+static lv_obj_t* modalCreate(const char* component, const char* titleName, const char* title) {
+  modal = popupCreate(component);
+  setText(childByName(modal, titleName), title);
   return modal;
 }
 
@@ -228,39 +270,38 @@ static void numKbEvent(lv_event_t* e) {
 // timeSec: `cur` is in seconds and the user picks minutes or seconds.
 static void openNumEditor(const char* title, float cur, NumApply cb, int arg, bool timeSec = false) {
   if (modal) return;
+  if (!modalCreate("num_editor", "num_title", title)) return;
   numApply = cb;
   numArg = arg;
-  modalCreate(title);
-  modalTa = lv_textarea_create(modal);
-  lv_textarea_set_one_line(modalTa, true);
+  modalTa = childByName(modal, "num_ta");
+  modalUnits = childByName(modal, "num_units");
+  lv_obj_t* kb = childByName(modal, "num_kb");
+  if (!modalTa || !kb) {
+    Serial.println("[ui] num_editor needs num_ta and num_kb");
+    modalClose();
+    return;
+  }
   lv_textarea_set_accepted_chars(modalTa, timeSec ? "0123456789." : "0123456789.-");
   lv_textarea_set_max_length(modalTa, 8);
-  lv_obj_set_width(modalTa, 160);
-  lv_obj_set_pos(modalTa, 0, 24);
   char buf[16];
   if (timeSec) {
     const uint32_t s = (uint32_t)lroundf(cur);
     const bool mins = (s % 60 == 0);
     snprintf(buf, sizeof(buf), "%lu", (unsigned long)(mins ? s / 60 : s));
-    static const char* units[] = {"min", "s", ""};
-    modalUnits = lv_buttonmatrix_create(modal);
-    lv_buttonmatrix_set_map(modalUnits, units);
-    lv_buttonmatrix_set_button_ctrl_all(modalUnits, LV_BUTTONMATRIX_CTRL_CHECKABLE);
-    lv_buttonmatrix_set_one_checked(modalUnits, true);
-    lv_buttonmatrix_set_button_ctrl(modalUnits, mins ? 0 : 1, LV_BUTTONMATRIX_CTRL_CHECKED);
-    lv_obj_set_size(modalUnits, 136, 44);
-    lv_obj_set_pos(modalUnits, 172, 20);
+    if (modalUnits) {
+      lv_buttonmatrix_set_one_checked(modalUnits, true);
+      lv_buttonmatrix_clear_button_ctrl_all(modalUnits, LV_BUTTONMATRIX_CTRL_CHECKED);
+      lv_buttonmatrix_set_button_ctrl(modalUnits, mins ? 0 : 1, LV_BUTTONMATRIX_CTRL_CHECKED);
+    }
   } else {
+    if (modalUnits) lv_obj_add_flag(modalUnits, LV_OBJ_FLAG_HIDDEN);
+    modalUnits = nullptr;
     snprintf(buf, sizeof(buf), "%.1f", cur);
     const size_t l = strlen(buf);  // drop a trailing ".0" for integer values
     if (l > 2 && strcmp(buf + l - 2, ".0") == 0) buf[l - 2] = 0;
   }
   lv_textarea_set_text(modalTa, buf);
-  lv_obj_t* kb = lv_keyboard_create(modal);
-  lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_NUMBER);
   lv_keyboard_set_textarea(kb, modalTa);
-  lv_obj_set_size(kb, SCREEN_W - 8, 150);
-  lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
   lv_obj_add_event_cb(kb, numKbEvent, LV_EVENT_ALL, nullptr);
 }
 
@@ -282,21 +323,20 @@ static void textKbEvent(lv_event_t* e) {
 static void openTextEditor(const char* title, const char* cur, uint16_t maxLen, bool password, TextApply cb,
                            int arg) {
   if (modal) return;
+  if (!modalCreate("text_editor", "text_title", title)) return;
   textApply = cb;
   textArg = arg;
-  modalCreate(title);
-  modalTa = lv_textarea_create(modal);
-  lv_textarea_set_one_line(modalTa, true);
+  modalTa = childByName(modal, "text_ta");
+  lv_obj_t* kb = childByName(modal, "text_kb");
+  if (!modalTa || !kb) {
+    Serial.println("[ui] text_editor needs text_ta and text_kb");
+    modalClose();
+    return;
+  }
   lv_textarea_set_max_length(modalTa, maxLen);
   lv_textarea_set_password_mode(modalTa, password);
-  lv_obj_set_width(modalTa, SCREEN_W - 8);
-  lv_obj_set_pos(modalTa, 0, 20);
   lv_textarea_set_text(modalTa, cur);
-  lv_obj_t* kb = lv_keyboard_create(modal);
-  lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_TEXT_LOWER);
   lv_keyboard_set_textarea(kb, modalTa);
-  lv_obj_set_size(kb, SCREEN_W - 8, 166);
-  lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
   lv_obj_add_event_cb(kb, textKbEvent, LV_EVENT_ALL, nullptr);
 }
 
@@ -351,13 +391,13 @@ extern "C" void ui_on_skip(lv_event_t*) { sendCmd(CMD_SKIP); }
 
 static void onStopAnswer(lv_event_t* e) {
   lv_obj_t* m = (lv_obj_t*)lv_event_get_user_data(e);
-  if (strcmp(footerText(e), "Stop") == 0) sendCmd(CMD_STOP);
-  lv_msgbox_close_async(m);
+  if (dialogButton(e) == 1) sendCmd(CMD_STOP);  // btn1 = Stop
+  lv_obj_delete_async(m);
 }
 
 extern "C" void ui_on_stop(lv_event_t*) {
-  static const char* btns[] = {"Stop", "Cancel", ""};
-  msgBox("Stop program?", "The end action from Setup > Controller is applied.", btns, onStopAnswer, false);
+  const char* btns[] = {T("btn_stop"), T("btn_cancel"), ""};
+  msgBox(T("stop_title"), T("stop_text"), btns, onStopAnswer, false);
 }
 
 extern "C" void ui_on_main_prog(lv_event_t*) { selectProgram(lv_dropdown_get_selected(ddMainProg)); }
@@ -376,12 +416,14 @@ static void applyManualSp(float v, int) {
 
 extern "C" void ui_on_manual_sp(lv_event_t*) {
   float cur;
-  char title[64];
+  char title[80], lo[12], hi[12];
   {
     Guard g;
     cur = gSettings.manualSp;
-    snprintf(title, sizeof(title), "Manual setpoint (C), %.0f..%.0f", gSettings.spMin, gSettings.spMax);
+    snprintf(lo, sizeof(lo), "%.0f", gSettings.spMin);
+    snprintf(hi, sizeof(hi), "%.0f", gSettings.spMax);
   }
+  trf(title, sizeof(title), "ed_manual_sp", lo, hi);
   openNumEditor(title, cur, applyManualSp, 0);
 }
 
@@ -409,70 +451,73 @@ static void bindMain() {
   btnSkip = find("main_skip");
   barProg = find("main_progress");
   lblMsg = find("main_msg");
-  if (barProg) lv_bar_set_range(barProg, 0, 1000);
 }
 
 static void updateMain(const LiveData& L, const Settings& S) {
-  char a[24], buf[96];
+  char a[24], b[24], buf[128];
   if (L.pvValid) fmtTemp(true, L.pv, a, sizeof(a));
-  else if (L.commOk && L.pvFlag != VAL_OK) strlcpy(a, L.pvFlag == VAL_SENSOR_FAULT ? "Sensor" : "---.-", sizeof(a));
+  else if (L.commOk && L.pvFlag != VAL_OK) strlcpy(a, L.pvFlag == VAL_SENSOR_FAULT ? T("pv_sensor") : "---.-", sizeof(a));
   else strlcpy(a, "---.-", sizeof(a));
   setText(lblPv, a);
 
   fmtTemp(L.spEffValid, L.spEff, a, sizeof(a));
-  snprintf(buf, sizeof(buf), "SP %s", a);
-  setText(lblSp, buf);
+  setText(lblSp, trf(buf, sizeof(buf), "sp_value", a));
 
   const bool active = programActive(L.state);
   if (active) {
     fmtTemp(true, L.target, a, sizeof(a));
-    snprintf(buf, sizeof(buf), "Step target %s", a);
-    setText(lblTarget, buf);
+    setText(lblTarget, trf(buf, sizeof(buf), "step_target", a));
   } else {
-    setText(lblTarget, S.reg.sp == REG_UNSET ? "SP register not set!" : "");
+    setText(lblTarget, S.reg.sp == REG_UNSET ? T("sp_reg_unset") : "");
   }
 
-  if (ledLink)
-    lv_obj_set_style_bg_color(ledLink, lv_palette_main(L.commOk ? LV_PALETTE_GREEN : LV_PALETTE_RED), 0);
+  // link dot: the XML style for state user_1 shows "no answer"
+  if (ledLink && lv_obj_has_state(ledLink, LV_STATE_USER_1) == L.commOk) {
+    if (L.commOk) lv_obj_remove_state(ledLink, LV_STATE_USER_1);
+    else lv_obj_add_state(ledLink, LV_STATE_USER_1);
+  }
 
   switch (L.state) {
     case RunState::Running:
     case RunState::Paused:
-      snprintf(buf, sizeof(buf), "%s %d/%d", L.state == RunState::Paused ? "Paused" : "Step", L.step + 1,
-               L.stepCount);
-      setText(lblState, buf);
+      snprintf(a, sizeof(a), "%d", L.step + 1);
+      snprintf(b, sizeof(b), "%d", L.stepCount);
+      setText(lblState, trf(buf, sizeof(buf), L.state == RunState::Paused ? "st_paused" : "st_step", a, b));
       break;
     default:
-      if (L.manualOn) setText(lblState, "Manual");
-      else if (L.state == RunState::Finished) setText(lblState, "Finished");
-      else if (L.state == RunState::Aborted) setText(lblState, "Stopped");
-      else setText(lblState, "Idle");
+      if (L.manualOn) setText(lblState, T("st_manual"));
+      else if (L.state == RunState::Finished) setText(lblState, T("st_finished"));
+      else if (L.state == RunState::Aborted) setText(lblState, T("st_stopped"));
+      else setText(lblState, T("st_idle"));
   }
   if (active) {
     fmtDur(L.phaseDur - L.phaseEl, a, sizeof(a));
-    if (L.soakWait) setText(lblPhase, "Hold: waiting for PV");
-    else {
-      snprintf(buf, sizeof(buf), "%s  %s left", L.phase == Phase::Ramp ? "Ramp" : "Hold", a);
-      setText(lblPhase, buf);
-    }
+    if (L.soakWait) setText(lblPhase, T("ph_soak_wait"));
+    else setText(lblPhase, trf(buf, sizeof(buf), L.phase == Phase::Ramp ? "ph_ramp" : "ph_hold", a));
     fmtDur(L.total - L.elapsed, a, sizeof(a));
-    snprintf(buf, sizeof(buf), "%s: %s left", L.runName, a);
-    setText(lblTotal, buf);
-    if (barProg) lv_bar_set_value(barProg, L.total > 0 ? (int)(1000 * L.elapsed / L.total) : 0, LV_ANIM_OFF);
+    setText(lblTotal, trf(buf, sizeof(buf), "run_left", L.runName, a));
   } else {
-    setText(lblPhase, L.manualOn ? (L.manualSynced ? "setpoint written" : "writing...") : "");
+    setText(lblPhase, L.manualOn ? (L.manualSynced ? T("man_written") : T("man_writing")) : "");
+    char name[PROG_NAME_LEN];
     {
       Guard g;
       const Program& sel = gPrograms[S.selProgram < MAX_PROGRAMS ? S.selProgram : 0];
       fmtDur(ProgramEngine::plannedTotal(sel), a, sizeof(a));
-      snprintf(buf, sizeof(buf), "%s, %s", sel.name, a);
+      strlcpy(name, sel.name, sizeof(name));
     }
-    setText(lblTotal, buf);
-    if (barProg) lv_bar_set_value(barProg, L.state == RunState::Finished ? 1000 : 0, LV_ANIM_OFF);
+    setText(lblTotal, trf(buf, sizeof(buf), "prog_total", name, a));
+  }
+  if (barProg) {  // progress in the bar's own range (min/max in the XML)
+    const int32_t lo = lv_bar_get_min_value(barProg), hi = lv_bar_get_max_value(barProg);
+    float f = 0;
+    if (active && L.total > 0) f = L.elapsed / L.total;
+    else if (!active && L.state == RunState::Finished) f = 1;
+    f = f < 0 ? 0 : f > 1 ? 1 : f;
+    lv_bar_set_value(barProg, lo + (int32_t)lroundf(f * (hi - lo)), LV_ANIM_OFF);
   }
   if (L.outValid) {
-    snprintf(buf, sizeof(buf), "Out %.0f%%", L.out);
-    setText(lblOut, buf);
+    snprintf(a, sizeof(a), "%.0f", L.out);
+    setText(lblOut, trf(buf, sizeof(buf), "out_value", a));
   } else {
     setText(lblOut, "");
   }
@@ -510,8 +555,8 @@ static void refreshTable() {
   char buf[16];
   if (!uiProg.count) {
     lv_table_set_cell_value(table, 0, COL_NUM, "");
-    lv_table_set_cell_value(table, 0, COL_TARGET, "no steps");
-    lv_table_set_cell_value(table, 0, COL_RAMP, "tap +");
+    lv_table_set_cell_value(table, 0, COL_TARGET, T("tbl_no_steps"));
+    lv_table_set_cell_value(table, 0, COL_RAMP, T("tbl_tap_plus"));
     lv_table_set_cell_value(table, 0, COL_HOLD, "");
   }
   for (int i = 0; i < uiProg.count; ++i) {
@@ -526,11 +571,12 @@ static void refreshTable() {
     lv_table_set_cell_value(table, i, COL_HOLD, buf);
   }
   if (selRow >= uiProg.count) selRow = uiProg.count - 1;
-  char d[16], info[64];
+  char d[16], c[12], m[12], info[80];
   fmtDur(ProgramEngine::plannedTotal(uiProg), d, sizeof(d));
-  snprintf(info, sizeof(info), "%d/%d steps  total %s", uiProg.count, MAX_STEPS, d);
-  setText(lblProgInfo, info);
-  setText(lblProgUnsaved, progDirty ? "unsaved" : "");
+  snprintf(c, sizeof(c), "%d", uiProg.count);
+  snprintf(m, sizeof(m), "%d", MAX_STEPS);
+  setText(lblProgInfo, trf(info, sizeof(info), "prog_info", c, m, d));
+  setText(lblProgUnsaved, progDirty ? T("prog_unsaved") : "");
   setEnabled(btnAdd, uiProg.count < MAX_STEPS);
   setEnabled(btnDel, selRow >= 0);
   setEnabled(btnUp, selRow > 0);
@@ -584,7 +630,9 @@ static void applyCell(float v, int arg) {
   markDirty();
 }
 
-// highlight the selected row, grey step numbers
+// highlight the selected row, grey step numbers (colors from ui/globals.xml)
+static lv_color_t colRowSelected, colStepNo;
+
 static void onTableDraw(lv_event_t* e) {
   lv_draw_task_t* t = lv_event_get_draw_task(e);
   lv_draw_dsc_base_t* base = (lv_draw_dsc_base_t*)lv_draw_task_get_draw_dsc(t);
@@ -594,12 +642,12 @@ static void onTableDraw(lv_event_t* e) {
   if (type == LV_DRAW_TASK_TYPE_FILL && row == selRow && uiProg.count) {
     lv_draw_fill_dsc_t* f = lv_draw_task_get_fill_dsc(t);
     if (f) {
-      f->color = lv_palette_darken(LV_PALETTE_BLUE, 3);
+      f->color = colRowSelected;
       f->opa = LV_OPA_COVER;
     }
   } else if (type == LV_DRAW_TASK_TYPE_LABEL && col == COL_NUM) {
     lv_draw_label_dsc_t* l = lv_draw_task_get_label_dsc(t);
-    if (l) l->color = lv_palette_main(LV_PALETTE_GREY);
+    if (l) l->color = colStepNo;
   }
 }
 
@@ -610,16 +658,16 @@ extern "C" void ui_on_table(lv_event_t*) {
   selRow = row;
   refreshTable();
   if (col == COL_NUM) return;  // the number column only selects the row
-  char title[48];
+  char title[80], n[12];
+  snprintf(n, sizeof(n), "%lu", (unsigned long)row + 1);
   if (col == COL_TARGET) {
-    snprintf(title, sizeof(title), "Step %lu target temperature (C)", (unsigned long)row + 1);
-    openNumEditor(title, uiProg.s[row].target, applyCell, row * 10 + col);
+    openNumEditor(trf(title, sizeof(title), "ed_step_target", n), uiProg.s[row].target, applyCell, row * 10 + col);
   } else if (col == COL_RAMP) {
-    snprintf(title, sizeof(title), "Step %lu ramp time (0 = jump)", (unsigned long)row + 1);
-    openNumEditor(title, uiProg.s[row].rampSec, applyCell, row * 10 + col, true);
+    openNumEditor(trf(title, sizeof(title), "ed_step_ramp", n), uiProg.s[row].rampSec, applyCell, row * 10 + col,
+                  true);
   } else if (col == COL_HOLD) {
-    snprintf(title, sizeof(title), "Step %lu hold time", (unsigned long)row + 1);
-    openNumEditor(title, uiProg.s[row].holdSec, applyCell, row * 10 + col, true);
+    openNumEditor(trf(title, sizeof(title), "ed_step_hold", n), uiProg.s[row].holdSec, applyCell, row * 10 + col,
+                  true);
   }
 }
 
@@ -667,9 +715,9 @@ static void applyName(const char* t, int) {
 }
 
 extern "C" void ui_on_rename(lv_event_t*) {
-  char title[48];
-  snprintf(title, sizeof(title), "Name of program %d", editIdx + 1);
-  openTextEditor(title, uiProg.name, PROG_NAME_LEN - 1, false, applyName, 0);
+  char title[64], n[12];
+  snprintf(n, sizeof(n), "%d", editIdx + 1);
+  openTextEditor(trf(title, sizeof(title), "ed_prog_name", n), uiProg.name, PROG_NAME_LEN - 1, false, applyName, 0);
 }
 
 static void saveEdited() {
@@ -694,8 +742,8 @@ static void saveEdited() {
     st = gLive.state;
     running = gLive.runProg;
   }
-  if (!ok) toast("Not saved", "Writing the program to flash failed.");
-  else if (programActive(st) && running == editIdx) toast("Saved", "Changes apply to the next run.");
+  if (!ok) toast(T("not_saved_title"), T("not_saved_text"));
+  else if (programActive(st) && running == editIdx) toast(T("saved_title"), T("saved_next_run"));
 }
 
 extern "C" void ui_on_prog_save(lv_event_t*) { saveEdited(); }
@@ -714,17 +762,17 @@ static void switchToProgram(int idx) {
 
 static void onSwitchAnswer(lv_event_t* e) {
   lv_obj_t* m = (lv_obj_t*)lv_event_get_user_data(e);
-  const char* t = footerText(e);
-  if (strcmp(t, "Save") == 0) {
+  const int b = dialogButton(e);  // 1 = Save, 2 = Discard, 3 = Cancel
+  if (b == 1) {
     saveEdited();
     switchToProgram(pendingSwitch);
-  } else if (strcmp(t, "Discard") == 0) {
+  } else if (b == 2) {
     switchToProgram(pendingSwitch);
   } else {
     lv_dropdown_set_selected(ddEditProg, editIdx);
   }
   pendingSwitch = -1;
-  lv_msgbox_close_async(m);
+  lv_obj_delete_async(m);
 }
 
 extern "C" void ui_on_edit_prog(lv_event_t*) {
@@ -735,13 +783,14 @@ extern "C" void ui_on_edit_prog(lv_event_t*) {
     return;
   }
   pendingSwitch = idx;
-  static const char* btns[] = {"Save", "Discard", "Cancel", ""};
-  char text[64];
-  snprintf(text, sizeof(text), "\"%s\" has unsaved changes.", uiProg.name);
-  msgBox("Unsaved changes", text, btns, onSwitchAnswer, false);
+  const char* btns[] = {T("btn_save"), T("btn_discard"), T("btn_cancel"), ""};
+  char text[96];
+  msgBox(T("unsaved_title"), trf(text, sizeof(text), "unsaved_text", uiProg.name), btns, onSwitchAnswer, false);
 }
 
 static void bindProgram() {
+  colRowSelected = xmlColor("color_row_selected", 0x1565C0);
+  colStepNo = xmlColor("color_muted", 0x9E9E9E);
   ddEditProg = find("prog_select");
   table = find("prog_table");
   lblProgInfo = find("prog_info");
@@ -886,14 +935,14 @@ static void updateChart() {
     lv_obj_invalidate(chartXScale);
   }
 
-  char a[16], b[16], buf[96];
+  char a[16], b[16], buf[128];
   if (d.run) {
     fmtDur(d.elapsed, a, sizeof(a));
     fmtDur(d.planTotal, b, sizeof(b));
-    snprintf(buf, sizeof(buf), "%s  %s / %s", d.progName, a, b);
+    trf(buf, sizeof(buf), "chart_run_info", d.progName, a, b);
   } else {
     fmtDur(d.planTotal, b, sizeof(b));
-    snprintf(buf, sizeof(buf), "Last 5 min. Preview: %s (%s over full width)", d.progName, b);
+    trf(buf, sizeof(buf), "chart_idle_info", d.progName, b);
   }
   setText(lblChartInfo, buf);
 }
@@ -903,8 +952,8 @@ static const uint32_t BAUDS[] = {2400, 4800, 9600, 19200, 38400};
 
 // --- System
 static void refreshWifiButtons() {
-  setText(lblSsid, wifiSsid[0] ? wifiSsid : "(none: AP only)");
-  setText(lblPass, wifiPass[0] ? "********" : "(none)");
+  setText(lblSsid, wifiSsid[0] ? wifiSsid : T("wifi_none"));
+  setText(lblPass, wifiPass[0] ? "********" : T("pass_none"));
   setText(lblApPass, "********");
 }
 
@@ -932,9 +981,8 @@ static void updateSysInfo() {
     Guard g;
     strlcpy(host, gSettings.hostname, sizeof(host));
   }
-  char buf[160];
-  snprintf(buf, sizeof(buf), "%s\nhttp://%s.local   firmware " FW_VERSION, info.c_str(), host);
-  setText(lblSysInfo, buf);
+  char buf[192];
+  setText(lblSysInfo, trf(buf, sizeof(buf), "sys_info", info.c_str(), host, FW_VERSION));
 }
 
 extern "C" void ui_on_rotate(lv_event_t*) {
@@ -950,7 +998,8 @@ extern "C" void ui_on_rotate(lv_event_t*) {
 
 extern "C" void ui_on_brightness(lv_event_t*) {
   if (setupLoading) return;
-  const uint8_t b = (uint8_t)lv_slider_get_value(sldBright);
+  const int32_t v = lv_slider_get_value(sldBright);  // range from the XML
+  const uint8_t b = (uint8_t)(v < 1 ? 1 : v > 255 ? 255 : v);
   {
     Guard g;
     gSettings.brightness = b;
@@ -972,22 +1021,21 @@ static void applyPass(const char* t, int) {
 }
 static void applyApPass(const char* t, int) {
   if (strlen(t) < 8) {
-    toast("Too short", "The access point password needs at least 8 characters.");
+    toast(T("too_short_title"), T("too_short_text"));
     return;
   }
   strlcpy(wifiApPass, t, sizeof(wifiApPass));
   refreshWifiButtons();
 }
-extern "C" void ui_on_ssid(lv_event_t*) { openTextEditor("Wi-Fi network name (SSID)", wifiSsid, 32, false, applySsid, 0); }
-extern "C" void ui_on_pass(lv_event_t*) { openTextEditor("Wi-Fi password", wifiPass, 64, true, applyPass, 0); }
+extern "C" void ui_on_ssid(lv_event_t*) { openTextEditor(T("ed_ssid"), wifiSsid, 32, false, applySsid, 0); }
+extern "C" void ui_on_pass(lv_event_t*) { openTextEditor(T("ed_pass"), wifiPass, 64, true, applyPass, 0); }
 extern "C" void ui_on_ap_pass(lv_event_t*) {
-  openTextEditor("Access point password (8+ characters)", wifiApPass, 32, true, applyApPass, 0);
+  openTextEditor(T("ed_ap_pass"), wifiApPass, 32, true, applyApPass, 0);
 }
 
 static void onScanPick(lv_event_t* e) {
-  lv_obj_t* btn = evTarget(e);
-  lv_obj_t* list = lv_obj_get_parent(btn);
-  strlcpy(wifiSsid, lv_list_get_button_text(list, btn), sizeof(wifiSsid));
+  lv_obj_t* l = childByName(evTarget(e), "wifi_ssid");
+  if (l) strlcpy(wifiSsid, lv_label_get_text(l), sizeof(wifiSsid));
   refreshWifiButtons();
   modalClose();
 }
@@ -995,27 +1043,31 @@ static void onScanCancel(lv_event_t*) { modalClose(); }
 
 static void showScanResult(const char* names, int count) {
   if (modal) return;
-  modalCreate(count > 0 ? "Pick a network" : count == 0 ? "No networks found" : "Scan failed - Wi-Fi busy, try again");
-  lv_obj_t* list = lv_list_create(modal);
-  lv_obj_set_size(list, SCREEN_W - 8, 172);
-  lv_obj_set_pos(list, 0, 22);
+  if (!modalCreate("wifi_list", "scan_title",
+                   count > 0 ? T("scan_pick") : count == 0 ? T("scan_none") : T("scan_failed")))
+    return;
+  lv_obj_t* list = childByName(modal, "scan_list");
+  lv_obj_t* cancel = childByName(modal, "scan_cancel");
+  if (cancel) lv_obj_add_event_cb(cancel, onScanCancel, LV_EVENT_CLICKED, nullptr);
+  if (!list) return;
+  lv_obj_clean(list);  // remove the example rows
   const char* p = names;
   for (int i = 0; i < count && p && *p; ++i) {
     const char* e = strchr(p, '\n');
     char name[33];
     snprintf(name, sizeof(name), "%.*s", (int)(e ? e - p : strlen(p)), p);
-    lv_obj_t* b = lv_list_add_button(list, LV_SYMBOL_WIFI, name);
-    lv_obj_add_event_cb(b, onScanPick, LV_EVENT_CLICKED, nullptr);
+    const char* attrs[] = {"ssid", name, nullptr};
+    lv_obj_t* b = (lv_obj_t*)lv_xml_create(list, "wifi_item", attrs);
+    if (b) lv_obj_add_event_cb(b, onScanPick, LV_EVENT_CLICKED, nullptr);
     p = e ? e + 1 : nullptr;
   }
-  mkButton(modal, "Cancel", 220, 198, 92, 34, onScanCancel);
 }
 
 extern "C" void ui_on_scan(lv_event_t*) {
   if (scanWaiting) return;
   netScanStart();
   scanWaiting = true;
-  setText(lblSysInfo, "Scanning for networks...");
+  setText(lblSysInfo, T("scan_running"));
 }
 
 static void pollScan() {
@@ -1048,21 +1100,18 @@ static void pollWifiBox() {
   if (!wifiBox) return;
   const uint32_t now = millis();
   if (wifiBoxCloseAt && (int32_t)(now - wifiBoxCloseAt) >= 0) {
-    lv_msgbox_close(wifiBox);  // triggers onWifiBoxDeleted
+    lv_obj_delete(wifiBox);  // triggers onWifiBoxDeleted
     return;
   }
   if (!wifiBoxWaiting) return;
-  char buf[160];
+  char buf[200];
   if (netConnectedSinceApply()) {
-    snprintf(buf, sizeof(buf), "Connected to %s\nIP %s", wifiSsid, netStaIp().c_str());
-    setText(wifiBoxLabel, buf);
+    setText(wifiBoxLabel, trf(buf, sizeof(buf), "wifi_connected", wifiSsid, netStaIp().c_str()));
     wifiBoxWaiting = false;
     wifiBoxCloseAt = now + 2500;
     updateSysInfo();
   } else if (now - wifiBoxMs > 30000) {
-    snprintf(buf, sizeof(buf), "Could not join \"%s\". Check the name and password. The access point stays available.",
-             wifiSsid);
-    setText(wifiBoxLabel, buf);
+    setText(wifiBoxLabel, trf(buf, sizeof(buf), "wifi_failed", wifiSsid));
     wifiBoxWaiting = false;  // stays open until closed
   }
 }
@@ -1076,12 +1125,12 @@ extern "C" void ui_on_connect(lv_event_t*) {
   }
   saveSettingsQuiet();
   netApplyWifi();
-  if (wifiBox) lv_msgbox_close(wifiBox);
-  char buf[64];
-  if (wifiSsid[0]) snprintf(buf, sizeof(buf), "Connecting to \"%s\"...", wifiSsid);
-  else strlcpy(buf, "Saved. Running as access point only.", sizeof(buf));
-  wifiBox = msgBox("Wi-Fi", buf, nullptr, nullptr, true, &wifiBoxLabel);
-  lv_obj_add_event_cb(wifiBox, onWifiBoxDeleted, LV_EVENT_DELETE, nullptr);
+  if (wifiBox) lv_obj_delete(wifiBox);
+  char buf[128];
+  if (wifiSsid[0]) trf(buf, sizeof(buf), "wifi_connecting", wifiSsid);
+  else strlcpy(buf, T("wifi_ap_only"), sizeof(buf));
+  wifiBox = msgBox(T("wifi_title"), buf, nullptr, nullptr, true, &wifiBoxLabel);
+  if (wifiBox) lv_obj_add_event_cb(wifiBox, onWifiBoxDeleted, LV_EVENT_DELETE, nullptr);
   wifiBoxMs = millis();
   wifiBoxWaiting = wifiSsid[0] != 0;
   wifiBoxCloseAt = wifiSsid[0] ? 0 : wifiBoxMs + 2500;
@@ -1094,7 +1143,6 @@ static void bindSystem() {
   lblPass = find("sys_pass_text");
   lblApPass = find("sys_ap_pass_text");
   lblSysInfo = find("sys_info");
-  if (sldBright) lv_slider_set_range(sldBright, 10, 255);
   refreshSystem();
   updateSysInfo();
 }
@@ -1120,12 +1168,11 @@ static void refreshController() {
   setText(lblBand, b);
   setChecked(swLock, S.lockFront);
   if (ddEnd) lv_dropdown_set_selected(ddEnd, S.endAction);
-  char sp[12], rr[12], off[12], info[120];
-  if (S.reg.sp == REG_UNSET) strcpy(sp, "not set"); else snprintf(sp, sizeof(sp), "%u", S.reg.sp);
-  if (S.reg.rampRate == REG_UNSET) strcpy(rr, "not set"); else snprintf(rr, sizeof(rr), "%u", S.reg.rampRate);
-  if (S.reg.ctrlOff == REG_UNSET) strcpy(off, "not set"); else snprintf(off, sizeof(off), "%u", S.reg.ctrlOff);
-  snprintf(info, sizeof(info), "Registers (edit on the web page): SP %s,\nramp r.SP %s, outputs off %s", sp, rr, off);
-  setText(lblCtlInfo, info);
+  char sp[24], rr[24], off[24], info[160];
+  if (S.reg.sp == REG_UNSET) strlcpy(sp, T("reg_not_set"), sizeof(sp)); else snprintf(sp, sizeof(sp), "%u", S.reg.sp);
+  if (S.reg.rampRate == REG_UNSET) strlcpy(rr, T("reg_not_set"), sizeof(rr)); else snprintf(rr, sizeof(rr), "%u", S.reg.rampRate);
+  if (S.reg.ctrlOff == REG_UNSET) strlcpy(off, T("reg_not_set"), sizeof(off)); else snprintf(off, sizeof(off), "%u", S.reg.ctrlOff);
+  setText(lblCtlInfo, trf(info, sizeof(info), "ctl_regs", sp, rr, off));
   setupLoading = false;
 }
 
@@ -1179,7 +1226,7 @@ extern "C" void ui_on_slave(lv_event_t*) {
     Guard g;
     cur = gSettings.slaveId;
   }
-  openNumEditor("Modbus slave address (1-247)", cur, applySlave, 0);
+  openNumEditor(T("ed_slave"), cur, applySlave, 0);
 }
 extern "C" void ui_on_band(lv_event_t*) {
   float cur;
@@ -1187,11 +1234,11 @@ extern "C" void ui_on_band(lv_event_t*) {
     Guard g;
     cur = gSettings.soakBand;
   }
-  openNumEditor("Soak band +/- (C)", cur, applyBand, 0);
+  openNumEditor(T("ed_band"), cur, applyBand, 0);
 }
 extern "C" void ui_on_controller_save(lv_event_t*) {
   saveSettingsAndNotify();
-  toast("Saved", "Controller settings stored. The serial link was reopened.");
+  toast(T("saved_title"), T("ctl_saved_text"));
 }
 
 extern "C" void ui_on_test_link(lv_event_t*) {
@@ -1202,11 +1249,17 @@ extern "C" void ui_on_test_link(lv_event_t*) {
     r.addr = gSettings.reg.pv;
   }
   r.count = 1;
-  char msg[160];
-  if (r.addr == REG_UNSET) strlcpy(msg, "The PV register address is not set.", sizeof(msg));
-  else if (busRequest(r, 5000)) snprintf(msg, sizeof(msg), "Controller answered.\nPV register %u = %d (raw)", r.addr, r.values[0]);
-  else snprintf(msg, sizeof(msg), "No valid answer.\n%s\nSave settings first if you changed them.", r.err);
-  toast("Link test", msg);
+  char msg[200], a[12], b[12];
+  if (r.addr == REG_UNSET) {
+    strlcpy(msg, T("link_no_pv"), sizeof(msg));
+  } else if (busRequest(r, 5000)) {
+    snprintf(a, sizeof(a), "%u", r.addr);
+    snprintf(b, sizeof(b), "%d", r.values[0]);
+    trf(msg, sizeof(msg), "link_ok", a, b);
+  } else {
+    trf(msg, sizeof(msg), "link_fail", r.err);
+  }
+  toast(T("link_title"), msg);
 }
 
 static void bindController() {
@@ -1335,6 +1388,13 @@ static void uiRegisterFonts() {
   lv_xml_register_font(nullptr, "font_icons_14", &lv_font_montserrat_14);
 }
 
+static const char* const POPUPS[] = {"dialog", "num_editor", "text_editor", "wifi_list", "wifi_item"};
+static bool isPopup(const char* name) {
+  for (const char* p : POPUPS)
+    if (strcmp(p, name) == 0) return true;
+  return false;
+}
+
 static bool uiLoadXml() {
   uiRegisterFonts();
   bool ok = true;
@@ -1344,17 +1404,31 @@ static bool uiLoadXml() {
       ok = false;
     }
   }
-  screen = lv_xml_create_screen("main");
+#if UI_TR_AVAILABLE
+  // ui/translations.xml (static tables in flash); the first language is used
+  lv_translation_add_static(UI_TR_LANGS, UI_TR_TAGS, UI_TR_TEXTS);
+  lv_translation_set_language(UI_TR_LANGS[0]);
+#endif
+
+  // theme colors and dark / light from the constants in ui/globals.xml
+  const char* dark = lv_xml_get_const(nullptr, "theme_dark");
+  lv_theme_t* th = lv_theme_default_init(disp, xmlColor("color_accent", 0x2196F3), xmlColor("color_accent2", 0xFF5722),
+                                         dark ? atoi(dark) != 0 : true, &lv_font_montserrat_14);
+  lv_display_set_theme(disp, th);
+
+  screen = lv_xml_create_screen("gui");  // ui/screens/gui.xml
   if (!screen) {
-    Serial.println("[ui] could not create screen 'main' from the XML");
+    Serial.println("[ui] could not create the screen from ui/screens/gui.xml");
     return false;
   }
   lv_screen_load(screen);
   tabview = find("tabs");
-  // The screen is created once, so the parsed component definitions are no
-  // longer needed (~20 kB). "globals" stays: it owns the styles in use.
+  // The screen is created once, so the parsed page definitions are no longer
+  // needed (~20 kB). Kept: "globals" (owns the styles in use) and the popups,
+  // which are created each time they open.
   for (int i = 0; i < UI_XML_COUNT; ++i)
-    if (strcmp(UI_XML_FILES[i].kind, "globals") != 0) lv_xml_component_unregister(UI_XML_FILES[i].name);
+    if (strcmp(UI_XML_FILES[i].kind, "globals") != 0 && !isPopup(UI_XML_FILES[i].name))
+      lv_xml_component_unregister(UI_XML_FILES[i].name);
   return ok;
 }
 
@@ -1389,10 +1463,6 @@ void uiInit() {
   lv_indev_t* indev = lv_indev_create();
   lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(indev, touchCb);
-
-  lv_theme_t* th = lv_theme_default_init(disp, lv_palette_main(LV_PALETTE_BLUE),
-                                         lv_palette_main(LV_PALETTE_DEEP_ORANGE), true, &lv_font_montserrat_14);
-  lv_display_set_theme(disp, th);
 
   uiLoadXml();
   if (!screen) {  // show something useful instead of a black screen

@@ -178,12 +178,17 @@ export step.
 
 | File | Contents |
 |---|---|
-| `ui/globals.xml` | colours, spacing, fonts, shared styles |
-| `ui/screens/main.xml` | the tab view with the four pages |
+| `ui/globals.xml` | colours (incl. theme colours and dark/light), spacing, fonts, shared styles |
+| `ui/translations.xml` | all texts of the touch UI (labels, status texts, popup titles and messages) |
+| `ui/screens/gui.xml` | the screen: the tab view with the four pages |
 | `ui/components/main_page.xml` | Main: values, manual setpoint, program selection, run buttons |
 | `ui/components/program_page.xml` | Program editor: selection, name, step table, step buttons |
 | `ui/components/chart_page.xml` | chart, axes and legend |
 | `ui/components/setup_page.xml`, `system_panel.xml`, `controller_panel.xml`, `setting_row.xml` | Setup |
+| `ui/components/popups/num_editor.xml` | number / time entry (min or s) with keypad |
+| `ui/components/popups/text_editor.xml` | text entry with on-screen keyboard (program names, Wi-Fi) |
+| `ui/components/popups/dialog.xml` | message / question box (stop, unsaved changes, saved, Wi-Fi connecting, link test) |
+| `ui/components/popups/wifi_list.xml`, `wifi_item.xml` | Wi-Fi scan result list |
 
 Rules so the firmware keeps working:
 
@@ -198,8 +203,24 @@ Rules so the firmware keeps working:
   `src/ui.cpp` (`uiRegisterFonts`). The TTF files in `ui/fonts/` are only for the editor preview.
   Adding a new font size needs a line there and the size enabled in `include/lv_conf.h`.
 - Stay with LVGL 9.4 features: 9.5 moved the runtime XML loader out of the open-source library.
-- Everything that changes at runtime (texts, table rows, chart data, dialogs, keyboards) is done by the
-  firmware; the XML only holds placeholder values for the preview.
+- The build patches LVGL 9.4.0 (`scripts/patch_lvgl.py`, runs automatically): registering
+  `globals.xml` used an uninitialised parser state, which crashed the board at start-up
+  (Guru Meditation `LoadProhibited` right after `[boot] ui`); a const cast also removes LVGL's only
+  compiler warning (`lv_xml_buttonmatrix_parser.c`, `-Wdiscarded-qualifiers`).
+- Texts: static labels use `translation_tag="…"`, the firmware uses the same tags, all defined in
+  `ui/translations.xml`. `%1`, `%2`, `%3` in a text are filled in by the firmware (numbers, names,
+  times) and must stay in the text (not `{1}`: LVGL Pro reads a value in braces as an expression).
+  The build turns the file into tables in flash (no RAM). A second language: add its code to
+  `languages` and an attribute per text; the firmware currently uses the first language. Tab names and dropdown options are plain text in the XML files.
+- Colours: everything is in `ui/globals.xml` — the theme colours (`color_accent`, `color_accent2`,
+  `theme_dark`, applied by the firmware at start-up), the program table highlight
+  (`color_row_selected`, step numbers in `color_muted`) and the link dot (green, `style_link_error`
+  for state `user_1` when the controller does not answer).
+- Everything that changes at runtime (values, table rows, chart data) is done by the firmware; the XML
+  only holds placeholder values for the preview.
+- Popups are created from their component each time they open (on LVGL's top layer), so their
+  definitions stay loaded. The dialog has three footer buttons and a close button; the firmware labels
+  the ones it needs and hides the others. Keep the `num_units` buttons in the order min, s.
 
 XML errors are printed on the serial monitor at start-up (`[Warn] … lv_xml…`).
 

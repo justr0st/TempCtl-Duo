@@ -3,7 +3,8 @@
  * LV_COLOR_DEPTH 16, C library malloc/string/sprintf (floats in printf),
  * LV_OS_NONE (LVGL runs only in loop()), log level WARN via printf,
  * Montserrat 12/14/20/48, LV_USE_XML + LV_USE_OBJ_NAME + LV_USE_OBSERVER
- * (the UI is loaded from the XML in ui/), default dark theme.
+ * (the UI is loaded from the XML in ui/), LV_USE_TRANSLATION (texts from
+ * ui/translations.xml), default dark theme.
  */
 /**
  * @file lv_conf.h
@@ -1206,7 +1207,7 @@
 #define LV_USE_XML 1
 
 /** 1: Enable text translation support */
-#define LV_USE_TRANSLATION 0
+#define LV_USE_TRANSLATION 1
 
 /*1: Enable color filter style*/
 #define LV_USE_COLOR_FILTER     0

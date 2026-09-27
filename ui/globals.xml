@@ -15,7 +15,9 @@
 		<color name="color_border" value="0x3A3F47" help="Panel borders" />
 		<color name="color_text" value="0xF2F4F7" help="Primary text" />
 		<color name="color_muted" value="0x9AA3AF" help="Secondary text and captions" />
-		<color name="color_accent" value="0x2196F3" help="Buttons, selection" />
+		<color name="color_accent" value="0x2196F3" help="Theme primary color: buttons, selection" />
+		<color name="color_accent2" value="0xFF5722" help="Theme secondary color" />
+		<color name="color_row_selected" value="0x1565C0" help="Selected step in the program table" />
 		<color name="color_danger" value="0xF44336" help="Stop button" />
 		<color name="color_pv" value="0xFF5722" help="Process value (temperature)" />
 		<color name="color_sp" value="0x03A9F4" help="Setpoint" />
@@ -29,6 +31,9 @@
 		<int name="space_md" value="8" />
 		<int name="tab_bar_height" value="32" />
 		<int name="row_height" value="34" />
+
+		<!-- Theme (applied by the firmware at start-up): 1 = dark, 0 = light -->
+		<int name="theme_dark" value="1" />
 	</consts>
 
 	<fonts>
@@ -37,9 +42,9 @@
 		<bin name="font_20" src_path="fonts/Montserrat-Medium.ttf" size="20" bpp="4" range="0x20-0x7F" as_file="false" />
 		<bin name="font_48" src_path="fonts/Montserrat-Medium.ttf" size="48" bpp="4" range="0x20-0x7F" as_file="false" />
 		<!-- Icon glyphs (play, pause, stop, next, plus, minus, up, down, edit,
-		     save, refresh, wi-fi, warning) for icon-only buttons -->
+		     save, refresh, wi-fi, warning, close) for icon-only buttons -->
 		<bin name="font_icons_14" src_path="fonts/FontAwesome5.ttf" size="14" bpp="4"
-			range="0xF04B-0xF04D,0xF051,0xF067,0xF068,0xF077,0xF078,0xF304,0xF0C7,0xF021,0xF1EB,0xF071" as_file="false" />
+			range="0xF04B-0xF04D,0xF051,0xF067,0xF068,0xF077,0xF078,0xF304,0xF0C7,0xF021,0xF1EB,0xF071,0xF00D" as_file="false" />
 	</fonts>
 
 	<styles>
@@ -60,5 +65,15 @@
 		<style name="style_no_points" width="0" height="0" />
 		<style name="style_scale_ticks" length="4" />
 		<style name="style_scale_line" line_opa="0" />
+		<style name="style_link_error" bg_color="#color_danger" />
+		<!-- popups (components/popups) -->
+		<style name="style_popup" bg_color="#color_panel" bg_opa="100%" border_width="0" radius="0" pad_all="#space_sm"
+			text_color="#color_text" />
+		<style name="style_backdrop" bg_color="0x000000" bg_opa="50%" border_width="0" radius="0" pad_all="0" />
+		<style name="style_dialog" bg_color="#color_panel" bg_opa="100%" border_color="#color_border" border_width="1"
+			radius="8" pad_all="10" text_color="#color_text" />
+		<style name="style_list" pad_all="0" radius="4" />
+		<style name="style_list_item" bg_color="#color_panel" bg_opa="100%" radius="0" shadow_width="0"
+			border_color="#color_border" border_width="1" border_side="bottom" text_color="#color_text" pad_hor="10" />
 	</styles>
 </globals>

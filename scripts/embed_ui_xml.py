@@ -4,11 +4,16 @@ Collects ui/globals.xml, ui/components/**/*.xml and ui/screens/**/*.xml and
 writes them as C strings to src/ui_xml_data.h. The firmware registers them
 with LVGL's XML loader at start-up (see uiLoadXml() in src/ui.cpp).
 
+ui/translations.xml is turned into static tables (UI_TR_LANGS / UI_TR_TAGS /
+UI_TR_TEXTS) for lv_translation_add_static(), so the texts stay in flash.
+Missing translations fall back to the first language.
+
 Runs automatically before every PlatformIO build (extra_scripts in
 platformio.ini). Can also be run by hand:  python scripts/embed_ui_xml.py
 """
 import os
 import sys
+import xml.etree.ElementTree as ET
 
 HEADER = "src/ui_xml_data.h"
 
@@ -44,6 +49,38 @@ def c_string(text):
     return "\n".join(out)
 
 
+def c_literal(text):
+    esc = text.replace("\\", "\\\\").replace('"', '\\"').replace("\r", "").replace("\n", "\\n")
+    return '"%s"' % esc
+
+
+def translations(root):
+    """(languages, [(tag, [text per language])]) from ui/translations.xml, or None."""
+    path = os.path.join(root, "translations.xml")
+    if not os.path.isfile(path):
+        return None
+    try:
+        top = ET.parse(path).getroot()
+    except ET.ParseError as e:
+        sys.exit("embed_ui_xml: %s: %s" % (path, e))
+    langs = (top.get("languages") or "").split()
+    if not langs:
+        sys.exit("embed_ui_xml: %s: no languages" % path)
+    rows, seen = [], set()
+    for t in top.iter("translation"):
+        tag = t.get("tag")
+        if not tag:
+            sys.exit("embed_ui_xml: %s: translation without tag" % path)
+        if tag in seen:
+            sys.exit("embed_ui_xml: %s: duplicate tag '%s'" % (path, tag))
+        seen.add(tag)
+        first = t.get(langs[0])
+        if first is None:
+            first = tag
+        rows.append((tag, [t.get(l) if t.get(l) is not None else first for l in langs]))
+    return langs, rows
+
+
 def generate(project_dir):
     root = os.path.join(project_dir, "ui")
     files = collect(root)
@@ -68,6 +105,23 @@ def generate(project_dir):
     parts.append("};")
     parts.append("static const int UI_XML_COUNT = sizeof(UI_XML_FILES) / sizeof(UI_XML_FILES[0]);")
     parts.append("")
+    tr = translations(root)
+    if tr:
+        langs, rows = tr
+        parts.append("// ui/translations.xml: %d texts, languages %s" % (len(rows), " ".join(langs)))
+        parts.append("#define UI_TR_AVAILABLE 1")
+        parts.append("static const char* UI_TR_LANGS[] = {%s, nullptr};" % ", ".join(c_literal(l) for l in langs))
+        parts.append("static const char* UI_TR_TAGS[] = {")
+        for tag, _ in rows:
+            parts.append("    %s," % c_literal(tag))
+        parts.append("    nullptr};")
+        parts.append("static const char* UI_TR_TEXTS[] = {  // per tag: one text per language")
+        for tag, texts in rows:
+            parts.append("    %s," % ", ".join(c_literal(x) for x in texts))
+        parts.append("};")
+    else:
+        parts.append("#define UI_TR_AVAILABLE 0")
+    parts.append("")
     content = "\n".join(parts)
     out = os.path.join(project_dir, HEADER)
     old = None
@@ -77,7 +131,8 @@ def generate(project_dir):
     if old != content:  # keep the timestamp if nothing changed (no needless rebuilds)
         with open(out, "w", encoding="utf-8", newline="\n") as f:
             f.write(content)
-    print("embed_ui_xml: %d XML files -> %s" % (len(files), HEADER))
+    print("embed_ui_xml: %d XML files%s -> %s"
+          % (len(files), ", %d texts" % len(tr[1]) if tr else "", HEADER))
 
 
 try:
