@@ -1,4 +1,4 @@
-# TempCtl: ramp/soak temperature programmer for ESP32-CYD + Modbus RTU
+# TempCtl Duo: ramp/soak temperature programmer for ESP32-CYD + Modbus RTU
 
 Firmware for the ESP32-2432S028R ("Cheap Yellow Display") that drives a **PMA KS 40-1 / 41-1 / 42-1**
 (or another Modbus RTU temperature controller) over RS485. It stores **up to 10 named programs with up to
