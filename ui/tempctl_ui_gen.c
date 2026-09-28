@@ -37,7 +37,7 @@ static uint32_t tempctl_ui_target = TEMPCTL_UI_TARGET_ALL;
 
 #ifndef LV_EDITOR_PREVIEW
     static const char * translation_languages[] = {"en", NULL};
-    static const char * translation_tags[] = {"blank", "btn_save", "btn_cancel", "btn_stop", "btn_discard", "btn_revert", "btn_name", "time_min", "time_s", "main_pv_caption", "main_manual_sp", "main_on_off", "st_idle", "st_manual", "st_finished", "st_stopped", "st_step", "st_paused", "ph_ramp", "ph_hold", "ph_soak_wait", "man_written", "man_writing", "run_left", "prog_total", "sp_value", "step_target", "sp_reg_unset", "out_value", "pv_sensor", "stop_title", "stop_text", "ed_manual_sp", "prog_col_no", "prog_col_target", "prog_col_ramp", "prog_col_hold", "prog_empty", "tbl_no_steps", "tbl_tap_plus", "prog_info", "prog_unsaved", "ed_step_target", "ed_step_ramp", "ed_step_hold", "ed_prog_name", "not_saved_title", "not_saved_text", "saved_title", "saved_next_run", "unsaved_title", "unsaved_text", "chart_pv", "chart_sp", "chart_program", "chart_dashed", "chart_run_info", "chart_idle_info", "sys_display", "sys_rotate", "sys_brightness", "sys_wifi", "sys_network", "sys_password", "sys_ap_password", "sys_connect", "sys_info", "wifi_none", "pass_none", "ed_ssid", "ed_pass", "ed_ap_pass", "too_short_title", "too_short_text", "scan_running", "scan_pick", "scan_none", "scan_failed", "wifi_title", "wifi_connecting", "wifi_ap_only", "wifi_connected", "wifi_failed", "ctl_serial", "ctl_type", "ctl_slave", "ctl_baud", "ctl_format", "ctl_behaviour", "ctl_ramp", "ctl_soak", "ctl_band", "ctl_lock", "ctl_end", "ctl_test", "ctl_regs", "reg_not_set", "ed_slave", "ed_band", "ctl_saved_text", "link_title", "link_no_pv", "link_ok", "link_fail", NULL};
+    static const char * translation_tags[] = {"blank", "btn_save", "btn_cancel", "btn_stop", "btn_discard", "btn_revert", "btn_name", "time_min", "time_s", "main_pv_caption", "main_manual_sp", "main_on_off", "st_idle", "st_manual", "st_finished", "st_stopped", "st_step", "st_paused", "ph_ramp", "ph_hold", "ph_soak_wait", "man_written", "man_writing", "run_left", "prog_total", "sp_value", "step_target", "sp_reg_unset", "out_value", "pv_sensor", "stop_title", "stop_text", "ed_manual_sp", "prog_col_no", "prog_col_target", "prog_col_ramp", "prog_col_hold", "prog_empty", "tbl_no_steps", "tbl_tap_plus", "prog_info", "prog_unsaved", "ed_step_target", "ed_step_ramp", "ed_step_hold", "ed_prog_name", "not_saved_title", "not_saved_text", "saved_title", "saved_next_run", "unsaved_title", "unsaved_text", "chart_pv", "chart_sp", "chart_program", "chart_dashed", "chart_run_info", "chart_idle_info", "sys_display", "sys_rotate", "sys_brightness", "sys_theme", "sys_dark", "sys_wifi", "sys_network", "sys_password", "sys_ap_password", "sys_connect", "sys_info", "wifi_none", "pass_none", "ed_ssid", "ed_pass", "ed_ap_pass", "too_short_title", "too_short_text", "scan_running", "scan_pick", "scan_none", "scan_failed", "wifi_title", "wifi_connecting", "wifi_ap_only", "wifi_connected", "wifi_failed", "ctl_serial", "ctl_type", "ctl_slave", "ctl_baud", "ctl_format", "ctl_behaviour", "ctl_ramp", "ctl_soak", "ctl_band", "ctl_lock", "ctl_end", "ctl_test", "ctl_regs", "reg_not_set", "ed_slave", "ed_band", "ctl_saved_text", "link_title", "link_no_pv", "link_ok", "link_fail", NULL};
     static const char * translation_texts[] = {
         " ", /* blank */
         "Save", /* btn_save */
@@ -48,7 +48,7 @@ static uint32_t tempctl_ui_target = TEMPCTL_UI_TARGET_ALL;
         "Name", /* btn_name */
         "%1 min", /* time_min */
         "%1 s", /* time_s */
-        "Process value (C)", /* main_pv_caption */
+        "Process value (°C)", /* main_pv_caption */
         "Manual SP on/off", /* main_manual_sp */
         "on / off", /* main_on_off */
         "Idle", /* st_idle */
@@ -100,6 +100,8 @@ static uint32_t tempctl_ui_target = TEMPCTL_UI_TARGET_ALL;
         "Display", /* sys_display */
         "Rotate 180 deg", /* sys_rotate */
         "Brightness", /* sys_brightness */
+        "Colour theme", /* sys_theme */
+        "Dark mode", /* sys_dark */
         "Wi-Fi", /* sys_wifi */
         "Network", /* sys_network */
         "Password", /* sys_password */
@@ -172,6 +174,18 @@ lv_font_t * font_32;
 extern lv_font_t font_32_data;
 lv_font_t * font_48;
 extern lv_font_t font_48_data;
+lv_font_t * fontM_12;
+extern lv_font_t fontM_12_data;
+lv_font_t * fontM_14;
+extern lv_font_t fontM_14_data;
+lv_font_t * fontM_20;
+extern lv_font_t fontM_20_data;
+lv_font_t * fontM_24;
+extern lv_font_t fontM_24_data;
+lv_font_t * fontM_32;
+extern lv_font_t fontM_32_data;
+lv_font_t * fontM_48;
+extern lv_font_t fontM_48_data;
 lv_font_t * font_icons_14;
 extern lv_font_t font_icons_14_data;
 
@@ -194,6 +208,13 @@ lv_style_t style_panel;
 lv_style_t style_tab_bar;
 lv_style_t style_row;
 lv_style_t style_danger;
+lv_style_t style_text_pv;
+lv_style_t style_text_sp;
+lv_style_t style_text_plan;
+lv_style_t style_text_warn;
+lv_style_t style_text_accent;
+lv_style_t style_border_accent;
+lv_style_t style_bg_ok;
 lv_style_t style_table_cell;
 lv_style_t style_chart_line;
 lv_style_t style_no_points;
@@ -204,6 +225,7 @@ lv_style_t style_popup;
 lv_style_t style_backdrop;
 lv_style_t style_dialog;
 lv_style_t style_list;
+lv_style_t style_spinner;
 lv_style_t style_list_item;
 
 /*----------------
@@ -265,6 +287,42 @@ void tempctl_ui_init_gen(const char * asset_path)
             font_48 = &font_48_data;
 
         }
+        if (!fontM_12) {
+            /* fontM_12 */
+            /* get font 'fontM_12' from a C array */
+            fontM_12 = &fontM_12_data;
+
+        }
+        if (!fontM_14) {
+            /* fontM_14 */
+            /* get font 'fontM_14' from a C array */
+            fontM_14 = &fontM_14_data;
+
+        }
+        if (!fontM_20) {
+            /* fontM_20 */
+            /* get font 'fontM_20' from a C array */
+            fontM_20 = &fontM_20_data;
+
+        }
+        if (!fontM_24) {
+            /* fontM_24 */
+            /* get font 'fontM_24' from a C array */
+            fontM_24 = &fontM_24_data;
+
+        }
+        if (!fontM_32) {
+            /* fontM_32 */
+            /* get font 'fontM_32' from a C array */
+            fontM_32 = &fontM_32_data;
+
+        }
+        if (!fontM_48) {
+            /* fontM_48 */
+            /* get font 'fontM_48' from a C array */
+            fontM_48 = &fontM_48_data;
+
+        }
         if (!font_icons_14) {
             /* font_icons_14 */
             /* get font 'font_icons_14' from a C array */
@@ -297,6 +355,13 @@ void tempctl_ui_init_gen(const char * asset_path)
         lv_style_init(&style_tab_bar);
         lv_style_init(&style_row);
         lv_style_init(&style_danger);
+        lv_style_init(&style_text_pv);
+        lv_style_init(&style_text_sp);
+        lv_style_init(&style_text_plan);
+        lv_style_init(&style_text_warn);
+        lv_style_init(&style_text_accent);
+        lv_style_init(&style_border_accent);
+        lv_style_init(&style_bg_ok);
         lv_style_init(&style_table_cell);
         lv_style_init(&style_chart_line);
         lv_style_init(&style_no_points);
@@ -307,6 +372,7 @@ void tempctl_ui_init_gen(const char * asset_path)
         lv_style_init(&style_backdrop);
         lv_style_init(&style_dialog);
         lv_style_init(&style_list);
+        lv_style_init(&style_spinner);
         lv_style_init(&style_list_item);
 
         lv_style_set_bg_color(&style_screen, COLOR_BG);
@@ -338,6 +404,13 @@ void tempctl_ui_init_gen(const char * asset_path)
         lv_style_set_pad_all(&style_row, SPACE_XS);
         lv_style_set_radius(&style_row, 0);
         lv_style_set_bg_color(&style_danger, COLOR_DANGER);
+        lv_style_set_text_color(&style_text_pv, COLOR_PV);
+        lv_style_set_text_color(&style_text_sp, COLOR_SP);
+        lv_style_set_text_color(&style_text_plan, COLOR_PLAN);
+        lv_style_set_text_color(&style_text_warn, COLOR_WARN);
+        lv_style_set_text_color(&style_text_accent, COLOR_ACCENT);
+        lv_style_set_border_color(&style_border_accent, COLOR_ACCENT);
+        lv_style_set_bg_color(&style_bg_ok, COLOR_OK);
         lv_style_set_pad_top(&style_table_cell, 3);
         lv_style_set_pad_bottom(&style_table_cell, 3);
         lv_style_set_pad_left(&style_table_cell, 4);
@@ -368,6 +441,7 @@ void tempctl_ui_init_gen(const char * asset_path)
         lv_style_set_text_color(&style_dialog, COLOR_TEXT);
         lv_style_set_pad_all(&style_list, 0);
         lv_style_set_radius(&style_list, 4);
+        lv_style_set_arc_width(&style_spinner, 4);
         lv_style_set_bg_color(&style_list_item, COLOR_PANEL);
         lv_style_set_bg_opa(&style_list_item, (255 * 100 / 100));
         lv_style_set_radius(&style_list_item, 0);
@@ -404,6 +478,12 @@ void tempctl_ui_init_gen(const char * asset_path)
     check_font(&font_24, "font_24");
     check_font(&font_32, "font_32");
     check_font(&font_48, "font_48");
+    check_font(&fontM_12, "fontM_12");
+    check_font(&fontM_14, "fontM_14");
+    check_font(&fontM_20, "fontM_20");
+    check_font(&fontM_24, "fontM_24");
+    check_font(&fontM_32, "fontM_32");
+    check_font(&fontM_48, "fontM_48");
     check_font(&font_icons_14, "font_icons_14");
 
     /* Register fonts */
@@ -413,6 +493,12 @@ void tempctl_ui_init_gen(const char * asset_path)
     lv_xml_register_font(NULL, "font_24", font_24);
     lv_xml_register_font(NULL, "font_32", font_32);
     lv_xml_register_font(NULL, "font_48", font_48);
+    lv_xml_register_font(NULL, "fontM_12", fontM_12);
+    lv_xml_register_font(NULL, "fontM_14", fontM_14);
+    lv_xml_register_font(NULL, "fontM_20", fontM_20);
+    lv_xml_register_font(NULL, "fontM_24", fontM_24);
+    lv_xml_register_font(NULL, "fontM_32", fontM_32);
+    lv_xml_register_font(NULL, "fontM_48", fontM_48);
     lv_xml_register_font(NULL, "font_icons_14", font_icons_14);
 
     /* Register subjects */

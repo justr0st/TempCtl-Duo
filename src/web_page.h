@@ -1,5 +1,9 @@
 // Single-page web UI served from flash. Self-contained (works in AP mode
-// without internet access).
+// without internet access): inline CSS, JS and SVG icons, system fonts.
+// Look: dark industrial HMI style loosely following MoldControl: page tiles
+// in a sidebar (slide-in panel on phones), pale cyan controls, yellow for the
+// active step; the state cell and the manual setpoint tile change colour.
+// The JSON API is in web.cpp.
 #pragma once
 #include <Arduino.h>
 
@@ -8,176 +12,371 @@ static const char WEB_PAGE[] PROGMEM = R"HTML(<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Temperature program</title>
+<meta name="color-scheme" content="dark">
+<title>TempCtl</title>
 <style>
+/* Look inspired by industrial HMIs (dark panels, tile menu, pale cyan
+   controls, yellow highlight for the active item). Offline: no web fonts. */
 :root{
-  --bg:#E6EAEE;--panel:#FAFBFC;--ink:#17202B;--muted:#5A6675;--rule:#C9D1DA;
-  --heat:#D9480F;--set:#1B64A8;--plan:#7FA7CF;--ok:#2B8A57;--warn:#B7791F;--bad:#C53030;
-  --num:"Bahnschrift","DIN Alternate","DIN 2014","Roboto Condensed","Arial Narrow",sans-serif;
-  --txt:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --bg:#1C1E21;--panel:#2A2D31;--panel2:#34383D;--inset:#222427;--line:#41464C;--line2:#585E65;
+  --ink:#E9ECEE;--muted:#9BA3AB;--dim:#6C737A;
+  --acc:#9FD9D5;--acc2:#C4ECE9;--acc-ink:#12302E;--acc-soft:rgba(159,217,213,.14);
+  --hi:#F3C335;--hi-ink:#231C04;
+  --pv:#FF8F52;--set:#7CC4F2;--plan:#D4D8DC;--ok:#5DCB8C;--bad:#F2695C;--warn:#F3C335;
+  --field:#E7EAEC;--field-ink:#1B1E21;
+  --txt:"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;
+  --r:6px;
 }
-@media (prefers-color-scheme:dark){:root{
-  --bg:#12171D;--panel:#1A2129;--ink:#E4E9EE;--muted:#93A0AE;--rule:#2C3642;
-  --heat:#FF7A3D;--set:#5EA3E6;--plan:#3F6B96;--ok:#4CC38A;--warn:#E2B04A;--bad:#F07070;}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--txt)}
-header{display:flex;align-items:center;gap:12px;padding:12px 18px;flex-wrap:wrap}
-header h1{font:600 20px/1 var(--num);margin:0;letter-spacing:.01em}
-#link{width:10px;height:10px;border-radius:50%;background:var(--muted)}
-#net{margin-left:auto;color:var(--muted);font-size:13px;white-space:pre-line;text-align:right}
-nav{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--rule);overflow-x:auto}
-nav button{background:none;border:0;border-bottom:3px solid transparent;padding:10px 12px;color:var(--muted);
-  font:500 15px var(--txt);cursor:pointer;white-space:nowrap}
-nav button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--set)}
-main{max-width:980px;margin:0 auto;padding:16px}
-section{display:none}section.on{display:block}
-.panel{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:16px;margin-bottom:16px}
-h2{font:600 17px var(--num);margin:0 0 10px}
-p.note{color:var(--muted);margin:4px 0 12px;max-width:70ch}
-.readout{display:grid;grid-template-columns:auto 1fr;gap:4px 24px;align-items:end}
-.pv{font:600 clamp(56px,11vw,96px)/.9 var(--num);color:var(--heat);font-variant-numeric:tabular-nums}
-.sp{font:500 clamp(28px,5vw,40px)/1 var(--num);color:var(--set);font-variant-numeric:tabular-nums}
-.cap{color:var(--muted);font-size:13px}
-.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px 18px;margin-top:14px}
-.facts b{display:block;font:500 20px var(--num);font-variant-numeric:tabular-nums}
-.strip{position:relative;display:flex;height:46px;margin:18px 0 6px;border-radius:4px;overflow:hidden;
-  border:1px solid var(--rule)}
-.strip div{position:relative;border-right:1px solid var(--rule);font:500 12px/1.2 var(--num);padding:5px 6px;
-  overflow:hidden;white-space:nowrap}
-.strip .ramp{background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--set) 18%,transparent))}
-.strip .hold{background:color-mix(in srgb,var(--set) 18%,transparent)}
-.strip .cur{outline:2px solid var(--set);outline-offset:-2px}
-#marker{position:absolute;top:0;bottom:0;width:3px;background:var(--heat);left:0;display:none}
-canvas{width:100%;height:280px;display:block}
-.legend{display:flex;gap:18px;color:var(--muted);font-size:13px;margin-top:6px;flex-wrap:wrap}
-.legend i{display:inline-block;width:18px;height:3px;vertical-align:middle;margin-right:6px}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 var(--txt);
+  display:grid;grid-template-columns:236px 1fr;overflow:hidden}
+button,input,select{font:inherit;color:inherit}
+svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.hide{display:none!important}
+
+/* ---------- sidebar with the page tiles (always visible on wide screens,
+   a slide-in panel behind the menu button on narrow ones) */
+#side{background:#26292D;border-right:1px solid #000;display:flex;flex-direction:column;gap:14px;padding:14px;
+  overflow-y:auto;z-index:25}
+.brand{display:flex;align-items:baseline;gap:8px;padding:2px 2px 4px;font-size:19px;letter-spacing:.02em}
+.brand small{color:var(--muted);font-size:12px}
+#scrim{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:20;display:none}
+#scrim.open{display:block}
+.tiles{display:grid;grid-template-columns:1fr;gap:10px}
+.tile{height:60px;border:1px solid var(--acc);border-radius:var(--r);background:none;color:var(--acc2);cursor:pointer;
+  display:flex;align-items:center;gap:14px;padding:0 16px;font-size:15px;text-align:left}
+.tile svg{width:26px;height:26px;flex:none}
+.tile:hover{background:var(--acc-soft)}
+.tile[aria-current=true]{background:var(--acc);color:var(--acc-ink);border-color:var(--acc)}
+.sfoot{margin-top:auto;display:flex;flex-direction:column;gap:10px;font-size:12px;color:var(--muted)}
+#linkRow{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--r);border:1px solid var(--line);
+  background:var(--inset);cursor:pointer;color:var(--ink);text-align:left;width:100%}
+#linkRow i{width:10px;height:10px;border-radius:50%;background:var(--dim);flex:none}
+#linkRow.ok i{background:var(--ok)}
+#linkRow.bad{border-color:var(--bad);background:rgba(242,105,92,.15)}
+#linkRow.bad i{background:var(--bad)}
+#sideNet{white-space:pre-line;line-height:1.3}
+.sfoot .row{justify-content:space-between}
+#clock{font-variant-numeric:tabular-nums;font-size:15px;color:var(--ink)}
+#bMenu{display:none}
+
+/* ---------- top bar */
+#app{display:grid;grid-template-rows:52px 1fr;min-width:0;height:100vh}
+#top{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:12px;padding:0 14px;
+  background:var(--panel);border-bottom:1px solid #000}
+.tl{display:flex;align-items:center;gap:10px;min-width:0}
+#segs{display:flex;gap:0;min-width:0;overflow-x:auto;scrollbar-width:none}
+#segs::-webkit-scrollbar{display:none}
+#segs button{flex:none;height:32px;padding:0 12px;border:1px solid var(--acc);background:none;color:var(--acc2);cursor:pointer;
+  white-space:nowrap;font-size:13px;margin-left:-1px}
+#segs button:first-child{border-radius:var(--r) 0 0 var(--r);margin-left:0}
+#segs button:last-child{border-radius:0 var(--r) var(--r) 0}
+#segs button:hover{background:var(--acc-soft)}
+#title{font-size:20px;font-weight:400;letter-spacing:.01em;margin:0;text-align:center;white-space:nowrap}
+#topR{display:flex;justify-content:flex-end;align-items:center;gap:10px;min-width:0}
+#net{color:var(--muted);font-size:12px;white-space:pre-line;text-align:right;line-height:1.25;overflow:hidden}
+.ib{width:36px;height:34px;border:1px solid var(--acc);border-radius:var(--r);display:grid;place-items:center;
+  color:var(--acc2);background:none;cursor:pointer;flex:none;text-decoration:none}
+.ib:hover{background:var(--acc-soft)}
+.ib svg{width:20px;height:20px}
+
+/* ---------- content */
+main{overflow:auto;padding:14px;min-width:0}
+section{display:none;max-width:1280px;margin:0 auto}
+section.on{display:block}
+.card{background:var(--panel);border:1px solid #000;border-radius:var(--r);padding:14px;margin-bottom:14px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.card>h2,.cardh{font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+.cardh{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.cardh .sp{flex:1}
+p.note{color:var(--muted);margin:0 0 12px;max-width:75ch;font-size:13px}
+.cap{color:var(--muted);font-size:12px}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-button.b,a.b{font:500 15px var(--txt);padding:9px 16px;border-radius:5px;border:1px solid var(--rule);
-  background:var(--panel);color:var(--ink);cursor:pointer}
-button.b.primary{background:var(--set);border-color:var(--set);color:#fff}
-a.b{text-decoration:none;display:inline-block}
-button.b.danger{color:var(--bad);border-color:var(--bad)}
-button.b:disabled{opacity:.45;cursor:default}
-button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--set);outline-offset:2px}
-#msg{margin-top:10px;min-height:1.4em;color:var(--muted)}
-#msg.bad{color:var(--bad)}
-table{border-collapse:collapse;width:100%}
-th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--rule)}
-th{font-weight:500;color:var(--muted);font-size:13px}
-td.n{font-variant-numeric:tabular-nums}
-input,select{font:15px var(--txt);padding:7px 8px;border:1px solid var(--rule);border-radius:4px;
-  background:var(--bg);color:var(--ink);width:100%;max-width:140px}
-input[type=checkbox]{width:20px;height:20px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px 18px}
-.grid label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(440px,100%),1fr));gap:14px;align-items:start}
+.cols>.card{margin:0}
+
+/* buttons */
+.b{height:38px;padding:0 16px;border-radius:var(--r);border:1px solid var(--acc);background:none;color:var(--acc2);
+  cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;white-space:nowrap}
+.b:hover{background:var(--acc-soft)}
+.b.primary{background:var(--acc);color:var(--acc-ink);border-color:var(--acc);font-weight:600}
+.b.primary:hover{background:var(--acc2)}
+.b.danger{border-color:var(--bad);color:var(--bad)}
+.b.danger:hover{background:rgba(242,105,92,.12)}
+.b:disabled{opacity:.35;cursor:default;background:none}
+.b.primary:disabled{background:var(--acc)}
+.b svg{width:18px;height:18px}
+button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--hi);outline-offset:2px}
+
+/* fields: light, like value fields on a panel */
+input,select{height:36px;padding:0 10px;border:0;border-radius:4px;background:var(--field);color:var(--field-ink);
+  width:100%;max-width:160px}
+input[type=number]{text-align:right;font-variant-numeric:tabular-nums}
+select{padding-right:6px}
+input:disabled,select:disabled{opacity:.55}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px 16px}
+.grid label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted)}
 .grid label input,.grid label select{max-width:none}
-.warn{border-left:4px solid var(--warn);padding:8px 12px;background:color-mix(in srgb,var(--warn) 12%,transparent);
-  margin-bottom:14px;border-radius:0 4px 4px 0}
-.hide{display:none}
-code{font-size:13px}
-@media (max-width:560px){.readout{grid-template-columns:1fr}main{padding:10px}.panel{padding:12px}}
-@media (prefers-reduced-motion:reduce){*{transition:none!important}}
-.pill{display:inline-block;padding:2px 10px;border-radius:12px;font-size:13px;border:1px solid var(--rule);color:var(--muted)}
-.pill.on{background:var(--ok);border-color:var(--ok);color:#fff}
+.grid label.sw{flex-direction:row;align-items:center;justify-content:space-between;gap:10px;
+  min-height:36px;align-self:end}
 .inl{display:inline-flex;gap:6px;align-items:center}
-.inl input{max-width:90px}.inl select{max-width:72px}
-td .b{padding:5px 9px;font-size:14px}
-tr.sel td{background:color-mix(in srgb,var(--set) 10%,transparent)}
-#progSel{max-width:260px}#progName{max-width:260px}
+
+/* switch (dark track, light knob with ring) */
+.switch{appearance:none;-webkit-appearance:none;flex:none;width:58px;height:32px;max-width:none;border-radius:16px;
+  background:#15171A;border:1px solid var(--line2);position:relative;cursor:pointer;padding:0;
+  transition:background .15s}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;
+  background:var(--bg);border:3px solid var(--plan);transition:left .15s}
+.switch:checked{background:var(--acc);border-color:var(--acc)}
+.switch:checked::after{left:29px;border-color:#fff;background:var(--acc-ink)}
+.switch:disabled{opacity:.4;cursor:default}
+
+/* stepper: [-][field][+] */
+.stepper{display:inline-flex;align-items:stretch;height:40px}
+.stepper button{width:40px;border:0;background:var(--acc);color:var(--acc-ink);font-size:22px;line-height:1;cursor:pointer}
+.stepper button:first-child{border-radius:var(--r) 0 0 var(--r)}
+.stepper button:last-child{border-radius:0 var(--r) var(--r) 0}
+.stepper button:hover{background:var(--acc2)}
+.stepper input{height:auto;border-radius:0;max-width:120px;font-size:17px}
+
+/* ---------- main view */
+.dash{display:grid;grid-template-columns:minmax(0,1fr) 210px;gap:14px}
+.dash>*{min-width:0}
+.warn{border-left:4px solid var(--warn);padding:9px 12px;background:rgba(243,195,53,.1);margin-bottom:14px;
+  border-radius:0 var(--r) var(--r) 0}
+.warn a{color:var(--hi)}
+.chartcard{padding:0;overflow:hidden}
+.chartcard .cardh{margin:0;padding:10px 14px}
+.legend{display:flex;gap:14px;color:var(--muted);font-size:12px;flex-wrap:wrap;align-items:center;text-transform:none;letter-spacing:0;font-weight:400}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:0}
+#chartSpan{color:var(--dim)}
+.strip{position:relative;display:flex;height:54px;margin:0 14px 8px;gap:3px}
+.strip div{position:relative;flex:1 1 0;min-width:8px;border:1px solid rgba(212,216,220,.45);border-radius:3px;
+  background:linear-gradient(180deg,rgba(212,216,220,.10),rgba(212,216,220,.03));
+  font-size:11px;line-height:1.2;padding:4px 5px;overflow:hidden;white-space:nowrap;color:var(--muted)}
+.strip .ramp{background:linear-gradient(180deg,rgba(212,216,220,.02),rgba(212,216,220,.14))}
+.strip div b{position:absolute;right:2px;bottom:2px;min-width:15px;height:15px;border:1px solid rgba(212,216,220,.6);
+  border-radius:50%;font-size:9px;font-weight:600;display:grid;place-items:center;color:var(--plan)}
+.strip .cur{min-width:46px;background:var(--hi);border-color:var(--hi);color:var(--hi-ink)}
+.strip .cur b{border-color:var(--hi-ink);color:var(--hi-ink)}
+#marker{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--hi);left:0;display:none;z-index:2}
+#marker span{position:absolute;top:-2px;left:50%;transform:translate(-50%,-100%);background:var(--hi);color:var(--hi-ink);
+  font-size:11px;font-weight:600;padding:2px 6px;border-radius:3px;white-space:nowrap}
+.plot{background:var(--inset);border-top:1px solid #000}
+canvas{width:100%;height:300px;display:block}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));background:var(--panel);
+  border:1px solid #000;border-radius:var(--r);overflow:hidden;margin-bottom:14px}
+.facts>div{padding:9px 12px;min-width:0;border-right:1px solid #000;border-bottom:1px solid #000;margin:0 -1px -1px 0}
+.facts b{display:block;font-size:17px;font-weight:400;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#msg{min-height:1.4em;color:var(--muted);margin:-6px 2px 10px;font-size:13px}
+#msg.bad{color:var(--bad)}
+
+/* right column: big readouts */
+.reads{display:flex;flex-direction:column;gap:14px}
+.read{background:var(--panel);border:1px solid #000;border-radius:var(--r);padding:10px 12px 12px;position:relative}
+.read .cap{display:block}
+.big{font-size:52px;font-weight:300;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.01em;margin-top:4px}
+.big small{font-size:15px;color:var(--muted);margin-left:3px;font-weight:400}
+.mid{font-size:34px;font-weight:300;line-height:1.05;font-variant-numeric:tabular-nums;margin-top:4px}
+#pv{color:var(--pv)}#sp{color:var(--set)}
+.meter{position:absolute;right:10px;top:12px;bottom:12px;width:7px;display:flex;flex-direction:column-reverse;gap:2px}
+.meter i{flex:1;background:#15171A;border-radius:1px}
+.meter i.on{background:var(--ok)}
+.meter i.on.hot{background:var(--warn)}
+#outRead{padding-right:28px}
+.man .stepper{margin:8px 0 10px}
+.man .row{justify-content:space-between}
+.pill{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;border:1px solid var(--line2);color:var(--muted)}
+.pill.on{background:var(--ok);border-color:var(--ok);color:#0E2A1A}
+
+/* program run controls on the status page */
+.runbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.runbar select{max-width:300px;flex:1 1 170px;height:44px;background:var(--panel2);color:var(--ink);border:1px solid var(--line2)}
+.runbar .b{height:44px;min-width:100px}
+.runbar .b.stop{border-color:var(--bad);color:var(--bad)}
+.runbar .b.stop:hover{background:rgba(242,105,92,.12)}
+.runbar .b.stop:not(:disabled){background:var(--bad);color:#2A0C08;font-weight:600}
+
+/* state cell and manual setpoint tile: colour shows what is going on */
+.facts>div.st-running{background:var(--ok);color:#0B2616}
+.facts>div.st-paused{background:var(--hi);color:var(--hi-ink)}
+.facts>div.st-finished{background:var(--acc);color:var(--acc-ink)}
+.facts>div.st-stopped{background:var(--bad);color:#2A0C08}
+.facts>div.st-manual{background:var(--pv);color:#2B1204}
+.facts>div[class^=st-] .cap{color:inherit;opacity:.75}
+.read.man.on{background:#6B3316;border-color:var(--pv);box-shadow:inset 0 0 0 1px var(--pv)}
+.read.man.on>.cap{color:#FFD9C2}
+.read.man.on .pill.on{background:var(--pv);border-color:var(--pv);color:#2B1204}
+
+/* tables */
+table{border-collapse:collapse;width:100%}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+th{font-weight:600;color:var(--muted);font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+td.n{font-variant-numeric:tabular-nums}
+td input{max-width:110px;height:32px}
+td .inl input{max-width:80px}td .inl select{max-width:66px}
+tr.sel td{background:rgba(243,195,53,.08)}
+tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--hi)}
+.sq{width:32px;height:32px;padding:0;border:1px solid var(--acc);border-radius:4px;background:none;color:var(--acc2);
+  cursor:pointer;font-size:15px}
+.sq:hover{background:var(--acc-soft)}
+.sq.danger{border-color:var(--bad);color:var(--bad)}
+.sq:disabled{opacity:.3;cursor:default;background:none}
+.prog{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:14px;align-items:start}
+.tbl{overflow:auto}
+#progChart{height:240px}
+.prog .plot{border:1px solid #000;border-radius:4px}
+
+/* dialog */
+#dlg{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:50;display:none;place-items:center;padding:16px}
+#dlg.open{display:grid}
+#dlg .box{background:#3A3D42;border:1px solid #000;border-radius:8px;width:min(420px,100%);padding:18px;
+  box-shadow:0 12px 36px rgba(0,0,0,.55)}
+#dlg .t{font-size:17px;margin:0 0 14px;line-height:1.35}
+#dlg .row{justify-content:flex-end}
+
+@media (max-width:980px){.dash{grid-template-columns:minmax(0,1fr)}.reads{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+  .prog{grid-template-columns:1fr}}
+@media (max-width:860px){body{grid-template-columns:1fr}
+  #side{position:fixed;left:0;top:0;bottom:0;width:min(270px,86vw);transform:translateX(-105%);transition:transform .18s ease;
+    box-shadow:6px 0 18px rgba(0,0,0,.5)}
+  #side.open{transform:none}#bMenu{display:grid}#segs{display:none}}
+@media (max-width:720px){#net{display:none}#top{grid-template-columns:auto 1fr auto;padding:0 10px}#title{text-align:left;font-size:18px}
+  main{padding:10px}.card{padding:12px}.big{font-size:42px}canvas{height:230px}.legend .dsh{display:none}
+  .runbar .b{min-width:0;flex:1;padding:0 8px}.runbar select{max-width:none;flex-basis:100%}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
 <body>
-<header>
-  <span id="link" title="Controller link"></span>
-  <h1>Temperature program</h1>
-  <span id="net"></span>
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+  <symbol id="i-screen" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+  <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 5h3v14H7zM14 5h3v14h-3z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-skip" viewBox="0 0 24 24"><path d="M5 5v14l9-7z" fill="currentColor" stroke="none"/><path d="M18 5v14"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-run" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M10 8v8l6-4z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-runp" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9 8h2v8H9zM13 8h2v8h-2z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3l10 18H2z"/><path d="M13 9l-3 4h4l-3 4"/></symbol>
+  <symbol id="i-dl" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 19.5h.01"/></symbol>
+</svg>
+
+<aside id="side" aria-label="Pages">
+  <div class="brand">TempCtl <small id="fw"></small></div>
+  <div class="tiles">
+    <button class="tile" data-v="main"><svg><use href="#i-home"/></svg>Status</button>
+    <button class="tile" data-v="prog"><svg><use href="#i-list"/></svg>Programs</button>
+    <button class="tile" data-v="sys"><svg><use href="#i-screen"/></svg>System</button>
+    <button class="tile" data-v="ctrl"><svg><use href="#i-sliders"/></svg>Controller</button>
+    <button class="tile" data-v="tools"><svg><use href="#i-tool"/></svg>Tools</button>
+  </div>
+  <div class="sfoot">
+    <button id="linkRow" title="Controller link"><i></i><span id="linkTxt">Controller: -</span></button>
+    <span id="sideNet"></span>
+    <div class="row"><span id="clock"></span><a class="b" href="/api/log.csv" style="height:34px"><svg><use href="#i-dl"/></svg>Log (CSV)</a></div>
+  </div>
+</aside>
+<div id="scrim"></div>
+
+<div id="app">
+<header id="top">
+  <div class="tl"><button class="ib" id="bMenu" title="Menu" aria-expanded="false" aria-controls="side"><svg><use href="#i-menu"/></svg></button>
+    <div id="segs"></div></div>
+  <h1 id="title">Status</h1>
+  <div id="topR"></div>
 </header>
-<nav role="tablist">
-  <button role="tab" data-v="main" aria-selected="true">Main</button>
-  <button role="tab" data-v="prog">Program</button>
-  <button role="tab" data-v="sys">System</button>
-  <button role="tab" data-v="ctrl">Controller</button>
-  <button role="tab" data-v="tools">Tools</button>
-</nav>
 <main>
 
 <section id="v-main" class="on">
   <div id="spWarn" class="warn hide">The setpoint register address is not set, so programs and the manual
     setpoint cannot work yet. Open <a href="#" data-go="ctrl">Controller</a> or use <a href="#" data-go="tools">Tools</a> to find it.</div>
-  <div class="panel">
-    <div class="readout">
-      <div><div class="cap">Process value</div><div class="pv" id="pv">---.-</div></div>
-      <div><div class="cap">Setpoint in controller</div><div class="sp" id="sp">---.-</div></div>
+  <div class="dash">
+    <div>
+      <div class="card chartcard">
+        <div class="cardh">Temperature<span class="sp"></span>
+          <span class="legend"><span><i style="background:var(--pv)"></i>Process value</span>
+            <span><i style="background:var(--set)"></i>Setpoint</span>
+            <span><i style="background:var(--plan)"></i>Program</span><span class="dsh">dashed = not active</span></span></div>
+        <div class="strip" id="strip"><span id="marker"><span id="markTag"></span></span></div>
+        <div class="plot"><canvas id="chart"></canvas></div>
+        <div class="cap" id="chartSpan" style="padding:7px 14px"></div>
+      </div>
+      <div class="runbar">
+        <select id="mainProg" aria-label="Program"></select>
+        <button class="b primary" id="bStart"><svg><use href="#i-play"/></svg><span>Start</span></button>
+        <button class="b" id="bPause"><svg><use href="#i-pause"/></svg>Pause</button>
+        <button class="b" id="bSkip"><svg><use href="#i-skip"/></svg>Next phase</button>
+        <button class="b stop" id="bStop"><svg><use href="#i-stop"/></svg>Stop</button>
+      </div>
+      <div class="facts">
+        <div id="stateCell"><span class="cap">State</span><b id="state">-</b></div>
+        <div><span class="cap">Step</span><b id="step">-</b></div>
+        <div><span class="cap">Phase left</span><b id="phLeft">-</b></div>
+        <div><span class="cap">Total left</span><b id="totLeft">-</b></div>
+        <div><span class="cap">Controller mode</span><b id="mode">-</b></div>
+      </div>
+      <div id="msg"></div>
     </div>
-    <div class="facts">
-      <div><span class="cap">State</span><b id="state">-</b></div>
-      <div><span class="cap">Step</span><b id="step">-</b></div>
-      <div><span class="cap">Phase left</span><b id="phLeft">-</b></div>
-      <div><span class="cap">Total left</span><b id="totLeft">-</b></div>
-      <div><span class="cap">Output</span><b id="out">-</b></div>
-      <div><span class="cap">Controller mode</span><b id="mode">-</b></div>
+    <div class="reads">
+      <div class="read"><span class="cap">Process value</span><div class="big"><span id="pv">---.-</span><small>°C</small></div></div>
+      <div class="read"><span class="cap">Setpoint in controller</span><div class="mid" id="sp">---.-</div></div>
+      <div class="read" id="outRead"><span class="cap">Output</span><div class="mid" id="out">-</div><div class="meter" id="meter"></div></div>
+      <div class="read man" id="manTile"><span class="cap">Manual setpoint</span>
+        <div class="stepper"><button data-d="-1" aria-label="Lower">−</button><input id="manSp" type="number" step="0.1" aria-label="Manual setpoint"><button data-d="1" aria-label="Higher">+</button></div>
+        <div class="row"><button class="b" id="bManSet">Set</button>
+          <span class="inl"><span class="pill" id="manState">off</span><input type="checkbox" class="switch" id="manSw" aria-label="Manual mode on / off"></span></div>
+        <p class="cap" style="margin:10px 0 0">On: writes this setpoint and switches the controller outputs on. Off: outputs off.
+          Starting a program ends manual mode.</p>
+      </div>
     </div>
   </div>
-  <div class="panel">
-    <h2>Manual setpoint</h2>
-    <p class="note">On: the ESP32 writes this setpoint and switches the controller outputs on. Off: the outputs are
-      switched off (if the outputs-off register is set). Starting a program ends manual mode.</p>
-    <div class="row"><label class="inl cap">Setpoint <input id="manSp" type="number" step="0.1"></label>
-      <button class="b" id="bManSet">Set</button>
-      <button class="b" id="bManOn">Switch on</button><button class="b" id="bManOff">Switch off</button>
-      <span class="pill" id="manState">off</span></div>
-  </div>
-  <div class="panel">
-    <h2>Program</h2>
-    <div class="row"><select id="mainProg" aria-label="Program"></select>
-      <button class="b primary" id="bStart">Start program</button>
-      <button class="b" id="bPause">Pause</button>
-      <button class="b" id="bSkip">Skip to next phase</button>
-      <button class="b danger" id="bStop">Stop program</button></div>
-    <div class="strip" id="strip"><span id="marker"></span></div>
-  </div>
-  <div class="panel">
-    <canvas id="chart"></canvas>
-    <div class="legend"><span><i style="background:var(--heat)"></i>Process value</span>
-      <span><i style="background:var(--set)"></i>Setpoint</span>
-      <span><i style="background:var(--plan)"></i>Program</span>
-      <span>broken line = not active</span>
-      <span id="chartSpan"></span></div>
-  </div>
-  <div class="row"><a class="b" href="/api/log.csv">Download log (CSV)</a></div>
-  <div id="msg"></div>
 </section>
 
 <section id="v-prog">
-  <div class="panel">
-    <h2>Programs</h2>
+  <div class="card">
     <div class="grid">
       <label>Program<select id="progSel"></select></label>
       <label>Name<input id="progName" maxlength="23"></label>
     </div>
-    <p class="note">Each step ramps from the previous temperature to its target, then holds. The first ramp starts
+    <p class="note" style="margin:12px 0 0">Each step ramps from the previous temperature to its target, then holds. The first ramp starts
       at the temperature measured when the program starts. A ramp of 0 jumps directly. Up to 100 steps.</p>
-    <table><thead><tr><th>Step</th><th>Target</th><th>Ramp</th><th>Hold</th><th></th></tr></thead>
-      <tbody id="progRows"></tbody></table>
-    <div class="row" style="margin-top:10px"><button class="b" id="bAddStep">Add step</button>
-      <span class="cap" id="progTotal"></span></div>
-    <canvas id="progChart" style="height:200px;margin-top:12px"></canvas>
-    <div class="row" style="margin-top:12px"><button class="b primary" id="bSaveProg">Save program</button>
-      <button class="b" id="bRevertProg">Revert</button><span id="progMsg" class="cap"></span></div>
+  </div>
+  <div class="prog">
+    <div class="card"><h2>Steps</h2>
+      <div class="tbl"><table><thead><tr><th>No</th><th>Target</th><th>Ramp</th><th>Hold</th><th></th></tr></thead>
+        <tbody id="progRows"></tbody></table></div>
+      <div class="row" style="margin-top:12px"><button class="b" id="bAddStep">+ Add step</button>
+        <span class="cap" id="progTotal"></span></div>
+    </div>
+    <div class="card"><h2>Preview</h2>
+      <div class="plot"><canvas id="progChart"></canvas></div>
+      <div class="row" style="margin-top:12px"><button class="b primary" id="bSaveProg">Save program</button>
+        <button class="b" id="bRevertProg">Revert</button><span id="progMsg" class="cap"></span></div>
+    </div>
   </div>
 </section>
 
 <section id="v-sys">
-  <div class="panel">
-    <h2>Display</h2>
+  <div class="cols">
+  <div class="card">
+    <h2>Touch display</h2>
     <div class="grid">
-      <label>Rotate screen 180°<select id="rotate180"><option value="false">No</option><option value="true">Yes</option></select></label>
+      <label class="sw">Rotate screen 180°<input type="checkbox" class="switch" id="rotate180"></label>
       <label>Brightness (10-255)<input id="brightness" type="number" min="10" max="255"></label>
+      <label>Colour theme<select id="themePalette"></select></label>
+      <label class="sw">Dark mode<input type="checkbox" class="switch" id="themeDark"></label>
     </div>
-    <div class="row" style="margin-top:12px"><button class="b primary" id="bSaveSys">Save display settings</button>
+    <div class="row" style="margin-top:14px"><button class="b primary" id="bSaveSys">Save display settings</button>
       <span id="sysMsg" class="cap"></span></div>
   </div>
-  <div class="panel">
+  <div class="card">
     <h2>Wi-Fi</h2>
     <p class="note">Leave the network name empty to run as an access point only. If the device cannot join the
       network within 20 s it also opens its own access point. The host name takes effect after a restart.</p>
@@ -187,14 +386,16 @@ tr.sel td{background:color-mix(in srgb,var(--set) 10%,transparent)}
       <label>Access point password (8+ characters, empty = keep)<input id="apPass" type="password" maxlength="32"></label>
       <label>Host name (http://name.local)<input id="hostname" maxlength="23"></label>
     </div>
-    <div class="row" style="margin-top:12px"><button class="b primary" id="bSaveWifi">Save and connect</button>
+    <div class="row" style="margin-top:14px"><button class="b primary" id="bSaveWifi">Save and connect</button>
       <span id="wifiMsg" class="cap"></span></div>
-    <p class="note" id="sysInfo"></p>
+    <p class="note" id="sysInfo" style="margin:12px 0 0"></p>
+  </div>
   </div>
 </section>
 
 <section id="v-ctrl">
-  <div class="panel">
+  <div class="cols">
+  <div class="card">
     <h2>Serial link</h2>
     <div class="grid">
       <label>Controller type<select id="profile"><option value="0">PMA KS 40-1 / 41-1 / 42-1</option>
@@ -208,13 +409,33 @@ tr.sel td{background:color-mix(in srgb,var(--set) 10%,transparent)}
       <label>Response timeout (ms)<input id="timeoutMs" type="number"></label>
       <label>Poll interval (ms)<input id="pollMs" type="number"></label>
     </div>
-    <div class="row" style="margin-top:12px"><button class="b" id="bDefaults">Load register defaults for this type</button></div>
+    <div class="row" style="margin-top:14px"><button class="b" id="bDefaults">Load register defaults for this type</button></div>
   </div>
-  <div class="panel">
+  <div class="card">
+    <h2>Program behaviour</h2>
+    <div class="grid">
+      <label>Setpoint ramp<select id="rampMode"><option value="0">ESP32 writes setpoint steps</option>
+        <option value="1">Controller ramps (r.SP), fewer writes</option></select></label>
+      <label>Minimum step between writes<input id="minStep" type="number" step="0.1"></label>
+      <label>Minimum seconds between writes<input id="minWriteSec" type="number"></label>
+      <label class="sw">Hold only counts inside band (guaranteed soak)<input type="checkbox" class="switch" id="guaranteedSoak"></label>
+      <label>Soak band ±<input id="soakBand" type="number" step="0.1"></label>
+      <label>When the program ends or stops<select id="endAction"><option value="0">Keep current setpoint</option>
+        <option value="1">Set end setpoint</option><option value="2">Switch controller outputs off</option></select></label>
+      <label>End setpoint<input id="endSp" type="number" step="0.1"></label>
+      <label class="sw">Lock front panel while running<input type="checkbox" class="switch" id="lockFront"></label>
+      <label>Pause after link loss (s, 0 = never)<input id="commLossSec" type="number"></label>
+      <label>Lowest allowed setpoint<input id="spMin" type="number" step="0.1"></label>
+      <label>Highest allowed setpoint<input id="spMax" type="number" step="0.1"></label>
+    </div>
+    <div class="row" style="margin-top:14px"><button class="b primary" id="bSaveConn">Save controller settings</button>
+      <span id="connMsg" class="cap"></span></div>
+  </div>
+  <div class="card">
     <h2>Register addresses</h2>
     <p class="note">Decimal protocol addresses (0-based, as sent on the wire). Use -1 for “not available”.
       PMA KS 4x-1 defaults use the “1dP” column of the interface description (value = register / 10),
-      e.g. SP = 11372, r.SP = 11295.</p>
+      e.g. SP = 11372, r.SP = 11295. Saved with “Save controller settings”.</p>
     <div class="grid">
       <label>Process value (read)<input id="r_pv" type="number"></label>
       <label>Effective setpoint (read)<input id="r_spEff" type="number"></label>
@@ -233,74 +454,62 @@ tr.sel td{background:color-mix(in srgb,var(--set) 10%,transparent)}
       <label>“Off” raw value<input id="r_offRaw" type="number"></label>
     </div>
   </div>
-  <div class="panel">
-    <h2>Program behaviour</h2>
-    <div class="grid">
-      <label>Setpoint ramp<select id="rampMode"><option value="0">ESP32 writes setpoint steps</option>
-        <option value="1">Controller ramps (r.SP), fewer writes</option></select></label>
-      <label>Minimum step between writes<input id="minStep" type="number" step="0.1"></label>
-      <label>Minimum seconds between writes<input id="minWriteSec" type="number"></label>
-      <label>Hold only counts inside band<select id="guaranteedSoak"><option value="false">No</option>
-        <option value="true">Yes (guaranteed soak)</option></select></label>
-      <label>Soak band ±<input id="soakBand" type="number" step="0.1"></label>
-      <label>When the program ends or stops<select id="endAction"><option value="0">Keep current setpoint</option>
-        <option value="1">Set end setpoint</option><option value="2">Switch controller outputs off</option></select></label>
-      <label>End setpoint<input id="endSp" type="number" step="0.1"></label>
-      <label>Lock front panel while running<select id="lockFront"><option value="false">No</option>
-        <option value="true">Yes</option></select></label>
-      <label>Pause after link loss (s, 0 = never)<input id="commLossSec" type="number"></label>
-      <label>Lowest allowed setpoint<input id="spMin" type="number" step="0.1"></label>
-      <label>Highest allowed setpoint<input id="spMax" type="number" step="0.1"></label>
-    </div>
-    <div class="row" style="margin-top:12px"><button class="b primary" id="bSaveConn">Save controller settings</button>
-      <span id="connMsg" class="cap"></span></div>
-  </div>
-  <div class="panel">
+  <div class="card">
     <h2>Controller parameters</h2>
     <p class="note" id="ctrlNote">Reads the PID and alarm parameters of the PMA KS 4x-1. Values are written one at a
       time; the controller rejects values outside its limits.</p>
     <div class="row"><button class="b" id="bReadParams">Read from controller</button></div>
-    <table style="margin-top:12px"><thead><tr><th>Name</th><th>Meaning</th><th>Value</th><th></th></tr></thead>
-      <tbody id="paramRows"></tbody></table>
+    <div class="tbl"><table style="margin-top:12px"><thead><tr><th>Name</th><th>Meaning</th><th>Value</th><th></th></tr></thead>
+      <tbody id="paramRows"></tbody></table></div>
   </div>
-  <div class="panel">
+  <div class="card">
     <h2>Actions</h2>
-    <div class="row" id="actions"></div>
+    <div class="row" id="actions"><span class="cap">Read the parameters first.</span></div>
     <div id="actMsg" class="cap" style="margin-top:8px"></div>
+  </div>
   </div>
 </section>
 
 <section id="v-tools">
-  <div class="panel">
+  <div class="cols">
+  <div class="card">
     <h2>Find the setpoint address</h2>
-    <p class="note">Not needed for the PMA KS 4x-1 (preset to 11372). For other controllers: reads every register in the range and lists those whose value equals the controller's current
-      effective setpoint. Make sure no ramp is active and the setpoint is an unusual value (e.g. 123.4) so the match
-      is unique. Then change the setpoint on the front panel and read the candidate again to confirm.</p>
-    <div class="row"><label class="cap">From <input id="scanFrom" type="number"></label>
-      <label class="cap">To <input id="scanTo" type="number"></label>
+    <p class="note">Not needed for the PMA KS 4x-1 (preset to 11372). For other controllers: reads every register in the
+      range and lists those whose value equals the controller's current effective setpoint. Make sure no ramp is active
+      and the setpoint is an unusual value (e.g. 123.4) so the match is unique. Then change the setpoint on the front
+      panel and read the candidate again to confirm.</p>
+    <div class="row"><label class="inl cap">From <input id="scanFrom" type="number"></label>
+      <label class="inl cap">To <input id="scanTo" type="number"></label>
       <button class="b" id="bScan">Scan</button></div>
     <div id="scanOut" style="margin-top:10px"></div>
   </div>
-  <div class="panel">
+  <div class="card">
     <h2>Read registers</h2>
-    <div class="row"><label class="cap">Address <input id="rdAddr" type="number"></label>
-      <label class="cap">Count <input id="rdN" type="number" value="1" min="1" max="60"></label>
-      <label class="cap">Function <select id="rdFn"><option value="0">default</option><option>3</option>
+    <div class="row"><label class="inl cap">Address <input id="rdAddr" type="number"></label>
+      <label class="inl cap">Count <input id="rdN" type="number" value="1" min="1" max="60"></label>
+      <label class="inl cap">Function <select id="rdFn"><option value="0">default</option><option>3</option>
         <option>4</option></select></label>
       <button class="b" id="bRead">Read</button></div>
-    <div id="rdOut" style="margin-top:10px"></div>
+    <div id="rdOut" class="tbl" style="margin-top:10px"></div>
   </div>
-  <div class="panel">
+  <div class="card">
     <h2>Write one register</h2>
     <p class="note">Writes the raw 16-bit value. Wrong addresses can change controller configuration.</p>
-    <div class="row"><label class="cap">Address <input id="wrAddr" type="number"></label>
-      <label class="cap">Raw value <input id="wrVal" type="number"></label>
+    <div class="row"><label class="inl cap">Address <input id="wrAddr" type="number"></label>
+      <label class="inl cap">Raw value <input id="wrVal" type="number"></label>
       <button class="b danger" id="bWrite">Write</button></div>
     <div id="wrOut" class="cap" style="margin-top:10px"></div>
+  </div>
   </div>
 </section>
 </main>
 
+</div>
+
+<div id="dlg"><div class="box" role="dialog" aria-modal="true" aria-labelledby="dlgT">
+  <p class="t" id="dlgT"></p>
+  <div class="row"><button class="b" id="dlgNo">Cancel</button><button class="b primary" id="dlgYes">OK</button></div>
+</div></div>
 <script>
 const $=id=>document.getElementById(id);
 const api=async(p,body)=>{const o=body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)};
@@ -313,16 +522,45 @@ const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim
 const spanFor=t=>t<=0?60:t+Math.max(t*0.1,30);
 let settings=null,programs=null,status=null,view='main',edit=null,editIdx=0,dirty=false,selRow=-1;
 
-// ---------- navigation
-function show(v){view=v;document.querySelectorAll('nav button').forEach(b=>b.setAttribute('aria-selected',b.dataset.v===v));
+// ---------- dialog (replaces confirm())
+function ask(text,ok){return new Promise(res=>{$('dlgT').textContent=text;$('dlgYes').textContent=ok||'OK';
+  const d=$('dlg');d.classList.add('open');$('dlgYes').focus();
+  const done=v=>{d.classList.remove('open');$('dlgYes').onclick=$('dlgNo').onclick=d.onkeydown=null;res(v);};
+  $('dlgYes').onclick=()=>done(true);$('dlgNo').onclick=()=>done(false);
+  d.onkeydown=e=>{if(e.key==='Escape')done(false);};});}
+
+// ---------- menu + navigation
+const TITLES={main:'Status',prog:'Programs',sys:'System',ctrl:'Controller',tools:'Tools'};
+// the sidebar is fixed on wide screens; on narrow ones the menu button slides it in
+function menu(open){$('side').classList.toggle('open',open);$('scrim').classList.toggle('open',open);
+  $('bMenu').setAttribute('aria-expanded',open);$('bMenu').innerHTML=`<svg><use href="#i-${open?'close':'menu'}"/></svg>`;}
+$('bMenu').onclick=()=>menu(!$('side').classList.contains('open'));
+$('scrim').onclick=()=>menu(false);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')menu(false);});
+function show(v){view=v;menu(false);
+  document.querySelectorAll('.tile[data-v]').forEach(b=>b.setAttribute('aria-current',b.dataset.v===v));
   document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id==='v-'+v));
+  $('title').textContent=TITLES[v];
+  // top bar segments: jump to the cards of this page
+  const segs=$('segs');segs.innerHTML='';
+  if(v!=='main')$('v-'+v).querySelectorAll('.card>h2').forEach(h=>{const b=document.createElement('button');
+    b.textContent=h.textContent;b.onclick=()=>h.parentNode.scrollIntoView({behavior:'smooth',block:'start'});segs.appendChild(b);});
+  document.querySelector('main').scrollTop=0;
   if(v==='prog')loadPrograms().then(()=>{if(!dirty)loadProgram(programs.sel);});
   if(v==='sys'||v==='ctrl'||v==='tools')loadSettings();if(v==='ctrl')loadParamsInfo();if(v==='main')pollHistory();}
-document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>show(b.dataset.v));
+document.querySelectorAll('.tile[data-v]').forEach(b=>b.onclick=()=>show(b.dataset.v));
 document.querySelectorAll('[data-go]').forEach(a=>a.onclick=e=>{e.preventDefault();show(a.dataset.go);});
+$('linkRow').onclick=()=>{if(status&&!status.comm.ok)ask('No answer from the controller: '+(status.comm.err||'link down'),'Close');};
+const tick=()=>{const d=new Date();$('clock').textContent=`${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;};
+tick();setInterval(tick,5000);
+
+// ---------- steppers [-][field][+]
+document.querySelectorAll('.stepper').forEach(s=>{const inp=s.querySelector('input');
+  s.querySelectorAll('button').forEach(b=>b.onclick=()=>{const st=+inp.step||1;
+    const v=Math.round(((+inp.value||0)+st*+b.dataset.d)/st)*st;inp.value=+v.toFixed(3);inp.focus();});});
 
 // ---------- chart
-// d: {pv,sp,plan (arrays), binSec, mode:'live'|'run', planActive, spActive, planSpan}
+// d: {pv,sp,plan (arrays), binSec, mode:'live'|'run', planActive, spActive}
 function drawChart(cv,d){
   const dpr=window.devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight;cv.width=W*dpr;cv.height=H*dpr;
   const g=cv.getContext('2d');g.scale(dpr,dpr);g.clearRect(0,0,W,H);
@@ -330,19 +568,26 @@ function drawChart(cv,d){
   let lo=all.length?Math.min(...all):0,hi=all.length?Math.max(...all):100;if(hi-lo<10){lo-=5;hi+=5;}
   const raw=(hi-lo)/5,mag=10**Math.floor(Math.log10(raw)),st=[1,2,2.5,5,10].map(m=>m*mag).find(v=>v>=raw);
   lo=Math.floor(lo/st)*st;hi=Math.ceil(hi/st)*st;
-  const L=48,R=12,T=10,B=26,x=i=>L+(W-L-R)*i/(n-1),y=v=>T+(H-T-B)*(1-(v-lo)/(hi-lo));
-  g.font='12px '+css('--txt');g.fillStyle=css('--muted');g.strokeStyle=css('--rule');g.lineWidth=1;
+  const L=48,R=14,T=12,B=26,x=i=>L+(W-L-R)*i/(n-1),y=v=>T+(H-T-B)*(1-(v-lo)/(hi-lo));
+  g.font='11px '+css('--txt');g.fillStyle=css('--muted');g.strokeStyle=css('--line');g.lineWidth=1;g.setLineDash([2,4]);
   for(let v=lo;v<=hi+st/2;v+=st){const yy=Math.round(y(v))+.5;g.beginPath();g.moveTo(L,yy);g.lineTo(W-R,yy);g.stroke();
-    g.textAlign='right';g.fillText(+v.toFixed(1),L-6,yy+4);}
+    g.textAlign='right';g.fillText(+v.toFixed(1),L-8,yy+4);}
   const span=(n-1)*d.binSec,maxLbl=Math.max(2,Math.floor((W-L-R)/80));
   const ts=[10,30,60,120,300,600,900,1800,3600,7200,10800,14400,21600,43200,86400].find(v=>span/v<=maxLbl)||86400;
   const lab=s=>{const a=Math.abs(s),h=Math.floor(a/3600),m=Math.floor(a%3600/60),x=Math.round(a%60);
     return(s<0?'-':'')+(h?`${h}:${String(m).padStart(2,'0')} h`:(a<600&&x?`${m}:${String(x).padStart(2,'0')}`:`${m} min`));};
-  for(let t=0;t<=span+1;t+=ts){const i=t/d.binSec,xx=x(d.mode==='live'?(n-1)-i:i);
+  for(let t=0;t<=span+1;t+=ts){const i=t/d.binSec,xx=x(d.mode==='live'?(n-1)-i:i),xr=Math.round(xx)+.5;
+    g.beginPath();g.moveTo(xr,T);g.lineTo(xr,H-B);g.stroke();
     g.textAlign=xx>W-R-30?'right':xx<L+30?'left':'center';g.fillText(d.mode==='live'?lab(-t):lab(t),xx,H-8);}
+  g.setLineDash([]);
   const line=(arr,col,w,dash)=>{g.strokeStyle=col;g.lineWidth=w;g.setLineDash(dash?[7,5]:[]);g.beginPath();let pen=false;
     arr.forEach((v,i)=>{if(v==null){pen=false;return;}pen?g.lineTo(x(i),y(v)):g.moveTo(x(i),y(v));pen=true;});g.stroke();};
-  line(d.plan,css('--plan'),2,!d.planActive);line(d.sp,css('--set'),1.5,!d.spActive);line(d.pv,css('--heat'),2.5,false);
+  // program curve with a light fill below, like a process profile
+  if(d.plan.some(v=>v!=null)){const gr=g.createLinearGradient(0,T,0,H-B);gr.addColorStop(0,'rgba(212,216,220,.16)');
+    gr.addColorStop(1,'rgba(212,216,220,0)');g.fillStyle=gr;g.beginPath();let first=-1,last=-1;
+    d.plan.forEach((v,i)=>{if(v==null)return;if(first<0){first=i;g.moveTo(x(i),H-B);}g.lineTo(x(i),y(v));last=i;});
+    g.lineTo(x(last),H-B);g.closePath();g.fill();}
+  line(d.plan,css('--plan'),2,!d.planActive);line(d.sp,css('--set'),1.5,!d.spActive);line(d.pv,css('--pv'),2.5,false);
   g.setLineDash([]);
 }
 
@@ -357,44 +602,51 @@ function fillProgSelect(sel,cur){if(!programs)return;const keep=document.activeE
   const html=programs.programs.map((p,i)=>`<option value="${i}">${i+1} ${esc(p.name)}${p.steps?` (${p.steps} steps, ${dur(p.total)})`:' (empty)'}</option>`).join('');
   if(sel.dataset.h!==html&&!keep){sel.innerHTML=html;sel.dataset.h=html;}if(!keep)sel.value=String(cur);}
 
+// step boxes above the chart: one box per ramp / hold, number badge, active phase highlighted
 function renderStrip(st){
   const el=$('strip');el.querySelectorAll('div').forEach(d=>d.remove());
   const steps=st.active&&runSteps?runSteps:(selSteps||[]);
-  const tot=steps.reduce((a,s)=>a+s.r+s.h,0)||1;
-  steps.forEach((s,i)=>{[['ramp',s.r],['hold',s.h]].forEach(([k,sec])=>{if(sec<=0)return;
-    const d=document.createElement('div');d.className=k;d.style.width=(100*sec/tot)+'%';
-    d.textContent=k==='ramp'?`${i+1} → ${s.t}`:`${i+1} hold`;d.title=`Step ${i+1}: ${k} ${dur(sec)}, target ${s.t}`;
-    if(st.active&&st.step===i&&st.phase===k)d.classList.add('cur');
-    el.insertBefore(d,$('marker'));});});
+  const parts=[];steps.forEach((s,i)=>[['ramp',s.r],['hold',s.h]].forEach(([k,sec])=>{if(sec>0)parts.push({k,sec,i,s});}));
+  const tot=parts.reduce((a,p)=>a+p.sec,0)||1;
+  parts.forEach(p=>{const d=document.createElement('div');d.className=p.k;
+    d.style.flexGrow=p.sec/tot;
+    d.innerHTML=`${p.k==='ramp'?'→ '+esc(p.s.t):'hold'}<br>${dur(p.sec)}<b>${p.i+1}</b>`;
+    d.title=`Step ${p.i+1}: ${p.k} ${dur(p.sec)}, target ${p.s.t}`;
+    if(st.active&&st.step===p.i&&st.phase===p.k)d.classList.add('cur');
+    el.insertBefore(d,$('marker'));});
 }
 let selSteps=null,selStepsIdx=-1,runSteps=null,runStepsIdx=-1;
 async function stepsOf(i){return(await api('/api/program?i='+i)).steps;}
 
+function meter(pct){const m=$('meter');if(!m.children.length)m.innerHTML='<i></i>'.repeat(20);
+  [...m.children].forEach((c,i)=>{c.className=pct!=null&&pct>i*5+2.5?(i>=17?'on hot':'on'):'';});}
+
 async function pollStatus(){
-  try{status=await api('/api/status');}catch(e){$('link').style.background=css('--bad');return;}
+  try{status=await api('/api/status');}catch(e){$('linkRow').className='bad';$('linkTxt').textContent='Device not reachable';return;}
   const s=status,r=s.run,active=r.state==='running'||r.state==='paused';
-  $('link').style.background=s.comm.ok?css('--ok'):css('--bad');
-  $('net').textContent=s.net;
+  $('linkRow').className=s.comm.ok?'ok':'bad';$('linkTxt').textContent=s.comm.ok?'Controller link OK':'No answer from the controller';
+  $('sideNet').textContent=s.net;$('fw').textContent=s.fw?'v'+s.fw:'';
   $('pv').textContent=s.pv!=null?f1(s.pv):(s.comm.ok&&s.pvFlag!=='ok'?s.pvFlag:'---.-');
   $('sp').textContent=f1(s.spEff);
   let stTxt=r.state[0].toUpperCase()+r.state.slice(1)+(r.soakWait?' (waiting for band)':'');
   if(!active&&s.manual.on)stTxt='Manual';
   $('state').textContent=stTxt;
+  $('stateCell').className=!active&&s.manual.on?'st-manual':(r.state!=='idle'?'st-'+r.state:'');
+  $('manTile').classList.toggle('on',s.manual.on);
   $('step').textContent=active?`${r.step+1} of ${r.steps}, ${r.phase} to ${f1(r.target)}`:'-';
   $('phLeft').textContent=active?dur(r.phaseDur-r.phaseEl):'-';
   $('totLeft').textContent=active?`${dur(r.total-r.elapsed)} (${r.name})`:`${dur(s.plannedTotal)} planned (${s.selName})`;
-  $('out').textContent=s.out!=null?Math.round(s.out)+' %':'-';
+  $('out').textContent=s.out!=null?Math.round(s.out)+' %':'-';meter(s.out);
   $('mode').textContent=s.mode||'-';
   $('spWarn').classList.toggle('hide',s.spConfigured);
-  $('bStart').textContent=r.state==='paused'?'Resume program':'Start program';
+  $('bStart').lastChild.textContent=r.state==='paused'?'Resume':'Start';
   $('bStart').disabled=r.state==='running';$('bPause').disabled=r.state!=='running';
   $('bSkip').disabled=!active;$('bStop').disabled=!active;$('mainProg').disabled=active;
-  $('manState').textContent=s.manual.on?(s.manual.synced?'on':'on, writing...'):'off';
+  $('manState').textContent=s.manual.on?(s.manual.synced?'on':'writing...'):'off';
   $('manState').classList.toggle('on',s.manual.on);
-  $('bManOn').disabled=active||s.manual.on;$('bManOff').disabled=!s.manual.on;
+  if(!$('manSw').busy){$('manSw').checked=s.manual.on;$('manSw').disabled=active&&!s.manual.on;}
   if(document.activeElement!==$('manSp'))$('manSp').value=s.manual.sp;
   if(programs&&programs.sel!==s.sel){programs.sel=s.sel;fillProgSelect($('mainProg'),s.sel);}
-  const m=$('marker');m.style.display=active?'block':'none';if(r.total>0)m.style.left=(100*r.elapsed/r.total)+'%';
   const err=!s.comm.ok||((active||s.manual.on)&&!r.spSynced);$('msg').className=err?'bad':'';
   $('msg').textContent=err?s.comm.err:(r.msg+(active?` (setpoint writes this run: ${r.spWrites})`:''));
   if(view==='main'){
@@ -402,30 +654,34 @@ async function pollStatus(){
     if(active&&runStepsIdx!==r.prog){runStepsIdx=r.prog;runSteps=r.prog>=0?await stepsOf(r.prog):null;}
     if(!active)runStepsIdx=-1;
     renderStrip({active,step:r.step,phase:r.phase});
+    // time marker inside the active box
+    const m=$('marker'),cur=$('strip').querySelector('.cur');m.style.display=cur?'block':'none';
+    if(cur){const f=r.phaseDur>0?Math.min(1,r.phaseEl/r.phaseDur):0;m.style.left=(cur.offsetLeft+cur.offsetWidth*f-1)+'px';
+      $('markTag').textContent=dur(r.elapsed);}
   }
 }
 pollStatus.n=0;
 
 async function pollHistory(){
   if(view!=='main')return;
-  try{const h=await api('/api/history');
-    if(h.mode==='live'){ // program preview uses its own time scale across the full width
-      drawChart($('chart'),h);
-      $('chartSpan').textContent=`Last ${dur(h.span)}. Preview of “${h.name}”: ${dur(h.planTotal)} over the full width`;
-    }else{drawChart($('chart'),h);$('chartSpan').textContent=`“${h.name}”: ${dur(h.elapsed)} of ${dur(h.planTotal)}`;}
+  try{const h=await api('/api/history');drawChart($('chart'),h);
+    $('chartSpan').textContent=h.mode==='live'?`Last ${dur(h.span)}. Preview of “${h.name}”: ${dur(h.planTotal)} over the full width`
+      :`“${h.name}”: ${dur(h.elapsed)} of ${dur(h.planTotal)}`;
   }catch(e){}
 }
 const cmd=(c,extra)=>api('/api/cmd',Object.assign({cmd:c},extra||{})).then(pollStatus);
 $('bStart').onclick=()=>status&&status.run.state==='paused'?cmd('resume'):cmd('start',{prog:+$('mainProg').value});
 $('bPause').onclick=()=>cmd('pause');
-$('bSkip').onclick=()=>confirm('Skip to the next phase?')&&cmd('skip');
-$('bStop').onclick=()=>confirm('Stop the program? The end action from the Controller settings is applied.')&&cmd('stop');
+$('bSkip').onclick=async()=>{if(await ask('Skip to the next phase?','Skip'))cmd('skip');};
+$('bStop').onclick=async()=>{if(await ask('Stop the program? The end action from the Controller settings is applied.','Stop'))cmd('stop');};
 $('mainProg').onchange=async()=>{await api('/api/select',{i:+$('mainProg').value});await loadPrograms();pollStatus();pollHistory();};
 $('bManSet').onclick=async()=>{await api('/api/manual',{sp:+$('manSp').value});$('manSp').blur();pollStatus();};
 $('manSp').onkeydown=e=>{if(e.key==='Enter')$('bManSet').click();};
-$('bManOn').onclick=async()=>{await api('/api/manual',{sp:+$('manSp').value,on:true});setTimeout(pollStatus,600);};
-$('bManOff').onclick=async()=>{if(!confirm('Switch manual mode off? The controller outputs are switched off.'))return;
-  await api('/api/manual',{on:false});setTimeout(pollStatus,600);};
+$('manSw').onchange=async()=>{const sw=$('manSw');sw.busy=true;
+  try{if(sw.checked)await api('/api/manual',{sp:+$('manSp').value,on:true});
+    else if(await ask('Switch manual mode off? The controller outputs are switched off.','Switch off'))await api('/api/manual',{on:false});
+    else sw.checked=true;}
+  finally{setTimeout(()=>{sw.busy=false;pollStatus();},600);}};
 
 // ---------- program editor
 const unitOf=sec=>sec>0&&sec%60!==0?'s':'min';
@@ -439,11 +695,12 @@ function renderRows(){const tb=$('progRows');tb.innerHTML='';
     tr.innerHTML=`<td class="n">${i+1}</td>
       <td><input type="number" step="0.1" min="${edit.spMin}" max="${edit.spMax}" value="${s.t}" aria-label="Step ${i+1} target"></td>
       <td>${timeCell(s.r,`Step ${i+1} ramp`)}</td><td>${timeCell(s.h,`Step ${i+1} hold`)}</td>
-      <td style="white-space:nowrap"><button class="b" title="Move up" ${i?'':'disabled'}>↑</button>
-        <button class="b" title="Move down" ${i<edit.steps.length-1?'':'disabled'}>↓</button>
-        <button class="b" title="Insert a step below">+</button>
-        <button class="b danger" title="Remove step">✕</button></td>`;
-    tr.querySelectorAll('input,select').forEach(el=>{el.oninput=()=>{readRows();markDirty();};el.onfocus=()=>{selRow=i;}});
+      <td style="white-space:nowrap"><button class="sq" title="Move up" ${i?'':'disabled'}>↑</button>
+        <button class="sq" title="Move down" ${i<edit.steps.length-1?'':'disabled'}>↓</button>
+        <button class="sq" title="Insert a step below">+</button>
+        <button class="sq danger" title="Remove step">✕</button></td>`;
+    tr.querySelectorAll('input,select').forEach(el=>{el.oninput=()=>{readRows();markDirty();};
+      el.onfocus=()=>{selRow=i;tb.querySelectorAll('tr').forEach((t,k)=>t.classList.toggle('sel',k===i));}});
     const [bu,bd,bi,bx]=tr.querySelectorAll('button');
     bu.onclick=()=>moveStep(i,-1);bd.onclick=()=>moveStep(i,1);bi.onclick=()=>addStep(i+1);bx.onclick=()=>{edit.steps.splice(i,1);selRow=Math.min(i,edit.steps.length-1);markDirty();renderRows();};
     tb.appendChild(tr);});
@@ -463,7 +720,7 @@ function previewProgram(){const start=status&&status.pv!=null?status.pv:20;const
 $('bAddStep').onclick=()=>addStep(selRow>=0?selRow+1:edit.steps.length);
 $('progName').oninput=()=>{edit.name=$('progName').value;markDirty();};
 $('progSel').onchange=async()=>{const i=+$('progSel').value;
-  if(dirty&&!confirm(`Discard the unsaved changes to “${edit.name}”?`)){$('progSel').value=String(editIdx);return;}
+  if(dirty&&!await ask(`Discard the unsaved changes to “${edit.name}”?`,'Discard')){$('progSel').value=String(editIdx);return;}
   await api('/api/select',{i});await loadProgram(i);loadPrograms();};
 $('bSaveProg').onclick=async()=>{readRows();const r=await api('/api/program',{i:editIdx,name:edit.name,steps:edit.steps});
   if(r.err){$('progMsg').textContent=r.err;return;}
@@ -472,24 +729,29 @@ $('bSaveProg').onclick=async()=>{readRows();const r=await api('/api/program',{i:
     'Saved. The running program keeps its old steps until the next start.':'Saved.';};
 $('bRevertProg').onclick=()=>loadProgram(editIdx);
 
-// ---------- settings
+// ---------- settings (switches are checkboxes, the API uses booleans)
+const setv=(el,v)=>{if(el.type==='checkbox')el.checked=!!v;else el.value=String(v);};
+const getv=el=>el.type==='checkbox'?el.checked:(v=>v==='true'?true:v==='false'?false:+v)(el.value);
 const regKeys=['pv','spEff','out','status','alarm','sp','spLo','spHi','rampRate','ctrlOff','remote','scale','readFn','writeFn','offRaw'];
 const topKeys=['profile','slaveId','baud','parity','stopBits','timeoutMs','pollMs','rampMode','minStep','minWriteSec',
   'guaranteedSoak','soakBand','endAction','endSp','lockFront','commLossSec','spMin','spMax'];
 async function loadSettings(){settings=await api('/api/settings');
-  topKeys.forEach(k=>$(k).value=String(settings[k]));regKeys.forEach(k=>$('r_'+k).value=settings.reg[k]);
+  topKeys.forEach(k=>setv($(k),settings[k]));regKeys.forEach(k=>$('r_'+k).value=settings.reg[k]);
   $('scanFrom').value=settings.scanFrom;$('scanTo').value=settings.scanTo;
-  $('rotate180').value=String(settings.rotate180);$('brightness').value=settings.brightness;
+  setv($('rotate180'),settings.rotate180);$('brightness').value=settings.brightness;
+  $('themePalette').innerHTML=(settings.themes||[]).map((n,i)=>`<option value="${i}">${esc(n)}</option>`).join('');
+  $('themePalette').value=String(settings.themePalette);setv($('themeDark'),settings.themeDark);
   $('ssid').value=settings.ssid;$('hostname').value=settings.hostname;
   $('sysInfo').textContent=status?`${status.net}  ·  firmware ${status.fw}`:'';}
-function collectSettings(){const o={reg:{}};topKeys.forEach(k=>{const v=$(k).value;o[k]=v==='true'?true:v==='false'?false:+v;});
+function collectSettings(){const o={reg:{}};topKeys.forEach(k=>o[k]=getv($(k)));
   regKeys.forEach(k=>o.reg[k]=+$('r_'+k).value);
   if(o.profile!==settings.profile)delete o.reg; // new type: start from its defaults
   return o;}
 $('bSaveConn').onclick=async()=>{await api('/api/settings',collectSettings());$('connMsg').textContent='Saved. The serial link was reopened.';loadSettings();};
-$('bDefaults').onclick=async()=>{if(!confirm('Replace all register addresses with the defaults for this controller type?'))return;
+$('bDefaults').onclick=async()=>{if(!await ask('Replace all register addresses with the defaults for this controller type?','Replace'))return;
   await api('/api/settings',{profile:+$('profile').value,loadDefaults:true});loadSettings();$('connMsg').textContent='Defaults loaded.';};
-$('bSaveSys').onclick=async()=>{await api('/api/settings',{rotate180:$('rotate180').value==='true',brightness:+$('brightness').value});
+$('bSaveSys').onclick=async()=>{await api('/api/settings',{rotate180:$('rotate180').checked,brightness:+$('brightness').value,
+  themePalette:+$('themePalette').value,themeDark:$('themeDark').checked});
   $('sysMsg').textContent='Saved.';loadSettings();};
 $('bSaveWifi').onclick=async()=>{const o={ssid:$('ssid').value};if($('pass').value||!$('ssid').value)o.pass=$('pass').value;
   if($('apPass').value)o.apPass=$('apPass').value;
@@ -501,14 +763,14 @@ $('bScan').onclick=async()=>{const o=$('scanOut');o.textContent='Scanning, this 
   const r=await api('/api/mb/findsp',{from:+$('scanFrom').value,to:+$('scanTo').value});
   if(!r.ok){o.textContent=r.err;return;}
   if(!r.candidates.length){o.textContent=`No register in this range holds ${f1(r.reference)}. Try another range.`;return;}
-  o.innerHTML=`Registers holding ${f1(r.reference)}: `+r.candidates.map(a=>`<button class="b" data-a="${a}">Use ${a} as setpoint</button>`).join(' ');
+  o.innerHTML=`<p class="cap">Registers holding ${f1(r.reference)}:</p><div class="row">`+r.candidates.map(a=>`<button class="b" data-a="${a}">Use ${a} as setpoint</button>`).join('')+'</div>';
   o.querySelectorAll('button').forEach(b=>b.onclick=async()=>{await api('/api/settings',{reg:{sp:+b.dataset.a}});
     o.textContent=`Setpoint address set to ${b.dataset.a}. Confirm it by changing the setpoint on the controller and reading it here.`;});};
 $('bRead').onclick=async()=>{const a=+$('rdAddr').value,n=+$('rdN').value;
   const r=await api(`/api/mb/read?addr=${a}&n=${n}&fn=${$('rdFn').value}`);
   $('rdOut').innerHTML=r.ok?'<table><tr><th>Address</th><th>Raw</th><th>÷10</th><th>Hex</th></tr>'+r.values.map((v,i)=>
-    `<tr><td class="n">${a+i}</td><td class="n">${v}</td><td class="n">${(v/10).toFixed(1)}</td><td class="n">0x${(v&0xffff).toString(16).padStart(4,'0')}</td></tr>`).join('')+'</table>':r.err;};
-$('bWrite').onclick=async()=>{if(!confirm('Write this raw value to the controller?'))return;
+    `<tr><td class="n">${a+i}</td><td class="n">${v}</td><td class="n">${(v/10).toFixed(1)}</td><td class="n">0x${(v&0xffff).toString(16).padStart(4,'0')}</td></tr>`).join('')+'</table>':esc(r.err);};
+$('bWrite').onclick=async()=>{if(!await ask('Write this raw value to the controller?','Write'))return;
   const r=await api('/api/mb/write',{addr:+$('wrAddr').value,value:+$('wrVal').value});$('wrOut').textContent=r.ok?'Written.':r.err;};
 
 // ---------- controller parameters
@@ -518,16 +780,18 @@ async function loadParamsInfo(){const s=settings||await api('/api/settings');
 $('bReadParams').onclick=async()=>{const tb=$('paramRows');tb.innerHTML='<tr><td colspan="4">Reading...</td></tr>';
   const r=await api('/api/params');tb.innerHTML='';
   r.params.forEach(p=>{const tr=document.createElement('tr');const ro=p.name==='Sw.Op';
-    tr.innerHTML=`<td>${p.name}</td><td>${p.desc}</td><td>${p.err?p.err:`<input value="${p.value}" ${ro?'disabled':''}>`}</td><td>${ro||p.err?'':'<button class="b">Write</button>'}</td>`;
+    tr.innerHTML=`<td>${esc(p.name)}</td><td>${esc(p.desc)}</td><td>${p.err?esc(p.err):`<input value="${esc(p.value)}" ${ro?'disabled':''}>`}</td><td>${ro||p.err?'':'<button class="b">Write</button>'}</td>`;
     const b=tr.querySelector('button');if(b)b.onclick=async()=>{const v=tr.querySelector('input').value;
       const w=await api('/api/params',{addr:p.addr,scaled:p.scaled,value:v==='off'?'off':+v});b.textContent=w.ok?'Written':'Failed';b.title=w.err||'';};
     tb.appendChild(tr);});
   const ac=$('actions');ac.innerHTML='';r.actions.forEach((l,i)=>{const b=document.createElement('button');b.className='b';b.textContent=l;
-    b.onclick=async()=>{if(!confirm(l+'?'))return;const w=await api('/api/action',{i});$('actMsg').textContent=w.ok?l+': done.':w.err;};ac.appendChild(b);});};
+    b.onclick=async()=>{if(!await ask(l+'?',l))return;const w=await api('/api/action',{i});$('actMsg').textContent=w.ok?l+': done.':w.err;};ac.appendChild(b);});};
 
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
+window.addEventListener('resize',()=>{if(view==='main')pollHistory();else if(view==='prog'&&edit)previewProgram();});
+show('main');
 loadPrograms().then(pollStatus);
-setInterval(pollStatus,1000);setInterval(pollHistory,2000);pollHistory();
+setInterval(pollStatus,1000);setInterval(pollHistory,2000);
 </script>
 </body>
 </html>)HTML";

@@ -3,6 +3,8 @@
 Firmware for the ESP32-2432S028R ("Cheap Yellow Display") that drives a **PMA KS 40-1 / 41-1 / 42-1**
 (or another Modbus RTU temperature controller) over RS485. It stores **up to 10 named programs with up to
 100 ramp/soak steps each** and can also hold a **manual setpoint**.
+Main use: the heater of a **BGA rework station** (reflow / desolder profiles); on the first start
+program 1 is an example lead-free GPU desolder profile ("GPU desolder (LeadFree)", 4 steps, 4:40).
 
 - LVGL 9.6 touch GUI, designed as an **LVGL Pro Editor** project (`ui/`, see section 4a):
   - **Main**: live values, manual setpoint (numeric entry + on/off), program selection and Start / Pause / Stop / Skip
@@ -12,7 +14,8 @@ Firmware for the ESP32-2432S028R ("Cheap Yellow Display") that drives a **PMA KS
     preview of the selected program on its own time scale. Running: fixed time axis covering the whole program
     plus spare time; the program curve and the PV trace grow from the left. Program and setpoint lines are
     solid while active and dashed while not active.
-  - **Setup → System**: rotate the screen by 180°, brightness, Wi-Fi (scan, password, AP password)
+  - **Setup → System**: rotate the screen by 180°, brightness, colour theme and dark mode, Wi-Fi (scan,
+    password, AP password)
   - **Setup → Controller**: controller type, serial link, ramp mode, soak, front-panel lock, end action
 - Web interface with the same functions plus controller parameters (PID, limits, self-tuning), full register
   map, register read/write tools, a setpoint-address finder and CSV log download
@@ -213,11 +216,22 @@ Rules so the firmware keeps working:
   "missing", and LVGL would show the tag instead. A second language: add its code to `languages` and
   an attribute per text; the exported code selects the first language. Tab names and dropdown options
   are plain text in the XML files.
-- Colours: everything is in `ui/globals.xml` — the theme colours (`color_accent`, `color_accent2`,
-  `theme_dark`, applied by the firmware at start-up), the program table highlight
-  (`color_row_selected`, step numbers in `color_muted`) and the link dot (green, `style_link_error`
-  for state `user_1` when the controller does not answer). The export turns the constants into C
-  macros (`COLOR_ACCENT`, …), which `src/ui_gen.c` passes on.
+- Colours: everything is in `ui/globals.xml`. `color_*` are 14 colour roles (background, panel,
+  border, text, muted, accent, accent2, row_selected, danger, pv, sp, plan, ok, warn); they are the
+  palette *Default* in dark mode and what the editor preview shows. The other palettes (Default
+  light, Dracula, Solarized, Gruvbox, Catppuccin, One — each dark and light) are constants named
+  `<palette>_<dark|light>_<role>`. *Setup → System* (and the web *System* page) selects palette and
+  dark mode at runtime; `theme_dark` is only the mode at the first start. The export turns the
+  constants into C macros (`COLOR_ACCENT`, `DRACULA_DARK_BG`, …); `src/ui_gen.c` builds the palettes
+  from them (`PALETTE_NAMES`, `paletteLoad()`) and recolours the styles (`STYLE_COLORS`), and `src/ui.cpp`
+  (`applyTheme`) the LVGL theme (accent, accent2, dark), the chart series and the program table
+  highlight. Rules:
+  - widgets get colours only through named styles in `globals.xml`, not with `style_…_color` on the
+    widget (that colour would stay the same in every palette);
+  - a style with a colour needs a line in `STYLE_COLORS` in `src/ui_gen.c` (the firmware logs a
+    warning at start-up if a line no longer matches `globals.xml`);
+  - a new palette: 14 constants in `globals.xml` for dark and 14 for light, its name in
+    `PALETTE_NAMES` and two cases in `paletteLoad()` in `src/ui_gen.c`.
 - Everything that changes at runtime (values, table rows, chart data) is done by the firmware; the XML
   only holds placeholder values for the preview.
 - Popups are created with their exported create function each time they open (on LVGL's top layer).

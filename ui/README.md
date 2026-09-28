@@ -11,7 +11,9 @@ handlers by name); see section 4a of the main README for the rules.
 
 Pages are in `components/`, the popups (number / text entry, dialog, Wi-Fi list)
 in `components/popups/`.
-All texts are in `translations.xml`, colours and theme settings in `globals.xml`.
+All texts are in `translations.xml`, colours in `globals.xml` (`color_*` = palette
+"Default" in dark mode, the preview; the other palettes follow; section 4a of
+the main README explains how they are applied).
 
 Fonts in `fonts/` (Montserrat, Font Awesome 5 Free) are converted by the export
 into `fonts/*_data.c`; licenses in `fonts/licenses/`.

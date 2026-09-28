@@ -66,13 +66,24 @@ lv_obj_t * system_panel_create(lv_obj_t * parent)
         lv_slider_set_max_value(sys_bright, 255);
         lv_slider_set_value(sys_bright, 200, false);
 
+        lv_obj_t * setting_row_2 = setting_row_create(lv_obj_0, "sys_theme");
+        lv_obj_t * sys_theme = lv_dropdown_create(setting_row_2);
+        lv_obj_set_name(sys_theme, "sys_theme");
+        lv_obj_set_width(sys_theme, 140);
+        lv_dropdown_set_options(sys_theme, "Default\nDracula\nSolarized\nGruvbox\nCatppuccin\nOne");
+        lv_obj_add_style(sys_theme, &style_panel, 0);
+
+        lv_obj_t * setting_row_3 = setting_row_create(lv_obj_0, "sys_dark");
+        lv_obj_t * sys_dark = lv_switch_create(setting_row_3);
+        lv_obj_set_name(sys_dark, "sys_dark");
+
         lv_obj_t * lv_label_1 = lv_label_create(lv_obj_0);
         lv_label_set_translation_tag(lv_label_1, "sys_wifi");
         lv_obj_set_style_pad_top(lv_label_1, 6, 0);
         lv_obj_add_style(lv_label_1, &style_caption, 0);
 
-        lv_obj_t * setting_row_2 = setting_row_create(lv_obj_0, "sys_network");
-        lv_obj_t * lv_obj_1 = lv_obj_create(setting_row_2);
+        lv_obj_t * setting_row_4 = setting_row_create(lv_obj_0, "sys_network");
+        lv_obj_t * lv_obj_1 = lv_obj_create(setting_row_4);
         lv_obj_set_width(lv_obj_1, 196);
         lv_obj_set_height(lv_obj_1, LV_SIZE_CONTENT);
         lv_obj_set_flag(lv_obj_1, LV_OBJ_FLAG_SCROLLABLE, false);
@@ -101,8 +112,8 @@ lv_obj_t * system_panel_create(lv_obj_t * parent)
         lv_label_set_text(lv_label_2, "");
         lv_obj_set_style_text_font(lv_label_2, font_icons_14, 0);
 
-        lv_obj_t * setting_row_3 = setting_row_create(lv_obj_0, "sys_password");
-        lv_obj_t * sys_pass = lv_button_create(setting_row_3);
+        lv_obj_t * setting_row_5 = setting_row_create(lv_obj_0, "sys_password");
+        lv_obj_t * sys_pass = lv_button_create(setting_row_5);
         lv_obj_set_name(sys_pass, "sys_pass");
         lv_obj_set_width(sys_pass, 140);
         lv_obj_set_height(sys_pass, ROW_HEIGHT);
@@ -111,8 +122,8 @@ lv_obj_t * system_panel_create(lv_obj_t * parent)
         lv_obj_set_align(sys_pass_text, LV_ALIGN_CENTER);
         lv_label_set_text(sys_pass_text, "(none)");
 
-        lv_obj_t * setting_row_4 = setting_row_create(lv_obj_0, "sys_ap_password");
-        lv_obj_t * sys_ap_pass = lv_button_create(setting_row_4);
+        lv_obj_t * setting_row_6 = setting_row_create(lv_obj_0, "sys_ap_password");
+        lv_obj_t * sys_ap_pass = lv_button_create(setting_row_6);
         lv_obj_set_name(sys_ap_pass, "sys_ap_pass");
         lv_obj_set_width(sys_ap_pass, 140);
         lv_obj_set_height(sys_ap_pass, ROW_HEIGHT);
@@ -121,8 +132,8 @@ lv_obj_t * system_panel_create(lv_obj_t * parent)
         lv_obj_set_align(sys_ap_pass_text, LV_ALIGN_CENTER);
         lv_label_set_text(sys_ap_pass_text, "********");
 
-        lv_obj_t * setting_row_5 = setting_row_create(lv_obj_0, "blank");
-        lv_obj_t * sys_connect = lv_button_create(setting_row_5);
+        lv_obj_t * setting_row_7 = setting_row_create(lv_obj_0, "blank");
+        lv_obj_t * sys_connect = lv_button_create(setting_row_7);
         lv_obj_set_name(sys_connect, "sys_connect");
         lv_obj_set_width(sys_connect, 200);
         lv_obj_set_height(sys_connect, 36);

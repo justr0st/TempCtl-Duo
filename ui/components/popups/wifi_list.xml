@@ -1,5 +1,7 @@
-<!-- Popup: Wi-Fi scan result. The firmware sets the title, removes the
-     example rows and adds one wifi_item per network found. -->
+<!-- Popup: Wi-Fi scan. Opens when Scan is tapped: the firmware sets the
+     title, removes the example rows and shows scan_spinner while scanning.
+     When the scan is done it hides the spinner and adds one wifi_item per
+     network found. -->
 <component>
 	<previews>
 		<preview name="cyd" width="320" height="240" />
@@ -14,6 +16,11 @@
 			<wifi_item ssid="FRITZ!Box 7590" />
 			<wifi_item ssid="Guest" />
 		</lv_obj>
+		<!-- on top of scan_list (must come after it), centred on it -->
+		<lv_spinner name="scan_spinner" x="132" y="84" width="48" height="48">
+			<style name="style_spinner" />
+			<style name="style_spinner" selector="indicator" />
+		</lv_spinner>
 		<lv_button name="scan_cancel" x="220" y="198" width="92" height="34">
 			<lv_label align="center" translation_tag="btn_cancel" />
 		</lv_button>

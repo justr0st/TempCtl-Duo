@@ -70,6 +70,15 @@ lv_obj_t * wifi_list_create(lv_obj_t * parent)
 
         wifi_item_create(scan_list, "Guest");
 
+        lv_obj_t * scan_spinner = lv_spinner_create(lv_obj_0);
+        lv_obj_set_name(scan_spinner, "scan_spinner");
+        lv_obj_set_x(scan_spinner, 132);
+        lv_obj_set_y(scan_spinner, 84);
+        lv_obj_set_width(scan_spinner, 48);
+        lv_obj_set_height(scan_spinner, 48);
+        lv_obj_add_style(scan_spinner, &style_spinner, 0);
+        lv_obj_add_style(scan_spinner, &style_spinner, LV_PART_INDICATOR);
+
         lv_obj_t * scan_cancel = lv_button_create(lv_obj_0);
         lv_obj_set_name(scan_cancel, "scan_cancel");
         lv_obj_set_x(scan_cancel, 220);

@@ -2403,7 +2403,7 @@
 /** Include the header given by LV_ASSERT_CUSTOM_INCLUDE, which must define
  *  a custom LV_ASSERT_HANDLER.
  */
-#define LV_ASSERT_USE_CUSTOM_INCLUDE 0
+#define LV_ASSERT_USE_CUSTOM_INCLUDE 1  /* TempCtl: abort() instead of freezing, see the header */
 
 #if LV_ASSERT_USE_CUSTOM_INCLUDE
 /** Optional header to override assert-related macros.
@@ -2412,7 +2412,7 @@
  *    Statement to execute when an assertion fails.
  *    e.g. #define LV_ASSERT_HANDLER my_assert_failed(__FILE__, __LINE__);
  */
-#define LV_ASSERT_CUSTOM_INCLUDE ""
+#define LV_ASSERT_CUSTOM_INCLUDE "lv_assert_custom.h"
 
 #endif /*LV_ASSERT_USE_CUSTOM_INCLUDE*/
 

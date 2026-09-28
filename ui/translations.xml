@@ -8,7 +8,8 @@
      Not in here: tab names and dropdown options (edit them in the XML files). -->
 <translations languages="en">
 	<!-- common -->
-	<translation tag="blank" en=" " /><!-- a space: an empty text is exported as "missing" and the tag would be shown -->
+	<translation tag="blank" en=" " />
+	<!-- a space: an empty text is exported as "missing" and the tag would be shown -->
 	<translation tag="btn_save" en="Save" />
 	<translation tag="btn_cancel" en="Cancel" />
 	<translation tag="btn_stop" en="Stop" />
@@ -19,7 +20,7 @@
 	<translation tag="time_s" en="%1 s" />
 
 	<!-- Main -->
-	<translation tag="main_pv_caption" en="Process value (C)" />
+	<translation tag="main_pv_caption" en="Process value (°C)" />
 	<translation tag="main_manual_sp" en="Manual SP on/off" />
 	<translation tag="main_on_off" en="on / off" />
 	<translation tag="st_idle" en="Idle" />
@@ -77,6 +78,8 @@
 	<translation tag="sys_display" en="Display" />
 	<translation tag="sys_rotate" en="Rotate 180 deg" />
 	<translation tag="sys_brightness" en="Brightness" />
+	<translation tag="sys_theme" en="Colour theme" />
+	<translation tag="sys_dark" en="Dark mode" />
 	<translation tag="sys_wifi" en="Wi-Fi" />
 	<translation tag="sys_network" en="Network" />
 	<translation tag="sys_password" en="Password" />

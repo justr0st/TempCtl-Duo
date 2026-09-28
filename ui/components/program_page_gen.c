@@ -52,8 +52,9 @@ lv_obj_t * program_page_create(lv_obj_t * parent)
         lv_obj_set_y(prog_select, 0);
         lv_obj_set_width(prog_select, 196);
         lv_obj_set_height(prog_select, 32);
-        lv_dropdown_set_options(prog_select, "1 Example");
+        lv_dropdown_set_options(prog_select, "1 GPU desolder (LeadFree)");
         lv_obj_set_style_pad_all(prog_select, 7, 0);
+        lv_obj_set_style_text_font(prog_select, font_14, 0);
         lv_obj_add_style(prog_select, &style_panel, 0);
 
         lv_obj_t * prog_rename = lv_button_create(lv_obj_0);
@@ -98,14 +99,15 @@ lv_obj_t * program_page_create(lv_obj_t * parent)
         lv_obj_set_height(prog_table, 104);
         lv_table_set_column_count(prog_table, 4);
         lv_table_set_row_count(prog_table, 3);
+        lv_obj_set_style_text_font(prog_table, font_14, 0);
         lv_obj_set_style_pad_all(prog_table, 0, 0);
         lv_obj_add_style(prog_table, &style_panel, 0);
         lv_obj_add_style(prog_table, &style_panel, LV_PART_ITEMS);
         lv_obj_add_style(prog_table, &style_table_cell, LV_PART_ITEMS);
-        lv_table_set_column_width(prog_table, 0, 34);
-        lv_table_set_column_width(prog_table, 1, 94);
-        lv_table_set_column_width(prog_table, 2, 94);
-        lv_table_set_column_width(prog_table, 3, 92);
+        lv_table_set_column_width(prog_table, 0, 44);
+        lv_table_set_column_width(prog_table, 1, 90);
+        lv_table_set_column_width(prog_table, 2, 90);
+        lv_table_set_column_width(prog_table, 3, 90);
         lv_table_set_cell_value(prog_table, 0, 0, "1");
         lv_table_set_cell_value(prog_table, 0, 1, "100.0");
         lv_table_set_cell_value(prog_table, 0, 2, "30 min");
@@ -131,8 +133,8 @@ lv_obj_t * program_page_create(lv_obj_t * parent)
         lv_obj_set_x(prog_unsaved, 200);
         lv_obj_set_y(prog_unsaved, 158);
         lv_label_set_text(prog_unsaved, "unsaved");
-        lv_obj_set_style_text_color(prog_unsaved, COLOR_WARN, 0);
         lv_obj_add_style(prog_unsaved, &style_small, 0);
+        lv_obj_add_style(prog_unsaved, &style_text_warn, 0);
 
         lv_obj_t * prog_add = lv_button_create(lv_obj_0);
         lv_obj_set_name(prog_add, "prog_add");

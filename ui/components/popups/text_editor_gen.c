@@ -60,7 +60,7 @@ lv_obj_t * text_editor_create(lv_obj_t * parent)
         lv_obj_set_y(text_ta, 20);
         lv_obj_set_width(text_ta, 312);
         lv_textarea_set_one_line(text_ta, true);
-        lv_textarea_set_text(text_ta, "Glaze firing");
+        lv_textarea_set_text(text_ta, "GPU desolder (LeadFree)");
 
         lv_obj_t * text_kb = lv_keyboard_create(lv_obj_0);
         lv_obj_set_name(text_kb, "text_kb");

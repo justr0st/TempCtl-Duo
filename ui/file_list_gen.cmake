@@ -20,6 +20,12 @@ list(
   ${CMAKE_CURRENT_LIST_DIR}/fonts/font_32_data.c
   ${CMAKE_CURRENT_LIST_DIR}/fonts/font_48_data.c
   ${CMAKE_CURRENT_LIST_DIR}/fonts/font_icons_14_data.c
+  ${CMAKE_CURRENT_LIST_DIR}/fonts/fontM_12_data.c
+  ${CMAKE_CURRENT_LIST_DIR}/fonts/fontM_14_data.c
+  ${CMAKE_CURRENT_LIST_DIR}/fonts/fontM_20_data.c
+  ${CMAKE_CURRENT_LIST_DIR}/fonts/fontM_24_data.c
+  ${CMAKE_CURRENT_LIST_DIR}/fonts/fontM_32_data.c
+  ${CMAKE_CURRENT_LIST_DIR}/fonts/fontM_48_data.c
   ${CMAKE_CURRENT_LIST_DIR}/screens/gui_gen.c
   ${CMAKE_CURRENT_LIST_DIR}/tempctl_ui_gen.c
   ${CMAKE_CURRENT_LIST_DIR}/tempctl_ui.c)

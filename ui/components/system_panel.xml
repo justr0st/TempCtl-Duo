@@ -12,6 +12,15 @@
 		<setting_row label="sys_brightness" style_pad_right="14">
 			<lv_slider name="sys_bright" width="140" min_value="10" max_value="255" value="200" />
 		</setting_row>
+		<!-- palette names and order are set by the firmware (src/ui_gen.c, PALETTE_NAMES) -->
+		<setting_row label="sys_theme">
+			<lv_dropdown name="sys_theme" width="140" options="Default&#10;Dracula&#10;Solarized&#10;Gruvbox&#10;Catppuccin&#10;One">
+				<style name="style_panel" />
+			</lv_dropdown>
+		</setting_row>
+		<setting_row label="sys_dark">
+			<lv_switch name="sys_dark" />
+		</setting_row>
 
 		<lv_label translation_tag="sys_wifi" style_pad_top="6">
 			<style name="style_caption" />

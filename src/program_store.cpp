@@ -16,13 +16,17 @@ static void pathFor(int idx, char* out, size_t n) { snprintf(out, n, "/prog%d.bi
 
 static void defaultName(int idx, char* out, size_t n) { snprintf(out, n, "Program %d", idx + 1); }
 
+// Example for the first start: lead-free (SAC305) BGA desolder profile for a GPU
+// core on a rework station: preheat, soak, ramp to reflow, peak for removal.
+// Targets in degrees C, times in seconds. Adapt to the station, the board and
+// where the thermocouple sits.
 void programExample(Program& p) {
-  programClear(p, "Example");
+  programClear(p, "GPU desolder (LeadFree)");
   const Step steps[] = {
-      {100, 30 * 60, 30 * 60},
-      {250, 60 * 60, 60 * 60},
-      {400, 60 * 60, 120 * 60},
-      {200, 90 * 60, 0},
+      {160, 60, 30},  // preheat
+      {190, 40, 40},  // soak
+      {225, 30, 20},  // ramp towards liquidus (217 C)
+      {245, 20, 40},  // peak: lift the chip
   };
   for (const Step& s : steps) programInsertStep(p, p.count, s);
 }

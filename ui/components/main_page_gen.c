@@ -58,7 +58,7 @@ lv_obj_t * main_page_create(lv_obj_t * parent)
         lv_obj_set_y(main_pv, 12);
         lv_label_set_text(main_pv, "153.8");
         lv_obj_set_style_text_font(main_pv, font_48, 0);
-        lv_obj_set_style_text_color(main_pv, COLOR_PV, 0);
+        lv_obj_add_style(main_pv, &style_text_pv, 0);
 
         lv_obj_t * main_sp = lv_label_create(lv_obj_0);
         lv_obj_set_name(main_sp, "main_sp");
@@ -66,7 +66,7 @@ lv_obj_t * main_page_create(lv_obj_t * parent)
         lv_obj_set_y(main_sp, 62);
         lv_label_set_text(main_sp, "SP 150.0");
         lv_obj_set_style_text_font(main_sp, font_24, 0);
-        lv_obj_set_style_text_color(main_sp, COLOR_SP, 0);
+        lv_obj_add_style(main_sp, &style_text_sp, 0);
 
         lv_obj_t * main_link = lv_obj_create(lv_obj_0);
         lv_obj_set_name(main_link, "main_link");
@@ -77,8 +77,8 @@ lv_obj_t * main_page_create(lv_obj_t * parent)
         lv_obj_set_flag(main_link, LV_OBJ_FLAG_SCROLLABLE, false);
         lv_obj_set_style_radius(main_link, 6, 0);
         lv_obj_set_style_border_width(main_link, 0, 0);
-        lv_obj_set_style_bg_color(main_link, COLOR_OK, 0);
         lv_obj_set_style_bg_opa(main_link, (255 * 100 / 100), 0);
+        lv_obj_add_style(main_link, &style_bg_ok, 0);
         lv_obj_add_style(main_link, &style_link_error, LV_STATE_USER_1);
 
         lv_obj_t * main_state = lv_label_create(lv_obj_0);
@@ -101,7 +101,7 @@ lv_obj_t * main_page_create(lv_obj_t * parent)
         lv_obj_set_y(main_total, 38);
         lv_obj_set_width(main_total, 140);
         lv_label_set_long_mode(main_total, LV_LABEL_LONG_MODE_DOTS);
-        lv_label_set_text(main_total, "Example, 10:18:05");
+        lv_label_set_text(main_total, "GPU desolder (LeadFree), 4:40");
         lv_obj_add_style(main_total, &style_small, 0);
 
         lv_obj_t * main_out = lv_label_create(lv_obj_0);
@@ -129,6 +129,7 @@ lv_obj_t * main_page_create(lv_obj_t * parent)
         lv_obj_set_x(lv_label_1, 156);
         lv_obj_set_y(lv_label_1, 101);
         lv_label_set_translation_tag(lv_label_1, "main_manual_sp");
+        lv_obj_set_style_text_font(lv_label_1, font_14, 0);
 
         lv_obj_t * main_man_sp = lv_button_create(lv_obj_0);
         lv_obj_set_name(main_man_sp, "main_man_sp");
@@ -136,15 +137,15 @@ lv_obj_t * main_page_create(lv_obj_t * parent)
         lv_obj_set_y(main_man_sp, 92);
         lv_obj_set_width(main_man_sp, 92);
         lv_obj_set_height(main_man_sp, ROW_HEIGHT);
-        lv_obj_set_style_bg_opa(main_man_sp, 100, 0);
-        lv_obj_set_style_border_color(main_man_sp, COLOR_ACCENT, 0);
+        lv_obj_set_style_bg_opa(main_man_sp, 60, 0);
         lv_obj_set_style_border_width(main_man_sp, 2, 0);
+        lv_obj_add_style(main_man_sp, &style_border_accent, 0);
         lv_obj_t * main_man_sp_text = lv_label_create(main_man_sp);
         lv_obj_set_name(main_man_sp_text, "main_man_sp_text");
         lv_obj_set_align(main_man_sp_text, LV_ALIGN_CENTER);
         lv_label_set_text(main_man_sp_text, "150.0");
         lv_obj_set_style_text_font(main_man_sp_text, font_32, 0);
-        lv_obj_set_style_text_color(main_man_sp_text, COLOR_ACCENT, 0);
+        lv_obj_add_style(main_man_sp_text, &style_text_accent, 0);
 
         lv_obj_t * main_man_sw = lv_switch_create(lv_obj_0);
         lv_obj_set_name(main_man_sw, "main_man_sw");
@@ -159,8 +160,10 @@ lv_obj_t * main_page_create(lv_obj_t * parent)
         lv_obj_set_y(main_prog, 132);
         lv_obj_set_width(main_prog, 140);
         lv_obj_set_height(main_prog, 36);
-        lv_dropdown_set_options(main_prog, "1 Example");
+        lv_dropdown_set_options(main_prog, "1 GPU desolder (LeadFree)");
         lv_obj_set_style_pad_all(main_prog, 8, 0);
+        lv_obj_set_style_pad_left(main_prog, 4, 0);
+        lv_obj_set_style_text_font(main_prog, font_14, 0);
         lv_obj_add_style(main_prog, &style_panel, 0);
 
         lv_obj_t * main_start = lv_button_create(lv_obj_0);

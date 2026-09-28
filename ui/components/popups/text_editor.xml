@@ -8,7 +8,7 @@
 	<view extends="lv_obj" width="100%" height="100%" scrollable="false">
 		<style name="style_popup" />
 		<lv_label name="text_title" x="0" y="0" width="312" long_mode="dots" text="Name of program 1" />
-		<lv_textarea name="text_ta" x="0" y="20" width="312" one_line="true" text="Glaze firing" />
+		<lv_textarea name="text_ta" x="0" y="20" width="312" one_line="true" text="GPU desolder (LeadFree)" />
 		<lv_keyboard name="text_kb" width="312" height="166" align="bottom_mid" mode="text_lower" />
 	</view>
 </component>

@@ -6,7 +6,12 @@
 #include <string.h>
 
 static constexpr uint32_t SETTINGS_MAGIC = 0x54435331;  // "TCS1"
-static constexpr uint16_t SETTINGS_VERSION = 3;
+static constexpr uint16_t SETTINGS_VERSION = 4;
+
+// Version 3 (firmware 1.2.0): identical to Settings up to manualSp; version 4
+// appended the theme fields.
+static constexpr size_t V3_SIZE = offsetof(Settings, themePalette);
+static_assert(V3_SIZE % alignof(Settings) == 0, "v3 size must be the old sizeof(Settings)");
 
 // Version 2 layout (firmware 1.0.x): identical to Settings up to scanTo,
 // followed by a fixed 6-step program with times in minutes.
@@ -108,6 +113,9 @@ void settingsDefaults(Settings& s) {
   s.rotate180 = 0;
   s.selProgram = 0;
   s.manualSp = 20;
+
+  s.themePalette = 0;
+  s.themeDark = THEME_DARK_DEFAULT;
 }
 
 static bool migrateV2(Preferences& p, Settings& s, Program* legacy, bool* haveLegacy) {
@@ -142,7 +150,13 @@ bool settingsLoad(Settings& s, Program* legacy, bool* haveLegacy) {
   const size_t n = p.getBytes("cfg", &tmp, sizeof(tmp));
   bool ok = n == sizeof(tmp) && tmp.magic == SETTINGS_MAGIC && tmp.version == SETTINGS_VERSION;
   bool migrated = false;
-  if (!ok) migrated = migrateV2(p, s, legacy, haveLegacy);
+  if (!ok && n == V3_SIZE && tmp.magic == SETTINGS_MAGIC && tmp.version == 3) {  // keep everything, add the theme
+    settingsDefaults(s);
+    memcpy(&s, &tmp, V3_SIZE);
+    s.version = SETTINGS_VERSION;
+    migrated = true;
+  }
+  if (!ok && !migrated) migrated = migrateV2(p, s, legacy, haveLegacy);
   p.end();
   if (migrated) {
     settingsSave(s);

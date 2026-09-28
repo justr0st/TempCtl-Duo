@@ -8,6 +8,7 @@
 #include "app_state.h"
 #include "controller.h"
 #include "net.h"
+#include "ui.h"
 #include "web_page.h"
 
 static WebServer server(80);
@@ -347,6 +348,16 @@ static void handleGetSettings() {
   d["spMax"] = S.spMax;
   d["brightness"] = S.brightness;
   d["rotate180"] = S.rotate180 != 0;
+  d["themePalette"] = S.themePalette;
+  d["themeDark"] = S.themeDark != 0;
+  JsonArray themes = d["themes"].to<JsonArray>();  // palette names, index = themePalette
+  for (const char* p = uiPaletteNames(); *p;) {
+    const char* e = strchr(p, '\n');
+    const size_t n = e ? (size_t)(e - p) : strlen(p);
+    themes.add(String(p).substring(0, n));
+    if (!e) break;
+    p = e + 1;
+  }
   d["hostname"] = S.hostname;
   d["ssid"] = S.ssid;
   d["scanFrom"] = S.scanFrom;
@@ -419,6 +430,8 @@ static void handlePostSettings() {
     if (S.spMax < S.spMin) S.spMax = S.spMin;
     upd<uint8_t>(d["brightness"], S.brightness, 10, 255);
     if (!d["rotate180"].isNull()) S.rotate180 = d["rotate180"].as<bool>();
+    upd<uint8_t>(d["themePalette"], S.themePalette, 0, (uint8_t)(uiPaletteCount() - 1));
+    if (!d["themeDark"].isNull()) S.themeDark = d["themeDark"].as<bool>();
     if (d["hostname"].is<const char*>()) strlcpy(S.hostname, d["hostname"], sizeof(S.hostname));
     upd<uint16_t>(d["scanFrom"], S.scanFrom, 0, 65534);
     upd<uint16_t>(d["scanTo"], S.scanTo, 0, 65534);

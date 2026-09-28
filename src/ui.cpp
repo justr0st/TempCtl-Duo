@@ -225,10 +225,12 @@ static void syncDropdown(lv_obj_t* dd, char* cache, size_t n, int sel) {
 static lv_obj_t* modal = nullptr;
 static lv_obj_t* modalTa = nullptr;
 static lv_obj_t* modalUnits = nullptr;  // time editor: "min" / "s"
+static lv_obj_t* scanPopup = nullptr;   // the Wi-Fi list popup while it is open
 
 static void modalClose() {
   if (modal) lv_obj_delete_async(modal);
   modal = nullptr;
+  scanPopup = nullptr;
   modalTa = nullptr;
   modalUnits = nullptr;
 }
@@ -354,7 +356,7 @@ static int pendingSwitch = -1;  // program to switch to after the save/discard q
 static lv_obj_t *chart, *chartYScale, *chartXScale, *lblChartInfo;
 static lv_chart_series_t *serPv, *serSp, *serPlan;
 // Setup tab
-static lv_obj_t *swRotate, *sldBright, *lblSsid, *lblPass, *lblApPass, *lblSysInfo;
+static lv_obj_t *swRotate, *sldBright, *ddTheme, *swDark, *lblSsid, *lblPass, *lblApPass, *lblSysInfo;
 static lv_obj_t *ddProfile, *lblSlave, *ddBaud, *ddFormat, *ddRamp, *swSoak, *lblBand, *swLock, *ddEnd, *lblCtlInfo;
 static bool setupLoading = false;
 static char wifiSsid[33], wifiPass[65], wifiApPass[33];
@@ -958,6 +960,8 @@ static void refreshSystem() {
   }
   setChecked(swRotate, S.rotate180);
   if (sldBright) lv_slider_set_value(sldBright, S.brightness, LV_ANIM_OFF);
+  if (ddTheme) lv_dropdown_set_selected(ddTheme, S.themePalette);
+  setChecked(swDark, S.themeDark);
   strlcpy(wifiSsid, S.ssid, sizeof(wifiSsid));
   strlcpy(wifiPass, S.pass, sizeof(wifiPass));
   strlcpy(wifiApPass, S.apPass, sizeof(wifiApPass));
@@ -1003,6 +1007,57 @@ extern "C" void ui_on_brightness_done(lv_event_t*) {
   if (!setupLoading) saveSettingsQuiet();
 }
 
+// Colour palette + dark / light mode (System > Display). Recolours the styles
+// from ui/globals.xml (uiGenSetPalette), the LVGL theme (buttons, switches,
+// dropdown lists, keyboards ...), the chart series and the colours the program
+// table draws itself. Popups take the colours when they are opened.
+static int appliedPalette = -1, appliedDark = -1;
+
+static void applyTheme(int palette, bool dark) {
+  uiGenSetPalette(palette, dark);
+  lv_theme_default_init(disp, uiGenColor(UI_COLOR_ACCENT), uiGenColor(UI_COLOR_ACCENT2), dark,
+                        &lv_font_montserrat_14);
+  colRowSelected = uiGenColor(UI_COLOR_ROW_SELECTED);
+  colStepNo = uiGenColor(UI_COLOR_MUTED);
+  if (chart && serPlan) {
+    lv_chart_set_series_color(chart, serPv, uiGenColor(UI_COLOR_PV));
+    lv_chart_set_series_color(chart, serSp, uiGenColor(UI_COLOR_SP));
+    lv_chart_set_series_color(chart, serPlan, uiGenColor(UI_COLOR_PLAN));
+  }
+  if (screen) lv_obj_invalidate(screen);
+  appliedPalette = palette;
+  appliedDark = dark;
+}
+
+extern "C" void ui_on_theme(lv_event_t*) {
+  if (setupLoading || !ddTheme) return;
+  const uint8_t p = (uint8_t)lv_dropdown_get_selected(ddTheme);
+  bool dark;
+  {
+    Guard g;
+    gSettings.themePalette = p;
+    dark = gSettings.themeDark;
+  }
+  applyTheme(p, dark);
+  saveSettingsQuiet();
+}
+
+extern "C" void ui_on_dark(lv_event_t*) {
+  if (setupLoading || !swDark) return;
+  const bool dark = lv_obj_has_state(swDark, LV_STATE_CHECKED);
+  uint8_t p;
+  {
+    Guard g;
+    gSettings.themeDark = dark;
+    p = gSettings.themePalette;
+  }
+  applyTheme(p, dark);
+  saveSettingsQuiet();
+}
+
+const char* uiPaletteNames() { return uiGenPaletteNames(); }
+int uiPaletteCount() { return uiGenPaletteCount(); }
+
 static void applySsid(const char* t, int) {
   strlcpy(wifiSsid, t, sizeof(wifiSsid));
   refreshWifiButtons();
@@ -1033,16 +1088,30 @@ static void onScanPick(lv_event_t* e) {
 }
 static void onScanCancel(lv_event_t*) { modalClose(); }
 
-static void showScanResult(const char* names, int count) {
+// The Wi-Fi list popup opens as soon as Scan is tapped and shows a spinner
+// (scan_spinner) until the scan is done; then the spinner is hidden and the
+// networks are listed. Cancel closes it at any time (the scan keeps running
+// in the background and is collected by pollScan()).
+static void scanPopupOpen() {
   if (modal) return;
-  if (!modalCreate(uiGenWifiList, "scan_title",
-                   count > 0 ? T("scan_pick") : count == 0 ? T("scan_none") : T("scan_failed")))
-    return;
-  lv_obj_t* list = childByName(modal, "scan_list");
+  if (!modalCreate(uiGenWifiList, "scan_title", T("scan_running"))) return;
+  scanPopup = modal;
   lv_obj_t* cancel = childByName(modal, "scan_cancel");
   if (cancel) lv_obj_add_event_cb(cancel, onScanCancel, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t* list = childByName(modal, "scan_list");
+  if (list) lv_obj_clean(list);  // remove the example rows
+  lv_obj_t* spinner = childByName(modal, "scan_spinner");
+  if (spinner) lv_obj_set_hidden(spinner, false);
+}
+
+static void scanPopupShowResult(const char* names, int count) {
+  if (!scanPopup || modal != scanPopup) return;  // closed meanwhile
+  setText(childByName(modal, "scan_title"),
+          count > 0 ? T("scan_pick") : count == 0 ? T("scan_none") : T("scan_failed"));
+  lv_obj_t* spinner = childByName(modal, "scan_spinner");
+  if (spinner) lv_obj_set_hidden(spinner, true);
+  lv_obj_t* list = childByName(modal, "scan_list");
   if (!list) return;
-  lv_obj_clean(list);  // remove the example rows
   const char* p = names;
   for (int i = 0; i < count && p && *p; ++i) {
     const char* e = strchr(p, '\n');
@@ -1055,10 +1124,12 @@ static void showScanResult(const char* names, int count) {
 }
 
 extern "C" void ui_on_scan(lv_event_t*) {
-  if (scanWaiting) return;
-  netScanStart();
-  scanWaiting = true;
-  setText(lblSysInfo, T("scan_running"));
+  if (!scanWaiting) {  // tapped again while a scan runs: just reopen the popup
+    netScanStart();
+    scanWaiting = true;
+    setText(lblSysInfo, T("scan_running"));
+  }
+  scanPopupOpen();
 }
 
 static void pollScan() {
@@ -1068,8 +1139,7 @@ static void pollScan() {
   if (n == -1) return;
   scanWaiting = false;
   updateSysInfo();
-  // only pop up the list if the user is still on the Setup tab
-  if (activeTab() == TAB_SETUP) showScanResult(names, n);
+  scanPopupShowResult(names, n);
 }
 
 // "Connecting..." message: closes itself once the station has an IP address,
@@ -1130,6 +1200,9 @@ extern "C" void ui_on_connect(lv_event_t*) {
 static void bindSystem() {
   swRotate = find("sys_rotate");
   sldBright = find("sys_bright");
+  ddTheme = find("sys_theme");
+  if (ddTheme) lv_dropdown_set_options(ddTheme, uiGenPaletteNames());
+  swDark = find("sys_dark");
   lblSsid = find("sys_ssid_text");
   lblPass = find("sys_pass_text");
   lblApPass = find("sys_ap_pass_text");
@@ -1295,6 +1368,13 @@ static void uiTimer(lv_timer_t*) {
     setChecked(swRotate, S.rotate180);
     setupLoading = false;
   }
+  if (S.themePalette != appliedPalette || (S.themeDark != 0) != appliedDark) {  // changed from the web page
+    applyTheme(S.themePalette, S.themeDark != 0);
+    setupLoading = true;
+    if (ddTheme) lv_dropdown_set_selected(ddTheme, S.themePalette);
+    setChecked(swDark, S.themeDark);
+    setupLoading = false;
+  }
   const int tab = activeTab();
   if (tab == TAB_MAIN) updateMain(L, S);
   if (tab == TAB_PROGRAM) updateProgramTab(S);
@@ -1344,6 +1424,8 @@ static const UiEvent UI_EVENTS[] = {
     {"sys_rotate", LV_EVENT_VALUE_CHANGED, ui_on_rotate},
     {"sys_bright", LV_EVENT_VALUE_CHANGED, ui_on_brightness},
     {"sys_bright", LV_EVENT_RELEASED, ui_on_brightness_done},
+    {"sys_theme", LV_EVENT_VALUE_CHANGED, ui_on_theme},
+    {"sys_dark", LV_EVENT_VALUE_CHANGED, ui_on_dark},
     {"sys_ssid", LV_EVENT_CLICKED, ui_on_ssid},
     {"sys_scan", LV_EVENT_CLICKED, ui_on_scan},
     {"sys_pass", LV_EVENT_CLICKED, ui_on_pass},
@@ -1370,11 +1452,13 @@ static void uiBindEvents() {
   }
 }
 
-static bool uiCreateScreen() {
-  // theme colors and dark / light from the constants in ui/globals.xml; set
-  // before the screen is created (tempctl_ui_init() creates it)
-  lv_theme_t* th = lv_theme_default_init(disp, uiGenColor(UI_COLOR_ACCENT), uiGenColor(UI_COLOR_ACCENT2),
-                                         uiGenThemeDark(), &lv_font_montserrat_14);
+static bool uiCreateScreen(int palette, bool dark) {
+  // palette and dark / light mode from the settings; the theme is set before
+  // the screen is created (tempctl_ui_init() creates it), the styles are
+  // recoloured by uiGenInit()
+  uiGenSetPalette(palette, dark);
+  lv_theme_t* th = lv_theme_default_init(disp, uiGenColor(UI_COLOR_ACCENT), uiGenColor(UI_COLOR_ACCENT2), dark,
+                                         &lv_font_montserrat_14);
   lv_display_set_theme(disp, th);
 
   // styles, fonts, translations (ui/translations.xml) and the permanent
@@ -1421,7 +1505,16 @@ void uiInit() {
   lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(indev, touchCb);
 
-  uiCreateScreen();
+  int palette;
+  bool dark;
+  {
+    Guard g;
+    if (gSettings.themePalette >= uiGenPaletteCount()) gSettings.themePalette = 0;
+    if (gSettings.themeDark == THEME_DARK_DEFAULT) gSettings.themeDark = uiGenThemeDark();  // first start
+    palette = gSettings.themePalette;
+    dark = gSettings.themeDark != 0;
+  }
+  uiCreateScreen(palette, dark);
   if (!screen) {  // show something useful instead of a black screen
     lv_obj_t* l = lv_label_create(lv_screen_active());
     lv_label_set_text(l, "UI could not be created.\nSee the serial log (115200 baud).");
@@ -1434,6 +1527,7 @@ void uiInit() {
   bindChart();
   bindSystem();
   bindController();
+  applyTheme(palette, dark);  // chart series, table colours
 
   lv_timer_create(uiTimer, 250, nullptr);
 }

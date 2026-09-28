@@ -7,7 +7,8 @@
      The axis numbers are off here (label_show="false") and switched on by
      the firmware: the LVGL Pro Editor preview aborts ("Invalidate area is
      not allowed during rendering") when scale numbers and labels are drawn
-     together on this page. Series colors = color_pv/sp/plan in globals.xml. -->
+     together on this page. The series colors here are for the preview; the
+     firmware sets them from the palette (roles pv, sp, plan). -->
 <component>
 	<!-- editor preview only (ignored by the firmware): the tab content size -->
 	<previews>
@@ -18,7 +19,7 @@
 
 		<!-- temperature axis: labels in degrees (range set by firmware) -->
 		<lv_scale name="chart_yscale" x="0" y="4" width="34" height="138" mode="vertical_left" min_value="0"
-			max_value="600" total_tick_count="6" major_tick_every="1" label_show="false" style_text_font="font_12">
+			max_value="300" total_tick_count="6" major_tick_every="1" label_show="false" style_text_font="font_12">
 			<style name="style_scale_ticks" selector="indicator" />
 			<style name="style_scale_line" />
 		</lv_scale>
@@ -28,11 +29,11 @@
 			<style name="style_panel" />
 			<style name="style_chart_line" selector="items" />
 			<style name="style_no_points" selector="indicator" />
-			<lv_chart-axis axis="primary_y" min_value="0" max_value="6000" />
-			<lv_chart-series color="0xFF5722" axis="primary_y" values="220 600 1000 1450 1900 2400 2480 2500 2510 2490 3000 3500 3950 3990 4010 4000" />
-			<lv_chart-series color="0x03A9F4" axis="primary_y" values="200 650 1050 1500 1950 2500 2500 2500 2500 2500 3000 3500 4000 4000 4000 4000" />
+			<lv_chart-axis axis="primary_y" min_value="0" max_value="3000" />
+			<lv_chart-series color="0xFF5722" axis="primary_y" values="230 515 980 1445 1580 1620 1775 1880 1880 1973 2214 2230 2430 2430 2430 2430" />
+			<lv_chart-series color="0x03A9F4" axis="primary_y" values="250 715 1180 1600 1600 1700 1855 1900 1900 2087 2250 2323 2450 2450 2450 2450" />
 			<lv_chart-series color="0x90A4AE" axis="primary_y"
-				values="1000 1500 2000 2500 2500 2500 4000 4000 4000 4000 5000 5500 6000 5500 5000 4500" />
+				values="250 715 1180 1600 1600 1700 1855 1900 1900 2087 2250 2323 2450 2450 2450 2450" />
 		</lv_chart>
 
 		<!-- time axis: labels written by firmware (-5:00 .. 0:00 or 0:00 .. end) -->
@@ -43,19 +44,22 @@
 		</lv_scale>
 
 		<!-- legend -->
-		<lv_label x="2" y="170" translation_tag="chart_pv" style_text_color="#color_pv">
+		<lv_label x="2" y="170" translation_tag="chart_pv">
 			<style name="style_small" />
+			<style name="style_text_pv" />
 		</lv_label>
-		<lv_label x="30" y="170" translation_tag="chart_sp" style_text_color="#color_sp">
+		<lv_label x="30" y="170" translation_tag="chart_sp">
 			<style name="style_small" />
+			<style name="style_text_sp" />
 		</lv_label>
-		<lv_label x="58" y="170" translation_tag="chart_program" style_text_color="#color_plan">
+		<lv_label x="58" y="170" translation_tag="chart_program">
 			<style name="style_small" />
+			<style name="style_text_plan" />
 		</lv_label>
 		<lv_label x="120" y="170" translation_tag="chart_dashed">
 			<style name="style_caption" />
 		</lv_label>
-		<lv_label name="chart_info" x="2" y="186" width="312" long_mode="dots" text="Last 5 min. Preview: Example (10:18:05)">
+		<lv_label name="chart_info" x="2" y="186" width="312" long_mode="dots" text="Last 5 min. Preview: GPU desolder (LeadFree) (4:40)">
 			<style name="style_small" />
 		</lv_label>
 	</view>

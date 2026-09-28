@@ -8,8 +8,12 @@
 		<lv_label x="2" y="0" translation_tag="main_pv_caption">
 			<style name="style_caption" />
 		</lv_label>
-		<lv_label name="main_pv" x="0" y="12" text="153.8" style_text_font="font_48" style_text_color="#color_pv" />
-		<lv_label name="main_sp" x="2" y="62" text="SP 150.0" style_text_font="font_24" style_text_color="#color_sp" />
+		<lv_label name="main_pv" x="0" y="12" text="153.8" style_text_font="font_48">
+			<style name="style_text_pv" />
+		</lv_label>
+		<lv_label name="main_sp" x="2" y="62" text="SP 150.0" style_text_font="font_24">
+			<style name="style_text_sp" />
+		</lv_label>
 
 		<!-- status column (set by firmware) -->
 		<lv_obj
@@ -21,9 +25,9 @@
 			scrollable="false"
 			style_radius="6"
 			style_border_width="0"
-			style_bg_color="#color_ok"
 			style_bg_opa="100%"
 		>
+			<style name="style_bg_ok" />
 			<!-- state user_1 = no answer from the controller (set by firmware) -->
 			<style name="style_link_error" selector="user_1" />
 		</lv_obj>
@@ -31,7 +35,7 @@
 		<lv_label name="main_phase" x="176" y="24" text="Ramp 36:40 left">
 			<style name="style_small" />
 		</lv_label>
-		<lv_label name="main_total" x="176" y="38" width="140" long_mode="dots" text="Example, 10:18:05">
+		<lv_label name="main_total" x="176" y="38" width="140" long_mode="dots" text="GPU desolder (LeadFree), 4:40">
 			<style name="style_small" />
 		</lv_label>
 		<lv_label name="main_out" x="176" y="52" text="Out 37%">
@@ -45,29 +49,40 @@
 		</lv_label>
 
 		<!-- manual setpoint -->
-		<lv_label x="156" y="101" translation_tag="main_manual_sp" />
+		<lv_label x="156" y="101" translation_tag="main_manual_sp" style_text_font="font_14" />
 		<lv_button
 			name="main_man_sp"
 			x="0"
 			y="92"
 			width="92"
 			height="#row_height"
-			style_bg_opa="100"
-			style_border_color="#color_accent"
+			style_bg_opa="60"
 			style_border_width="2"
 		>
+			<style name="style_border_accent" />
 			<lv_label
 				name="main_man_sp_text"
 				align="center"
 				text="150.0"
 				style_text_font="font_32"
-				style_text_color="#color_accent"
-			/>
+			>
+				<style name="style_text_accent" />
+			</lv_label>
 		</lv_button>
 		<lv_switch name="main_man_sw" x="96" y="92" width="54" height="32" />
 
 		<!-- program selection and run controls -->
-		<lv_dropdown name="main_prog" x="0" y="132" width="140" height="36" options="1 Example" style_pad_all="8">
+		<lv_dropdown
+			name="main_prog"
+			x="0"
+			y="132"
+			width="140"
+			height="36"
+			options="1 GPU desolder (LeadFree)"
+			style_pad_all="8"
+			style_pad_left="4"
+			style_text_font="font_14"
+		>
 			<style name="style_panel" />
 		</lv_dropdown>
 		<lv_button name="main_start" x="144" y="132" width="46" height="36">

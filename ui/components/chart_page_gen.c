@@ -54,7 +54,7 @@ lv_obj_t * chart_page_create(lv_obj_t * parent)
         lv_obj_set_height(chart_yscale, 138);
         lv_scale_set_mode(chart_yscale, LV_SCALE_MODE_VERTICAL_LEFT);
         lv_scale_set_min_value(chart_yscale, 0);
-        lv_scale_set_max_value(chart_yscale, 600);
+        lv_scale_set_max_value(chart_yscale, 300);
         lv_scale_set_total_tick_count(chart_yscale, 6);
         lv_scale_set_major_tick_every(chart_yscale, 1);
         lv_scale_set_label_show(chart_yscale, false);
@@ -77,15 +77,15 @@ lv_obj_t * chart_page_create(lv_obj_t * parent)
         lv_obj_add_style(chart, &style_chart_line, LV_PART_ITEMS);
         lv_obj_add_style(chart, &style_no_points, LV_PART_INDICATOR);
         lv_chart_set_axis_min_value(chart, LV_CHART_AXIS_PRIMARY_Y, 0);
-        lv_chart_set_axis_max_value(chart, LV_CHART_AXIS_PRIMARY_Y, 6000);
+        lv_chart_set_axis_max_value(chart, LV_CHART_AXIS_PRIMARY_Y, 3000);
         lv_chart_series_t * lv_chart_series_0 = lv_chart_add_series(chart, lv_color_hex(0xFF5722), LV_CHART_AXIS_PRIMARY_Y);
-        static const int32_t chart_values_0[] = {220, 600, 1000, 1450, 1900, 2400, 2480, 2500, 2510, 2490, 3000, 3500, 3950, 3990, 4010, 4000};
+        static const int32_t chart_values_0[] = {230, 515, 980, 1445, 1580, 1620, 1775, 1880, 1880, 1973, 2214, 2230, 2430, 2430, 2430, 2430};
         lv_chart_set_series_values(chart, lv_chart_series_0, chart_values_0, 16);
         lv_chart_series_t * lv_chart_series_1 = lv_chart_add_series(chart, lv_color_hex(0x03A9F4), LV_CHART_AXIS_PRIMARY_Y);
-        static const int32_t chart_values_1[] = {200, 650, 1050, 1500, 1950, 2500, 2500, 2500, 2500, 2500, 3000, 3500, 4000, 4000, 4000, 4000};
+        static const int32_t chart_values_1[] = {250, 715, 1180, 1600, 1600, 1700, 1855, 1900, 1900, 2087, 2250, 2323, 2450, 2450, 2450, 2450};
         lv_chart_set_series_values(chart, lv_chart_series_1, chart_values_1, 16);
         lv_chart_series_t * lv_chart_series_2 = lv_chart_add_series(chart, lv_color_hex(0x90A4AE), LV_CHART_AXIS_PRIMARY_Y);
-        static const int32_t chart_values_2[] = {1000, 1500, 2000, 2500, 2500, 2500, 4000, 4000, 4000, 4000, 5000, 5500, 6000, 5500, 5000, 4500};
+        static const int32_t chart_values_2[] = {250, 715, 1180, 1600, 1600, 1700, 1855, 1900, 1900, 2087, 2250, 2323, 2450, 2450, 2450, 2450};
         lv_chart_set_series_values(chart, lv_chart_series_2, chart_values_2, 16);
 
         lv_obj_t * chart_xscale = lv_scale_create(lv_obj_0);
@@ -108,22 +108,22 @@ lv_obj_t * chart_page_create(lv_obj_t * parent)
         lv_obj_set_x(lv_label_0, 2);
         lv_obj_set_y(lv_label_0, 170);
         lv_label_set_translation_tag(lv_label_0, "chart_pv");
-        lv_obj_set_style_text_color(lv_label_0, COLOR_PV, 0);
         lv_obj_add_style(lv_label_0, &style_small, 0);
+        lv_obj_add_style(lv_label_0, &style_text_pv, 0);
 
         lv_obj_t * lv_label_1 = lv_label_create(lv_obj_0);
         lv_obj_set_x(lv_label_1, 30);
         lv_obj_set_y(lv_label_1, 170);
         lv_label_set_translation_tag(lv_label_1, "chart_sp");
-        lv_obj_set_style_text_color(lv_label_1, COLOR_SP, 0);
         lv_obj_add_style(lv_label_1, &style_small, 0);
+        lv_obj_add_style(lv_label_1, &style_text_sp, 0);
 
         lv_obj_t * lv_label_2 = lv_label_create(lv_obj_0);
         lv_obj_set_x(lv_label_2, 58);
         lv_obj_set_y(lv_label_2, 170);
         lv_label_set_translation_tag(lv_label_2, "chart_program");
-        lv_obj_set_style_text_color(lv_label_2, COLOR_PLAN, 0);
         lv_obj_add_style(lv_label_2, &style_small, 0);
+        lv_obj_add_style(lv_label_2, &style_text_plan, 0);
 
         lv_obj_t * lv_label_3 = lv_label_create(lv_obj_0);
         lv_obj_set_x(lv_label_3, 120);
@@ -137,7 +137,7 @@ lv_obj_t * chart_page_create(lv_obj_t * parent)
         lv_obj_set_y(chart_info, 186);
         lv_obj_set_width(chart_info, 312);
         lv_label_set_long_mode(chart_info, LV_LABEL_LONG_MODE_DOTS);
-        lv_label_set_text(chart_info, "Last 5 min. Preview: Example (10:18:05)");
+        lv_label_set_text(chart_info, "Last 5 min. Preview: GPU desolder (LeadFree) (4:40)");
         lv_obj_add_style(chart_info, &style_small, 0);
 
         the_root = lv_obj_0;

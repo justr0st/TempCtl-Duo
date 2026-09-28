@@ -72,7 +72,13 @@ struct Settings {
   uint8_t rotate180;   // display turned upside down
   uint8_t selProgram;  // program selected on the Main screen (0..MAX_PROGRAMS-1)
   float manualSp;      // last manual setpoint
+
+  // ---- added in version 4 ----
+  uint8_t themePalette;  // colour palette (ui/globals.xml, System > Display)
+  uint8_t themeDark;     // 1 dark, 0 light, THEME_DARK_DEFAULT = theme_dark in ui/globals.xml
 };
+
+constexpr uint8_t THEME_DARK_DEFAULT = 0xFF;
 
 void regMapDefaults(RegMap& r, uint8_t profile);
 void settingsDefaults(Settings& s);
