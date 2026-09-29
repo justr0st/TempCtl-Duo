@@ -83,6 +83,8 @@ enum CmdType : uint8_t {
   CMD_MANUAL_OFF,   // arg = channel
   CMD_MANUAL_SP,    // arg = channel, value = new manual setpoint
   CMD_ACK_FAULT,    // arg = channel: acknowledge a latched fault
+  CMD_TUNE_START,   // arg = channel (local), value = test temperature
+  CMD_TUNE_STOP,    // arg = channel
 };
 
 struct Cmd {

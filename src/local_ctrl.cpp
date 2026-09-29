@@ -39,6 +39,9 @@ struct Local {
   char faultText[64] = "";
   Pid pid;
   RunawayMonitor runaway;
+  RelayAutotune tune;
+  bool tuning = false;
+  float tuneSp = NAN;
 };
 
 static Local loc[NUM_CHANNELS];
@@ -164,6 +167,10 @@ static void latch(Local& l, uint8_t f, const char* text) {
   l.on = false;
   l.pid.reset();
   l.runaway.reset();
+  if (l.tuning) {
+    l.tune.stop();
+    l.tuning = false;
+  }
 }
 
 static void step(int ch, float dt) {
@@ -200,15 +207,31 @@ static void step(int ch, float dt) {
     const bool fresh = l.everGood && millis() - l.lastGoodMs < FRESH_MS && l.badReads == 0;
     char t[64];
     // faults are latched only while the outputs are on; when off the channel just shows "no reading"
-    if (l.badReads >= BAD_READS_FAULT && l.on) {
+    const bool heating = l.on || l.tuning;
+    if (l.badReads >= BAD_READS_FAULT && heating) {
       snprintf(t, sizeof(t), "%s", tcFaultName(r.fault));
       latch(l, FAULT_SENSOR, t);
     }
-    if (fresh && l.on && l.pv > c.maxTemp) {
+    if (fresh && heating && l.pv > c.maxTemp) {
       snprintf(t, sizeof(t), "%.1f C above the cut-off %.0f C", l.pv, c.maxTemp);
       latch(l, FAULT_OVERTEMP, t);
     }
-    if (!l.fault && l.on && fresh && !isnan(l.sp)) {
+    if (!l.fault && l.tuning) {
+      // autotune drives the output; runaway: "heating failed" only (the PV swings around the test SP)
+      l.out = l.tune.update(fresh ? l.pv : NAN, dt);
+      if (l.out > c.maxOut) l.out = c.maxOut;
+      const uint8_t rf = fresh ? l.runaway.update(c.runaway, dt, true, l.pv, l.pv, l.out) : (uint8_t)FAULT_NONE;
+      if (rf) {
+        snprintf(t, sizeof(t), "%s", faultName(rf));
+        latch(l, rf, t);
+      }
+      if (l.tune.state() != TuneState::Running) {
+        l.tuning = false;
+        l.out = 0;
+        l.runaway.reset();
+      }
+      duty = (l.fault || !l.tuning) ? 0 : l.out / 100.0f;
+    } else if (!l.fault && l.on && fresh && !isnan(l.sp)) {
       const PidParams p{c.kp, c.ki, c.kd, c.maxOut};
       l.out = l.pid.update(p, l.sp, l.pv, dt);
       const uint8_t rf = l.runaway.update(c.runaway, dt, true, l.sp, l.pv, l.out);
@@ -280,6 +303,8 @@ void localCtrlConfigure(int ch, bool enabled, const LocalChannelSettings& c) {
     l.on = false;
     l.fault = FAULT_NONE;
     l.faultText[0] = 0;
+    l.tune.stop();
+    l.tuning = false;
   }
   l.enabled = enabled && wired;
   l.pins = p;
@@ -298,6 +323,11 @@ bool localCtrlSetOutputs(int ch, bool on) {
   Local& l = loc[ch];
   if (on && (!l.enabled || l.fault)) return false;
   if (on && l.everGood && l.pv > l.cfg.maxTemp) return false;  // already above the cut-off
+  if (on && l.tuning) return false;
+  if (!on && l.tuning) {  // "outputs off" also ends an autotune
+    l.tune.stop();
+    l.tuning = false;
+  }
   if (on && !l.on) {
     l.pid.reset();
     l.runaway.reset();
@@ -322,6 +352,7 @@ void localCtrlGet(int ch, LocalStatus& st) {
   st.out = l.out;
   st.fault = l.fault;
   snprintf(st.faultText, sizeof(st.faultText), "%s", l.faultText);
+  st.tuning = l.tuning;
 }
 
 bool localCtrlAck(int ch, char* err, size_t n) {
@@ -344,4 +375,63 @@ bool localCtrlAck(int ch, char* err, size_t n) {
   l.pid.reset();
   l.runaway.reset();
   return true;
+}
+
+// ------------------------------------------------------------------ autotune
+
+bool localCtrlTuneStart(int ch, float sp, char* err, size_t n) {
+  if (ch < 0 || ch >= NUM_CHANNELS || !mtx) return false;
+  LockL g;
+  Local& l = loc[ch];
+  const bool fresh = l.everGood && millis() - l.lastGoodMs < FRESH_MS && l.badReads == 0;
+  if (!l.enabled) return snprintf(err, n, "not a local channel"), false;
+  if (l.fault) return snprintf(err, n, "acknowledge the fault first (%s)", l.faultText), false;
+  if (!fresh) return snprintf(err, n, "no temperature reading"), false;
+  if (l.tuning) return snprintf(err, n, "autotune already running"), false;
+  const float margin = l.cfg.maxTemp - sp;
+  if (!(sp > l.pv + 10) || margin < 15) {
+    return snprintf(err, n, "test temperature must be > PV + 10 C and <= cut-off - 15 C (%.0f C)",
+                    l.cfg.maxTemp - 15), false;
+  }
+  TuneConfig c;
+  c.sp = sp;
+  c.outMax = l.cfg.maxOut;
+  c.maxOver = margin - 5 < 40 ? margin - 5 : 40;  // stays below the cut-off
+  l.on = false;
+  l.pid.reset();
+  l.runaway.reset();
+  l.tune.start(c);
+  l.tuning = true;
+  l.tuneSp = sp;
+  return true;
+}
+
+void localCtrlTuneStop(int ch) {
+  if (ch < 0 || ch >= NUM_CHANNELS || !mtx) return;
+  LockL g;
+  Local& l = loc[ch];
+  l.tune.stop();
+  l.tuning = false;
+}
+
+void localCtrlTuneGet(int ch, LocalTune& t) {
+  t = LocalTune{};
+  if (ch < 0 || ch >= NUM_CHANNELS || !mtx) return;
+  LockL g;
+  const Local& l = loc[ch];
+  t.state = l.tune.state();
+  t.cycle = l.tune.cycle();
+  t.elapsed = l.tune.elapsed();
+  t.sp = l.tuneSp;
+  snprintf(t.msg, sizeof(t.msg), "%s", l.tune.message());
+  t.res = l.tune.result();
+}
+
+void localCtrlTuneClear(int ch) {
+  if (ch < 0 || ch >= NUM_CHANNELS || !mtx) return;
+  LockL g;
+  Local& l = loc[ch];
+  if (l.tuning) return;
+  l.tune = RelayAutotune();
+  l.tuneSp = NAN;
 }

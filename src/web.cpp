@@ -7,6 +7,7 @@
 #include <math.h>
 #include "app_state.h"
 #include "controller.h"
+#include "local_ctrl.h"
 #include "net.h"
 #include "settings_store.h"
 #include "ui.h"
@@ -119,7 +120,27 @@ static void handleStatus() {
     setNum(o["sp"], C.spEffValid ? C.spEff : NAN);
     setNum(o["out"], C.outValid ? C.out : NAN);
     if (C.statusValid && C.type == CH_MODBUS && S.ch[i].mb.profile == PROFILE_PMA_KS4X) o["mode"] = pmaModeText(C.status);
-    if (C.type == CH_LOCAL) setNum(o["cold"], C.coldC);
+    if (C.type == CH_LOCAL) {
+      setNum(o["cold"], C.coldC);
+      LocalTune t;
+      localCtrlTuneGet(i, t);
+      if (t.state != TuneState::Idle) {
+        static const char* const TS[] = {"idle", "running", "done", "failed"};
+        JsonObject a = o["autotune"].to<JsonObject>();
+        a["state"] = TS[(int)t.state];
+        setNum(a["sp"], t.sp);
+        a["cycle"] = t.cycle;
+        a["elapsed"] = (int)t.elapsed;
+        a["msg"] = t.msg;
+        if (t.state == TuneState::Done) {
+          a["kp"] = t.res.kp;
+          a["ki"] = t.res.ki;
+          a["kd"] = t.res.kd;
+          a["ku"] = t.res.ku;
+          a["pu"] = t.res.pu;
+        }
+      }
+    }
     o["fault"] = C.fault ? C.faultText : "";
     JsonObject m = o["manual"].to<JsonObject>();
     m["on"] = C.manualOn;
@@ -321,6 +342,50 @@ static void handleAck() {
   if (ch < 0 || ch >= NUM_CHANNELS) return sendError("ch must be 0 (bottom) or 1 (top)");
   JsonDocument r;
   r["ok"] = sendCmd(CMD_ACK_FAULT, ch);
+  sendJson(r);
+}
+
+// PID autotune of a local channel:
+//   {"ch":1,"cmd":"start","sp":200}  relay test around 200 degC
+//   {"ch":1,"cmd":"stop"}
+//   {"ch":1,"cmd":"accept"}          take the proposed kp/ki/kd into the settings
+//   {"ch":1,"cmd":"discard"}
+static void handleAutotune() {
+  JsonDocument d;
+  if (!parseBody(d)) return sendError("Invalid JSON");
+  const int ch = d["ch"] | -1;
+  if (ch < 0 || ch >= NUM_CHANNELS) return sendError("ch must be 0 (bottom) or 1 (top)");
+  const char* cmd = d["cmd"] | "";
+  JsonDocument r;
+  if (!strcmp(cmd, "start")) {
+    const float sp = d["sp"] | NAN;
+    if (isnan(sp)) return sendError("sp (test temperature) missing");
+    r["ok"] = sendCmd(CMD_TUNE_START, ch, sp);
+  } else if (!strcmp(cmd, "stop")) {
+    r["ok"] = sendCmd(CMD_TUNE_STOP, ch);
+  } else if (!strcmp(cmd, "accept") || !strcmp(cmd, "discard")) {
+    LocalTune t;
+    localCtrlTuneGet(ch, t);
+    if (t.state == TuneState::Running) return sendError("autotune is still running");
+    if (!strcmp(cmd, "accept")) {
+      if (t.state != TuneState::Done) return sendError("no autotune result to accept");
+      {
+        Guard g;
+        LocalChannelSettings& l = gSettings.ch[ch].loc;
+        l.kp = t.res.kp;
+        l.ki = t.res.ki;
+        l.kd = t.res.kd;
+      }
+      saveSettingsAndNotify();
+      r["kp"] = t.res.kp;
+      r["ki"] = t.res.ki;
+      r["kd"] = t.res.kd;
+    }
+    localCtrlTuneClear(ch);
+    r["ok"] = true;
+  } else {
+    return sendError("cmd must be start, stop, accept or discard");
+  }
   sendJson(r);
 }
 
@@ -707,6 +772,7 @@ void webBegin() {
   server.on("/api/manual", HTTP_POST, handleManual);
   server.on("/api/cmd", HTTP_POST, handleCmd);
   server.on("/api/ack", HTTP_POST, handleAck);
+  server.on("/api/autotune", HTTP_POST, handleAutotune);
   server.on("/api/settings", HTTP_GET, handleGetSettings);
   server.on("/api/settings", HTTP_POST, handlePostSettings);
   server.on("/api/wifi", HTTP_POST, handleWifi);

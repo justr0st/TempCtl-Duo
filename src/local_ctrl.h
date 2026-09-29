@@ -13,6 +13,7 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+#include "autotune.h"
 #include "settings.h"
 
 // First thing in setup(): SSR pins low, thermocouple CS pins high
@@ -37,6 +38,24 @@ struct LocalStatus {
   float out;         // PID output %
   uint8_t fault;     // ChannelFault (latched)
   char faultText[64];
+  bool tuning;       // autotune running (drives the SSR instead of the PID)
 };
 void localCtrlGet(int ch, LocalStatus& st);
 bool localCtrlAck(int ch, char* err, size_t n);
+
+// ---- PID autotune (relay method, autotune.h) ----
+// Starts at test temperature sp; refused on a fault, without a fresh reading or
+// too close to the cut-off. The tune stops on "outputs off", a fault or its own
+// limits; afterwards the SSR is off and the result waits for accept / discard.
+bool localCtrlTuneStart(int ch, float sp, char* err, size_t n);
+void localCtrlTuneStop(int ch);
+struct LocalTune {
+  TuneState state;
+  int cycle;
+  float elapsed;
+  float sp;
+  char msg[64];
+  TuneResult res;
+};
+void localCtrlTuneGet(int ch, LocalTune& t);
+void localCtrlTuneClear(int ch);  // after accept / discard: back to Idle

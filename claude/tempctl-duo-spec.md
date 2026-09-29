@@ -7,13 +7,13 @@ target and the CYD as second device (2, 2a, 2b), colours (6), the Web-GUI based 
 (7, `claude/web-sim/`), serial console (7a) and the Web Serial page / local app (7b). Every open point
 was decided one by one; what is left is only for later (GitHub Pages, SD logging, "Convert to
 Timeline") and hardware checks during bring-up (9.10).
-2026-09-30: **steps 1–3 of 9.10 implemented** (S3 bring-up, per-board headers, three CYD variants,
-identity 1.0.0; channel interface, two Modbus channels on one bus, `/duo/settings.json`; local channels
-with thermocouple, SSR, PID and safety). All four envs compile and link in the cloud container; nothing
-committed yet. State: 9.10.1–9.10.3. **The 4" display
+2026-09-30: **steps 1–4 of 9.10 implemented** (S3 bring-up, per-board headers, three CYD variants,
+identity; channel interface, two Modbus channels on one bus, `/duo/settings.json`; local channels
+with thermocouple, SSR, PID and safety; autotune). All four envs compile and link in the cloud container.
+Commits (Rost pushes): `7c34d2e` 1.0.0 = steps 1–3, then 1.0.1 = step 4. State: 9.10.1–9.10.4. **The 4" display
 and the PMA controller are still being delivered** (Rost): their checks are deferred until each part
-arrives; meanwhile test what the bare S3 board and the CYD allow. Next: step 4 (autotune; the PID
-itself came with step 3).
+arrives; meanwhile test what the bare S3 board and the CYD allow. Next: step 5 (program types
+Sequence + Timeline, one run engine for both channels).
 
 Read this file first, then `README.md` (TempCtl hardware, wiring, PMA register background, build, web
 API) and `ui/README.md`. Sections 3–8 describe the **TempCtl 1.2 code base that Duo starts from**; the
@@ -1138,6 +1138,27 @@ chart work on the **bottom channel** (`ENGINE_CH`); the top channel is polled, s
   set a channel local (`{"channels":[null,{"type":"local"}]}` on the S3), check `channels[1].pv` and
   `cold`, manual on with `/api/manual {"ch":1,"on":true,"sp":50}`, watch the LED duty; pull the
   thermocouple -> `fault` "thermocouple open", `/api/ack` refused until it is back.
+
+#### 9.10.4 State of step 4 (2026-09-30, version 1.0.1)
+- `src/autotune.*` (pure, host-tested): `RelayAutotune` — heat-up at outMax until PV > sp + h, then relay
+  bias +/- d with hysteresis h = 0.5 degC; after every cycle the bias is re-centred (Marlin) from the
+  high/low times (bias limited to 10..90 % of outMax, d = distance to the nearer limit); 2 settling cycles,
+  then 5 counted cycles, and a bias correction >= 2 % of outMax restarts the counting. Fails on period
+  spread > 30 %, amplitude <= 1.2 h, time limit (30 min), PV > sp + maxOver, no reading, stop.
+  Ku = 4d / (pi sqrt(a^2 - h^2)); Tyreus–Luyben: kp = Ku/2.2, ki = kp/(2.2 Pu), kd = kp Pu/6.3.
+  Simulated heaters (gain 1.5–8 degC/%, tau 60–600 s, dead 3–40 s, 60–350 degC): all converge; the
+  proposed PID reaches the SP from ambient with <= 0.1 degC overshoot (2.3 degC at 60 degC).
+- `local_ctrl`: `localCtrlTuneStart/Stop/Get/Clear`; while tuning the relay drives the SSR (limited to
+  maxOut), runaway only "heating failed" (hold check off), sensor / over-temperature faults latch and end
+  the tune; "outputs off" ends it; start refused on a fault, without a reading, unless sp > PV + 10 and
+  sp <= maxTemp - 15 (maxOver = min(40, maxTemp - sp - 5)).
+- Control task: `CMD_TUNE_START` (local only, not while the program runs on that channel; switches its
+  manual mode off), `CMD_TUNE_STOP`; manual on / program start refused while tuning; the end is logged
+  (`[tune] Top: done: Ku 6.08, Pu 34 s -> kp ... (accept or discard)`); LED "running" while tuning.
+- Web: `POST /api/autotune` start / stop / accept (kp/ki/kd -> settings, saved) / discard;
+  `channels[].autotune` {state, sp, cycle, elapsed, msg, kp, ki, kd, ku, pu} in `/api/status`.
+- To test with hardware (thermocouple + SSR + heater): `{"ch":1,"cmd":"start","sp":150}`, watch
+  `channels[1].autotune`, then accept; afterwards a manual SP should settle without overshoot.
 
 Keep the TempCtl conventions (full web/touch parity, colours via named styles, texts in
 `translations.xml`, widgets bound by name, exported UI code committed) unless Rost decides otherwise.

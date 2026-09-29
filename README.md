@@ -300,8 +300,8 @@ chart and the TempCtl 1.2 endpoints below work on the **bottom channel**; `chann
 `ch` in `/api/manual` and the bus tools, and `/api/config` cover both.
 
 **Local channels** (type `local`, step 3): thermocouple converter MAX31855 or MAX6675 (`local.sensor`) read
-every 250 ms, calibration `true = raw * calGain + calOffset`, PID (`kp`, `ki`, `kd`; autotune comes in step
-4) and a time-proportional SSR output (`windowSec`, default 1 s; `maxOut` %). Safety: SSR pins low from
+every 250 ms, calibration `true = raw * calGain + calOffset`, PID (`kp`, `ki`, `kd`, or from the autotune: relay test around a
+test temperature, Tyreus–Luyben rule) and a time-proportional SSR output (`windowSec`, default 1 s; `maxOut` %). Safety: SSR pins low from
 the first line of `setup()`, SSR off when the task stops refreshing it (1.5 s), and latched faults
 (outputs off, run stopped) for no reading (3 bad reads while on), above `maxTemp` and the runaway checks.
 Modbus channels get the same runaway checks with the controller's output (Ypid); a fault switches the
@@ -317,6 +317,7 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 | GET/POST | `/api/program?i=0` | `{"i":0,"name":"Bisque","steps":[{"t":100,"r":1800,"h":600}, …]}` (r, h in seconds) |
 | POST | `/api/select` | `{"i":index}` select the program for Main / Chart |
 | POST | `/api/manual` | `{"sp":150}` and/or `{"on":true}`, optional `"ch":1` (top; default 0 = bottom) |
+| POST | `/api/autotune` | local channels: `{"ch":1,"cmd":"start","sp":200}`, `"stop"`, `"accept"` (proposed kp/ki/kd → settings), `"discard"`; progress and result in `/api/status` → `channels[].autotune` |
 | POST | `/api/ack` | `{"ch":0}` acknowledge a channel fault (runaway, sensor, over temperature); refused while the cause is still there. The outputs stay off until switched on again |
 | POST | `/api/cmd` | `{"cmd":"start"|"pause"|"resume"|"stop"|"skip", "prog":index}` |
 | GET/POST | `/api/settings` | TempCtl 1.2 form (bottom channel + common); partial updates allowed; `{"profile":0,"loadDefaults":true}`, `{"rotate180":true}` |
@@ -350,12 +351,13 @@ src/settings.*            settings of both channels: defaults, validation, JSON 
 src/settings_store.*      /duo/settings.json on LittleFS (safe save)
 src/channel.*             channel interface: Modbus backend (+ runaway check), local, off
 src/local_ctrl.*          local channels: task reading the thermocouples, PID, SSR time proportioning, safety
-src/tc_sensor.*, pid.*, runaway.*  MAX31855/MAX6675 decoding, PID, runaway check (pure C++, unit-tested)
+src/tc_sensor.*, pid.*, runaway.*, autotune.*  MAX31855/MAX6675 decoding, PID, runaway check, relay autotune
+                          (pure C++, unit-tested)
 src/app_state.*           control task: polling both channels, program (bottom), manual setpoint per channel, chart history
 src/ui.*                  touch UI behaviour: event callbacks, dialogs, bring-up panel
 src/ui_gen.*              bridge to the exported UI code (create functions, constants, font fallbacks)
 src/web.*, web_page.h     HTTP server, JSON API, single-page web UI
-test/host_test.cpp        g++ -std=c++17 -Isrc -I<ArduinoJson>/src test/host_test.cpp src/program.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp && ./a.out
+test/host_test.cpp        g++ -std=c++17 -Isrc -I<ArduinoJson>/src test/host_test.cpp src/program.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp && ./a.out
 ```
 
 ## 7. Safety

@@ -1,6 +1,6 @@
 // Host-side tests. Build & run on a PC (ArduinoJson 7 headers, e.g. from .pio/libdeps/<env>/ArduinoJson/src):
 //   g++ -std=c++17 -I../src -I<ArduinoJson>/src host_test.cpp ../src/program.cpp ../src/settings.cpp 
-//       ../src/tc_sensor.cpp ../src/pid.cpp ../src/runaway.cpp -o host_test
+//       ../src/tc_sensor.cpp ../src/pid.cpp ../src/runaway.cpp ../src/autotune.cpp -o host_test
 //   ./host_test
 #include <cassert>
 #include <cmath>
@@ -9,6 +9,7 @@
 #include <string>
 #include "modbus_frame.h"
 #include "program.h"
+#include "autotune.h"
 #include "pid.h"
 #include "runaway.h"
 #include "settings.h"
@@ -427,6 +428,71 @@ static void testRunaway() {
   CHECK(f == FAULT_NONE);
 }
 
+// ------------------------------------------------------------------ autotune
+
+static bool runTune(Heater& h, RelayAutotune& at, const TuneConfig& c) {
+  at.start(c);
+  float T = h.T;
+  for (int i = 0; i < 4 * 7200 && at.state() == TuneState::Running; ++i) T = h.step(at.update(roundf(T * 4) / 4, 0.25f), 0.25f);
+  return at.state() == TuneState::Done;
+}
+
+static void testAutotune() {
+  // heater gain 3 degC/%, tau 120 s, dead time 8 s; test at 200 degC
+  Heater h;
+  RelayAutotune at;
+  TuneConfig c;
+  c.sp = 200;
+  c.outMax = 100;
+  CHECK(runTune(h, at, c));
+  const TuneResult& r = at.result();
+  CHECK(r.pu > 25 && r.pu < 45);
+  CHECK(r.kp > 1 && r.kp < 6 && r.ki > 0 && r.kd > 0);
+  CHECK(near(r.ki, r.kp / (2.2f * r.pu), 1e-4f) && near(r.kd, r.kp * r.pu / 6.3f, 1e-3f));
+  // the proposed PID: from 25 degC to 200 degC without real overshoot
+  Heater h2;
+  Pid pid;
+  PidParams p{r.kp, r.ki, r.kd, 100};
+  float T = h2.T, peak = 0;
+  for (int i = 0; i < 4 * 1800; ++i) {
+    T = h2.step(pid.update(p, 200, roundf(T * 4) / 4, 0.25f), 0.25f);
+    if (T > peak) peak = T;
+  }
+  CHECK(fabsf(T - 200) < 1.0f && peak < 203);
+  // low setpoint (the heater needs ~25 %): the relay re-centres, still converges
+  Heater h3;
+  c.sp = 100;
+  CHECK(runTune(h3, at, c));
+  // output limit is respected
+  Heater h4;
+  c.sp = 150;
+  c.outMax = 70;
+  at.start(c);
+  T = h4.T;
+  bool within = true;
+  for (int i = 0; i < 4 * 3600 && at.state() == TuneState::Running; ++i) {
+    const float o = at.update(roundf(T * 4) / 4, 0.25f);
+    within &= o >= 0 && o <= 70.001f;
+    T = h4.step(o, 0.25f);
+  }
+  CHECK(within && at.state() == TuneState::Done);
+  // too weak to reach the setpoint (max 25 + 1 * 100 = 125 degC): time limit
+  Heater weak;
+  weak.gain = 1;
+  c.sp = 200;
+  c.outMax = 100;
+  c.maxSec = 900;
+  CHECK(!runTune(weak, at, c) && at.state() == TuneState::Failed && strstr(at.message(), "time"));
+  // user stop, missing reading
+  at.start(c);
+  at.update(25, 0.25f);
+  at.stop();
+  CHECK(at.state() == TuneState::Failed && at.update(25, 0.25f) == 0);
+  at.start(c);
+  at.update(NAN, 0.25f);
+  CHECK(at.state() == TuneState::Failed);
+}
+
 int main() {
   testCrc();
   testParse();
@@ -440,6 +506,7 @@ int main() {
   testThermocouple();
   testPid();
   testRunaway();
+  testAutotune();
   printf(fails ? "%d FAILED\n" : "all tests passed\n", fails);
   return fails ? 1 : 0;
 }

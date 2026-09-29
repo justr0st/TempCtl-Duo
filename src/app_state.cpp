@@ -169,10 +169,21 @@ static bool anyFault() {
   return false;
 }
 
+static bool tuning(int ch) {
+  if (s.ch[ch].type != CH_LOCAL) return false;
+  LocalStatus st;
+  localCtrlGet(ch, st);
+  return st.tuning;
+}
+
 static void startProgram(int idx) {
   if (eng.active()) return;
   if (anyFault()) {
     setMsg("Cannot start: acknowledge the channel fault first");
+    return;
+  }
+  if (tuning(ENGINE_CH)) {
+    snprintf(runMsg, sizeof(runMsg), "Cannot start: autotune is running on %s", EC.name);
     return;
   }
   if (EC.type == CH_OFF) {
@@ -274,6 +285,10 @@ static void manualSwitch(int ch, bool on) {
       snprintf(runMsg, sizeof(runMsg), "%s: acknowledge the fault first (%s)", name, ft);
       return;
     }
+    if (tuning(ch)) {
+      snprintf(runMsg, sizeof(runMsg), "%s: autotune is running (stop it first)", name);
+      return;
+    }
     if (!c.spConfigured()) {
       setMsg("Set the setpoint register address first (web: Controller)");
       return;
@@ -348,6 +363,33 @@ static void handleCmd(const Cmd& c) {
       }
       break;
     }
+    case CMD_TUNE_START: {
+      if (c.arg < 0 || c.arg >= NUM_CHANNELS) break;
+      const char* name = s.ch[c.arg].name;
+      if (s.ch[c.arg].type != CH_LOCAL) {
+        snprintf(runMsg, sizeof(runMsg), "%s: autotune is for local channels (Modbus controllers tune themselves)", name);
+        break;
+      }
+      if (c.arg == ENGINE_CH && eng.active()) {
+        snprintf(runMsg, sizeof(runMsg), "%s: stop the program before the autotune", name);
+        break;
+      }
+      Manual& m = man[c.arg];  // the tune takes over the channel
+      m.on = m.pending = m.offPending = false;
+      char err[96];
+      if (localCtrlTuneStart(c.arg, c.value, err, sizeof(err))) {
+        snprintf(runMsg, sizeof(runMsg), "%s: autotune started at %.0f C", name, c.value);
+        Serial.printf("[tune] %s: started at %.0f C\n", name, c.value);
+      } else {
+        snprintf(runMsg, sizeof(runMsg), "%s: autotune not started: %s", name, err);
+      }
+      break;
+    }
+    case CMD_TUNE_STOP:
+      if (c.arg < 0 || c.arg >= NUM_CHANNELS) break;
+      localCtrlTuneStop(c.arg);
+      snprintf(runMsg, sizeof(runMsg), "%s: autotune stopped", s.ch[c.arg].name);
+      break;
     case CMD_MANUAL_SP:
       if (c.arg < 0 || c.arg >= NUM_CHANNELS) break;
       man[c.arg].sp = clampSp(c.arg, c.value);
@@ -431,6 +473,25 @@ static void pollChannel(int i) {
   if (changed && c.type() != CH_OFF) {  // log link changes, not every failed poll
     if (ok) Serial.printf("[ch] %s (%s): link ok\n", s.ch[i].name, channelTypeName(c.type()));
     else Serial.printf("[ch] %s (%s): %s\n", s.ch[i].name, channelTypeName(c.type()), err);
+  }
+  // autotune finished / failed: log it once
+  static bool wasTuning[NUM_CHANNELS];
+  if (c.type() == CH_LOCAL) {
+    LocalStatus ls;
+    localCtrlGet(i, ls);
+    if (wasTuning[i] && !ls.tuning) {
+      LocalTune t;
+      localCtrlTuneGet(i, t);
+      if (t.state == TuneState::Done)
+        Serial.printf("[tune] %s: %s -> kp %.3f ki %.4f kd %.2f (accept or discard)\n", s.ch[i].name, t.msg, t.res.kp,
+                      t.res.ki, t.res.kd);
+      else
+        Serial.printf("[tune] %s: failed: %s\n", s.ch[i].name, t.msg);
+      snprintf(runMsg, sizeof(runMsg), "%s: autotune %s", s.ch[i].name, t.state == TuneState::Done ? "done - accept or discard (web)" : t.msg);
+    }
+    wasTuning[i] = ls.tuning;
+  } else {
+    wasTuning[i] = false;
   }
   // latched fault (runaway, sensor, over temperature): outputs are already off
   char ft[64];
@@ -661,6 +722,7 @@ static void cycle(float dt) {
 
   bool fault = false, active = eng.active();
   for (int i = 0; i < NUM_CHANNELS; ++i) {
+    if (tuning(i)) active = true;
     if (s.ch[i].type != CH_OFF && (!gLive.ch[i].commOk || gLive.ch[i].fault)) fault = true;
     if (man[i].on) active = true;
   }
