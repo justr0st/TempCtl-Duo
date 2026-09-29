@@ -75,9 +75,21 @@ bool programStoreSave(int idx, const Program& p) {
   return LittleFS.rename(tmp, path);
 }
 
-void programStoreBegin(Program* progs, const Program* firstBoot) {
+bool storageBegin() {
+  static bool tried = false;
+  if (tried) return fsOk;
+  tried = true;
   fsOk = LittleFS.begin(true);  // formats the partition on first use
-  if (!fsOk) Serial.println("LittleFS mount failed: programs are not persistent");
+  if (!fsOk) {
+    Serial.println("[fs] LittleFS mount failed: settings and programs are not persistent");
+    return false;
+  }
+  if (!LittleFS.exists("/duo")) LittleFS.mkdir("/duo");
+  return true;
+}
+
+void programStoreBegin(Program* progs, const Program* firstBoot) {
+  storageBegin();
   bool any = false;
   for (int i = 0; i < MAX_PROGRAMS; ++i) {
     if (loadOne(i, progs[i])) {

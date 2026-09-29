@@ -1,11 +1,18 @@
-// Host-side tests. Build & run on a PC:
-//   g++ -std=c++17 -I../src host_test.cpp ../src/program.cpp -o host_test && ./host_test
+// Host-side tests. Build & run on a PC (ArduinoJson 7 headers, e.g. from .pio/libdeps/<env>/ArduinoJson/src):
+//   g++ -std=c++17 -I../src -I<ArduinoJson>/src host_test.cpp ../src/program.cpp ../src/settings.cpp 
+//       ../src/tc_sensor.cpp ../src/pid.cpp ../src/runaway.cpp -o host_test
+//   ./host_test
 #include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include "modbus_frame.h"
 #include "program.h"
+#include "pid.h"
+#include "runaway.h"
+#include "settings.h"
+#include "tc_sensor.h"
 
 static int fails = 0;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++fails; } } while (0)
@@ -157,12 +164,282 @@ static void testRun() {
   CHECK(b.state() == RunState::Finished && near(b.setpoint(), 50));
 }
 
+
+// ------------------------------------------------------------------ settings (JSON, validation)
+
+static const BoardLimits S3{true, 2}, CYD_1L485{true, 1}, CYD_2L{false, 2};
+
+static void roundTrip(const Settings& in, Settings& out, bool forApi) {
+  JsonDocument d;
+  settingsToJson(in, d.to<JsonObject>(), forApi);
+  std::string txt;
+  serializeJson(d, txt);
+  JsonDocument e;
+  CHECK(deserializeJson(e, txt) == DeserializationError::Ok);
+  char msg[160];
+  settingsDefaults(out, S3);
+  CHECK(settingsFromJson(e.as<JsonObjectConst>(), out, msg, sizeof(msg)));
+}
+
+static void testSettingsDefaults() {
+  Settings s;
+  char msg[200];
+  settingsDefaults(s, S3);
+  CHECK(s.ch[0].type == CH_MODBUS && s.ch[1].type == CH_OFF);
+  CHECK(s.ch[0].mb.slaveId == 1 && s.ch[1].mb.slaveId == 2);
+  CHECK(!strcmp(s.ch[0].name, "Bottom") && !strcmp(s.ch[1].name, "Top"));
+  CHECK(s.ch[0].mb.runaway.heatSec == 300 && s.ch[1].mb.runaway.heatSec == 120);
+  CHECK(s.ch[0].mb.reg.pv == 13294 && s.ch[0].mb.reg.sp == 11372);
+  CHECK(!strcmp(s.hostname, "tempctl-duo"));
+  CHECK(settingsValidate(s, S3, msg, sizeof(msg)) && msg[0] == 0);
+  settingsDefaults(s, CYD_2L);
+  CHECK(s.ch[0].type == CH_LOCAL && s.ch[1].type == CH_LOCAL);
+  CHECK(settingsValidate(s, CYD_2L, msg, sizeof(msg)));
+  settingsDefaults(s, CYD_1L485);
+  CHECK(s.ch[0].type == CH_MODBUS && s.ch[1].type == CH_OFF);
+}
+
+static void testSettingsJson() {
+  Settings a, b;
+  settingsDefaults(a, S3);
+  strcpy(a.ssid, "Workshop");
+  strcpy(a.pass, "secret-pw");
+  a.ch[1].type = CH_LOCAL;
+  strcpy(a.ch[1].name, "IR head");
+  a.ch[1].loc.sensor = SENSOR_MAX6675;
+  a.ch[1].loc.kp = 7.5f;
+  a.ch[0].mb.reg.alarm = REG_UNSET;
+  a.accentColor = 0xD65D0E;
+  a.themeDark = 0;
+  roundTrip(a, b, false);
+  CHECK(!strcmp(b.ssid, "Workshop") && !strcmp(b.pass, "secret-pw"));
+  CHECK(b.ch[1].type == CH_LOCAL && !strcmp(b.ch[1].name, "IR head"));
+  CHECK(b.ch[1].loc.sensor == SENSOR_MAX6675 && near(b.ch[1].loc.kp, 7.5f));
+  CHECK(b.ch[0].mb.reg.alarm == REG_UNSET && b.ch[0].mb.reg.pv == 13294);
+  CHECK(b.accentColor == 0xD65D0E && b.themeDark == 0);
+  CHECK(memcmp(&a.ch[0], &b.ch[0], sizeof(ChannelSettings)) == 0);
+  // API form: no passwords
+  JsonDocument d;
+  settingsToJson(a, d.to<JsonObject>(), true);
+  CHECK(d["wifi"]["pass"].isNull() && d["wifi"]["passSet"] == true);
+  roundTrip(a, b, true);
+  CHECK(b.pass[0] == 0);  // defaults kept (not overwritten)
+}
+
+static void testSettingsMerge() {
+  Settings s;
+  char msg[200];
+  settingsDefaults(s, S3);
+  // partial update: only the top channel's type and address, unknown keys ignored
+  JsonDocument d;
+  CHECK(deserializeJson(d, R"({"channels":[null,{"type":"modbus","modbus":{"addr":5}}],"foo":1,"bus":{"baud":19200}})") ==
+        DeserializationError::Ok);
+  CHECK(settingsFromJson(d.as<JsonObjectConst>(), s, msg, sizeof(msg)));
+  CHECK(s.ch[1].type == CH_MODBUS && s.ch[1].mb.slaveId == 5 && s.ch[0].type == CH_MODBUS);
+  CHECK(s.baud == 19200 && s.parity == 1);
+  CHECK(settingsValidate(s, S3, msg, sizeof(msg)));
+  // same address on both Modbus channels
+  s.ch[1].mb.slaveId = 1;
+  CHECK(!settingsValidate(s, S3, msg, sizeof(msg)) && strstr(msg, "same Modbus address"));
+  // wrong types are rejected with the path
+  JsonDocument e;
+  deserializeJson(e, R"({"channels":[{"spMax":"hot"}]})");
+  CHECK(!settingsFromJson(e.as<JsonObjectConst>(), s, msg, sizeof(msg)) && strstr(msg, "channels[0].spMax"));
+  deserializeJson(e, R"({"channels":[{"type":"gas"}]})");
+  CHECK(!settingsFromJson(e.as<JsonObjectConst>(), s, msg, sizeof(msg)) && strstr(msg, "type"));
+  deserializeJson(e, R"({"display":{"accent":"blue"}})");
+  CHECK(!settingsFromJson(e.as<JsonObjectConst>(), s, msg, sizeof(msg)) && strstr(msg, "accent"));
+  // a new profile loads its register map
+  deserializeJson(e, R"({"channels":[{"modbus":{"profile":"generic"}}]})");
+  CHECK(settingsFromJson(e.as<JsonObjectConst>(), s, msg, sizeof(msg)));
+  CHECK(s.ch[0].mb.profile == PROFILE_GENERIC && s.ch[0].mb.reg.pv == REG_UNSET);
+}
+
+static void testSettingsVariants() {
+  Settings s;
+  char msg[200];
+  // CYD 2x local: no RS485 -> Modbus channels are switched off
+  settingsDefaults(s, CYD_2L);
+  s.ch[0].type = CH_MODBUS;
+  CHECK(!settingsValidate(s, CYD_2L, msg, sizeof(msg)) && strstr(msg, "no RS485"));
+  CHECK(s.ch[0].type == CH_OFF && s.ch[1].type == CH_LOCAL);
+  // CYD 1x local + RS485: only one local channel
+  settingsDefaults(s, CYD_1L485);
+  s.ch[0].type = CH_LOCAL;
+  s.ch[1].type = CH_LOCAL;
+  CHECK(!settingsValidate(s, CYD_1L485, msg, sizeof(msg)) && strstr(msg, "only 1 local"));
+  CHECK(s.ch[0].type == CH_LOCAL && s.ch[1].type == CH_OFF);
+  // local: spMax stays 10 degC below the cut-off
+  settingsDefaults(s, S3);
+  s.ch[1].type = CH_LOCAL;
+  s.ch[1].loc.maxTemp = 300;
+  s.ch[1].spMax = 350;
+  CHECK(settingsValidate(s, S3, msg, sizeof(msg)));
+  CHECK(near(s.ch[1].spMax, 290));
+  // ranges
+  s.pollMs = 5;
+  s.baud = 1234;
+  s.hostname[0] = 0;
+  s.ch[0].name[0] = 0;
+  settingsValidate(s, S3, msg, sizeof(msg));
+  CHECK(s.pollMs == 250 && s.baud == 9600 && !strcmp(s.hostname, "tempctl-duo") && !strcmp(s.ch[0].name, "Bottom"));
+}
+
+// ------------------------------------------------------------------ thermocouple frames
+
+static void testThermocouple() {
+  // MAX31855: TC +25.00 degC (100 << 18), internal +25.0 degC (400 << 4)
+  TcReading r = tcDecode31855(0x01901900u);
+  CHECK(r.fault == TC_OK && near(r.tempC, 25.0f) && near(r.coldC, 25.0f));
+  // TC -250 degC (14-bit two's complement 0x3C18), internal -0.0625 degC (0xFFF)
+  r = tcDecode31855((0x3C18u << 18) | (0xFFFu << 4));
+  CHECK(r.fault == TC_OK && near(r.tempC, -250.0f) && near(r.coldC, -0.0625f));
+  // TC +1000.75 degC
+  r = tcDecode31855((4003u << 18) | (400u << 4));
+  CHECK(r.fault == TC_OK && near(r.tempC, 1000.75f));
+  // faults: fault bit D16 + OC / SCG / SCV
+  CHECK(tcDecode31855(0x00011901u).fault == TC_OPEN);
+  CHECK(tcDecode31855(0x00011902u).fault == TC_SHORT_GND);
+  CHECK(tcDecode31855(0x00011904u).fault == TC_SHORT_VCC);
+  CHECK(near(tcDecode31855(0x00011901u).coldC, 25.0f));
+  // nothing on the bus / reserved bits set
+  CHECK(tcDecode31855(0xFFFFFFFFu).fault == TC_NO_DEVICE);
+  CHECK(tcDecode31855(0).fault == TC_NO_DEVICE);
+  CHECK(tcDecode31855(0x01901908u).fault == TC_NO_DEVICE);  // D3 set
+  CHECK(tcDecode31855(0x01921900u).fault == TC_NO_DEVICE);  // D17 set
+  // MAX6675: 100.25 degC = 401 << 3
+  TcReading m = tcDecode6675(401 << 3);
+  CHECK(m.fault == TC_OK && near(m.tempC, 100.25f) && std::isnan(m.coldC));
+  CHECK(tcDecode6675((401 << 3) | 4).fault == TC_OPEN);
+  CHECK(tcDecode6675(0xFFFF).fault == TC_NO_DEVICE);
+  CHECK(tcDecode6675(0).fault == TC_NO_DEVICE);
+  CHECK(tcDecode6675((401 << 3) | 2).fault == TC_NO_DEVICE);  // device id bit must be 0
+}
+
+// ------------------------------------------------------------------ PID
+
+// First-order heater with dead time: dT/dt = (gain * out% - (T - ambient)) / tau
+struct Heater {
+  float T = 25, amb = 25, gain = 3.0f, tau = 120, dead = 8;
+  float hist[400] = {};
+  int n = 0;
+  float step(float out, float dt) {
+    const int d = (int)(dead / dt);
+    for (int i = 399; i > 0; --i) hist[i] = hist[i - 1];
+    hist[0] = out;
+    const float u = n >= d ? hist[d] : 0;
+    ++n;
+    T += (gain * u - (T - amb)) / tau * dt;
+    return T;
+  }
+};
+
+static void testPid() {
+  Pid pid;
+  PidParams p{4, 0, 0, 100};
+  CHECK(near(pid.update(p, 100, 90, 0.25f), 40));   // P only
+  CHECK(near(pid.update(p, 100, 50, 0.25f), 100));  // clamped
+  pid.reset();
+  CHECK(near(pid.update(p, 100, 120, 0.25f), 0));   // never negative
+  // output limit
+  PidParams lim{4, 0, 0, 60};
+  pid.reset();
+  CHECK(near(pid.update(lim, 100, 50, 0.25f), 60));
+  // no derivative kick on a setpoint jump (derivative on the measurement)
+  PidParams pd{0, 0, 50, 100};
+  pid.reset();
+  pid.update(pd, 100, 100, 0.25f);
+  CHECK(near(pid.update(pd, 200, 100, 0.25f), 0));
+  // anti-windup: 10 min saturated far below the setpoint, then the setpoint drops below PV
+  PidParams pi{2, 0.05f, 0, 100};
+  pid.reset();
+  for (int i = 0; i < 2400; ++i) pid.update(pi, 300, 25, 0.25f);
+  CHECK(pid.integral() <= 100.0f);
+  float o = 100;
+  for (int i = 0; i < 8; ++i) o = pid.update(pi, 20, 25, 0.25f);  // error -5
+  CHECK(o < 100);  // leaves saturation at once (integral not wound far above the limit)
+  // closed loop: reaches 200 degC from 25 degC, small overshoot, settles
+  Heater h;
+  PidParams cl{3.0f, 0.03f, 20, 100};
+  pid.reset();
+  float T = h.T, peak = 0;
+  for (int i = 0; i < 4 * 1800; ++i) {  // 30 min at 250 ms, readings in 0.25 degC steps like the converters
+    const float out = pid.update(cl, 200, roundf(T * 4) / 4, 0.25f);
+    T = h.step(out, 0.25f);
+    if (T > peak) peak = T;
+  }
+  CHECK(fabsf(T - 200) < 1.0f);
+  CHECK(peak < 215);
+}
+
+// ------------------------------------------------------------------ runaway
+
+static void testRunaway() {
+  Runaway c{1, 80, 120, 5, 15, 60};
+  RunawayMonitor m;
+  // heating failed: 100 % for 120 s, PV rises only 2 degC
+  uint8_t f = FAULT_NONE;
+  float pv = 25;
+  for (int i = 0; i < 125 && !f; ++i) f = m.update(c, 1, true, 200, pv += 2.0f / 120, 100);
+  CHECK(f == FAULT_HEATING);
+  // heats fine: 0.5 degC/s at 100 % -> no fault for 10 min
+  m.reset();
+  pv = 25;
+  f = FAULT_NONE;
+  for (int i = 0; i < 600 && !f; ++i) f = m.update(c, 1, true, 400, pv += 0.5f, 100);
+  CHECK(f == FAULT_NONE);
+  // output below minOut: no heating check
+  m.reset();
+  f = FAULT_NONE;
+  for (int i = 0; i < 600 && !f; ++i) f = m.update(c, 1, true, 30, 25, 50);
+  CHECK(f == FAULT_NONE);
+  // unknown output (NAN): no heating check
+  m.reset();
+  f = FAULT_NONE;
+  for (int i = 0; i < 600 && !f; ++i) f = m.update(c, 1, true, 30, 25, NAN);
+  CHECK(f == FAULT_NONE);
+  // holding: reached 200, then 20 degC below for 61 s -> fault; 50 s -> recovers
+  m.reset();
+  f = m.update(c, 1, true, 200, 199.5f, 30);
+  for (int i = 0; i < 50; ++i) f |= m.update(c, 1, true, 200, 180, 30);
+  CHECK(f == FAULT_NONE);
+  f |= m.update(c, 1, true, 200, 200, 30);  // back in the band: timer restarts
+  for (int i = 0; i < 62 && !f; ++i) f = m.update(c, 1, true, 200, 180, 30);
+  CHECK(f == FAULT_HOLD);
+  // a moving setpoint (ramp) is not "holding"
+  m.reset();
+  f = FAULT_NONE;
+  float sp = 100;
+  for (int i = 0; i < 300 && !f; ++i) f = m.update(c, 1, true, sp += 1.0f, 100, 30);
+  CHECK(f == FAULT_NONE);
+  // not reached yet: far below a new setpoint is no hold fault
+  m.reset();
+  f = FAULT_NONE;
+  for (int i = 0; i < 300 && !f; ++i) f = m.update(c, 1, true, 250, 100, 30);
+  CHECK(f == FAULT_NONE);
+  // outputs off / disabled: never a fault
+  m.reset();
+  f = FAULT_NONE;
+  for (int i = 0; i < 300 && !f; ++i) f = m.update(c, 1, false, 200, 25, 100);
+  Runaway off = c;
+  off.enable = 0;
+  for (int i = 0; i < 300 && !f; ++i) f = m.update(off, 1, true, 200, 25, 100);
+  CHECK(f == FAULT_NONE);
+}
+
 int main() {
   testCrc();
   testParse();
   testEdit();
   testPlan();
   testRun();
+  testSettingsDefaults();
+  testSettingsJson();
+  testSettingsMerge();
+  testSettingsVariants();
+  testThermocouple();
+  testPid();
+  testRunaway();
   printf(fails ? "%d FAILED\n" : "all tests passed\n", fails);
   return fails ? 1 : 0;
 }

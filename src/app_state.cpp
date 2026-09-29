@@ -2,7 +2,11 @@
 #include <math.h>
 #include <string.h>
 #include "controller.h"
+#include "local_ctrl.h"
+#include "net.h"
 #include "program_store.h"
+#include "settings_store.h"
+#include "status_led.h"
 
 Settings gSettings;
 LiveData gLive;
@@ -16,9 +20,15 @@ static SemaphoreHandle_t reqMutex, reqDone;
 static BusRequest reqSlot;
 static volatile bool reqPending = false;
 
-static Controller ctl;
-static ProgramEngine eng;
+static ModbusMaster bus;                  // the one RS485 bus, shared by the Modbus channels
+static ChannelSlot slots[NUM_CHANNELS];   // bottom, top
+static uint8_t busTurn = 0;               // next channel to poll on the bus (round robin)
+static ProgramEngine eng;                 // single-channel engine on ENGINE_CH (until step 5)
 static Settings s;  // control task's private copy of the settings
+#define EC (s.ch[ENGINE_CH])              // settings of the engine's channel
+
+static Channel& ech() { return *slots[ENGINE_CH].active; }
+static Controller* emb() { return slots[ENGINE_CH].active->modbus(); }  // null if not Modbus
 static Program startBuf;  // program being started (kept off the task stack)
 static int8_t runProg = -1;
 
@@ -32,50 +42,60 @@ static bool rampSaved = false;
 static int16_t rampOriginal = 0;
 static bool endPending = false;
 static RunState prevState = RunState::Idle;
-static char runMsg[80] = "";
-static char lastErr[80] = "";
+static char runMsg[128] = "";
+static char lastErr[NUM_CHANNELS][80];  // write errors of this cycle, per channel
 
-// manual setpoint
-static bool manualOn = false;
-static float manualSp = NAN;
-static bool manualPending = false;   // SP (+ outputs on) still to be written
-static bool outputsOffPending = false;
+// manual setpoint, per channel
+struct Manual {
+  bool on = false;
+  float sp = NAN;
+  bool pending = false;     // SP (+ outputs on) still to be written
+  bool offPending = false;  // outputs off still to be written
+};
+static Manual man[NUM_CHANNELS];
 
 // ------------------------------------------------------------------ helpers
 
 static void setMsg(const char* m) { strlcpy(runMsg, m, sizeof(runMsg)); }
 
-static void describeError(MbResult r, const char* what, char* out, size_t n) {
-  if (r == MbResult::Exception)
-    snprintf(out, n, "%s: %s", what, mbExceptionName(ctl.lastException()));
-  else
-    snprintf(out, n, "%s: %s", what, mbResultName(r));
+static float clampSp(int ch, float v) {
+  if (v < s.ch[ch].spMin) v = s.ch[ch].spMin;
+  if (v > s.ch[ch].spMax) v = s.ch[ch].spMax;
+  return v;
 }
 
+// setpoint of the engine's channel
 static bool writeSp(float v) {
-  if (v < s.spMin) v = s.spMin;
-  if (v > s.spMax) v = s.spMax;
-  const MbResult r = ctl.writeScaled(s.reg.sp, v);
-  if (r == MbResult::Ok) {
+  v = clampSp(ENGINE_CH, v);
+  if (ech().writeSp(v, lastErr[ENGINE_CH], sizeof(lastErr[0]))) {
     lastWritten = v;
     lastWriteMs = millis();
     ++spWrites;
     return true;
   }
-  describeError(r, "Setpoint write", lastErr, sizeof(lastErr));
   return false;
 }
 
-static bool writeRampOff() {
-  if (s.reg.rampRate == REG_UNSET) return true;
-  const MbResult r = ctl.writeRaw(s.reg.rampRate, s.reg.offRaw);
-  if (r != MbResult::Ok) describeError(r, "Ramp-rate write", lastErr, sizeof(lastErr));
+// Modbus-only extras of the engine's channel (true = nothing to do)
+static bool hasRampReg() { return emb() && emb()->reg().rampRate != REG_UNSET; }
+
+static bool mbWrite(uint16_t addr, int16_t raw, const char* what) {
+  Controller* c = emb();
+  if (!c || addr == REG_UNSET) return true;
+  const MbResult r = c->writeRaw(addr, raw);
+  if (r != MbResult::Ok) mbDescribe(r, c->lastException(), what, lastErr[ENGINE_CH], sizeof(lastErr[0]));
   return r == MbResult::Ok;
 }
 
+static bool writeRampOff() {
+  if (!hasRampReg()) return true;
+  return mbWrite(emb()->reg().rampRate, emb()->reg().offRaw, "Ramp-rate write");
+}
+
 static bool writeRampRate(float perMin) {
-  const MbResult r = ctl.writeScaled(s.reg.rampRate, perMin);
-  if (r != MbResult::Ok) describeError(r, "Ramp-rate write", lastErr, sizeof(lastErr));
+  Controller* c = emb();
+  const MbResult r = c->writeScaled(c->reg().rampRate, perMin);
+  if (r != MbResult::Ok) mbDescribe(r, c->lastException(), "Ramp-rate write", lastErr[ENGINE_CH], sizeof(lastErr[0]));
   return r == MbResult::Ok;
 }
 
@@ -142,9 +162,24 @@ void chartSnapshot(ChartData& d) {
 
 // ------------------------------------------------------------------ commands
 
+static bool anyFault() {
+  Guard g;
+  for (int i = 0; i < NUM_CHANNELS; ++i)
+    if (gLive.ch[i].fault) return true;
+  return false;
+}
+
 static void startProgram(int idx) {
   if (eng.active()) return;
-  if (s.reg.sp == REG_UNSET) {
+  if (anyFault()) {
+    setMsg("Cannot start: acknowledge the channel fault first");
+    return;
+  }
+  if (EC.type == CH_OFF) {
+    snprintf(runMsg, sizeof(runMsg), "Cannot start: channel %s is off", EC.name);
+    return;
+  }
+  if (!ech().spConfigured()) {
     setMsg("Set the setpoint register address first (web: Controller)");
     return;
   }
@@ -170,13 +205,14 @@ static void startProgram(int idx) {
     snprintf(runMsg, sizeof(runMsg), "Cannot start: \"%s\" has no steps", p.name);
     return;
   }
-  programSanitize(p, s.spMin, s.spMax);
+  programSanitize(p, EC.spMin, EC.spMax);
   // The controller silently clamps setpoints to SP.LO..SP.Hi; with guaranteed
   // soak that would stall the program forever, so check before starting.
-  if (s.reg.spLo != REG_UNSET && s.reg.spHi != REG_UNSET) {
+  Controller* mc = emb();
+  if (mc && mc->reg().spLo != REG_UNSET && mc->reg().spHi != REG_UNSET) {
     float lo, hi;
     uint8_t f1 = 0, f2 = 0;
-    if (ctl.readScaled(s.reg.spLo, lo, f1) == MbResult::Ok && ctl.readScaled(s.reg.spHi, hi, f2) == MbResult::Ok &&
+    if (mc->readScaled(mc->reg().spLo, lo, f1) == MbResult::Ok && mc->readScaled(mc->reg().spHi, hi, f2) == MbResult::Ok &&
         f1 == VAL_OK && f2 == VAL_OK) {
       for (int i = 0; i < p.count; ++i) {
         if (p.s[i].target < lo || p.s[i].target > hi) {
@@ -192,22 +228,21 @@ static void startProgram(int idx) {
     return;
   }
   runProg = (int8_t)idx;
-  // a program takes over from manual mode; make sure the outputs are on
-  manualOn = false;
-  manualPending = false;
-  outputsOffPending = false;
-  if (s.reg.ctrlOff != REG_UNSET) ctl.writeRaw(s.reg.ctrlOff, 0);
+  // a program takes over from manual mode on its channel; make sure the outputs are on
+  Manual& m = man[ENGINE_CH];
+  m.on = m.pending = m.offPending = false;
+  ech().setOutputs(true, lastErr[ENGINE_CH], sizeof(lastErr[0]));
   // remember the controller's own gradient so we can restore it at the end
   rampSaved = false;
-  if (s.reg.rampRate != REG_UNSET) {
+  if (hasRampReg()) {
     int16_t raw;
-    if (ctl.readRaw(s.reg.rampRate, raw) == MbResult::Ok) {
+    if (mc->readRaw(mc->reg().rampRate, raw) == MbResult::Ok) {
       rampOriginal = raw;
       rampSaved = true;
     }
     writeRampOff();
   }
-  if (s.lockFront && s.reg.remote != REG_UNSET) ctl.writeRaw(s.reg.remote, 1);
+  if (mc && EC.mb.lockFront) mbWrite(mc->reg().remote, 1, "Front-lock write");
   lastWritten = NAN;
   syncedGen = 0xFFFFFFFF;
   hostFallback = false;
@@ -220,27 +255,66 @@ static void startProgram(int idx) {
   snprintf(runMsg, sizeof(runMsg), "Program \"%s\" started", p.name);
 }
 
-static void manualSwitch(bool on) {
+static void manualSwitch(int ch, bool on) {
+  if (ch < 0 || ch >= NUM_CHANNELS) return;
+  Manual& m = man[ch];
+  Channel& c = *slots[ch].active;
+  const char* name = s.ch[ch].name;
   if (on) {
-    if (eng.active()) {
-      setMsg("Stop the program before switching to manual");
+    if (ch == ENGINE_CH && eng.active()) {
+      snprintf(runMsg, sizeof(runMsg), "%s: stop the program before switching to manual", name);
       return;
     }
-    if (s.reg.sp == REG_UNSET) {
+    if (c.type() == CH_OFF) {
+      snprintf(runMsg, sizeof(runMsg), "%s is off (Settings: channel type)", name);
+      return;
+    }
+    char ft[64];
+    if (c.fault(ft, sizeof(ft))) {
+      snprintf(runMsg, sizeof(runMsg), "%s: acknowledge the fault first (%s)", name, ft);
+      return;
+    }
+    if (!c.spConfigured()) {
       setMsg("Set the setpoint register address first (web: Controller)");
       return;
     }
-    manualOn = true;
-    manualPending = true;
-    outputsOffPending = false;
-    setMsg("Manual setpoint on");
+    m.on = true;
+    m.pending = true;
+    m.offPending = false;
+    snprintf(runMsg, sizeof(runMsg), "%s: manual setpoint on", name);
   } else {
-    if (!manualOn) return;
-    manualOn = false;
-    manualPending = false;
-    outputsOffPending = s.reg.ctrlOff != REG_UNSET;
-    setMsg(outputsOffPending ? "Manual off: controller outputs switched off"
-                             : "Manual off (no outputs-off register: controller keeps its setpoint)");
+    if (!m.on) return;
+    m.on = false;
+    m.pending = false;
+    m.offPending = c.canSwitchOff();
+    snprintf(runMsg, sizeof(runMsg), m.offPending ? "%s: manual off, outputs switched off"
+                                                  : "%s: manual off (no outputs-off register: controller keeps its setpoint)",
+             name);
+  }
+}
+
+// (Re)opens the bus and selects the channel backends after a settings change
+static void applySettings(const Settings& prev, bool first) {
+  modbusBusBegin(bus, s);
+  for (int i = 0; i < NUM_CHANNELS; ++i) {
+    const bool typeChanged = first || prev.ch[i].type != s.ch[i].type;
+    slots[i].configure(i, &bus, s.ch[i]);
+    if (!first && !man[i].on) man[i].sp = s.ch[i].manualSp;  // may have been changed through the API
+    if (typeChanged && !first) {
+      man[i].on = man[i].pending = man[i].offPending = false;
+      if (i == ENGINE_CH && eng.active()) {
+        eng.stop();
+        endPending = false;
+        snprintf(runMsg, sizeof(runMsg), "Stopped: type of channel %s changed", s.ch[i].name);
+      }
+    }
+    Guard g;
+    gLive.ch[i].type = s.ch[i].type;
+    strlcpy(gLive.ch[i].name, s.ch[i].name, sizeof(gLive.ch[i].name));
+    if (typeChanged) {
+      gLive.ch[i].commOk = false;
+      gLive.ch[i].lastErr[0] = 0;
+    }
   }
 }
 
@@ -252,16 +326,32 @@ static void handleCmd(const Cmd& c) {
     case CMD_STOP: eng.stop(); setMsg("Stopped by user"); break;
     case CMD_SKIP: eng.skip(); setMsg("Skipped to next phase"); break;
     case CMD_SETTINGS_CHANGED: {
-      Guard g;
-      s = gSettings;
-    }
-      ctl.configure(s);
+      static Settings prev;  // static: large
+      prev = s;
+      {
+        Guard g;
+        s = gSettings;
+      }
+      applySettings(prev, false);
       break;
-    case CMD_MANUAL_ON: manualSwitch(true); break;
-    case CMD_MANUAL_OFF: manualSwitch(false); break;
+    }
+    case CMD_MANUAL_ON: manualSwitch(c.arg, true); break;
+    case CMD_MANUAL_OFF: manualSwitch(c.arg, false); break;
+    case CMD_ACK_FAULT: {
+      if (c.arg < 0 || c.arg >= NUM_CHANNELS) break;
+      char err[80] = "";
+      if (slots[c.arg].active->ack(err, sizeof(err))) {
+        snprintf(runMsg, sizeof(runMsg), "%s: fault acknowledged", s.ch[c.arg].name);
+        Serial.printf("[ch] %s: fault acknowledged\n", s.ch[c.arg].name);
+      } else {
+        snprintf(runMsg, sizeof(runMsg), "%s: fault not cleared: %s", s.ch[c.arg].name, err);
+      }
+      break;
+    }
     case CMD_MANUAL_SP:
-      manualSp = constrain(c.value, s.spMin, s.spMax);
-      if (manualOn) manualPending = true;
+      if (c.arg < 0 || c.arg >= NUM_CHANNELS) break;
+      man[c.arg].sp = clampSp(c.arg, c.value);
+      if (man[c.arg].on) man[c.arg].pending = true;
       break;
   }
 }
@@ -272,6 +362,16 @@ static void processRequest(BusRequest& r) {
   r.ok = false;
   r.err[0] = 0;
   r.n = 0;
+  Controller* ctlp = r.ch < NUM_CHANNELS ? slots[r.ch].active->modbus() : nullptr;
+  if (!ctlp) {
+    snprintf(r.err, sizeof(r.err), "%s is not a Modbus channel", r.ch < NUM_CHANNELS ? s.ch[r.ch].name : "?");
+    return;
+  }
+  Controller& ctl = *ctlp;
+  const RegMap& reg = ctl.reg();
+  auto describeError = [&](MbResult res, const char* what, char* out, size_t n) {
+    mbDescribe(res, ctl.lastException(), what, out, n);
+  };
   if (r.op == BUS_READ) {
     uint16_t cnt = r.count ? r.count : 1;
     if (cnt > 60) cnt = 60;
@@ -285,7 +385,7 @@ static void processRequest(BusRequest& r) {
   } else if (r.op == BUS_FINDSP) {
     float ref;
     uint8_t flag = 0;
-    const MbResult res = ctl.readScaled(s.reg.spEff, ref, flag);
+    const MbResult res = ctl.readScaled(reg.spEff, ref, flag);
     if (res != MbResult::Ok || flag != VAL_OK) {
       strlcpy(r.err, "Cannot read the effective setpoint (SP.EF) as reference", sizeof(r.err));
       return;
@@ -295,11 +395,11 @@ static void processRequest(BusRequest& r) {
     if (to < r.from) to = r.from;
     if (to - r.from > 300) to = r.from + 300;
     for (uint32_t a = r.from; a <= to && r.n < 64; ++a) {
-      if (a == s.reg.spEff || a == s.reg.pv) continue;
+      if (a == reg.spEff || a == reg.pv) continue;
       int16_t raw;
       if (ctl.readRaw((uint16_t)a, raw) != MbResult::Ok) continue;
       if (Controller::classify(raw) != VAL_OK) continue;
-      if (fabsf(raw / s.reg.scale - ref) < 0.051f) r.values[r.n++] = (int16_t)a;
+      if (fabsf(raw / reg.scale - ref) < 0.051f) r.values[r.n++] = (int16_t)a;
     }
     r.ok = true;
   }
@@ -307,37 +407,69 @@ static void processRequest(BusRequest& r) {
 
 // ------------------------------------------------------------------ cycle
 
-static void poll() {
-  float pv = NAN, spEff = NAN, out = NAN;
-  int16_t st = 0, al = 0;
-  uint8_t pvFlag = VAL_OK, f = 0;
-  bool pvOk = false, spOk = false, outOk = false, stOk = false, alOk = false;
-  char err[80] = "";
-
-  if (s.reg.pv == REG_UNSET) {
-    strlcpy(err, "PV register not configured", sizeof(err));
-  } else {
-    MbResult r = ctl.readScaled(s.reg.pv, pv, pvFlag);
-    if (r == MbResult::Ok) {
-      pvOk = (pvFlag == VAL_OK);
-      if (s.reg.spEff != REG_UNSET && ctl.readScaled(s.reg.spEff, spEff, f) == MbResult::Ok) spOk = (f == VAL_OK);
-      if (s.reg.out != REG_UNSET && ctl.readScaled(s.reg.out, out, f) == MbResult::Ok) outOk = (f == VAL_OK);
-      if (s.reg.status != REG_UNSET) stOk = ctl.readRaw(s.reg.status, st) == MbResult::Ok;
-      if (s.reg.alarm != REG_UNSET) alOk = ctl.readRaw(s.reg.alarm, al) == MbResult::Ok;
+static void pollChannel(int i) {
+  static ChannelLive v;  // value fields from the backend (static: keep it off the task stack)
+  char err[80];
+  memset(&v, 0, sizeof(v));
+  Channel& c = *slots[i].active;
+  const bool ok = c.poll(v, err, sizeof(err));
+  bool changed;
+  {
+    Guard g;
+    ChannelLive& L = gLive.ch[i];
+    changed = ok != L.commOk || (!ok && strcmp(err, L.lastErr) != 0);
+    L.commOk = ok;
+    if (ok) { L.okCount++; L.lastOkMs = millis(); L.lastErr[0] = 0; }
+    else if (c.type() != CH_OFF) { L.errCount++; strlcpy(L.lastErr, err, sizeof(L.lastErr)); }
+    L.pvValid = v.pvValid; L.pv = v.pv; L.pvFlag = v.pvFlag;
+    L.spEffValid = v.spEffValid; L.spEff = v.spEff;
+    L.outValid = v.outValid; L.out = v.out;
+    L.statusValid = v.statusValid; L.status = v.status;
+    L.alarmValid = v.alarmValid; L.alarm = v.alarm;
+    L.coldC = v.coldC;
+  }
+  if (changed && c.type() != CH_OFF) {  // log link changes, not every failed poll
+    if (ok) Serial.printf("[ch] %s (%s): link ok\n", s.ch[i].name, channelTypeName(c.type()));
+    else Serial.printf("[ch] %s (%s): %s\n", s.ch[i].name, channelTypeName(c.type()), err);
+  }
+  // latched fault (runaway, sensor, over temperature): outputs are already off
+  char ft[64];
+  const uint8_t f = c.fault(ft, sizeof(ft));
+  uint8_t prev;
+  {
+    Guard g;
+    ChannelLive& L = gLive.ch[i];
+    prev = L.fault;
+    L.fault = f;
+    strlcpy(L.faultText, ft, sizeof(L.faultText));
+  }
+  if (f && !prev) {
+    Serial.printf("[ch] %s: FAULT %s - outputs off\n", s.ch[i].name, ft);
+    Manual& m = man[i];
+    m.on = m.pending = false;
+    m.offPending = false;
+    if (eng.active()) {
+      // a fault stops the run (spec 9.2); on the faulted channel the outputs stay off
+      eng.stop();
+      snprintf(runMsg, sizeof(runMsg), "Stopped: %s fault: %s - acknowledge it (web)", s.ch[i].name, ft);
     } else {
-      describeError(r, "PV read", err, sizeof(err));
+      snprintf(runMsg, sizeof(runMsg), "%s fault: %s - acknowledge it (web)", s.ch[i].name, ft);
     }
   }
-  const bool linkOk = err[0] == 0;
-  Guard g;
-  gLive.commOk = linkOk;
-  if (linkOk) { gLive.okCount++; gLive.lastOkMs = millis(); }
-  else { gLive.errCount++; strlcpy(gLive.lastErr, err, sizeof(gLive.lastErr)); }
-  gLive.pvValid = pvOk; gLive.pv = pv; gLive.pvFlag = linkOk ? pvFlag : (uint8_t)VAL_OK;
-  gLive.spEffValid = spOk; gLive.spEff = spEff;
-  gLive.outValid = outOk; gLive.out = out;
-  gLive.statusValid = stOk; gLive.status = (uint16_t)st;
-  gLive.alarmValid = alOk; gLive.alarm = (uint16_t)al;
+}
+
+// Local channels every cycle, one bus channel per cycle (round robin)
+static void pollChannels() {
+  for (int i = 0; i < NUM_CHANNELS; ++i)
+    if (!slots[i].active->onBus()) pollChannel(i);
+  for (int k = 0; k < NUM_CHANNELS; ++k) {
+    const int i = (busTurn + k) % NUM_CHANNELS;
+    if (slots[i].active->onBus()) {
+      pollChannel(i);
+      busTurn = (uint8_t)((i + 1) % NUM_CHANNELS);
+      break;
+    }
+  }
 }
 
 static void driveSetpoint() {
@@ -345,7 +477,7 @@ static void driveSetpoint() {
   if (st != RunState::Running && st != RunState::Paused) return;
   const uint32_t gen = eng.generation();
   const bool needSync = gen != syncedGen;
-  const bool ctrlRamp = s.rampMode == RAMP_CONTROLLER && s.reg.rampRate != REG_UNSET;
+  const bool ctrlRamp = EC.mb.rampMode == RAMP_CONTROLLER && hasRampReg();
 
   if (ctrlRamp && needSync) {
     bool ok = true;
@@ -356,7 +488,7 @@ static void driveSetpoint() {
       const float cur = eng.setpoint(), tgt = eng.target();
       const float rate = fabsf(tgt - cur) / (eng.phaseRemaining() / 60.0f);
       // 1dP gradient: 0.1/min resolution, and the raw value must fit in int16
-      if (rate >= 0.1f && rate * s.reg.scale <= 30000.0f) {
+      if (rate >= 0.1f && rate * emb()->reg().scale <= 30000.0f) {
         // start the controller's own ramp from the current program value
         ok = writeRampOff() && writeSp(cur) && writeRampRate(rate) && writeSp(tgt);
       } else {
@@ -372,9 +504,12 @@ static void driveSetpoint() {
 
   if (!ctrlRamp || hostFallback) {
     const float sp = eng.setpoint();
+    // a local channel takes every new value (no controller EEPROM to spare)
+    const bool local = EC.type == CH_LOCAL;
+    const float minStep = local ? 0.0f : EC.mb.minStep;
+    const uint32_t minMs = local ? 0 : (uint32_t)EC.mb.minWriteSec * 1000UL;
     const bool due = needSync || isnan(lastWritten) ||
-                     (fabsf(sp - lastWritten) >= s.minStep &&
-                      millis() - lastWriteMs >= (uint32_t)s.minWriteSec * 1000UL);
+                     (fabsf(sp - lastWritten) >= minStep && sp != lastWritten && millis() - lastWriteMs >= minMs);
     if (due && writeSp(sp)) syncedGen = gen;
   }
 }
@@ -382,60 +517,59 @@ static void driveSetpoint() {
 static void applyEndAction() {
   bool ok = true;
   const bool aborted = eng.state() == RunState::Aborted;
-  const bool ctrlRamp = s.reg.rampRate != REG_UNSET;
-  if (ctrlRamp) ok &= writeRampOff();  // freeze a running controller ramp
+  if (hasRampReg()) ok &= writeRampOff();  // freeze a running controller ramp
   float hold = eng.setpoint();
   {
     Guard g;
     if (aborted && gLive.spEffValid) hold = gLive.spEff;
   }
-  switch (s.endAction) {
+  switch (EC.endAction) {
     case END_KEEP: ok &= writeSp(hold); break;
-    case END_SET_SP: ok &= writeSp(s.endSp); break;
+    case END_SET_SP: ok &= writeSp(EC.endSp); break;
     case END_OUTPUTS_OFF:
       ok &= writeSp(hold);
-      if (s.reg.ctrlOff != REG_UNSET) ok &= ctl.writeRaw(s.reg.ctrlOff, 1) == MbResult::Ok;
+      if (ech().canSwitchOff()) ok &= ech().setOutputs(false, lastErr[ENGINE_CH], sizeof(lastErr[0]));
       break;
   }
-  if (rampSaved) ok &= ctl.writeRaw(s.reg.rampRate, rampOriginal) == MbResult::Ok;
-  if (s.lockFront && s.reg.remote != REG_UNSET) ok &= ctl.writeRaw(s.reg.remote, 0) == MbResult::Ok;
+  if (rampSaved && emb()) ok &= mbWrite(emb()->reg().rampRate, rampOriginal, "Ramp-rate restore");
+  if (EC.mb.lockFront && emb()) ok &= mbWrite(emb()->reg().remote, 0, "Front-lock write");
   endPending = !ok;
   if (!aborted && ok) setMsg("Program finished");
 }
 
-static void driveManual() {
-  if (manualOn && manualPending) {
-    bool ok = true;
-    if (s.reg.ctrlOff != REG_UNSET) {
-      const MbResult r = ctl.writeRaw(s.reg.ctrlOff, 0);
-      if (r != MbResult::Ok) { describeError(r, "Outputs-on write", lastErr, sizeof(lastErr)); ok = false; }
+static void driveManual(int ch) {
+  Manual& m = man[ch];
+  Channel& c = *slots[ch].active;
+  char* err = lastErr[ch];
+  if (m.on && m.pending) {
+    if (c.setOutputs(true, err, sizeof(lastErr[0])) && c.writeSp(clampSp(ch, m.sp), err, sizeof(lastErr[0]))) {
+      m.pending = false;
+      if (ch == ENGINE_CH) {
+        lastWritten = clampSp(ch, m.sp);
+        lastWriteMs = millis();
+        ++spWrites;
+      }
     }
-    if (ok && writeSp(manualSp)) manualPending = false;
   }
-  if (!manualOn && outputsOffPending) {
-    const MbResult r = ctl.writeRaw(s.reg.ctrlOff, 1);
-    if (r == MbResult::Ok) outputsOffPending = false;
-    else describeError(r, "Outputs-off write", lastErr, sizeof(lastErr));
+  if (!m.on && m.offPending) {
+    if (c.setOutputs(false, err, sizeof(lastErr[0]))) m.offPending = false;
   }
-}
-
-static void setLed(bool r, bool g, bool b) {
-  digitalWrite(PIN_LED_R, r ? LOW : HIGH);
-  digitalWrite(PIN_LED_G, g ? LOW : HIGH);
-  digitalWrite(PIN_LED_B, b ? LOW : HIGH);
 }
 
 static void cycle(float dt) {
-  poll();
+  pollChannels();
 
   bool pvValid, commOk;
   float pv, spEff;
   bool spEffValid;
   uint32_t lastOk;
+  bool commCh[NUM_CHANNELS];
   {
     Guard g;
-    pvValid = gLive.pvValid; pv = gLive.pv; commOk = gLive.commOk;
-    spEff = gLive.spEff; spEffValid = gLive.spEffValid; lastOk = gLive.lastOkMs;
+    const ChannelLive& E = gLive.ch[ENGINE_CH];
+    pvValid = E.pvValid; pv = E.pv; commOk = E.commOk;
+    spEff = E.spEff; spEffValid = E.spEffValid; lastOk = E.lastOkMs;
+    for (int i = 0; i < NUM_CHANNELS; ++i) commCh[i] = gLive.ch[i].commOk;
   }
 
   // communication watchdog
@@ -446,9 +580,10 @@ static void cycle(float dt) {
   }
 
   eng.tick(dt, pv, pvValid, s.guaranteedSoak, s.soakBand);
-  lastErr[0] = 0;
+  for (int i = 0; i < NUM_CHANNELS; ++i) lastErr[i][0] = 0;
   if (commOk) driveSetpoint();
-  if (commOk) driveManual();
+  for (int i = 0; i < NUM_CHANNELS; ++i)
+    if (commCh[i]) driveManual(i);
 
   // end of program (finished or aborted)
   const RunState st = eng.state();
@@ -459,7 +594,8 @@ static void cycle(float dt) {
 
   // history + publish
   static uint32_t lastLive = 0;
-  const float spNow = spEffValid ? spEff : (eng.active() ? eng.setpoint() : (manualOn ? manualSp : NAN));
+  const Manual& em = man[ENGINE_CH];
+  const float spNow = spEffValid ? spEff : (eng.active() ? eng.setpoint() : (em.on ? em.sp : NAN));
   Guard g;
   if (eng.active() && gHist->runValid) {
     int idx = (int)(eng.elapsed() / gHist->runBin);
@@ -487,9 +623,30 @@ static void cycle(float dt) {
   gLive.stepCount = (uint8_t)eng.stepCount();
   gLive.runProg = runProg;
   strlcpy(gLive.runName, eng.program().name, sizeof(gLive.runName));
-  gLive.manualOn = manualOn;
-  gLive.manualSp = manualSp;
-  gLive.manualSynced = !manualPending && !outputsOffPending;
+  for (int i = 0; i < NUM_CHANNELS; ++i) {
+    ChannelLive& L = gLive.ch[i];
+    L.manualOn = man[i].on;
+    L.manualSp = man[i].sp;
+    L.manualSynced = !man[i].pending && !man[i].offPending;
+    if (lastErr[i][0]) strlcpy(L.lastErr, lastErr[i], sizeof(L.lastErr));
+  }
+  // flat mirror of the engine's channel (old UIs)
+  {
+    const ChannelLive& E = gLive.ch[ENGINE_CH];
+    gLive.commOk = E.commOk;
+    gLive.okCount = E.okCount;
+    gLive.errCount = E.errCount;
+    gLive.lastOkMs = E.lastOkMs;
+    strlcpy(gLive.lastErr, E.lastErr, sizeof(gLive.lastErr));
+    gLive.pvValid = E.pvValid; gLive.pv = E.pv; gLive.pvFlag = E.pvFlag;
+    gLive.spEffValid = E.spEffValid; gLive.spEff = E.spEff;
+    gLive.outValid = E.outValid; gLive.out = E.out;
+    gLive.statusValid = E.statusValid; gLive.status = E.status;
+    gLive.alarmValid = E.alarmValid; gLive.alarm = E.alarm;
+    gLive.manualOn = E.manualOn;
+    gLive.manualSp = E.manualSp;
+    gLive.manualSynced = E.manualSynced;
+  }
   gLive.phaseEl = eng.phaseElapsed();
   gLive.phaseDur = eng.phaseDuration();
   gLive.elapsed = eng.elapsed();
@@ -497,14 +654,17 @@ static void cycle(float dt) {
   gLive.soakWait = eng.soakWaiting();
   gLive.hostSp = eng.setpoint();
   gLive.target = eng.target();
-  gLive.spSynced = lastErr[0] == 0;
+  gLive.spSynced = lastErr[ENGINE_CH][0] == 0;
   gLive.lastWrittenSp = lastWritten;
   gLive.spWrites = spWrites;
-  if (lastErr[0]) strlcpy(gLive.lastErr, lastErr, sizeof(gLive.lastErr));
   strlcpy(gLive.runMsg, runMsg, sizeof(gLive.runMsg));
 
-  const bool active = eng.active() || manualOn;
-  setLed(!commOk, commOk && !active, commOk && active);
+  bool fault = false, active = eng.active();
+  for (int i = 0; i < NUM_CHANNELS; ++i) {
+    if (s.ch[i].type != CH_OFF && (!gLive.ch[i].commOk || gLive.ch[i].fault)) fault = true;
+    if (man[i].on) active = true;
+  }
+  statusLedSet(statusLedPick(fault, st == RunState::Paused, netApActive(), active));
 }
 
 static void controlTask(void*) {
@@ -512,8 +672,8 @@ static void controlTask(void*) {
     Guard g;
     s = gSettings;
   }
-  ctl.configure(s);
-  manualSp = s.manualSp;
+  applySettings(s, true);
+  for (int i = 0; i < NUM_CHANNELS; ++i) man[i].sp = s.ch[i].manualSp;
   uint32_t lastPoll = 0, lastTick = millis();
   for (;;) {
     Cmd c;
@@ -552,17 +712,22 @@ void appInit() {
   gLive.hostSp = gLive.target = gLive.lastWrittenSp = NAN;
   gLive.step = -1;
   gLive.runProg = -1;
-  static Program legacy;  // static: large
-  bool haveLegacy = false;
-  if (!settingsLoad(gSettings, &legacy, &haveLegacy)) settingsSave(gSettings);
-  if (!haveLegacy) programExample(legacy);
-  programStoreBegin(gPrograms, &legacy);
-  gLive.manualSp = gSettings.manualSp;
+  if (!settingsLoad(gSettings)) settingsSave(gSettings);
+  localCtrlBegin();  // before the control task configures the channels
+  for (int i = 0; i < NUM_CHANNELS; ++i) {
+    ChannelLive& L = gLive.ch[i];
+    L.type = gSettings.ch[i].type;
+    strlcpy(L.name, gSettings.ch[i].name, sizeof(L.name));
+    L.pv = L.spEff = L.out = NAN;
+    L.manualSp = gSettings.ch[i].manualSp;
+    Serial.printf("[settings] channel %d: %s, %s\n", i + 1, gSettings.ch[i].name, channelTypeName(gSettings.ch[i].type));
+  }
+  static Program example;  // static: large
+  programExample(example);
+  programStoreBegin(gPrograms, &example);
+  gLive.manualSp = gSettings.ch[ENGINE_CH].manualSp;
   histResetLive();
-  pinMode(PIN_LED_R, OUTPUT);
-  pinMode(PIN_LED_G, OUTPUT);
-  pinMode(PIN_LED_B, OUTPUT);
-  setLed(false, false, false);
+  statusLedBegin();
 }
 
 void controlTaskStart() {
@@ -613,7 +778,7 @@ bool saveProgram(int idx) {
   static Program copy;
   {
     Guard g;
-    programSanitize(gPrograms[idx], gSettings.spMin, gSettings.spMax);
+    programSanitize(gPrograms[idx], gSettings.ch[ENGINE_CH].spMin, gSettings.ch[ENGINE_CH].spMax);
     copy = gPrograms[idx];
     ++gProgGen;
   }
@@ -630,14 +795,16 @@ void selectProgram(int idx) {
   saveSettingsQuiet();
 }
 
-void setManualSp(float v) {
-  if (isnan(v)) return;
+void setManualSp(float v, int ch) {
+  if (isnan(v) || ch < 0 || ch >= NUM_CHANNELS) return;
   {
     Guard g;
-    v = constrain(v, gSettings.spMin, gSettings.spMax);
-    gSettings.manualSp = v;
-    gLive.manualSp = v;
+    ChannelSettings& c = gSettings.ch[ch];
+    v = constrain(v, c.spMin, c.spMax);
+    c.manualSp = v;
+    gLive.ch[ch].manualSp = v;
+    if (ch == ENGINE_CH) gLive.manualSp = v;
   }
   saveSettingsQuiet();
-  sendCmd(CMD_MANUAL_SP, 0, v);
+  sendCmd(CMD_MANUAL_SP, ch, v);
 }

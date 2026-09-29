@@ -1,4 +1,11 @@
-# TempCtl Duo: ramp/soak temperature programmer for ESP32-CYD + Modbus RTU
+# TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
+
+> **Work in progress (version 1.0.0).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
+> of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **step 1, hardware bring-up** —
+> the ESP32-S3 board (env `s3`) and the CYD (envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`) build from the same sources; the single-channel
+> TempCtl 1.2 functions below still apply. On the S3's 480×320 screen the 320×240 TempCtl screens run in
+> the top left corner, next to a bring-up panel (version, free memory, touch coordinates with a red dot
+> at the touched point).
 
 Firmware for the ESP32-2432S028R ("Cheap Yellow Display") that drives a **PMA KS 40-1 / 41-1 / 42-1**
 (or another Modbus RTU temperature controller) over RS485. It stores **up to 10 named programs with up to
@@ -97,9 +104,51 @@ The web *Main* page shows the number of setpoint writes in the current run.
 
 ## 2. Hardware
 
+Two supported boards, selected by the PlatformIO environment; all pins are in `src/board_s3.h` /
+`src/board_cyd.h`.
+
+### ESP32-S3 board (env `s3`, main target)
+
 | Part | Notes |
 |---|---|
-| ESP32-2432S028R (CYD) | 2.8" 320×240 ILI9341 + resistive touch. Some 2-USB versions use ST7789 (see `platformio.ini`) |
+| ESP32-S3-DevKitC-1 **v1.0 N16R8** | 16 MB flash, 8 MB octal PSRAM. On-board WS2812 on GPIO48 (a v1.1 board has it on GPIO38: swap 38 ↔ 48 in `board_s3.h`) |
+| 4.0" SPI module **MSP4031** | ST7796S 320×480 (used as 480×320 landscape), FT6336U capacitive touch (I²C 0x38). VCC 5 V recommended |
+| **3.3 V** RS485 transceiver | on UART1 |
+
+| Function | GPIO | | Function | GPIO |
+|---|---|---|---|---|
+| LCD SCK / SDI (MOSI) / SDO (MISO) | 12 / 11 / 13 | | RS485 TX → DI | 1 |
+| LCD_CS / LCD_RS (D/C) / LCD_RST | 10 / 9 / 14 | | RS485 RX ← RO | 2 |
+| LED (backlight, PWM) | 8 | | RS485 DE + /RE | 42 |
+| SD_CS (held high, SD not used) | 18 | | Thermocouple SCK / SO (later) | 41 / 40 |
+| CTP_SDA / CTP_SCL | 16 / 15 | | TC CS bottom / top (later) | 39 / 38 |
+| CTP_RST / CTP_INT | 17 / 7 | | SSR bottom / top (later) | 21 / 47 |
+
+Flash and watch the log through the USB port labelled **"UART"**. The native "USB" port is kept for the
+serial console / Web Serial page (later steps).
+
+Status LED (WS2812): green = idle, blue = running, amber blinking = paused / waiting, red blinking = fault
+(no answer from the controller), purple = access point mode.
+
+Bring-up checks: if the colours look inverted set `LCD_INVERT 1`; if touches land in the wrong place change
+`TOUCH_SWAP_XY` / `TOUCH_INVERT_X` / `TOUCH_INVERT_Y` in `board_s3.h` (the bring-up panel shows the raw
+touch values and the mapped point).
+
+### ESP32-2432S028R "CYD" (envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`)
+
+The CYD has too few free pins for RS485 plus two local channels, so it has three wirings, one env each
+(pictures in `claude/wiring/`):
+
+| Env | Channels | Wiring |
+|---|---|---|
+| `cyd-1xlocal-1x485` | RS485 (one or two Modbus controllers) + one local channel (bottom or top) | RS485: IO22 → DI (P3-2), IO35 ← RO (P3-3), IO27 → DE+/RE (CN1-2). Local: thermocouple SCK IO23, SO IO19, CS IO5; SSR IO18 (SD slot pins) — `cyd-wiring-a.png` |
+| `cyd-2xlocal` | two local channels, no RS485 | Thermocouples SCK IO23, SO IO19, CS bottom IO5, CS top IO27 (CN1-2); SSR bottom IO18, SSR top IO22 (P3-2) — `cyd-wiring-b.png` |
+| `cyd-2xlocal-2x485` | RS485 + two local channels, each channel local or Modbus. **On-board RGB LED removed** | RS485 as in `cyd-1xlocal-1x485`. Thermocouples SCK IO23, SO IO19, CS bottom IO5, CS top IO4 (LED pad R, 10 kΩ pull-up to 3V3); SSR bottom IO18, SSR top IO16 (LED pad G); status LED = external WS2812 on IO17 (LED pad B, powered from 3V3) — `cyd-wiring-c.png` |
+
+
+| Part | Notes |
+|---|---|
+| ESP32-2432S028R (CYD) | 2.8" 320×240 ILI9341 + resistive touch (the ST7789 variant with 2 USB ports is not supported yet) |
 | **3.3 V** RS485 transceiver module | MAX3485 / SP3485 based, with DE and RE pins. **Don't use a 5 V MAX485 module**: its RO output would drive 5 V into the ESP32 |
 | Optional: isolated transceiver | ADM2587E / ADM2483 based module if the ground potentials differ. The KS 4x-1 bus port is already isolated, so a plain transceiver is usually fine |
 | Twisted pair, screened cable | e.g. LiYCY 2×2×0.25; screen grounded at one end |
@@ -122,14 +171,18 @@ CYD P3
 ```
 
 Check the silkscreen for the CN1/P3 pin order; it differs between batches. For an auto-direction module,
-set `PIN_RS485_DE` to `-1` in `src/config.h`.
+set `PIN_RS485_DE` to `-1` in `src/board_cyd.h` / `src/board_s3.h`.
 
 - **Polarity:** PMA's "Data A/B" naming is reversed relative to EIA-485, but in practice PMA DATA A goes to the
   module's A(+). If there is no answer, swapping A and B is harmless.
 - **Termination:** PMA recommends *no* 120 Ω terminators for fewer than 8 devices at ≤ 9600 baud (up to 1000 m).
   Many cheap modules have a 120 Ω resistor fitted; remove it if communication is flaky on a short line, and make
   sure the module has fail-safe bias resistors.
-- The on-board RGB LED shows the link: green = OK, blue = program running, red = no answer.
+- CYD status LED: the on-board RGB LED (external WS2812 in `cyd-2xlocal-2x485`) with the same colours as the S3 (green = idle, blue = running,
+  amber blinking = paused / waiting, red blinking = fault, purple = access point mode).
+- Free CYD pins: only IO22 (P3-2 and CN1-3), IO27 (CN1-2, 10 k pull-up) and IO35 (P3-3, input only) are
+  on connectors. The SD slot pins (IO5, IO18, IO19, IO23) are reached with a micro-SD breakout adapter
+  (no SD card in the slot). IO6–IO11 are the module's flash and not usable.
 
 ## 3. Can the LCTC M226-TE (from the screenshot) work the same way?
 
@@ -151,19 +204,19 @@ PMA-specific extras (status word, self-tuning, outputs off, parameter page) won'
 ## 4. Build and flash
 
 1. Install VS Code + PlatformIO.
-2. Open this folder, build and upload environment `cyd` (`pio run -t upload`).
-3. First start: no Wi-Fi configured → the CYD opens access point `TempCtl-XXXX`, password `tempctl123`.
+2. Open this folder, build and upload environment `s3` (default), `cyd-1xlocal-1x485`, `cyd-2xlocal` or `cyd-2xlocal-2x485`
+   (`pio run -e s3 -t upload`).
+   Check `upload_port` / `monitor_port` in `platformio.ini`.
+3. First start: no Wi-Fi configured → the device opens access point `TempCtl-Duo-XXXX`, password `tempctl123`.
    Either set Wi-Fi on the display (*Setup → System*: scan, pick the network, enter the password, *Save +
-   connect*) or browse to `http://192.168.4.1` and use the *System* page. Afterwards: `http://tempctl.local`
+   connect*) or browse to `http://192.168.4.1` and use the *System* page. Afterwards: `http://tempctl-duo.local`
    or the IP shown on *Setup → System*.
 4. On *Controller*, check slave address, baud rate and parity match the controller (`ConF/othr`), then
    check that *Main* shows the process value.
 
-Updating from firmware 1.0: settings are migrated automatically and the old 6-step program becomes
-program 1 (enabled steps only).
-
-Updating from firmware 1.1: the UI moved from LVGL 8.3 to LVGL 9 (now 9.6). PlatformIO downloads the new
-library automatically; if an old build misbehaves, delete the `.pio` folder once.
+TempCtl Duo keeps its settings in `/duo/settings.json` and doesn't read TempCtl's: Wi-Fi, controller and
+touch settings start from defaults. Defaults: bottom = Modbus (address 1), top = Off (`cyd-2xlocal`: both
+local); change the channels with `POST /api/config` until the new UIs have a Channels page. After switching from the TempCtl build delete the `.pio` folder once.
 
 Touch calibration defaults (200…3700 / 240…3800) suit most CYDs. If touches land off, adjust `tsMinX…tsMaxY`
 through `POST /api/settings` and restart.
@@ -242,19 +295,33 @@ Rules so the firmware keeps working:
 
 ## 5. Web API
 
+TempCtl Duo (step 2): two channels. Until the new web page and run engine arrive, the program engine, the
+chart and the TempCtl 1.2 endpoints below work on the **bottom channel**; `channels` in `/api/status`,
+`ch` in `/api/manual` and the bus tools, and `/api/config` cover both.
+
+**Local channels** (type `local`, step 3): thermocouple converter MAX31855 or MAX6675 (`local.sensor`) read
+every 250 ms, calibration `true = raw * calGain + calOffset`, PID (`kp`, `ki`, `kd`; autotune comes in step
+4) and a time-proportional SSR output (`windowSec`, default 1 s; `maxOut` %). Safety: SSR pins low from
+the first line of `setup()`, SSR off when the task stops refreshing it (1.5 s), and latched faults
+(outputs off, run stopped) for no reading (3 bad reads while on), above `maxTemp` and the runaway checks.
+Modbus channels get the same runaway checks with the controller's output (Ypid); a fault switches the
+controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /api/ack` clears it.
+
 | Method | Path | Body / query |
 |---|---|---|
-| GET | `/api/status` | live values, run state, manual setpoint, selected program |
+| GET | `/api/status` | live values (bottom), run state, manual setpoint, selected program; `channels`: both channels (name, type, ok, err, pv, sp, out, mode, manual) |
+| GET/POST | `/api/config` | the whole settings document (= `/duo/settings.json` without passwords). POST changes only the keys given, e.g. `{"channels":[null,{"type":"modbus","modbus":{"addr":2}}]}`; errors come back as `{"ok":false,"err":"channels[1].type: one of …"}` |
 | GET | `/api/history` | chart data (300 points): `pv`, `sp`, `plan`, `mode` = `live`/`run`, `planActive`, `spActive` |
 | GET | `/api/log.csv` | last program run (or the live window) as CSV |
 | GET | `/api/programs` | names, step counts and durations of all 10 programs, `sel` |
 | GET/POST | `/api/program?i=0` | `{"i":0,"name":"Bisque","steps":[{"t":100,"r":1800,"h":600}, …]}` (r, h in seconds) |
 | POST | `/api/select` | `{"i":index}` select the program for Main / Chart |
-| POST | `/api/manual` | `{"sp":150}` and/or `{"on":true}` |
+| POST | `/api/manual` | `{"sp":150}` and/or `{"on":true}`, optional `"ch":1` (top; default 0 = bottom) |
+| POST | `/api/ack` | `{"ch":0}` acknowledge a channel fault (runaway, sensor, over temperature); refused while the cause is still there. The outputs stay off until switched on again |
 | POST | `/api/cmd` | `{"cmd":"start"|"pause"|"resume"|"stop"|"skip", "prog":index}` |
-| GET/POST | `/api/settings` | partial updates allowed; `{"profile":0,"loadDefaults":true}`, `{"rotate180":true}` |
+| GET/POST | `/api/settings` | TempCtl 1.2 form (bottom channel + common); partial updates allowed; `{"profile":0,"loadDefaults":true}`, `{"rotate180":true}` |
 | POST | `/api/wifi` | `{"ssid","pass","apPass"}`, reconnects without restart |
-| GET | `/api/mb/read?addr=&n=&fn=` | raw registers |
+| GET | `/api/mb/read?addr=&n=&fn=&ch=` | raw registers (`ch`: channel whose controller address is used, default 0; also in the POST tools below) |
 | POST | `/api/mb/write` | `{"addr","value"}` raw |
 | POST | `/api/mb/findsp` | `{"from","to"}` |
 | GET/POST | `/api/params` | PMA parameters |
@@ -265,21 +332,30 @@ The web UI has no login. Keep it on a trusted network.
 ## 6. Project layout
 
 ```
-platformio.ini            board, libraries, TFT_eSPI pin setup
+platformio.ini            environments s3, cyd-1xlocal-1x485, cyd-2xlocal, cyd-2xlocal-2x485; libraries
 include/lv_conf.h         LVGL 9.6 configuration
 ui/                       LVGL Pro Editor project: touch UI layout (XML) + exported C code (library.json)
-src/config.h              pins
+src/version.h             product name, version, host / AP name
+src/config.h              selects the board header, chart size
+src/board_s3.h, board_cyd.h  pins, display, touch and LED per board
+src/lcd.*                 display: LVGL's ST7796 / ILI9341 driver on ESP-IDF spi_master with DMA
+src/touch.h, touch_ft6336.cpp, touch_xpt2046.cpp  touch drivers (own FT6336U driver / XPT2046_Touchscreen)
+src/status_led.*          status LED (WS2812 / single LED)
 src/program.*             ramp/soak engine + step editing helpers (pure C++, unit-tested)
 src/program_store.*       10 programs on LittleFS
 src/modbus_frame.h        Modbus RTU framing + CRC (pure C++, unit-tested)
-src/modbus_rtu.*          half-duplex Modbus master on UART2
-src/controller.*          scaling, special values, PMA parameter/action tables
-src/settings.*            defaults + NVS storage (+ migration from 1.0)
-src/app_state.*           control task: polling, program, manual setpoint, setpoint writes, chart history
-src/ui.*                  touch UI behaviour: drivers, event callbacks, dialogs
+src/modbus_rtu.*          half-duplex Modbus master (UART1 on the S3, UART2 on the CYD)
+src/controller.*          register access of one controller on the shared bus, PMA parameter/action tables
+src/settings.*            settings of both channels: defaults, validation, JSON (pure C++, unit-tested)
+src/settings_store.*      /duo/settings.json on LittleFS (safe save)
+src/channel.*             channel interface: Modbus backend (+ runaway check), local, off
+src/local_ctrl.*          local channels: task reading the thermocouples, PID, SSR time proportioning, safety
+src/tc_sensor.*, pid.*, runaway.*  MAX31855/MAX6675 decoding, PID, runaway check (pure C++, unit-tested)
+src/app_state.*           control task: polling both channels, program (bottom), manual setpoint per channel, chart history
+src/ui.*                  touch UI behaviour: event callbacks, dialogs, bring-up panel
 src/ui_gen.*              bridge to the exported UI code (create functions, constants, font fallbacks)
 src/web.*, web_page.h     HTTP server, JSON API, single-page web UI
-test/host_test.cpp        g++ -std=c++17 -Isrc test/host_test.cpp src/program.cpp && ./a.out
+test/host_test.cpp        g++ -std=c++17 -Isrc -I<ArduinoJson>/src test/host_test.cpp src/program.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp && ./a.out
 ```
 
 ## 7. Safety

@@ -1,9 +1,12 @@
-// ESP32-CYD temperature profile controller for PMA KS 4x-1 (Modbus RTU)
-// and other Modbus RTU temperature controllers.
+// TempCtl Duo: two-channel temperature profile controller (bottom + top
+// heater of a BGA rework station) for PMA KS 4x-1 / generic Modbus RTU
+// controllers. Boards: ESP32-S3-DevKitC-1 + 4.0" ST7796 (env s3) and the
+// ESP32-2432S028R "CYD" (env cyd), see src/board_*.h.
 #include <Arduino.h>
 #include <esp_task_wdt.h>
 #include "app_state.h"
 #include "config.h"
+#include "local_ctrl.h"
 #include "net.h"
 #include "ui.h"
 #include "web.h"
@@ -14,8 +17,14 @@
 SET_LOOP_TASK_STACK_SIZE(24 * 1024);
 
 void setup() {
+  localCtrlEarlyInit();  // SSR outputs low (off) before anything else
   Serial.begin(115200);
-  Serial.printf("\n[boot] TempCtl %s, free heap %u bytes\n", FW_VERSION, ESP.getFreeHeap());
+  Serial.printf("\n[boot] " PRODUCT_NAME " %s (%s%s%s), free heap %u bytes", FW_VERSION, BOARD_NAME,
+                BOARD_VARIANT[0] ? ", " : "", BOARD_VARIANT, ESP.getFreeHeap());
+#ifdef BOARD_HAS_LARGE_RAM
+  Serial.printf(", PSRAM %u bytes", ESP.getPsramSize());
+#endif
+  Serial.println();
   appInit();          // settings, shared state
   Serial.println("[boot] ui");
   uiInit();           // display, touch, LVGL screens

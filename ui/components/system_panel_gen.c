@@ -144,7 +144,7 @@ lv_obj_t * system_panel_create(lv_obj_t * parent)
         lv_obj_t * sys_info = lv_label_create(lv_obj_0);
         lv_obj_set_name(sys_info, "sys_info");
         lv_obj_set_width(sys_info, lv_pct(100));
-        lv_label_set_text(sys_info, "Wi-Fi Workshop  192.168.1.57\nhttp://tempctl.local   firmware 1.2.0");
+        lv_label_set_text(sys_info, "Wi-Fi Workshop  192.168.1.57\nhttp://tempctl-duo.local   firmware 1.0.0");
         lv_obj_add_style(sys_info, &style_small, 0);
 
         the_root = lv_obj_0;

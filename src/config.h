@@ -1,29 +1,15 @@
-// Board configuration for the ESP32-2432S028R ("Cheap Yellow Display", CYD).
+// Build configuration: version, board (pins, display, touch) and shared sizes.
 #pragma once
 
-#define FW_VERSION "1.2.0"
+#include "version.h"
 
-// ---- RS485 transceiver (UART2) ----
-// CYD free pins: CN1 = GPIO22, GPIO27 (+3.3V, GND); P3 = GPIO21(backlight!), GPIO22, GPIO35.
-#define PIN_RS485_RX 35   // P3  - input-only pin, ideal for RX (RO of transceiver)
-#define PIN_RS485_TX 22   // CN1 - DI of transceiver
-#define PIN_RS485_DE 27   // CN1 - DE+/RE of transceiver. Set to -1 for auto-direction modules.
-
-// ---- Display / touch (fixed on the CYD) ----
-#define PIN_BACKLIGHT 21
-#define PIN_TOUCH_CLK 25
-#define PIN_TOUCH_MOSI 32
-#define PIN_TOUCH_MISO 39
-#define PIN_TOUCH_CS 33
-#define PIN_TOUCH_IRQ 36
-
-// ---- On-board RGB LED (active low) used as link status ----
-#define PIN_LED_R 4
-#define PIN_LED_G 16
-#define PIN_LED_B 17
-
-#define SCREEN_W 320
-#define SCREEN_H 240
+#if defined(BOARD_S3)
+#include "board_s3.h"
+#elif defined(BOARD_CYD)
+#include "board_cyd.h"
+#else
+#error "No board selected: build with -D BOARD_S3 or -D BOARD_CYD (platformio.ini envs s3, cyd-1xlocal-1x485, cyd-2xlocal, cyd-2xlocal-2x485)"
+#endif
 
 // Chart resolution (points). Idle: one sample per second -> 300 s = 5 min
 // rolling window. Running: the program timeline (plus some spare time) is

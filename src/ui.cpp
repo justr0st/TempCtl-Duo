@@ -1,49 +1,34 @@
-// LVGL 9.6 user interface for the 320x240 CYD screen.
+// LVGL 9.6 user interface.
 //
 // The screen layout is an LVGL Pro project in ui/ (XML). LVGL Pro exports it
 // as C code (ui/**/*_gen.c, compiled as the library in ui/library.json), which
 // creates the screen and the popups. This file only contains the behaviour:
 // it looks widgets up by their `name`, attaches the event handlers (UI_EVENTS)
 // and updates them.
+//
+// Display and touch drivers: lcd.cpp (LVGL's ST7796 / ILI9341 driver),
+// touch_ft6336.cpp (S3) / touch_xpt2046.cpp (CYD). During the S3 bring-up the
+// 320x240 TempCtl screens run in the top left corner of the 480x320 display
+// (UI_LEGACY_W/H in board_s3.h), next to a small bring-up panel.
 #include "ui.h"
-#include <SPI.h>
-#include <TFT_eSPI.h>
-#include <XPT2046_Touchscreen.h>
 #include <lvgl.h>
 #include <math.h>
 #include "app_state.h"
 #include "controller.h"
+#include "lcd.h"
 #include "net.h"
+#include "touch.h"
 #include "ui_gen.h"  // UI code exported by LVGL Pro (ui/)
 
 // ------------------------------------------------------------ drivers
-static TFT_eSPI tft;
-static SPIClass touchSpi(VSPI);
-static XPT2046_Touchscreen ts(PIN_TOUCH_CS, PIN_TOUCH_IRQ);
-alignas(4) static uint8_t drawBuf[SCREEN_W * 24 * 2];  // RGB565, 24 lines
 static lv_display_t* disp = nullptr;
-static uint16_t calMinX, calMaxX, calMinY, calMaxY;
 static uint8_t appliedBrightness = 0;
 static bool rotated = false;
-
-static void flushCb(lv_display_t* d, const lv_area_t* a, uint8_t* px) {
-  const uint32_t w = a->x2 - a->x1 + 1, h = a->y2 - a->y1 + 1;
-  tft.startWrite();
-  tft.setAddrWindow(a->x1, a->y1, w, h);
-  tft.pushColors((uint16_t*)px, w * h, true);  // swap bytes for the SPI display
-  tft.endWrite();
-  lv_display_flush_ready(d);
-}
+static void bringupUpdate();  // S3 bring-up panel (see "bring-up panel" below)
 
 static void touchCb(lv_indev_t*, lv_indev_data_t* data) {
-  if (ts.tirqTouched() && ts.touched()) {
-    TS_Point p = ts.getPoint();
-    long x = constrain(map(p.x, calMinX, calMaxX, 0, SCREEN_W - 1), 0, SCREEN_W - 1);
-    long y = constrain(map(p.y, calMinY, calMaxY, 0, SCREEN_H - 1), 0, SCREEN_H - 1);
-    if (rotated) {  // display turned by 180 degrees: mirror both axes
-      x = SCREEN_W - 1 - x;
-      y = SCREEN_H - 1 - y;
-    }
+  int32_t x, y;
+  if (touchRead(&x, &y)) {
     data->point.x = x;
     data->point.y = y;
     data->state = LV_INDEV_STATE_PRESSED;
@@ -56,13 +41,14 @@ static uint32_t tickCb() { return millis(); }
 
 void uiSetBrightness(uint8_t b) {
   if (b < 10) b = 10;
-  ledcWrite(0, b);
+  lcdSetBrightness(b);
   appliedBrightness = b;
 }
 
 static void applyRotation(bool r) {
   rotated = r;
-  tft.setRotation(r ? 3 : 1);  // 1 = landscape, 3 = landscape upside down
+  lcdSetRotation(r);  // landscape / landscape upside down (MADCTL)
+  touchSetRotation(r);
   lv_obj_invalidate(lv_screen_active());
   lv_obj_invalidate(lv_layer_top());
 }
@@ -402,7 +388,7 @@ static void applyManualSp(float v, int) {
   float cur;
   {
     Guard g;
-    cur = gSettings.manualSp;
+    cur = gSettings.ch[ENGINE_CH].manualSp;
   }
   fmtTemp(true, cur, b, sizeof(b));
   setText(lblManSp, b);
@@ -413,9 +399,9 @@ extern "C" void ui_on_manual_sp(lv_event_t*) {
   char title[80], lo[12], hi[12];
   {
     Guard g;
-    cur = gSettings.manualSp;
-    snprintf(lo, sizeof(lo), "%.0f", gSettings.spMin);
-    snprintf(hi, sizeof(hi), "%.0f", gSettings.spMax);
+    cur = gSettings.ch[ENGINE_CH].manualSp;
+    snprintf(lo, sizeof(lo), "%.0f", gSettings.ch[ENGINE_CH].spMin);
+    snprintf(hi, sizeof(hi), "%.0f", gSettings.ch[ENGINE_CH].spMax);
   }
   trf(title, sizeof(title), "ed_manual_sp", lo, hi);
   openNumEditor(title, cur, applyManualSp, 0);
@@ -462,7 +448,7 @@ static void updateMain(const LiveData& L, const Settings& S) {
     fmtTemp(true, L.target, a, sizeof(a));
     setText(lblTarget, trf(buf, sizeof(buf), "step_target", a));
   } else {
-    setText(lblTarget, S.reg.sp == REG_UNSET ? T("sp_reg_unset") : "");
+    setText(lblTarget, S.ch[ENGINE_CH].mb.reg.sp == REG_UNSET ? T("sp_reg_unset") : "");
   }
 
   // link dot: the XML style for state user_1 shows "no answer"
@@ -515,7 +501,7 @@ static void updateMain(const LiveData& L, const Settings& S) {
   } else {
     setText(lblOut, "");
   }
-  setText(lblMode, (L.statusValid && S.profile == PROFILE_PMA_KS4X) ? pmaModeText(L.status) : "");
+  setText(lblMode, (L.statusValid && S.ch[ENGINE_CH].mb.profile == PROFILE_PMA_KS4X) ? pmaModeText(L.status) : "");
 
   if (!L.commOk) snprintf(buf, sizeof(buf), LV_SYMBOL_WARNING " %s", L.lastErr);
   else if (!L.spSynced && (active || L.manualOn)) snprintf(buf, sizeof(buf), LV_SYMBOL_WARNING " %s", L.lastErr);
@@ -524,7 +510,7 @@ static void updateMain(const LiveData& L, const Settings& S) {
 
   // manual setpoint widgets
   if (!modal) {
-    fmtTemp(true, S.manualSp, a, sizeof(a));
+    fmtTemp(true, S.ch[ENGINE_CH].manualSp, a, sizeof(a));
     setText(lblManSp, a);
   }
   if (millis() - manualTouchedMs > 1500) setChecked(swManual, L.manualOn);
@@ -614,8 +600,8 @@ static void applyCell(float v, int arg) {
   float lo, hi;
   {
     Guard g;
-    lo = gSettings.spMin;
-    hi = gSettings.spMax;
+    lo = gSettings.ch[ENGINE_CH].spMin;
+    hi = gSettings.ch[ENGINE_CH].spMax;
   }
   const uint32_t sec = (v <= 0) ? 0 : (uint32_t)lroundf(fminf(v, (float)MAX_STEP_SEC));
   if (col == COL_TARGET) s.target = constrain(v, lo, hi);
@@ -670,8 +656,8 @@ extern "C" void ui_on_add_step(lv_event_t*) {
   float lo, hi;
   {
     Guard g;
-    lo = gSettings.spMin;
-    hi = gSettings.spMax;
+    lo = gSettings.ch[ENGINE_CH].spMin;
+    hi = gSettings.ch[ENGINE_CH].spMax;
   }
   if (selRow >= 0 && selRow < uiProg.count) st = uiProg.s[selRow];
   else if (uiProg.count) st = uiProg.s[uiProg.count - 1];
@@ -1219,23 +1205,23 @@ static void refreshController() {
     Guard g;
     S = gSettings;
   }
-  if (ddProfile) lv_dropdown_set_selected(ddProfile, S.profile);
+  if (ddProfile) lv_dropdown_set_selected(ddProfile, S.ch[ENGINE_CH].mb.profile);
   char b[16];
-  snprintf(b, sizeof(b), "%u", S.slaveId);
+  snprintf(b, sizeof(b), "%u", S.ch[ENGINE_CH].mb.slaveId);
   setText(lblSlave, b);
   for (int i = 0; i < 5; ++i)
     if (BAUDS[i] == S.baud && ddBaud) lv_dropdown_set_selected(ddBaud, i);
   if (ddFormat) lv_dropdown_set_selected(ddFormat, S.parity == 1 ? 1 : S.parity == 2 ? 2 : (S.stopBits == 2 ? 3 : 0));
-  if (ddRamp) lv_dropdown_set_selected(ddRamp, S.rampMode);
+  if (ddRamp) lv_dropdown_set_selected(ddRamp, S.ch[ENGINE_CH].mb.rampMode);
   setChecked(swSoak, S.guaranteedSoak);
   snprintf(b, sizeof(b), "%.1f", S.soakBand);
   setText(lblBand, b);
-  setChecked(swLock, S.lockFront);
-  if (ddEnd) lv_dropdown_set_selected(ddEnd, S.endAction);
+  setChecked(swLock, S.ch[ENGINE_CH].mb.lockFront);
+  if (ddEnd) lv_dropdown_set_selected(ddEnd, S.ch[ENGINE_CH].endAction);
   char sp[24], rr[24], off[24], info[160];
-  if (S.reg.sp == REG_UNSET) strlcpy(sp, T("reg_not_set"), sizeof(sp)); else snprintf(sp, sizeof(sp), "%u", S.reg.sp);
-  if (S.reg.rampRate == REG_UNSET) strlcpy(rr, T("reg_not_set"), sizeof(rr)); else snprintf(rr, sizeof(rr), "%u", S.reg.rampRate);
-  if (S.reg.ctrlOff == REG_UNSET) strlcpy(off, T("reg_not_set"), sizeof(off)); else snprintf(off, sizeof(off), "%u", S.reg.ctrlOff);
+  if (S.ch[ENGINE_CH].mb.reg.sp == REG_UNSET) strlcpy(sp, T("reg_not_set"), sizeof(sp)); else snprintf(sp, sizeof(sp), "%u", S.ch[ENGINE_CH].mb.reg.sp);
+  if (S.ch[ENGINE_CH].mb.reg.rampRate == REG_UNSET) strlcpy(rr, T("reg_not_set"), sizeof(rr)); else snprintf(rr, sizeof(rr), "%u", S.ch[ENGINE_CH].mb.reg.rampRate);
+  if (S.ch[ENGINE_CH].mb.reg.ctrlOff == REG_UNSET) strlcpy(off, T("reg_not_set"), sizeof(off)); else snprintf(off, sizeof(off), "%u", S.ch[ENGINE_CH].mb.reg.ctrlOff);
   setText(lblCtlInfo, trf(info, sizeof(info), "ctl_regs", sp, rr, off));
   setupLoading = false;
 }
@@ -1247,9 +1233,9 @@ extern "C" void ui_on_controller_changed(lv_event_t* e) {
   Settings& S = gSettings;
   if (t == ddProfile) {
     const uint8_t p = lv_dropdown_get_selected(ddProfile) ? PROFILE_GENERIC : PROFILE_PMA_KS4X;
-    if (p != S.profile) {
-      S.profile = p;
-      regMapDefaults(S.reg, p);
+    if (p != S.ch[ENGINE_CH].mb.profile) {
+      S.ch[ENGINE_CH].mb.profile = p;
+      regMapDefaults(S.ch[ENGINE_CH].mb.reg, p);
     }
   } else if (t == ddBaud) {
     const uint32_t i = lv_dropdown_get_selected(ddBaud);
@@ -1259,21 +1245,21 @@ extern "C" void ui_on_controller_changed(lv_event_t* e) {
     S.parity = (f == 1) ? 1 : (f == 2) ? 2 : 0;
     S.stopBits = (f == 3) ? 2 : 1;
   } else if (t == ddRamp) {
-    S.rampMode = lv_dropdown_get_selected(ddRamp) ? RAMP_CONTROLLER : RAMP_HOST;
+    S.ch[ENGINE_CH].mb.rampMode = lv_dropdown_get_selected(ddRamp) ? RAMP_CONTROLLER : RAMP_HOST;
   } else if (t == swSoak) {
     S.guaranteedSoak = lv_obj_has_state(swSoak, LV_STATE_CHECKED);
   } else if (t == swLock) {
-    S.lockFront = lv_obj_has_state(swLock, LV_STATE_CHECKED);
+    S.ch[ENGINE_CH].mb.lockFront = lv_obj_has_state(swLock, LV_STATE_CHECKED);
   } else if (t == ddEnd) {
     const uint32_t a = lv_dropdown_get_selected(ddEnd);
-    if (a <= END_OUTPUTS_OFF) S.endAction = a;
+    if (a <= END_OUTPUTS_OFF) S.ch[ENGINE_CH].endAction = a;
   }
 }
 
 static void applySlave(float v, int) {
   {
     Guard g;
-    gSettings.slaveId = (uint8_t)constrain((int)v, 1, 247);
+    gSettings.ch[ENGINE_CH].mb.slaveId = (uint8_t)constrain((int)v, 1, 247);
   }
   refreshController();
 }
@@ -1288,7 +1274,7 @@ extern "C" void ui_on_slave(lv_event_t*) {
   float cur;
   {
     Guard g;
-    cur = gSettings.slaveId;
+    cur = gSettings.ch[ENGINE_CH].mb.slaveId;
   }
   openNumEditor(T("ed_slave"), cur, applySlave, 0);
 }
@@ -1310,7 +1296,7 @@ extern "C" void ui_on_test_link(lv_event_t*) {
   r.op = BUS_READ;
   {
     Guard g;
-    r.addr = gSettings.reg.pv;
+    r.addr = gSettings.ch[ENGINE_CH].mb.reg.pv;
   }
   r.count = 1;
   char msg[200], a[12], b[12];
@@ -1375,6 +1361,7 @@ static void uiTimer(lv_timer_t*) {
     setChecked(swDark, S.themeDark);
     setupLoading = false;
   }
+  bringupUpdate();
   const int tab = activeTab();
   if (tab == TAB_MAIN) updateMain(L, S);
   if (tab == TAB_PROGRAM) updateProgramTab(S);
@@ -1473,34 +1460,83 @@ static bool uiCreateScreen(int palette, bool dark) {
   return true;
 }
 
+// ------------------------------------------------------------ bring-up panel
+#ifdef UI_LEGACY_W
+// Right of / below the 320x240 screens: identity, heap and the touch
+// coordinates (raw controller values and the mapped screen point), to check
+// the display, touch mapping and memory on new hardware.
+static lv_obj_t* bringupInfo = nullptr;
+static lv_obj_t* touchDot = nullptr;
+
+static void bringupCreate() {
+  lv_obj_t* tabs = find("tabs");
+  if (tabs) lv_obj_set_size(tabs, UI_LEGACY_W, UI_LEGACY_H);
+  bringupInfo = lv_label_create(screen);
+  lv_obj_set_pos(bringupInfo, UI_LEGACY_W + 6, 6);
+  lv_obj_set_width(bringupInfo, SCREEN_W - UI_LEGACY_W - 12);
+  lv_label_set_long_mode(bringupInfo, LV_LABEL_LONG_MODE_WRAP);
+  lv_obj_set_style_text_font(bringupInfo, &lv_font_montserrat_12, 0);
+  touchDot = lv_obj_create(lv_layer_sys());
+  lv_obj_remove_style_all(touchDot);
+  lv_obj_set_size(touchDot, 7, 7);
+  lv_obj_set_style_radius(touchDot, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(touchDot, lv_color_hex(0xFF3030), 0);
+  lv_obj_set_style_bg_opa(touchDot, LV_OPA_COVER, 0);
+  lv_obj_set_hidden(touchDot, true);
+  lv_obj_set_ignore_layout(touchDot, true);
+  lv_obj_set_clickable(touchDot, false);
+}
+
+static void bringupUpdate() {
+  if (!bringupInfo) return;
+  static char buf[256];
+  int32_t rx, ry;
+  touchLastRaw(&rx, &ry);
+  lv_indev_t* indev = lv_indev_get_next(nullptr);
+  lv_point_t p = {-1, -1};
+  const bool pressed = indev && lv_indev_get_state(indev) == LV_INDEV_STATE_PRESSED;
+  if (indev) lv_indev_get_point(indev, &p);
+  snprintf(buf, sizeof(buf),
+           PRODUCT_NAME " " FW_VERSION "\n" BOARD_NAME " bring-up\n%dx%d\n\nheap %u k\nlargest %u k\nPSRAM free %u k\n\n"
+           "touch %s\nraw %ld, %ld\nscreen %ld, %ld",
+           SCREEN_W, SCREEN_H, (unsigned)(ESP.getFreeHeap() / 1024), (unsigned)(ESP.getMaxAllocHeap() / 1024),
+           (unsigned)(ESP.getFreePsram() / 1024), pressed ? "down" : "up", (long)rx, (long)ry, (long)p.x, (long)p.y);
+  lv_label_set_text(bringupInfo, buf);
+  if (pressed) {
+    lv_obj_set_pos(touchDot, p.x - 3, p.y - 3);
+    lv_obj_set_hidden(touchDot, false);
+  } else {
+    lv_obj_set_hidden(touchDot, true);
+  }
+}
+#else
+static void bringupCreate() {}
+static void bringupUpdate() {}
+#endif
+
 // ------------------------------------------------------------ init
 void uiInit() {
   bool rot;
   uint8_t b;
+  TouchCal cal;
   {
     Guard g;
-    calMinX = gSettings.tsMinX; calMaxX = gSettings.tsMaxX;
-    calMinY = gSettings.tsMinY; calMaxY = gSettings.tsMaxY;
+    cal = {gSettings.tsMinX, gSettings.tsMaxX, gSettings.tsMinY, gSettings.tsMaxY};
     rot = gSettings.rotate180;
     b = gSettings.brightness;
   }
-  tft.init();
   rotated = rot;
-  tft.setRotation(rot ? 3 : 1);  // landscape 320x240
-  tft.fillScreen(TFT_BLACK);
-  ledcSetup(0, 5000, 8);
-  ledcAttachPin(PIN_BACKLIGHT, 0);
-  uiSetBrightness(b);
-
-  touchSpi.begin(PIN_TOUCH_CLK, PIN_TOUCH_MISO, PIN_TOUCH_MOSI, PIN_TOUCH_CS);
-  ts.begin(touchSpi);
-  ts.setRotation(1);  // raw orientation; 180 degree rotation is handled in touchCb
+  touchInit(cal);
+  touchSetRotation(rot);
 
   lv_init();
   lv_tick_set_cb(tickCb);
-  disp = lv_display_create(SCREEN_W, SCREEN_H);
-  lv_display_set_flush_cb(disp, flushCb);
-  lv_display_set_buffers(disp, drawBuf, nullptr, sizeof(drawBuf), LV_DISPLAY_RENDER_MODE_PARTIAL);
+  lv_delay_set_cb(delay);
+  disp = lcdInit(rot);  // landscape SCREEN_W x SCREEN_H
+  if (!disp) {
+    Serial.println("[ui] display could not be set up - no touch UI");
+    return;
+  }
   lv_indev_t* indev = lv_indev_create();
   lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(indev, touchCb);
@@ -1519,8 +1555,11 @@ void uiInit() {
     lv_obj_t* l = lv_label_create(lv_screen_active());
     lv_label_set_text(l, "UI could not be created.\nSee the serial log (115200 baud).");
     lv_obj_center(l);
+    lv_refr_now(disp);
+    uiSetBrightness(b);
     return;
   }
+  bringupCreate();
   uiBindEvents();
   bindMain();
   bindProgram();
@@ -1530,6 +1569,10 @@ void uiInit() {
   applyTheme(palette, dark);  // chart series, table colours
 
   lv_timer_create(uiTimer, 250, nullptr);
+  lv_refr_now(disp);  // first frame, then the backlight (no flash of garbage)
+  uiSetBrightness(b);
 }
 
-void uiLoop() { lv_timer_handler(); }
+void uiLoop() {
+  if (disp) lv_timer_handler();
+}

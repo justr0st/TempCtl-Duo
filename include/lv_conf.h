@@ -1618,7 +1618,7 @@
 /** Driver for LCD devices connected via SPI or parallel port.
  *  Use it if your LCD controller is not listed among the dedicated drivers below.
  */
-#define LV_USE_GENERIC_MIPI 0
+#define LV_USE_GENERIC_MIPI 1  /* TempCtl Duo: src/lcd.cpp */
 
 /** ST7735
  *
@@ -1636,13 +1636,13 @@
  *
  *  Enable: LV_USE_GENERIC_MIPI
  */
-#define LV_USE_ST7796 0
+#define LV_USE_ST7796 1  /* S3 board (4.0" module) */
 
 /** ILI9341
  *
  *  Enable: LV_USE_GENERIC_MIPI
  */
-#define LV_USE_ILI9341 0
+#define LV_USE_ILI9341 1  /* CYD */
 
 /** NV3007
  *

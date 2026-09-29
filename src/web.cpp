@@ -8,6 +8,7 @@
 #include "app_state.h"
 #include "controller.h"
 #include "net.h"
+#include "settings_store.h"
 #include "ui.h"
 #include "web_page.h"
 
@@ -65,7 +66,7 @@ static void handleStatus() {
   setNum(d["out"], L.outValid ? L.out : NAN);
   if (L.statusValid) {
     d["status"] = L.status;
-    if (S.profile == PROFILE_PMA_KS4X) d["mode"] = pmaModeText(L.status);
+    if (S.ch[ENGINE_CH].mb.profile == PROFILE_PMA_KS4X) d["mode"] = pmaModeText(L.status);
   }
   if (L.alarmValid) d["alarm"] = L.alarm;
   JsonObject r = d["run"].to<JsonObject>();
@@ -87,7 +88,7 @@ static void handleStatus() {
   r["steps"] = L.stepCount;
   JsonObject m = d["manual"].to<JsonObject>();
   m["on"] = L.manualOn;
-  setNum(m["sp"], S.manualSp);
+  setNum(m["sp"], S.ch[ENGINE_CH].manualSp);
   m["synced"] = L.manualSynced;
   d["sel"] = S.selProgram;
   {
@@ -97,11 +98,34 @@ static void handleStatus() {
     d["selSteps"] = p.count;
     d["plannedTotal"] = ProgramEngine::plannedTotal(p);
   }
-  d["spConfigured"] = S.reg.sp != REG_UNSET;
-  d["profile"] = S.profile;
+  d["spConfigured"] = S.ch[ENGINE_CH].mb.reg.sp != REG_UNSET;
+  d["profile"] = S.ch[ENGINE_CH].mb.profile;
   d["net"] = netInfo();
   d["uptime"] = millis() / 1000;
   d["fw"] = FW_VERSION;
+  d["board"] = BOARD_NAME;
+  d["variant"] = BOARD_VARIANT;
+  // both channels (the fields above are the bottom channel, for the old page)
+  JsonArray chs = d["channels"].to<JsonArray>();
+  for (int i = 0; i < NUM_CHANNELS; ++i) {
+    const ChannelLive& C = L.ch[i];
+    JsonObject o = chs.add<JsonObject>();
+    o["name"] = C.name;
+    o["type"] = channelTypeName(C.type);
+    o["ok"] = C.commOk;
+    o["err"] = C.lastErr;
+    setNum(o["pv"], C.pvValid ? C.pv : NAN);
+    o["pvFlag"] = Controller::flagName(C.pvFlag);
+    setNum(o["sp"], C.spEffValid ? C.spEff : NAN);
+    setNum(o["out"], C.outValid ? C.out : NAN);
+    if (C.statusValid && C.type == CH_MODBUS && S.ch[i].mb.profile == PROFILE_PMA_KS4X) o["mode"] = pmaModeText(C.status);
+    if (C.type == CH_LOCAL) setNum(o["cold"], C.coldC);
+    o["fault"] = C.fault ? C.faultText : "";
+    JsonObject m = o["manual"].to<JsonObject>();
+    m["on"] = C.manualOn;
+    setNum(m["sp"], S.ch[i].manualSp);
+    m["synced"] = C.manualSynced;
+  }
   sendJson(d);
 }
 
@@ -176,8 +200,8 @@ static void handleGetPrograms() {
     d["sel"] = gSettings.selProgram;
     d["max"] = MAX_PROGRAMS;
     d["maxSteps"] = MAX_STEPS;
-    d["spMin"] = gSettings.spMin;
-    d["spMax"] = gSettings.spMax;
+    d["spMin"] = gSettings.ch[ENGINE_CH].spMin;
+    d["spMax"] = gSettings.ch[ENGINE_CH].spMax;
     JsonArray a = d["programs"].to<JsonArray>();
     for (int i = 0; i < MAX_PROGRAMS; ++i) {
       JsonObject o = a.add<JsonObject>();
@@ -202,8 +226,8 @@ static void sendProgram(int i) {
   {
     Guard g;
     p = gPrograms[i];
-    lo = gSettings.spMin;
-    hi = gSettings.spMax;
+    lo = gSettings.ch[ENGINE_CH].spMin;
+    hi = gSettings.ch[ENGINE_CH].spMax;
   }
   JsonDocument d;
   d["i"] = i;
@@ -279,11 +303,24 @@ static void handleSelect() {
 static void handleManual() {
   JsonDocument d;
   if (!parseBody(d)) return sendError("Invalid JSON");
-  if (!d["sp"].isNull()) setManualSp(d["sp"].as<float>());
+  const int ch = d["ch"] | (int)ENGINE_CH;  // 0 = bottom (default), 1 = top
+  if (ch < 0 || ch >= NUM_CHANNELS) return sendError("ch must be 0 (bottom) or 1 (top)");
+  if (!d["sp"].isNull()) setManualSp(d["sp"].as<float>(), ch);
   bool ok = true;
-  if (!d["on"].isNull()) ok = sendCmd(d["on"].as<bool>() ? CMD_MANUAL_ON : CMD_MANUAL_OFF);
+  if (!d["on"].isNull()) ok = sendCmd(d["on"].as<bool>() ? CMD_MANUAL_ON : CMD_MANUAL_OFF, ch);
   JsonDocument r;
   r["ok"] = ok;
+  sendJson(r);
+}
+
+// {"ch":0}: acknowledge a channel's latched fault (runaway, sensor, over temperature)
+static void handleAck() {
+  JsonDocument d;
+  if (!parseBody(d)) return sendError("Invalid JSON");
+  const int ch = d["ch"] | -1;
+  if (ch < 0 || ch >= NUM_CHANNELS) return sendError("ch must be 0 (bottom) or 1 (top)");
+  JsonDocument r;
+  r["ok"] = sendCmd(CMD_ACK_FAULT, ch);
   sendJson(r);
 }
 
@@ -312,40 +349,40 @@ static void handleGetSettings() {
     S = gSettings;
   }
   JsonDocument d;
-  d["slaveId"] = S.slaveId;
+  d["slaveId"] = S.ch[ENGINE_CH].mb.slaveId;
   d["baud"] = S.baud;
   d["parity"] = S.parity;
   d["stopBits"] = S.stopBits;
   d["timeoutMs"] = S.timeoutMs;
   d["pollMs"] = S.pollMs;
-  d["profile"] = S.profile;
+  d["profile"] = S.ch[ENGINE_CH].mb.profile;
   JsonObject r = d["reg"].to<JsonObject>();
-  r["pv"] = addrOut(S.reg.pv);
-  r["spEff"] = addrOut(S.reg.spEff);
-  r["out"] = addrOut(S.reg.out);
-  r["status"] = addrOut(S.reg.status);
-  r["alarm"] = addrOut(S.reg.alarm);
-  r["sp"] = addrOut(S.reg.sp);
-  r["spLo"] = addrOut(S.reg.spLo);
-  r["spHi"] = addrOut(S.reg.spHi);
-  r["rampRate"] = addrOut(S.reg.rampRate);
-  r["ctrlOff"] = addrOut(S.reg.ctrlOff);
-  r["remote"] = addrOut(S.reg.remote);
-  r["scale"] = S.reg.scale;
-  r["readFn"] = S.reg.readFn;
-  r["writeFn"] = S.reg.writeFn;
-  r["offRaw"] = S.reg.offRaw;
-  d["rampMode"] = S.rampMode;
-  d["minStep"] = S.minStep;
-  d["minWriteSec"] = S.minWriteSec;
+  r["pv"] = addrOut(S.ch[ENGINE_CH].mb.reg.pv);
+  r["spEff"] = addrOut(S.ch[ENGINE_CH].mb.reg.spEff);
+  r["out"] = addrOut(S.ch[ENGINE_CH].mb.reg.out);
+  r["status"] = addrOut(S.ch[ENGINE_CH].mb.reg.status);
+  r["alarm"] = addrOut(S.ch[ENGINE_CH].mb.reg.alarm);
+  r["sp"] = addrOut(S.ch[ENGINE_CH].mb.reg.sp);
+  r["spLo"] = addrOut(S.ch[ENGINE_CH].mb.reg.spLo);
+  r["spHi"] = addrOut(S.ch[ENGINE_CH].mb.reg.spHi);
+  r["rampRate"] = addrOut(S.ch[ENGINE_CH].mb.reg.rampRate);
+  r["ctrlOff"] = addrOut(S.ch[ENGINE_CH].mb.reg.ctrlOff);
+  r["remote"] = addrOut(S.ch[ENGINE_CH].mb.reg.remote);
+  r["scale"] = S.ch[ENGINE_CH].mb.reg.scale;
+  r["readFn"] = S.ch[ENGINE_CH].mb.reg.readFn;
+  r["writeFn"] = S.ch[ENGINE_CH].mb.reg.writeFn;
+  r["offRaw"] = S.ch[ENGINE_CH].mb.reg.offRaw;
+  d["rampMode"] = S.ch[ENGINE_CH].mb.rampMode;
+  d["minStep"] = S.ch[ENGINE_CH].mb.minStep;
+  d["minWriteSec"] = S.ch[ENGINE_CH].mb.minWriteSec;
   d["guaranteedSoak"] = S.guaranteedSoak != 0;
   d["soakBand"] = S.soakBand;
-  d["endAction"] = S.endAction;
-  d["endSp"] = S.endSp;
-  d["lockFront"] = S.lockFront != 0;
+  d["endAction"] = S.ch[ENGINE_CH].endAction;
+  d["endSp"] = S.ch[ENGINE_CH].endSp;
+  d["lockFront"] = S.ch[ENGINE_CH].mb.lockFront != 0;
   d["commLossSec"] = S.commLossSec;
-  d["spMin"] = S.spMin;
-  d["spMax"] = S.spMax;
+  d["spMin"] = S.ch[ENGINE_CH].spMin;
+  d["spMax"] = S.ch[ENGINE_CH].spMax;
   d["brightness"] = S.brightness;
   d["rotate180"] = S.rotate180 != 0;
   d["themePalette"] = S.themePalette;
@@ -384,7 +421,7 @@ static void handlePostSettings() {
   {
     Guard g;
     Settings& S = gSettings;
-    upd<uint8_t>(d["slaveId"], S.slaveId, 1, 247);
+    upd<uint8_t>(d["slaveId"], S.ch[ENGINE_CH].mb.slaveId, 1, 247);
     if (!d["baud"].isNull()) {
       const uint32_t b = d["baud"];
       if (b == 2400 || b == 4800 || b == 9600 || b == 19200 || b == 38400) S.baud = b;
@@ -395,39 +432,39 @@ static void handlePostSettings() {
     upd<uint16_t>(d["pollMs"], S.pollMs, 250, 10000);
     if (!d["profile"].isNull()) {
       const uint8_t p = d["profile"].as<uint8_t>() ? PROFILE_GENERIC : PROFILE_PMA_KS4X;
-      if (p != S.profile || (d["loadDefaults"] | false)) regMapDefaults(S.reg, p);
-      S.profile = p;
+      if (p != S.ch[ENGINE_CH].mb.profile || (d["loadDefaults"] | false)) regMapDefaults(S.ch[ENGINE_CH].mb.reg, p);
+      S.ch[ENGINE_CH].mb.profile = p;
     }
     JsonVariantConst r = d["reg"];
     if (!r.isNull()) {
-      S.reg.pv = addrIn(r["pv"], S.reg.pv);
-      S.reg.spEff = addrIn(r["spEff"], S.reg.spEff);
-      S.reg.out = addrIn(r["out"], S.reg.out);
-      S.reg.status = addrIn(r["status"], S.reg.status);
-      S.reg.alarm = addrIn(r["alarm"], S.reg.alarm);
-      S.reg.sp = addrIn(r["sp"], S.reg.sp);
-      S.reg.spLo = addrIn(r["spLo"], S.reg.spLo);
-      S.reg.spHi = addrIn(r["spHi"], S.reg.spHi);
-      S.reg.rampRate = addrIn(r["rampRate"], S.reg.rampRate);
-      S.reg.ctrlOff = addrIn(r["ctrlOff"], S.reg.ctrlOff);
-      S.reg.remote = addrIn(r["remote"], S.reg.remote);
-      upd<float>(r["scale"], S.reg.scale, 1.0f, 1000.0f);
-      if (!r["readFn"].isNull()) S.reg.readFn = (r["readFn"].as<int>() == 4) ? 4 : 3;
-      if (!r["writeFn"].isNull()) S.reg.writeFn = (r["writeFn"].as<int>() == 16) ? 16 : 6;
-      upd<int16_t>(r["offRaw"], S.reg.offRaw, -32768, 32767);
+      S.ch[ENGINE_CH].mb.reg.pv = addrIn(r["pv"], S.ch[ENGINE_CH].mb.reg.pv);
+      S.ch[ENGINE_CH].mb.reg.spEff = addrIn(r["spEff"], S.ch[ENGINE_CH].mb.reg.spEff);
+      S.ch[ENGINE_CH].mb.reg.out = addrIn(r["out"], S.ch[ENGINE_CH].mb.reg.out);
+      S.ch[ENGINE_CH].mb.reg.status = addrIn(r["status"], S.ch[ENGINE_CH].mb.reg.status);
+      S.ch[ENGINE_CH].mb.reg.alarm = addrIn(r["alarm"], S.ch[ENGINE_CH].mb.reg.alarm);
+      S.ch[ENGINE_CH].mb.reg.sp = addrIn(r["sp"], S.ch[ENGINE_CH].mb.reg.sp);
+      S.ch[ENGINE_CH].mb.reg.spLo = addrIn(r["spLo"], S.ch[ENGINE_CH].mb.reg.spLo);
+      S.ch[ENGINE_CH].mb.reg.spHi = addrIn(r["spHi"], S.ch[ENGINE_CH].mb.reg.spHi);
+      S.ch[ENGINE_CH].mb.reg.rampRate = addrIn(r["rampRate"], S.ch[ENGINE_CH].mb.reg.rampRate);
+      S.ch[ENGINE_CH].mb.reg.ctrlOff = addrIn(r["ctrlOff"], S.ch[ENGINE_CH].mb.reg.ctrlOff);
+      S.ch[ENGINE_CH].mb.reg.remote = addrIn(r["remote"], S.ch[ENGINE_CH].mb.reg.remote);
+      upd<float>(r["scale"], S.ch[ENGINE_CH].mb.reg.scale, 1.0f, 1000.0f);
+      if (!r["readFn"].isNull()) S.ch[ENGINE_CH].mb.reg.readFn = (r["readFn"].as<int>() == 4) ? 4 : 3;
+      if (!r["writeFn"].isNull()) S.ch[ENGINE_CH].mb.reg.writeFn = (r["writeFn"].as<int>() == 16) ? 16 : 6;
+      upd<int16_t>(r["offRaw"], S.ch[ENGINE_CH].mb.reg.offRaw, -32768, 32767);
     }
-    upd<uint8_t>(d["rampMode"], S.rampMode, 0, 1);
-    upd<float>(d["minStep"], S.minStep, 0.1f, 100.0f);
-    upd<uint16_t>(d["minWriteSec"], S.minWriteSec, 1, 3600);
+    upd<uint8_t>(d["rampMode"], S.ch[ENGINE_CH].mb.rampMode, 0, 1);
+    upd<float>(d["minStep"], S.ch[ENGINE_CH].mb.minStep, 0.1f, 100.0f);
+    upd<uint16_t>(d["minWriteSec"], S.ch[ENGINE_CH].mb.minWriteSec, 1, 3600);
     if (!d["guaranteedSoak"].isNull()) S.guaranteedSoak = d["guaranteedSoak"].as<bool>();
     upd<float>(d["soakBand"], S.soakBand, 0.1f, 500.0f);
-    upd<uint8_t>(d["endAction"], S.endAction, 0, 2);
-    upd<float>(d["endSp"], S.endSp, -1999.0f, 9999.0f);
-    if (!d["lockFront"].isNull()) S.lockFront = d["lockFront"].as<bool>();
+    upd<uint8_t>(d["endAction"], S.ch[ENGINE_CH].endAction, 0, 2);
+    upd<float>(d["endSp"], S.ch[ENGINE_CH].endSp, -1999.0f, 9999.0f);
+    if (!d["lockFront"].isNull()) S.ch[ENGINE_CH].mb.lockFront = d["lockFront"].as<bool>();
     upd<uint16_t>(d["commLossSec"], S.commLossSec, 0, 3600);
-    upd<float>(d["spMin"], S.spMin, -1999.0f, 9999.0f);
-    upd<float>(d["spMax"], S.spMax, -1999.0f, 9999.0f);
-    if (S.spMax < S.spMin) S.spMax = S.spMin;
+    upd<float>(d["spMin"], S.ch[ENGINE_CH].spMin, -1999.0f, 9999.0f);
+    upd<float>(d["spMax"], S.ch[ENGINE_CH].spMax, -1999.0f, 9999.0f);
+    if (S.ch[ENGINE_CH].spMax < S.ch[ENGINE_CH].spMin) S.ch[ENGINE_CH].spMax = S.ch[ENGINE_CH].spMin;
     upd<uint8_t>(d["brightness"], S.brightness, 10, 255);
     if (!d["rotate180"].isNull()) S.rotate180 = d["rotate180"].as<bool>();
     upd<uint8_t>(d["themePalette"], S.themePalette, 0, (uint8_t)(uiPaletteCount() - 1));
@@ -439,9 +476,45 @@ static void handlePostSettings() {
     upd<uint16_t>(d["tsMaxX"], S.tsMaxX, 0, 4095);
     upd<uint16_t>(d["tsMinY"], S.tsMinY, 0, 4095);
     upd<uint16_t>(d["tsMaxY"], S.tsMaxY, 0, 4095);
+    char msg[160];
+    if (!settingsValidate(S, boardLimits(), msg, sizeof(msg))) Serial.printf("[settings] %s\n", msg);
   }
   saveSettingsAndNotify();
   handleGetSettings();
+}
+
+// ------------------------------------------------------------ settings document (Duo)
+// GET: the whole settings JSON (/duo/settings.json without passwords).
+// POST: a partial document; only the keys given are changed, e.g.
+//   {"channels":[null,{"type":"modbus","modbus":{"addr":2}}]}
+static void handleGetConfig() {
+  static Settings S;  // static: large; web handlers run in the loop task only
+  {
+    Guard g;
+    S = gSettings;
+  }
+  JsonDocument d;
+  settingsToJson(S, d.to<JsonObject>(), true);
+  sendJson(d);
+}
+
+static void handlePostConfig() {
+  JsonDocument d;
+  if (!parseBody(d)) return sendError("Invalid JSON");
+  static Settings S;
+  char msg[200];
+  {
+    Guard g;
+    S = gSettings;
+  }
+  if (!settingsFromJson(d.as<JsonObjectConst>(), S, msg, sizeof(msg))) return sendError(msg);
+  if (!settingsValidate(S, boardLimits(), msg, sizeof(msg))) return sendError(msg);
+  {
+    Guard g;
+    gSettings = S;
+  }
+  saveSettingsAndNotify();
+  handleGetConfig();
 }
 
 static void handleWifi() {
@@ -466,8 +539,19 @@ static void handleWifi() {
 }
 
 // ------------------------------------------------------------ bus tools
+// Optional "ch" (query or JSON body): channel whose controller is used, 0 = bottom (default), 1 = top
+static uint8_t argCh() {
+  const long c = server.hasArg("ch") ? server.arg("ch").toInt() : 0;
+  return (c >= 0 && c < NUM_CHANNELS) ? (uint8_t)c : 0;
+}
+static uint8_t bodyCh(const JsonDocument& b) {
+  const int c = b["ch"] | 0;
+  return (c >= 0 && c < NUM_CHANNELS) ? (uint8_t)c : 0;
+}
+
 static void handleMbRead() {
   BusRequest r{};
+  r.ch = argCh();
   r.op = BUS_READ;
   r.addr = server.arg("addr").toInt();
   r.count = server.hasArg("n") ? server.arg("n").toInt() : 1;
@@ -486,6 +570,7 @@ static void handleMbWrite() {
   JsonDocument b;
   if (!parseBody(b)) return sendError("Invalid JSON");
   BusRequest r{};
+  r.ch = bodyCh(b);
   r.op = BUS_WRITE;
   r.addr = b["addr"] | 0;
   r.value = b["value"] | 0;
@@ -500,6 +585,7 @@ static void handleFindSp() {
   JsonDocument b;
   parseBody(b);
   BusRequest r{};
+  r.ch = bodyCh(b);
   r.op = BUS_FINDSP;
   {
     Guard g;
@@ -520,10 +606,11 @@ static void handleFindSp() {
 static void handleGetParams() {
   uint8_t profile;
   float scale;
+  const uint8_t ch = argCh();
   {
     Guard g;
-    profile = gSettings.profile;
-    scale = gSettings.reg.scale;
+    profile = gSettings.ch[ch].mb.profile;
+    scale = gSettings.ch[ch].mb.reg.scale;
   }
   JsonDocument d;
   d["supported"] = profile == PROFILE_PMA_KS4X;
@@ -539,6 +626,7 @@ static void handleGetParams() {
       o["scaled"] = p[i].scaled != 0;
       o["desc"] = p[i].desc;
       BusRequest r{};
+      r.ch = ch;
       r.op = BUS_READ;
       r.addr = p[i].addr;
       r.count = 1;
@@ -561,11 +649,13 @@ static void handlePostParam() {
   JsonDocument b;
   if (!parseBody(b)) return sendError("Invalid JSON");
   float scale;
+  const uint8_t ch = bodyCh(b);
   {
     Guard g;
-    scale = gSettings.reg.scale;
+    scale = gSettings.ch[ch].mb.reg.scale;
   }
   BusRequest r{};
+  r.ch = ch;
   r.op = BUS_WRITE;
   r.addr = b["addr"] | 0;
   const bool scaled = b["scaled"] | false;
@@ -593,6 +683,7 @@ static void handleAction() {
   const int i = b["i"] | -1;
   if (i < 0 || i >= n) return sendError("Unknown action");
   BusRequest r{};
+  r.ch = bodyCh(b);
   r.op = BUS_WRITE;
   r.addr = a[i].addr;
   r.value = a[i].value;
@@ -615,9 +706,12 @@ void webBegin() {
   server.on("/api/select", HTTP_POST, handleSelect);
   server.on("/api/manual", HTTP_POST, handleManual);
   server.on("/api/cmd", HTTP_POST, handleCmd);
+  server.on("/api/ack", HTTP_POST, handleAck);
   server.on("/api/settings", HTTP_GET, handleGetSettings);
   server.on("/api/settings", HTTP_POST, handlePostSettings);
   server.on("/api/wifi", HTTP_POST, handleWifi);
+  server.on("/api/config", HTTP_GET, handleGetConfig);
+  server.on("/api/config", HTTP_POST, handlePostConfig);
   server.on("/api/mb/read", HTTP_GET, handleMbRead);
   server.on("/api/mb/write", HTTP_POST, handleMbWrite);
   server.on("/api/mb/findsp", HTTP_POST, handleFindSp);

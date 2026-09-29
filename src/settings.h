@@ -1,12 +1,23 @@
+// TempCtl Duo settings: common part + two channels (bottom, top).
+//
+// Stored as JSON in /duo/settings.json (settings_store.cpp); the same JSON is
+// the web API's settings document (GET/POST /api/config). The conversion and
+// validation here are pure C++ (no Arduino), so they are host-tested.
 #pragma once
+#include <ArduinoJson.h>
+#include <stddef.h>
 #include <stdint.h>
-#include "program.h"
 
 constexpr uint16_t REG_UNSET = 0xFFFF;
+constexpr int NUM_CHANNELS = 2;
+constexpr int CH_BOTTOM = 0, CH_TOP = 1;
+constexpr uint8_t SETTINGS_FMT = 1;  // "fmt" of /duo/settings.json
 
 enum Profile : uint8_t { PROFILE_PMA_KS4X = 0, PROFILE_GENERIC = 1 };
 enum RampMode : uint8_t { RAMP_HOST = 0, RAMP_CONTROLLER = 1 };
 enum EndAction : uint8_t { END_KEEP = 0, END_SET_SP = 1, END_OUTPUTS_OFF = 2 };
+enum ChannelType : uint8_t { CH_OFF = 0, CH_MODBUS = 1, CH_LOCAL = 2 };
+enum SensorType : uint8_t { SENSOR_MAX31855 = 0, SENSOR_MAX6675 = 1 };
 
 // Register map. All "analog" registers (pv, spEff, out, sp, rampRate) are
 // int16 divided by `scale`. status/alarm/ctrlOff/remote are raw integers.
@@ -28,32 +39,66 @@ struct RegMap {
   int16_t offRaw;     // raw value meaning "function switched off"
 };
 
-struct Settings {
-  uint32_t magic;
-  uint16_t version;
+// Thermal runaway detection (spec 9.2), kept per channel type
+struct Runaway {
+  uint8_t enable;
+  float minOut;       // "heating failed": output >= minOut % ...
+  uint16_t heatSec;   // ... for heatSec seconds ...
+  float minRise;      // ... but PV rose less than minRise degC
+  float holdBand;     // "runaway while holding": |PV - SP| > holdBand ...
+  uint16_t holdSec;   // ... for longer than holdSec seconds (after SP was reached)
+};
 
-  // Modbus link
+struct ModbusChannelSettings {
   uint8_t slaveId;
+  uint8_t profile;       // Profile
+  RegMap reg;
+  uint8_t rampMode;      // RampMode
+  float minStep;         // host mode: min. SP change before a new write
+  uint16_t minWriteSec;  // host mode: min. seconds between SP writes
+  uint8_t lockFront;     // set remote=1 while running
+  Runaway runaway;
+};
+
+struct LocalChannelSettings {
+  uint8_t sensor;       // SensorType
+  float calOffset;      // true = raw * calGain + calOffset
+  float calGain;
+  float kp, ki, kd;     // PID (output % per degC, per degC*s, per degC/s)
+  float windowSec;      // SSR time-proportioning window
+  float maxOut;         // output limit %
+  float maxTemp;        // SSR cut-off degC
+  Runaway runaway;
+};
+
+constexpr size_t CH_NAME_LEN = 17;  // 16 characters
+
+struct ChannelSettings {
+  char name[CH_NAME_LEN];
+  uint8_t type;         // ChannelType
+  uint8_t endAction;    // EndAction
+  float endSp;
+  float spMin, spMax;   // setpoint limits (editors, manual, programs)
+  float manualSp;       // last manual setpoint
+  ModbusChannelSettings mb;
+  LocalChannelSettings loc;
+};
+
+struct Settings {
+  // RS485 bus (shared by the Modbus channels)
   uint32_t baud;
-  uint8_t parity;      // 0 none, 1 even, 2 odd
-  uint8_t stopBits;    // 1 or 2
+  uint8_t parity;       // 0 none, 1 even, 2 odd
+  uint8_t stopBits;     // 1 or 2
   uint16_t timeoutMs;
   uint16_t pollMs;
+  uint16_t commLossSec; // pause the program after this many seconds without link
 
-  uint8_t profile;     // Profile
-  RegMap reg;
-
-  // Program behaviour
-  uint8_t rampMode;    // RampMode
-  float minStep;       // host mode: min. SP change before a new write
-  uint16_t minWriteSec;// host mode: min. seconds between SP writes
+  // Run
+  float bottomBand;     // "bottom reached" band (+-degC) for "wait for bottom"
+  // TempCtl 1.2 engine options, used by the single-channel engine until the
+  // new run engine (step 5) removes them. Not part of the Duo design.
   uint8_t guaranteedSoak;
   float soakBand;
-  uint8_t endAction;   // EndAction
-  float endSp;
-  uint8_t lockFront;   // set remote=1 while running
-  uint16_t commLossSec;// pause program after this many seconds without link
-  float spMin, spMax;  // editor limits
 
   // Network
   char ssid[33];
@@ -63,28 +108,41 @@ struct Settings {
 
   // Display
   uint8_t brightness;
-  uint16_t tsMinX, tsMaxX, tsMinY, tsMaxY;
+  uint8_t rotate180;
+  uint16_t tsMinX, tsMaxX, tsMinY, tsMaxY;  // XPT2046 calibration (CYD)
+  uint8_t themeDark;     // 1 dark, 0 light, THEME_DARK_DEFAULT = theme_dark in ui/globals.xml
+  uint8_t themePalette;  // TempCtl 1.2 palettes (replaced by accentColor with the new UI, step 6)
+  uint32_t accentColor;  // RGB 0xRRGGBB
 
-  // Setpoint-address finder range
+  // Tools: setpoint-address finder range
   uint16_t scanFrom, scanTo;
 
-  // ---- added in version 3 (everything above keeps the version 2 layout) ----
-  uint8_t rotate180;   // display turned upside down
-  uint8_t selProgram;  // program selected on the Main screen (0..MAX_PROGRAMS-1)
-  float manualSp;      // last manual setpoint
+  uint8_t selProgram;    // program selected for the next run
 
-  // ---- added in version 4 ----
-  uint8_t themePalette;  // colour palette (ui/globals.xml, System > Display)
-  uint8_t themeDark;     // 1 dark, 0 light, THEME_DARK_DEFAULT = theme_dark in ui/globals.xml
+  ChannelSettings ch[NUM_CHANNELS];
 };
 
 constexpr uint8_t THEME_DARK_DEFAULT = 0xFF;
 
+// What the board's wiring allows (board_*.h: HAS_RS485, LOCAL_CHANNELS_MAX)
+struct BoardLimits {
+  bool rs485;
+  uint8_t localMax;
+};
+
 void regMapDefaults(RegMap& r, uint8_t profile);
-void settingsDefaults(Settings& s);
-// Returns false if defaults were loaded. If an older (version 2) settings
-// blob was migrated, its 6-step program is converted into *legacy and
-// *haveLegacy is set.
-bool settingsLoad(Settings& s, Program* legacy = nullptr, bool* haveLegacy = nullptr);
-void settingsSave(const Settings& s);
-uint32_t serialConfigFor(const Settings& s);
+void settingsDefaults(Settings& s, const BoardLimits& lim);
+
+// Makes the settings consistent with the board and the value ranges.
+// Channel types the board can't wire are switched to Off. Returns false and a
+// message if something had to be changed that the caller asked for explicitly
+// (used to reject a POST); the settings are corrected either way.
+bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n);
+
+const char* channelTypeName(uint8_t t);  // "off" / "modbus" / "local"
+
+// forApi = true: passwords are replaced by "passSet" / "apPassSet"
+void settingsToJson(const Settings& s, JsonObject o, bool forApi);
+// Merges the keys present in `o` into `s` (missing keys keep their values,
+// unknown keys are ignored). Returns false + message on a wrong value type.
+bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n);

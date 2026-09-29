@@ -3,10 +3,18 @@
 #pragma once
 #include <Arduino.h>
 #include "config.h"
+#include "channel.h"
 #include "program.h"
 #include "settings.h"
 
+// Until the two-channel run engine and the new UIs (steps 5-7) the program
+// engine, the chart and the old touch / web UIs use the bottom channel
+// (ENGINE_CH); the flat fields below mirror it. Both channels are in `ch`.
+constexpr int ENGINE_CH = CH_BOTTOM;
+
 struct LiveData {
+  ChannelLive ch[NUM_CHANNELS];
+  // ---- mirror of ch[ENGINE_CH] (+ its setpoint-write errors) ----
   // link
   bool commOk;
   uint32_t okCount, errCount;
@@ -36,7 +44,7 @@ struct LiveData {
   bool manualOn;
   float manualSp;
   bool manualSynced;  // manual setpoint (and outputs on/off) written
-  char runMsg[80];
+  char runMsg[128];
 };
 
 // Chart history.
@@ -71,9 +79,10 @@ enum CmdType : uint8_t {
   CMD_STOP,
   CMD_SKIP,
   CMD_SETTINGS_CHANGED,
-  CMD_MANUAL_ON,
-  CMD_MANUAL_OFF,
-  CMD_MANUAL_SP,    // value = new manual setpoint
+  CMD_MANUAL_ON,    // arg = channel
+  CMD_MANUAL_OFF,   // arg = channel
+  CMD_MANUAL_SP,    // arg = channel, value = new manual setpoint
+  CMD_ACK_FAULT,    // arg = channel: acknowledge a latched fault
 };
 
 struct Cmd {
@@ -86,6 +95,7 @@ enum BusOp : uint8_t { BUS_READ, BUS_WRITE, BUS_FINDSP };
 
 struct BusRequest {
   BusOp op;
+  uint8_t ch;        // channel whose controller (address, register map) is used
   uint8_t fn;        // 0 = default from settings
   uint16_t addr;
   uint16_t count;    // read
@@ -119,6 +129,6 @@ void saveSettingsAndNotify();    // persist gSettings and tell the control task 
 void saveSettingsQuiet();        // persist gSettings only (display, selection, manual SP)
 bool saveProgram(int idx);       // persist gPrograms[idx] (call without holding gLock)
 void selectProgram(int idx);     // select + persist
-void setManualSp(float v);       // clamp, persist and send to the control task
+void setManualSp(float v, int ch = ENGINE_CH);  // clamp, persist and send to the control task
 float runSpanFor(float total);   // x axis length for a program: total + spare
 void chartSnapshot(ChartData& d);

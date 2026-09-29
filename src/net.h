@@ -3,6 +3,8 @@
 void netBegin();
 void netLoop();
 String netInfo();   // human-readable: mode, SSID, IP
+// Access point running and no station connection (status LED: purple)
+bool netApActive();
 // Re-apply the Wi-Fi settings from gSettings without restarting (joins the
 // new network; updates the access point password if the AP is running).
 void netApplyWifi();

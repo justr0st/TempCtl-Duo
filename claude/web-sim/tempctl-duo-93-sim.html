@@ -1,0 +1,1285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TempCtl Duo run simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#EDF0F1;--panel:#FFFFFF;--sunk:#F4F6F7;--line:#D3DADD;--text:#172024;--muted:#5B6970;--acc:#2C7C77;--acc-ink:#FFFFFF;--amber:#A87400;--amber-bg:#FFF3D1;--bot:#1F6FB2;--top:#C65A14;--danger:#B3261E;--ok:#2E7D32;
+--sans:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--cond:"Barlow Semi Condensed","Barlow",system-ui,sans-serif;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#11161A;--panel:#192024;--sunk:#141A1E;--line:#2B353B;--text:#E3E9EB;--muted:#8D9BA2;--acc:#9FD9D5;--acc-ink:#0F2A28;--amber:#F3C335;--amber-bg:#3A3217;--bot:#62B2EE;--top:#F28C40;--danger:#F2867E;--ok:#7BC47F;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#11161A;--panel:#192024;--sunk:#141A1E;--line:#2B353B;--text:#E3E9EB;--muted:#8D9BA2;--acc:#9FD9D5;--acc-ink:#0F2A28;--amber:#F3C335;--amber-bg:#3A3217;--bot:#62B2EE;--top:#F28C40;--danger:#F2867E;--ok:#7BC47F;color-scheme:dark}
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.45;font-variant-numeric:tabular-nums}
+.wrap{max-width:1180px;margin:0 auto;padding:18px 16px 40px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 24px;margin-bottom:14px}
+h1{font-family:var(--cond);font-weight:600;font-size:28px;line-height:1.1;margin:0;letter-spacing:.2px}
+header p{margin:4px 0 0;color:var(--muted);max-width:62ch}
+h2{font-family:var(--cond);font-weight:600;font-size:19px;margin:0 0 10px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-bottom:12px}
+.bar .sep{width:1px;align-self:stretch;background:var(--line);margin:0 4px}
+label.f{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:14px}
+select{max-width:100%}
+select,input[type=number]{font:inherit;color:var(--text);background:var(--sunk);border:1px solid var(--line);border-radius:6px;padding:5px 7px;min-height:34px}
+input[type=number]{width:72px;text-align:right}
+button{font:inherit;font-weight:500;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 12px;min-height:34px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--acc)}
+button.pri{background:var(--acc);color:var(--acc-ink);border-color:var(--acc)}
+button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.clock{font-family:var(--cond);font-size:22px;font-weight:600;margin-left:auto;display:flex;gap:10px;align-items:baseline}
+.clock small{font-family:var(--sans);font-size:13px;font-weight:500;color:var(--muted)}
+.state{display:inline-block;padding:2px 9px;border-radius:999px;font-size:13px;font-weight:600;background:var(--sunk);border:1px solid var(--line)}
+.state.run{color:var(--ok);border-color:currentColor}.state.pause{color:var(--amber);border-color:currentColor}.state.fin{color:var(--acc);border-color:currentColor}.state.stop{color:var(--danger);border-color:currentColor}
+.chartbox{margin:0 -4px;touch-action:pan-y;user-select:none}
+.chartbox svg{display:block;width:100%;height:auto}
+.chartbox [data-h]{touch-action:none}
+.zbar{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap}
+.zbar button{min-width:38px;padding:4px 10px}
+.zbar input[type=range]{flex:1;min-width:120px;accent-color:var(--acc)}
+.zr{color:var(--muted);font-size:13px;margin-left:4px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted);margin-top:8px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:18px;height:10px;border-radius:2px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
+@media (max-width:760px){.grid2{grid-template-columns:minmax(0,1fr)}}
+.chan{border-top:4px solid var(--c)}
+.chan .hd{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.chan .nm{font-family:var(--cond);font-weight:600;font-size:19px;color:var(--c)}
+.read{display:flex;gap:22px;align-items:flex-end;flex-wrap:wrap}
+.read div{display:flex;flex-direction:column}
+.read small{color:var(--muted);font-size:12.5px}
+.read b{font-family:var(--cond);font-weight:600;font-size:34px;line-height:1}
+.read b.sp{font-size:24px}
+.meter{height:8px;background:var(--sunk);border:1px solid var(--line);border-radius:4px;overflow:hidden;width:120px;margin-top:6px}
+.meter i{display:block;height:100%;background:var(--c);width:0}
+.why{color:var(--muted);font-size:13.5px;min-height:1.4em;margin:8px 0 6px}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
+.row .lbl{color:var(--muted);font-size:13.5px;min-width:86px}
+.ed-wrap{overflow-x:auto}
+table.ed{border-collapse:collapse;width:100%;font-size:14px}
+table.ed th{font-weight:600;color:var(--muted);text-align:left;padding:4px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.ed th.gB{color:var(--bot)}table.ed th.gT{color:var(--top)}
+table.ed td{padding:3px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.ed td.na{color:var(--muted);text-align:center}
+table.ed input[type=number]{width:62px;min-height:30px;padding:3px 6px}
+button.x{min-width:32px;padding:3px 8px;min-height:30px;color:var(--muted)}
+.cbl{display:inline-flex;align-items:center;gap:5px;font-size:13.5px;color:var(--text);white-space:nowrap}
+.pcs{display:flex;flex-direction:column;gap:8px}
+.pc{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--sunk)}
+.pc.cur{border-color:var(--amber);box-shadow:inset 3px 0 0 var(--amber)}.pc.done{opacity:.55}
+.pch{display:flex;align-items:center;gap:8px}.pch b{font-family:var(--cond);font-size:17px;min-width:18px}.pch .grow{flex:1}
+.pcr{display:flex;flex-wrap:wrap;align-items:flex-end;gap:6px 8px;margin-top:8px}
+.pl{font-weight:600;font-size:13.5px;min-width:52px;align-self:center}.pl.gB{color:var(--bot)}.pl.gT{color:var(--top)}
+.fl{display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:2px}
+.fl input[type=number]{width:64px}
+.pcr .na{align-self:center}
+table.ed select{min-height:30px;padding:2px 6px}
+table.ed tr.done td{opacity:.5}
+table.ed tr.cur td{background:var(--amber-bg)}
+table.ed tr.cur td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
+table.ed td.bl{border-left:1px solid var(--line)}
+.ins{font-size:12px;color:var(--amber);margin-left:4px}
+.tl2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0}
+.tl2>div{padding:0 12px}.tl2>div:first-child{padding-left:0;border-right:3px double var(--line)}.tl2>div:last-child{padding-right:0}
+@media (max-width:760px){.tl2{grid-template-columns:minmax(0,1fr)}.tl2>div{padding:0}.tl2>div:first-child{border-right:0;border-bottom:3px double var(--line);padding-bottom:12px;margin-bottom:12px}}
+.tl2 h3{font-family:var(--cond);font-size:17px;margin:0 0 6px}
+.edhint{color:var(--muted);font-size:13.5px;margin:-4px 0 10px}
+.edbar{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.log{font-size:13.5px;max-height:300px;overflow:auto;margin:0;padding:0;list-style:none}
+.log li{display:grid;grid-template-columns:48px minmax(0,1fr);gap:8px;padding:3px 0;border-bottom:1px dashed var(--line)}
+.log li span{color:var(--muted)}
+.notes{font-size:14px;margin:0;padding-left:18px;max-width:75ch}
+.notes li{margin-bottom:6px}
+.notes li.q{color:var(--amber)}
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);max-width:420px}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.mt{margin-top:12px}
+.tools{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+.edhead{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:10px}.edhead h2{margin:0}
+.unsaved{color:var(--amber);font-size:13.5px;font-weight:600}
+.halt{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:24px}
+.halt[hidden]{display:none}
+.halt>div{background:var(--panel);border:3px solid var(--amber);border-radius:14px;padding:28px 32px;max-width:560px;width:100%;text-align:center}
+.halt h2{font-size:44px;line-height:1.05;margin:0 0 10px;color:var(--amber)}
+.halt p{margin:0 0 22px;color:var(--muted);font-size:16px}
+.halt .edbar{justify-content:center}.halt button{font-size:18px;padding:10px 22px;min-height:48px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <h1>TempCtl Duo run simulator</h1>
+    <p>Section 9.3 of the spec in motion: sequence and timeline programs for the bottom preheater and the top heater, with edits during a run. The heater physics is a rough model.</p>
+  </div>
+</header>
+
+<section class="panel" aria-label="Run">
+  <div class="bar">
+    <label class="f" style="min-width:0;max-width:100%">Program <select id="prog" style="min-width:0"></select></label>
+    <span class="sep"></span>
+    <button id="bStart" class="pri">Start</button>
+    <button id="bPause">Pause</button>
+    <button id="bStop">Stop</button>
+    <button id="bNext" title="Sequence: wait → ramp → hold → next phase">Next phase</button>
+    <button id="bReset">Reset</button>
+    <span class="clock"><span id="stateBadge" class="state">Ready</span><span id="clock">0:00</span><small id="remain"></small></span>
+  </div>
+  <div class="bar" style="margin-bottom:6px">
+    <label class="f">Speed <select id="speed"><option>1</option><option>2</option><option>5</option><option selected>10</option><option>20</option><option>50</option></select>×</label>
+    <label class="f">"Bottom reached" band ± <input id="band" type="number" min="1" max="30" step="1" value="5"> °C</label>
+    <label class="f">End action <select id="endAct"><option value="off">Outputs off</option><option value="keep">Keep setpoint</option></select></label>
+    <span class="tools"><button data-act="undo">Undo</button><button data-act="redo">Redo</button><button data-act="save" class="pri">Save program</button><button data-act="discard">Discard changes</button></span>
+  </div>
+  <div class="chartbox" id="chartbox"></div>
+  <div class="zbar"><button id="zout" aria-label="Zoom out">−</button><button id="zin" aria-label="Zoom in">+</button><button id="zfit">Fit</button>
+    <input type="range" id="zscroll" min="0" max="0" value="0" aria-label="Scroll the time axis" hidden><span id="zrange" class="zr"></span></div>
+  <div class="legend">
+    <span><i class="sw" style="background:var(--bot)"></i>Bottom SP</span>
+    <span><i class="sw" style="background:var(--top)"></i>Top SP</span>
+    <span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="1 3"/></svg>PV (thin)</span>
+    <span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="var(--muted)" stroke-width="2" stroke-dasharray="6 4"/></svg>Forecast</span>
+    <span><i class="sw" style="background:var(--amber)"></i>Waiting for bottom</span>
+    <span><svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="7" style="fill:var(--amber)"/><rect x="4.5" y="4.5" width="2.5" height="7" style="fill:var(--panel)"/><rect x="9" y="4.5" width="2.5" height="7" style="fill:var(--panel)"/></svg>Program pause</span>
+    <span><i class="sw" style="background:var(--muted);opacity:.35"></i>Keeps previous target</span>
+    <span><svg width="16" height="16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="2" style="fill:var(--muted)"/></svg>Target: drag up or down</span>
+    <span><svg width="16" height="16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" transform="rotate(45 8 8)" style="fill:none;stroke:var(--muted);stroke-width:2"/></svg>Ramp end: drag left or right</span>
+    <span><svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="5" style="fill:none;stroke:var(--muted);stroke-width:2"/></svg>Hold end: drag left or right</span>
+  </div>
+</section>
+
+<div class="grid2" id="chans"></div>
+
+<section class="panel mt" aria-label="Program editor">
+  <div class="edhead"><h2 id="edTitle">Program</h2><span class="unsaved" id="unsaved"></span>
+    <span class="tools"><button data-act="undo">Undo</button><button data-act="redo">Redo</button><button data-act="save" class="pri">Save program</button><button data-act="discard">Discard changes</button></span></div>
+  <p class="edhint" id="edHint"></p>
+  <div id="editor"></div>
+</section>
+
+<div class="grid2">
+  <section class="panel" aria-label="Event log"><h2>Event log</h2><ul class="log" id="log"></ul></section>
+  <section class="panel" aria-label="Interpretation"><h2>How this reads 9.3</h2>
+    <ul class="notes">
+      <li>Sequence: phases run one after another. In a Both phase the bottom setpoint jumps (or the bottom is Idle) and the top ramps and holds; the phase lasts as long as the top part.</li>
+      <li>"Wait for bottom": in a Bottom phase the hold starts only when the bottom PV is inside the band; in a Both phase the top ramp starts only then. Next phase skips the wait.</li>
+      <li>Timeline: two step lists started together, no waits, Next phase disabled. A channel that finishes first keeps its last target until the other is done.</li>
+      <li>Edits during a run change the running copy. You are asked after the run whether to save them.</li>
+      <li>Target changes keep ramp slopes; the times adapt. In a hold, the setpoint ramps to the new target with the step's slope while the hold timer keeps running. A later ramp keeps its slope too.</li>
+      <li>Timeline during a run: when one channel's timing changes, the other channel is shifted by the same time through its holds only — the first hold at or after that moment gets longer (or holds get shorter). Its ramps are never changed or paused.</li>
+      <li>Outside a run, timeline channels are edited independently.</li>
+      <li>The forecast (dashed) uses the programmed times and treats every "wait for bottom" as already satisfied, like the preview in the spec. The real run shows the wait when it happens, and the forecast moves with it. So when the program is not running, a hold can be dragged back to the end of its ramp.</li>
+      <li>A channel that keeps the target of an earlier phase (e.g. the bottom during Top phases), or a timeline channel that is already done, can still get a new target. It moves there with the slope of the step that set it (a jump for a bottom jump). The change is stored in that earlier phase or step of the running copy.</li>
+      <li>Chart handles: target squares (in the middle of a hold) drag up and down; ramp-end diamonds and hold-end circles drag left and right. During a run, finished and current ramps have no ramp handle (ramp times are locked there, as in the table).</li>
+      <li>Thermal model: bottom slow (max 1.1 °C/s), top IR fast (max 3.5 °C/s); not tuned to real hardware.</li>
+    </ul>
+  </section>
+</div>
+</div>
+
+<div class="halt" id="halt" hidden role="alertdialog" aria-labelledby="haltTitle">
+  <div><h2 id="haltTitle">Action required</h2><p id="haltWhere"></p>
+  <div class="edbar"><button id="hCont" class="pri">Continue program</button><button id="hStop">Stop program</button></div></div>
+</div>
+<dialog id="saveDlg">
+  <h2>Save the run's changes?</h2>
+  <p>This run changed the program (targets, ramps or holds). Save them into the stored program, or keep the program as it was.</p>
+  <div class="edbar"><button id="dSave" class="pri">Save to program</button><button id="dDiscard">Keep the stored program</button></div>
+</dialog>
+
+<script>
+const AMB = 25;
+const PHYS = { B: { tau: 35, max: 1.1, cool: 450 }, T: { tau: 6, max: 3.5, cool: 70 } };
+const OTHER = { B: 'T', T: 'B' };
+const CH_NAME = { B: 'Bottom', T: 'Top' };
+const KIND_NAME = { B: 'Bottom', T: 'Top', BT: 'Both', P: 'Pause' };
+
+function ph(kind, wait, b, t) {
+  return { kind, wait: !!wait,
+    b: Object.assign({ t: 150, r: 0, h: 0, idle: false }, b || {}),
+    t: Object.assign({ t: 150, r: 0, h: 0 }, t || {}) };
+}
+function st(t, r, h) { return { idle: false, t, r, h }; }
+function idle(h) { return { idle: true, t: 0, r: 0, h }; }
+function pausePh(msg) { const p = ph('P', false); p.msg = msg !== false; return p; }
+function pauseStep(msg) { return { idle: false, pause: true, msg: msg !== false, t: 0, r: 0, h: 0 }; }
+
+function examplePrograms() {
+  return [
+    { name: 'Lead-free BGA', type: 'seq', phases: [
+      ph('B', true, { t: 150, r: 60, h: 60 }),
+      pausePh(true),
+      ph('BT', true, { t: 160 }, { t: 150, r: 60, h: 20 }),
+      ph('T', false, null, { t: 190, r: 40, h: 40 }),
+      ph('T', false, null, { t: 225, r: 30, h: 20 }),
+      ph('T', false, null, { t: 245, r: 20, h: 30 }),
+      ph('BT', false, { idle: true }, { t: 150, r: 40, h: 0 })] },
+    { name: 'Leaded BGA', type: 'seq', phases: [
+      ph('B', true, { t: 130, r: 40, h: 60 }),
+      ph('BT', true, { t: 140 }, { t: 130, r: 50, h: 20 }),
+      ph('T', false, null, { t: 170, r: 40, h: 30 }),
+      ph('T', false, null, { t: 205, r: 30, h: 20 }),
+      ph('T', false, null, { t: 220, r: 15, h: 30 }),
+      ph('BT', false, { idle: true }, { t: 120, r: 40, h: 0 })] },
+    { name: 'Lead-free BGA', type: 'tl',
+      B: [st(150, 60, 150), st(165, 30, 150), idle(60)],
+      T: [idle(120), st(150, 40, 20), st(190, 40, 30), st(225, 30, 20), st(245, 20, 30), st(150, 40, 0)] },
+    { name: 'Top only, bottom manual', type: 'seq', phases: [
+      ph('T', false, null, { t: 150, r: 60, h: 30 }),
+      ph('T', false, null, { t: 200, r: 40, h: 30 }),
+      ph('T', false, null, { t: 235, r: 25, h: 20 }),
+      ph('T', false, null, { t: 120, r: 40, h: 0 })] },
+  ];
+}
+
+function r1(v) { return Math.round(v * 10) / 10; }
+function chanInPhase(p, k) { return k === 'B' ? (p.kind === 'B' || p.kind === 'BT') : (p.kind === 'T' || p.kind === 'BT'); }
+function phaseTimed(p) { return p.kind === 'B' ? 'B' : 'T'; }
+function progUses(p, k) { return p.type === 'seq' ? p.phases.some(x => chanInPhase(x, k)) : p[k].length > 0; }
+
+function newChan(pv) {
+  return { pv, sp: null, on: false, to: null, slope: Infinity, stepSlope: Infinity, hasTarget: false,
+    rampWait: 0, manual: false, manOn: false, manSp: 150 };
+}
+function newSim(prog, opts) {
+  opts = opts || {};
+  const S = { prog: structuredClone(prog), rt: 0, pt: 0, running: false, paused: false, done: false, stopped: false,
+    band: opts.band ?? 5, endAction: opts.endAction ?? 'off', edited: false,
+    ch: { B: newChan(opts.pvB ?? AMB), T: newChan(opts.pvT ?? AMB) },
+    seq: null, tl: null, hist: [], log: [], events: [], nextSample: 0 };
+  for (const k of ['B', 'T']) {
+    const c = S.ch[k];
+    c.manual = !progUses(S.prog, k);
+    if (c.manual && opts.man && opts.man[k]) { c.manOn = opts.man[k].on; c.manSp = opts.man[k].sp; }
+    applyManual(c);
+  }
+  return S;
+}
+function applyManual(c) {
+  if (!c.manual) return;
+  if (c.manOn) { c.on = true; c.sp = c.manSp; c.to = c.manSp; c.slope = Infinity; c.hasTarget = true; }
+  else setIdle(c);
+}
+function log(S, msg) { S.log.push({ rt: S.rt, msg }); }
+
+function beginRamp(c, target, r) {
+  const from = c.hasTarget && c.on ? c.to : c.pv;
+  if (!(c.hasTarget && c.on)) c.sp = from;
+  const d = Math.abs(target - from);
+  c.slope = r > 0 && d > 1e-9 ? d / r : Infinity;
+  c.rampWait = d <= 1e-9 ? r : 0;
+  c.stepSlope = c.slope; c.to = target; c.on = true; c.hasTarget = true;
+}
+function setIdle(c) { c.on = false; c.hasTarget = false; c.to = null; c.sp = null; c.rampWait = 0; }
+function moveVal(from, to, step) { if (Math.abs(to - from) <= step) return to; return from + Math.sign(to - from) * step; }
+function moveSp(c, dt) {
+  if (!c.on || c.sp === c.to) return;
+  c.sp = c.slope === Infinity ? c.to : moveVal(c.sp, c.to, c.slope * dt);
+}
+function physics(c, k, dt) {
+  const P = PHYS[k];
+  const tgt = c.on ? c.sp : AMB;
+  if (c.pv < tgt) c.pv += Math.min(P.max * dt, (tgt - c.pv) * (1 - Math.exp(-dt / P.tau)));
+  else { let n = c.pv + (AMB - c.pv) * (1 - Math.exp(-dt / P.cool)); if (c.on && n < tgt) n = tgt; c.pv = n; }
+}
+function outputPct(c) {
+  if (!c.on) return 0;
+  return Math.max(0, Math.min(100, (c.sp - c.pv) * 6 + (c.pv - AMB) * 0.3));
+}
+
+/* ---------- run control ---------- */
+function start(S) {
+  S.running = true; S.paused = false; S.done = false; S.stopped = false; S.rt = 0; S.pt = 0;
+  S.hist = []; S.events = []; S.nextSample = 0;
+  for (const k of ['B', 'T']) if (!S.ch[k].manual) setIdle(S.ch[k]);
+  log(S, `Run started: ${S.prog.name} (${S.prog.type === 'seq' ? 'sequence' : 'timeline'})`);
+  for (const k of ['B', 'T']) if (S.ch[k].manual) log(S, `${CH_NAME[k]} has no ${S.prog.type === 'seq' ? 'phases' : 'steps'}: stays under manual control`);
+  if (S.prog.type === 'seq') {
+    if (!S.prog.phases.length) { log(S, 'Program has no phases'); S.running = false; return; }
+    seqEnter(S, 0);
+  } else {
+    S.tl = {};
+    for (const k of ['B', 'T']) {
+      if (S.ch[k].manual) S.tl[k] = { i: 0, stage: 'done', el: 0 };
+      else tlEnter(S, k, 0);
+    }
+    tlCheckDone(S);
+  }
+  sample(S);
+}
+function finish(S, stopped) {
+  if (!S.running) return;
+  S.running = false; S.done = true; S.stopped = !!stopped;
+  for (const k of ['B', 'T']) {
+    const c = S.ch[k];
+    if (c.manual) continue;
+    if (S.endAction === 'off') setIdle(c);
+  }
+  S.events.push({ rt: S.rt, type: 'end' });
+  log(S, `${stopped ? 'Run stopped' : 'Program finished'}; end action: ${S.endAction === 'off' ? 'outputs off' : 'keep setpoint'}`);
+  sample(S, true);
+}
+function stepSim(S, dt) {
+  if (S.running && S.halt && S.nominalWaits) continueRun(S);
+  if (S.running && !S.paused && !S.halt) {
+    for (const k of ['B', 'T']) moveSp(S.ch[k], dt);
+    S.pt += dt;
+    if (S.prog.type === 'seq') { S.seq.el += dt; seqAdvance(S); }
+    else {
+      for (const k of ['B', 'T']) if (S.tl[k].stage !== 'done') { S.tl[k].el += dt; tlAdvance(S, k); }
+      tlCheckDone(S);
+    }
+  }
+  for (const k of ['B', 'T']) { if (S.ch[k].manual) moveSp(S.ch[k], dt); physics(S.ch[k], k, dt); }
+  if (S.running) { S.rt += dt; if (S.rt >= S.nextSample - 1e-9) sample(S); }
+}
+function sample(S, force) {
+  if (!force && S.rt < S.nextSample - 1e-9) return;
+  const s = { rt: S.rt };
+  for (const k of ['B', 'T']) { const c = S.ch[k], stt = chanState(S, k); s[k] = { sp: c.on ? c.sp : null, pv: c.pv, st: stt, src: srcOf(S, k), ramp: stt === 'ramp' }; }
+  S.hist.push(s); S.nextSample = Math.floor(S.rt) + 1;
+}
+
+/* ---------- where the channel's current target comes from (phase / step index) ---------- */
+function srcOf(S, k) {
+  const c = S.ch[k];
+  if (c.manual || !S.running || !c.on) return null;
+  if (S.prog.type === 'seq') {
+    for (let j = S.seq.pi; j >= 0; j--) {
+      const p = S.prog.phases[j];
+      if (!chanInPhase(p, k)) continue;
+      if (j === S.seq.pi && k === 'T' && p.kind === 'BT' && S.seq.stage === 'waitB') continue;
+      if (k === 'B' && p.kind === 'BT' && p.b.idle) return null;
+      return j;
+    }
+    return null;
+  }
+  const q = S.tl[k];
+  if (q.stage === 'done') return tlSrcBefore(S.prog[k], S.prog[k].length);
+  if (q.stage === 'pause') return tlSrcBefore(S.prog[k], q.i);
+  if (q.stage === 'idle') return null;
+  return q.i;
+}
+
+/* ---------- channel state for display ---------- */
+function chanState(S, k) {
+  const c = S.ch[k];
+  if (c.manual) return c.manOn ? 'manual' : 'off';
+  if (!S.running) return S.done && c.on ? 'end' : 'off';
+  if (S.halt) return c.on ? 'halt' : 'off';
+  if (S.prog.type === 'seq') {
+    const p = S.prog.phases[S.seq.pi], stg = S.seq.stage;
+    if (k === 'B' && p.kind === 'BT') return p.b.idle ? 'off' : (stg === 'waitB' ? 'wait' : 'jump');
+    if (chanInPhase(p, k)) {
+      if (stg === 'waitB') return k === 'B' ? 'wait' : (c.on ? 'keep' : 'off');
+      return stg;
+    }
+    return c.on ? 'keep' : 'off';
+  }
+  const t = S.tl[k];
+  if (t.stage === 'done') return c.on ? 'keep' : 'off';
+  if (t.stage === 'idle') return 'off';
+  if (t.stage === 'hold' && S.prog[k][t.i].ins) return 'pause';
+  return t.stage;
+}
+
+/* ---------- sequence ---------- */
+function seqEnter(S, pi) {
+  const p = S.prog.phases[pi];
+  S.seq = { pi, stage: 'ramp', el: 0 };
+  const B = S.ch.B, T = S.ch.T;
+  S.events.push({ rt: S.rt, type: 'phase', pi });
+  log(S, `Phase ${pi + 1} (${KIND_NAME[p.kind]}) started`);
+  if (p.kind === 'P') {
+    S.seq.stage = 'pause'; S.halt = { msg: !!p.msg, where: `Phase ${pi + 1}` };
+    S.events.push({ rt: S.rt, type: 'pause' });
+    log(S, `Program pause${p.msg ? ': "Action required"' : ''} — setpoints kept, waiting for Continue`);
+    return;
+  }
+  if (p.kind === 'B') beginRamp(B, p.b.t, p.b.r);
+  else if (p.kind === 'T') beginRamp(T, p.t.t, p.t.r);
+  else {
+    if (p.b.idle) { setIdle(B); log(S, 'Bottom set to Idle: outputs off'); }
+    else { B.on = true; B.hasTarget = true; B.sp = p.b.t; B.to = p.b.t; B.slope = Infinity; B.stepSlope = Infinity; B.rampWait = 0; log(S, `Bottom setpoint jumps to ${p.b.t} °C`); }
+    if (p.wait && !p.b.idle) { S.seq.stage = 'waitB'; log(S, `Waiting for bottom to reach ${p.b.t} ±${S.band} °C before the top ramp`); }
+    else beginRamp(T, p.t.t, p.t.r);
+  }
+  seqAdvance(S);
+}
+function seqHoldLen(p) { return p.kind === 'B' ? p.b.h : p.t.h; }
+function seqAdvance(S) {
+  for (let n = 0; n < 12 && S.running; n++) {
+    const q = S.seq, p = S.prog.phases[q.pi], c = S.ch[phaseTimed(p)];
+    if (q.stage === 'pause') return;
+    if (q.stage === 'ramp') {
+      if (c.sp === c.to && q.el >= c.rampWait - 1e-9) {
+        S.events.push({ rt: S.rt, type: 'rampEnd', ref: { pi: q.pi, k: phaseTimed(p) } });
+        if (p.kind === 'B' && p.wait) { q.stage = 'waitB'; q.el = 0; log(S, `Bottom ramp done; hold starts when bottom PV is within ±${S.band} °C of ${p.b.t} °C`); }
+        else { q.stage = 'hold'; q.el = 0; }
+        continue;
+      }
+      return;
+    }
+    if (q.stage === 'waitB') {
+      const B = S.ch.B;
+      if (S.nominalWaits || Math.abs(B.pv - B.to) <= S.band) {
+        log(S, `Bottom reached ${B.to} °C (PV ${B.pv.toFixed(1)} °C)`);
+        if (p.kind === 'BT') { beginRamp(S.ch.T, p.t.t, p.t.r); q.stage = 'ramp'; } else q.stage = 'hold';
+        q.el = 0; continue;
+      }
+      return;
+    }
+    if (q.stage === 'hold') {
+      if (q.el >= seqHoldLen(p) - 1e-9) {
+        S.events.push({ rt: S.rt, type: 'holdEnd', ref: { pi: q.pi } });
+        if (q.pi + 1 < S.prog.phases.length) { seqEnter(S, q.pi + 1); return; }
+        finish(S); return;
+      }
+      return;
+    }
+    return;
+  }
+}
+function seqNext(S) {
+  if (!S.running || S.prog.type !== 'seq') return;
+  const q = S.seq, p = S.prog.phases[q.pi], c = S.ch[phaseTimed(p)];
+  if (q.stage === 'pause') { continueRun(S); return; }
+  if (q.stage === 'waitB') {
+    log(S, 'Next phase: wait for bottom skipped');
+    if (p.kind === 'BT') { beginRamp(S.ch.T, p.t.t, p.t.r); q.stage = 'ramp'; } else q.stage = 'hold';
+    q.el = 0;
+  } else if (q.stage === 'ramp') { log(S, 'Next phase: ramp skipped'); c.sp = c.to; q.el = Math.max(q.el, c.rampWait); }
+  else if (q.stage === 'hold') { log(S, 'Next phase: hold skipped'); q.el = seqHoldLen(p); }
+  seqAdvance(S);
+}
+function seqPrevTarget(S, pi, k) {
+  for (let j = pi - 1; j >= 0; j--) {
+    const p = S.prog.phases[j];
+    if (!chanInPhase(p, k)) continue;
+    if (k === 'B' && p.kind === 'BT' && p.b.idle) return null;
+    return k === 'B' ? p.b.t : p.t.t;
+  }
+  return null;
+}
+function seqRampPart(p, k) { if (k === 'B') return p.kind === 'B' ? p.b : null; return chanInPhase(p, 'T') ? p.t : null; }
+function keepSlope(r, from, oldT, newT) {
+  if (from == null || r <= 0) return r;
+  const od = Math.abs(oldT - from);
+  if (od <= 1e-9) return r;
+  return r1(r * Math.abs(newT - from) / od);
+}
+function seqSetHold(S, pi, h) {
+  const p = S.prog.phases[pi], part = p.kind === 'B' ? p.b : p.t;
+  h = Math.max(0, r1(h));
+  if (S.running) {
+    if (pi < S.seq.pi) return;
+    if (pi === S.seq.pi && S.seq.stage === 'hold') h = Math.max(h, r1(S.seq.el));
+    if (h === part.h) return;
+    log(S, `Phase ${pi + 1}: hold ${part.h} s → ${h} s (later phases unchanged, they move in time)`);
+    S.edited = true;
+  }
+  part.h = h;
+  if (S.running) seqAdvance(S);
+}
+function seqSetTarget(S, k, pi, v) {
+  const p = S.prog.phases[pi];
+  if (!chanInPhase(p, k) || (k === 'B' && p.kind === 'BT' && p.b.idle)) return;
+  const part = k === 'B' ? p.b : p.t, old = part.t;
+  v = r1(v);
+  if (v === old) return;
+  if (!S.running) { part.t = v; return; }
+  const c = S.ch[k], q = S.seq;
+  if (pi < q.pi) {
+    // a finished phase: only its target that the channel still keeps can be changed
+    if (chanInPhase(S.prog.phases[q.pi], k) || srcOf(S, k) !== pi) return;
+    S.edited = true;
+    c.to = v; c.slope = c.stepSlope; part.t = v;
+    log(S, `${CH_NAME[k]} keeps the target of phase ${pi + 1}: ${old} → ${v} °C (${c.stepSlope === Infinity ? 'jump' : "ramps with that phase's slope"})`);
+  } else {
+  S.edited = true;
+  if (pi === q.pi) {
+    if (k === 'B' && p.kind === 'BT') {
+      c.sp = v; c.to = v; part.t = v;
+      log(S, `Bottom target ${old} → ${v} °C: setpoint jumps${q.stage === 'waitB' ? '; the wait now uses the new target' : ''}`);
+    } else if (k === 'T' && p.kind === 'BT' && q.stage === 'waitB') {
+      const from = c.hasTarget && c.on ? c.to : c.pv;
+      part.r = keepSlope(part.r, from, old, v); part.t = v;
+      log(S, `Top target ${old} → ${v} °C (ramp not started yet: ramp time ${part.r} s, same slope)`);
+    } else if (q.stage === 'ramp' && phaseTimed(p) === k) {
+      c.to = v; part.t = v;
+      const rem = c.slope === Infinity ? 0 : Math.abs(v - c.sp) / c.slope;
+      part.r = r1(q.el + rem);
+      log(S, `${CH_NAME[k]} target ${old} → ${v} °C during the ramp: same slope, ${Math.round(rem)} s left`);
+    } else {
+      c.to = v; c.slope = c.stepSlope; part.t = v;
+      log(S, `${CH_NAME[k]} target ${old} → ${v} °C during the ${q.stage === 'hold' ? 'hold' : 'wait'}: ramps with the step's slope${c.stepSlope === Infinity ? ' (ramp 0 = jump)' : ''}; hold timer keeps running`);
+    }
+  } else {
+    const rp = seqRampPart(p, k);
+    if (rp) rp.r = keepSlope(rp.r, seqPrevTarget(S, pi, k), old, v);
+    part.t = v;
+    log(S, `Phase ${pi + 1}: ${CH_NAME[k]} target ${old} → ${v} °C${rp ? ` (ramp ${rp.r} s, same slope)` : ''}`);
+  }
+  }
+  for (let j = pi + 1; j < S.prog.phases.length; j++) {
+    const p2 = S.prog.phases[j];
+    if (!chanInPhase(p2, k)) continue;
+    const rp = seqRampPart(p2, k);
+    if (rp && rp.r > 0) {
+      const od = Math.abs(rp.t - old);
+      if (od > 1e-9) {
+        const newR = r1(rp.r * Math.abs(rp.t - v) / od);
+        if (newR !== rp.r) log(S, `Phase ${j + 1}: ${CH_NAME[k]} ramp ${rp.r} s → ${newR} s (keeps its slope)`);
+        rp.r = newR;
+      }
+    }
+    break;
+  }
+  seqAdvance(S);
+}
+function seqSetRamp(S, k, pi, r) {
+  const p = S.prog.phases[pi], rp = seqRampPart(p, k);
+  if (!rp) return;
+  r = Math.max(0, r1(r));
+  if (S.running) { if (pi <= S.seq.pi) return; S.edited = true; log(S, `Phase ${pi + 1}: ${CH_NAME[k]} ramp ${rp.r} s → ${r} s`); }
+  rp.r = r;
+}
+
+/* ---------- timeline ---------- */
+function tlEnter(S, k, i) {
+  const L = S.prog[k], c = S.ch[k];
+  S.tl[k] = { i, stage: 'ramp', el: 0 };
+  if (i >= L.length) {
+    S.tl[k].stage = 'done';
+    log(S, `${CH_NAME[k]}: all steps done — ${c.on ? `holds ${c.to} °C until the other channel is done` : 'stays off'}`);
+    return;
+  }
+  const s = L[i];
+  S.events.push({ rt: S.rt, type: 'step', k, i });
+  if (s.pause) {
+    S.tl[k].stage = 'pause';
+    if (!S.halt) S.events.push({ rt: S.rt, type: 'pause' });
+    S.halt = { msg: !!(s.msg || (S.halt && S.halt.msg)), where: `${CH_NAME[k]} step ${i + 1}` };
+    log(S, `Program pause at ${CH_NAME[k]} step ${i + 1}${s.msg ? ': "Action required"' : ''} — both channels keep their setpoints, waiting for Continue`);
+    return;
+  }
+  if (s.idle) { setIdle(c); S.tl[k].stage = 'idle'; log(S, `${CH_NAME[k]} step ${i + 1}: Idle for ${s.h} s (outputs off)`); }
+  else { beginRamp(c, s.t, s.r); log(S, `${CH_NAME[k]} step ${i + 1}: ramp to ${s.t} °C`); }
+}
+function tlAdvance(S, k) {
+  for (let n = 0; n < 12; n++) {
+    const q = S.tl[k];
+    if (q.stage === 'done') return;
+    const s = S.prog[k][q.i], c = S.ch[k];
+    if (q.stage === 'pause') return;
+    if (q.stage === 'ramp') {
+      if (c.sp === c.to && q.el >= c.rampWait - 1e-9) { S.events.push({ rt: S.rt, type: 'rampEnd', ref: { k, i: q.i } }); q.stage = 'hold'; q.el = 0; continue; }
+      return;
+    }
+    if (q.el >= s.h - 1e-9) {
+      S.events.push({ rt: S.rt, type: 'holdEnd', ref: { k, i: q.i } });
+      tlEnter(S, k, q.i + 1); continue;
+    }
+    return;
+  }
+}
+function tlCheckDone(S) { if (S.running && S.tl.B.stage === 'done' && S.tl.T.stage === 'done') finish(S); }
+function tlPrevTarget(L, i, c) {
+  for (let j = i - 1; j >= 0; j--) { if (L[j].pause) continue; if (L[j].idle) return null; return L[j].t; }
+  return null;
+}
+function tlSrcBefore(L, i) {
+  for (let j = i - 1; j >= 0; j--) { if (L[j].pause) continue; return L[j].idle ? null : j; }
+  return null;
+}
+function tlSchedule(S, k) {
+  const q = S.tl && S.tl[k], L = S.prog[k], c = S.ch[k], segs = [];
+  if (!q || q.stage === 'done') return segs;
+  let t = S.pt;
+  const s = L[q.i];
+  if (q.stage === 'ramp') {
+    let rem = c.slope === Infinity ? 0 : Math.abs(c.to - c.sp) / c.slope;
+    rem = Math.max(rem, c.rampWait - q.el);
+    segs.push({ kind: 'ramp', i: q.i, t0: t, t1: t + rem, cur: true }); t += rem;
+    segs.push({ kind: 'hold', i: q.i, t0: t, t1: t + s.h }); t += s.h;
+  } else if (q.stage === 'pause') {
+    segs.push({ kind: 'pause', i: q.i, t0: t, t1: t, cur: true });
+  } else {
+    const rem = Math.max(0, s.h - q.el);
+    segs.push({ kind: q.stage, i: q.i, t0: t, t1: t + rem, cur: true }); t += rem;
+  }
+  for (let j = q.i + 1; j < L.length; j++) {
+    const x = L[j];
+    if (x.pause) { segs.push({ kind: 'pause', i: j, t0: t, t1: t }); continue; }
+    if (x.idle) { segs.push({ kind: 'idle', i: j, t0: t, t1: t + x.h }); t += x.h; }
+    else { segs.push({ kind: 'ramp', i: j, t0: t, t1: t + x.r }); t += x.r; segs.push({ kind: 'hold', i: j, t0: t, t1: t + x.h }); t += x.h; }
+  }
+  return segs;
+}
+function segEnd(S, k, i, kind) { const g = tlSchedule(S, k).find(x => x.i === i && x.kind === kind); return g ? g.t1 : null; }
+/* Keep the two channels aligned during a run: the other channel's time changes only through its holds
+   (the first hold at or after time T is extended; shorter times are taken from holds at or after T). */
+function insertShift(S, k, T, D) {
+  if (!S.running || T == null || Math.abs(D) < 0.05) return;
+  const L = S.prog[k], eps = 1e-6, nm = CH_NAME[k];
+  const holds = tlSchedule(S, k).filter(g => (g.kind === 'hold' || g.kind === 'idle') && g.t1 >= T - eps);
+  if (!holds.length) { log(S, `${nm} has no hold left at that point — nothing to shift`); return; }
+  if (D > 0) {
+    const g = holds[0];
+    L[g.i].h = r1(L[g.i].h + D);
+    log(S, `${nm} step ${g.i + 1}: ${g.kind === 'idle' ? 'idle' : 'hold'} +${r1(D)} s to keep both channels aligned`);
+    return;
+  }
+  let rem = -D;
+  for (const g of holds) {
+    const avail = g.t1 - Math.max(g.t0, T), take = Math.min(rem, avail);
+    if (take > 0.05) { L[g.i].h = r1(L[g.i].h - take); rem -= take; log(S, `${nm} step ${g.i + 1}: ${g.kind === 'idle' ? 'idle' : 'hold'} −${r1(take)} s to keep both channels aligned`); }
+    if (rem <= 0.05) break;
+  }
+  if (rem > 0.05) log(S, `${nm}: not enough hold time left — ${r1(rem)} s could not be removed`);
+}
+function tlLocked(S, k, i) { return S.running && (S.tl[k].stage === 'done' || i < S.tl[k].i); }
+function tlSetHold(S, k, i, h) {
+  const L = S.prog[k]; h = Math.max(0, r1(h));
+  if (L[i].pause) return;
+  if (!S.running) { L[i].h = h; return; }
+  if (tlLocked(S, k, i)) return;
+  const q = S.tl[k];
+  if (q.i === i && q.stage !== 'ramp') h = Math.max(h, r1(q.el));
+  const D = h - L[i].h;
+  if (Math.abs(D) < 0.05) return;
+  const T = segEnd(S, k, i, L[i].idle ? 'idle' : 'hold');
+  S.edited = true;
+  log(S, `${CH_NAME[k]} step ${i + 1}: ${L[i].idle ? 'idle' : 'hold'} ${L[i].h} s → ${h} s`);
+  L[i].h = h;
+  insertShift(S, OTHER[k], T, D);
+  tlAdvance(S, k); tlCheckDone(S);
+}
+function tlSetRamp(S, k, i, r) {
+  const L = S.prog[k]; r = Math.max(0, r1(r));
+  if (L[i].idle || L[i].pause) return;
+  if (!S.running) { L[i].r = r; return; }
+  if (tlLocked(S, k, i) || S.tl[k].i === i) return;
+  const D = r - L[i].r, T = segEnd(S, k, i, 'ramp');
+  if (Math.abs(D) < 0.05) return;
+  S.edited = true;
+  log(S, `${CH_NAME[k]} step ${i + 1}: ramp ${L[i].r} s → ${r} s`);
+  L[i].r = r;
+  insertShift(S, OTHER[k], T, D);
+}
+function tlSetTarget(S, k, i, v) {
+  const L = S.prog[k], x = L[i];
+  if (x.idle || x.pause) return;
+  v = r1(v);
+  const old = x.t;
+  if (v === old) return;
+  if (!S.running) { x.t = v; return; }
+  const q = S.tl[k], c = S.ch[k];
+  if (q.stage === 'done' || q.stage === 'pause') {
+    if (i !== srcOf(S, k) || !c.on) return;
+    S.edited = true;
+    c.to = v; c.slope = c.stepSlope; x.t = v;
+    log(S, `${CH_NAME[k]} keeps its last target: ${old} → ${v} °C (${c.stepSlope === Infinity ? 'jump' : "ramps with that step's slope"})`);
+    return;
+  }
+  if (tlLocked(S, k, i)) return;
+  S.edited = true;
+  if (q.i === i && q.stage === 'ramp') {
+    const oldRem = c.slope === Infinity ? 0 : Math.abs(c.to - c.sp) / c.slope;
+    const T = S.pt + oldRem;
+    c.to = v; x.t = v;
+    const newRem = c.slope === Infinity ? 0 : Math.abs(v - c.sp) / c.slope;
+    x.r = r1(q.el + newRem);
+    log(S, `${CH_NAME[k]} target ${old} → ${v} °C during the ramp: same slope, ${Math.round(newRem)} s left`);
+    insertShift(S, OTHER[k], T, newRem - oldRem);
+  } else if (q.i === i) {
+    c.to = v; c.slope = c.stepSlope; x.t = v;
+    log(S, `${CH_NAME[k]} target ${old} → ${v} °C during the hold: ramps with the step's slope${c.stepSlope === Infinity ? ' (ramp 0 = jump)' : ''}; hold timer keeps running`);
+  } else {
+    const from = tlPrevTarget(L, i, c);
+    const T = segEnd(S, k, i, 'ramp');
+    const nr = keepSlope(x.r, from, old, v), D = nr - x.r;
+    x.t = v; x.r = nr;
+    log(S, `${CH_NAME[k]} step ${i + 1}: target ${old} → ${v} °C (ramp ${nr} s, same slope)`);
+    insertShift(S, OTHER[k], T, D);
+  }
+  let j = i + 1;
+  while (j < L.length && L[j].pause) j++;
+  if (j < L.length && !L[j].idle && L[j].r > 0) {
+    const od = Math.abs(L[j].t - old);
+    if (od > 1e-9) {
+      const T = segEnd(S, k, j, 'ramp');
+      const nr = r1(L[j].r * Math.abs(L[j].t - v) / od), D = nr - L[j].r;
+      if (Math.abs(D) >= 0.05) {
+        log(S, `${CH_NAME[k]} step ${j + 1}: ramp ${L[j].r} s → ${nr} s (keeps its slope)`);
+        L[j].r = nr;
+        insertShift(S, OTHER[k], T, D);
+      }
+    }
+  }
+  tlAdvance(S, k); tlCheckDone(S);
+}
+
+/* ---------- run edits through one entry point ---------- */
+function canEditTarget(S, k) {
+  if (!S.running || S.ch[k].manual) return { ok: false };
+  if (S.prog.type === 'seq') {
+    const p = S.prog.phases[S.seq.pi];
+    if (!chanInPhase(p, k)) {
+      const src = srcOf(S, k);
+      if (src == null) return { ok: false, why: 'Off until a later phase' };
+      return { ok: true, pi: src, kept: true };
+    }
+    if (k === 'B' && p.kind === 'BT' && p.b.idle) return { ok: false, why: 'Idle in this phase' };
+    return { ok: true, pi: S.seq.pi };
+  }
+  const q = S.tl[k], L = S.prog[k];
+  if (q.stage === 'done' || q.stage === 'pause') {
+    const src = srcOf(S, k);
+    return src != null ? { ok: true, i: src, kept: true } : { ok: false, why: q.stage === 'pause' ? 'Off during the pause' : 'All steps done' };
+  }
+  if (q.stage === 'idle') return { ok: false, why: 'Idle step' };
+  if (L[q.i].ins) {
+    // inside an inserted pause: the target the user means is the one of the step that follows
+    if (q.i + 1 >= L.length || L[q.i + 1].idle) return { ok: false, why: 'Paused to keep the channels aligned' };
+    return { ok: true, i: q.i + 1 };
+  }
+  return { ok: true, i: q.i };
+}
+function canExtend(S, k) {
+  if (!S.running || S.ch[k].manual || S.halt) return null;
+  if (S.prog.type === 'seq') {
+    const p = S.prog.phases[S.seq.pi];
+    return S.seq.stage === 'hold' && phaseTimed(p) === k ? { pi: S.seq.pi } : null;
+  }
+  const q = S.tl[k];
+  return q.stage === 'hold' && !S.prog[k][q.i].ins ? { i: q.i } : null;
+}
+function editTarget(S, k, v) {
+  const e = canEditTarget(S, k); if (!e.ok) return;
+  if (S.prog.type === 'seq') seqSetTarget(S, k, e.pi, v); else tlSetTarget(S, k, e.i, v);
+}
+function currentTarget(S, k) {
+  const e = canEditTarget(S, k); if (!e.ok) return null;
+  if (S.prog.type === 'seq') { const p = S.prog.phases[e.pi]; return k === 'B' ? p.b.t : p.t.t; }
+  return S.prog[k][e.i].t;
+}
+function extendHold(S, k, sec) {
+  const e = canExtend(S, k); if (!e) return;
+  if (S.prog.type === 'seq') seqSetHold(S, e.pi, seqHoldLen(S.prog.phases[e.pi]) + sec);
+  else tlSetHold(S, k, e.i, S.prog[k][e.i].h + sec);
+}
+
+/* ---------- forecast ---------- */
+function hasWaits(p) {
+  if (p.type === 'seq') return p.phases.some(x => x.kind === 'P' || (x.wait && x.kind !== 'T' && !(x.kind === 'BT' && x.b.idle)));
+  return p.B.concat(p.T).some(x => x.pause);
+}
+function continueRun(S) {
+  if (!S.running || !S.halt) return;
+  S.halt = null;
+  S.events.push({ rt: S.rt, type: 'continue' });
+  log(S, 'Continue: program resumes');
+  if (S.prog.type === 'seq') {
+    const pi = S.seq.pi;
+    if (pi + 1 < S.prog.phases.length) seqEnter(S, pi + 1); else finish(S);
+  } else {
+    for (const k of ['B', 'T']) if (S.tl[k].stage === 'pause') { tlEnter(S, k, S.tl[k].i + 1); tlAdvance(S, k); }
+    tlCheckDone(S);
+  }
+}
+function predict(S) {
+  const h = S.hist, l = S.log; S.hist = []; S.log = [];
+  const P = structuredClone(S); S.hist = h; S.log = l;
+  P.paused = false;
+  P.nominalWaits = true; // forecast = programmed times; a "wait for bottom" is assumed to be satisfied at once
+  const out = { samples: [], events: [] };
+  P.events = [];
+  if (!P.running) { if (P.done) return out; start(P); }
+  P.hist = []; P.nextSample = Math.ceil(P.rt);
+  const limit = P.rt + 5400, dt = 0.5;
+  sample(P, true);
+  while (P.running && P.rt < limit) stepSim(P, dt);
+  out.samples = P.hist; out.events = P.events; out.end = P.rt;
+  return out;
+}
+if (typeof module !== 'undefined') module.exports = { continueRun, srcOf, seqSetTarget, tlSetTarget, seqSetRamp, tlSetRamp, hasWaits, examplePrograms, newSim, start, stepSim, finish, seqNext, predict, editTarget, extendHold, tlSetHold, seqSetHold, canEditTarget, canExtend, chanState, tlSchedule, currentTarget };
+
+</script>
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const SAVED=examplePrograms(), DRAFT=SAVED.map(p=>structuredClone(p)), UNDO=SAVED.map(()=>[]), REDO=SAVED.map(()=>[]);
+const J=o=>JSON.stringify(o);
+function isDirty(){return J(DRAFT[sel])!==J(SAVED[sel]);}
+function beginStored(){ UNDO[sel].push(structuredClone(DRAFT[sel])); REDO[sel]=[]; return DRAFT[sel]; }
+let handleList=[], sel=0, S=null, pred=null, speed=10, dirty=true, lastPred=0, lastChart=0, drag=null, tableKey='', logLen=-1, promptShown=false;
+const man={B:{on:false,sp:150},T:{on:false,sp:180}};
+const fmt=t=>{t=Math.max(0,Math.round(t));return Math.floor(t/60)+':'+String(t%60).padStart(2,'0');};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function progLabel(p){return `${p.name} (${p.type==='seq'?'sequence':'timeline'})`;}
+function fillProgSelect(){ $('prog').innerHTML=DRAFT.map((p,i)=>`<option value="${i}"${i===sel?' selected':''}>${esc(progLabel(p))}${J(p)!==J(SAVED[i])?' (unsaved)':''}</option>`).join(''); }
+function opts(keep){ return {band:+$('band').value||5,endAction:$('endAct').value,man,pvB:keep&&S?S.ch.B.pv:undefined,pvT:keep&&S?S.ch.T.pv:undefined}; }
+function reset(keep){ S=newSim(DRAFT[sel],opts(keep)); dirty=true; promptShown=false; tableKey=''; logLen=-1; buildChans(); }
+
+/* ---------- channel cards ---------- */
+function buildChans(){
+  $('chans').innerHTML=['B','T'].map(k=>{const c=k==='B'?'--bot':'--top';return `
+  <section class="panel chan" style="--c:var(${c})" aria-label="${k==='B'?'Bottom preheater':'Top heater'}">
+    <div class="hd"><span class="nm">${k==='B'?'Bottom preheater':'Top heater'}</span><span class="state" id="st${k}"></span></div>
+    <div class="read">
+      <div><small>PV</small><b id="pv${k}">–</b></div>
+      <div><small>SP</small><b class="sp" id="sp${k}">–</b></div>
+      <div><small>Output</small><div class="meter"><i id="out${k}"></i></div></div>
+    </div>
+    <div class="why" id="why${k}"></div>
+    ${S.ch[k].manual?`
+    <div class="row"><span class="lbl">Manual</span><label class="f"><input type="checkbox" id="man${k}" ${man[k].on?'checked':''}> Setpoint on</label>
+      <input type="number" id="manSp${k}" value="${man[k].sp}" step="1" aria-label="Manual setpoint °C"> °C</div>`:`
+    <div class="row"><span class="lbl">Target</span>
+      <button data-dt="${k}" data-v="-5" aria-label="Target minus 5 °C">−5</button><button data-dt="${k}" data-v="-1" aria-label="Target minus 1 °C">−1</button>
+      <input type="number" id="tg${k}" step="1" aria-label="${k==='B'?'Bottom':'Top'} target °C"><button data-dt="${k}" data-v="+1" aria-label="Target plus 1 °C">+1</button><button data-dt="${k}" data-v="+5" aria-label="Target plus 5 °C">+5</button><button data-set="${k}">Set</button></div>
+    <div class="row"><span class="lbl">Extend hold</span><button data-ex="${k}" data-v="10">+10 s</button><button data-ex="${k}" data-v="30">+30 s</button><button data-ex="${k}" data-v="60">+1 min</button></div>`}
+  </section>`;}).join('');
+  for(const k of ['B','T']){
+    if(S.ch[k].manual){
+      $('man'+k).onchange=e=>{man[k].on=e.target.checked;S.ch[k].manOn=man[k].on;applyManual(S.ch[k]);dirty=true;};
+      $('manSp'+k).onchange=e=>{man[k].sp=+e.target.value;S.ch[k].manSp=man[k].sp;applyManual(S.ch[k]);dirty=true;};
+    }
+  }
+}
+$('chans').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  if(b.dataset.dt){const k=b.dataset.dt, t=currentTarget(S,k); if(t!=null){editTarget(S,k,t+(+b.dataset.v));dirty=true;}}
+  else if(b.dataset.set){const k=b.dataset.set, v=parseFloat($('tg'+k).value); if(!isNaN(v)){editTarget(S,k,v);dirty=true;}}
+  else if(b.dataset.ex){extendHold(S,b.dataset.ex,+b.dataset.v);dirty=true;}
+});
+const ST_TXT={halt:'Program pause',pause:'Aligned pause',ramp:'Ramp',hold:'Hold',wait:'Waiting for bottom',jump:'Jump target',keep:'Keeps previous target',off:'Off',manual:'Manual',end:'End: setpoint kept'};
+function updateChans(){
+  for(const k of ['B','T']){
+    const c=S.ch[k], st=chanState(S,k);
+    $('pv'+k).textContent=c.pv.toFixed(1)+' °C';
+    $('sp'+k).textContent=c.on?c.sp.toFixed(1)+' °C':'off';
+    $('out'+k).style.width=outputPct(c).toFixed(0)+'%';
+    $('st'+k).textContent=ST_TXT[st]||st;
+    let why='';
+    if(c.manual) why=`No ${S.prog.type==='seq'?'phases':'steps'} for this channel: controlled manually.`;
+    else if(!S.running) why=S.done?'Run over.':'Outputs off until the run gives this channel a target.';
+    else if(S.halt) why=`Program pause (${S.halt.where}): ${c.on?`setpoint kept at ${c.to} °C`:'outputs stay off'}. Press Continue.`;
+    else if(S.prog.type==='seq'){
+      const q=S.seq,p=S.prog.phases[q.pi];
+      if(st==='wait') why=`Phase ${q.pi+1}: waiting until PV is within ±${S.band} °C of ${c.to} °C.`;
+      else if(st==='ramp') why=`Phase ${q.pi+1}: ramping to ${c.to} °C at ${c.slope===Infinity?'—':c.slope.toFixed(2)} °C/s.`;
+      else if(st==='hold') why=`Phase ${q.pi+1}: hold ${fmt(q.el)} of ${fmt(seqHoldLen(p))}.`;
+      else if(st==='jump') why=`Phase ${q.pi+1}: setpoint jumped to ${c.to} °C; the top ${q.stage==='waitB'?'waits':'runs'}.`;
+      else if(st==='keep'){const e=canEditTarget(S,k); why=e.ok?`Keeps ${c.to} °C from phase ${e.pi+1}; the target can still be changed.`:(e.why||'')+'.';}
+      else if(st==='off'){const e=canEditTarget(S,k); why=e.why?e.why+'.':'';}
+    } else {
+      const q=S.tl[k], L=S.prog[k];
+      if(q.stage==='done') why=c.on?`All steps done: keeps ${c.to} °C until the other channel is done (target can still be changed).`:'All steps done: off.';
+      else if(q.stage==='idle') why=`Step ${q.i+1}: Idle ${fmt(q.el)} of ${fmt(L[q.i].h)} (outputs off).`;
+      else if(L[q.i].ins&&q.stage==='ramp') why=`Step ${q.i+2}: ramping; pauses at ${L[q.i].t} °C for ${L[q.i].h} s to keep the channels aligned.`;
+      else if(L[q.i].ins) why=`Paused at ${L[q.i].t} °C for ${fmt(L[q.i].h-q.el)} more to keep the channels aligned.`;
+      else if(q.stage==='ramp') why=`Step ${q.i+1}: ramping to ${c.to} °C at ${c.slope===Infinity?'—':c.slope.toFixed(2)} °C/s.`;
+      else why=`Step ${q.i+1}: hold ${fmt(q.el)} of ${fmt(L[q.i].h)}.`;
+    }
+    $('why'+k).textContent=why;
+    if(!c.manual){
+      const e=canEditTarget(S,k), t=currentTarget(S,k);
+      document.querySelectorAll(`[data-dt="${k}"],[data-set="${k}"]`).forEach(b=>b.disabled=!e.ok);
+      const inp=$('tg'+k); inp.disabled=!e.ok; if(document.activeElement!==inp) inp.value=t==null?'':t;
+      const x=canExtend(S,k); document.querySelectorAll(`[data-ex="${k}"]`).forEach(b=>b.disabled=!x);
+    }
+  }
+  const b=$('stateBadge');
+  if(S.running&&S.halt){b.textContent='Program pause';b.className='state pause';}
+  else if(S.running){b.textContent=S.paused?'Paused':'Running';b.className='state '+(S.paused?'pause':'run');}
+  else if(S.done){b.textContent=S.stopped?'Stopped':'Finished';b.className='state '+(S.stopped?'stop':'fin');}
+  else {b.textContent='Ready';b.className='state';}
+  $('clock').textContent=fmt(S.rt);
+  const w=hasWaits(S.prog)?' + waits':'';
+  $('remain').textContent=S.running&&pred&&pred.end!=null?`${fmt(pred.end-S.rt)}${w} left`:(!S.running&&!S.done&&pred&&pred.end?`${fmt(pred.end)}${w} total`:'');
+  $('bStart').disabled=S.running; $('bStart').textContent=S.done?'Start again':'Start';
+  $('bPause').disabled=!S.running; $('bPause').textContent=S.halt?'Continue':S.paused?'Resume':'Pause';
+  $('bStop').disabled=!S.running;
+  $('bNext').disabled=!S.running||S.prog.type!=='seq'||S.paused;
+  $('bNext').title=S.prog.type==='seq'?'Sequence: wait → ramp → hold → next phase':'Disabled for timeline programs';
+  $('prog').disabled=S.running;
+}
+
+/* ---------- editor ---------- */
+function editProg(){return S.running?S.prog:DRAFT[sel];}
+function numIn(f,v,en,extra){return `<input type="number" data-f="${f}" value="${v}" step="1" min="0" ${en?'':'disabled'} ${extra||''}>`;}
+function buildEditor(){
+  const p=editProg(), run=S.running;
+  $('edTitle').textContent=`${p.name} — ${p.type==='seq'?'sequence':'timeline'}`;
+  $('edHint').textContent=run?'Editing the running copy. Finished phases are locked; the current one allows targets and hold only.':(p.type==='seq'?'Editing the stored program. Times in seconds; a ramp of 0 is a jump.':'Editing the stored program: the two channels are independent here. Times in seconds.');
+  if(p.type==='seq'){
+    const cur=run?S.seq.pi:-1;
+    const kept={B:-1,T:-1}; if(run) for(const k of ['B','T']){const e=canEditTarget(S,k); if(e.ok&&e.kept) kept[k]=e.pi;}
+    const narrow=$('editor').clientWidth<720;
+    const na=t=>`<span class="na">${t}</span>`, del=(i)=>`<button class="x" data-del="${i}" ${run?'disabled':''} aria-label="Delete phase ${i+1}" title="Delete phase">✕</button>`;
+    const rows=p.phases.map((x,i)=>{
+      const done=run&&i<cur, isCur=run&&i===cur;
+      const hasB=x.kind==='B'||x.kind==='BT', hasT=x.kind==='T'||x.kind==='BT', bIdle=x.kind==='BT'&&x.b.idle, isP=x.kind==='P';
+      const en=(f)=>{ if(done||(isCur&&isP)) return (f==='b.t'&&i===kept.B)||(f==='t.t'&&i===kept.T); if(!run) return true;
+        if(isCur){ if(f==='b.t') return hasB&&!bIdle; if(f==='t.t') return hasT; if(f==='b.h') return x.kind==='B'; if(f==='t.h') return hasT; return false; }
+        return f!=='kind'; };
+      const opt=(v,t)=>`<option value="${v}"${x.kind===v?' selected':''}>${t}</option>`;
+      const sel=`<select data-f="kind" ${run?'disabled':''} aria-label="Phase ${i+1} type">${opt('B','Bottom')}${opt('T','Top')}${opt('BT','Both')}${opt('P','Pause')}</select>`;
+      const cb=(f,on,lab,dis)=>`<label class="cbl"><input type="checkbox" data-f="${f}" ${on?'checked':''} ${dis?'disabled':''}> ${lab}</label>`;
+      const c={
+        bt: hasB&&!bIdle?numIn('b.t',x.b.t,en('b.t'),`aria-label="Bottom °C, phase ${i+1}"`):na(bIdle?'off':'keeps'),
+        br: x.kind==='B'?numIn('b.r',x.b.r,en('b.r'),`aria-label="Bottom ramp s, phase ${i+1}"`):na(x.kind==='BT'&&!bIdle?'jump':'—'),
+        bh: x.kind==='B'?numIn('b.h',x.b.h,en('b.h'),`aria-label="Bottom hold s, phase ${i+1}"`):na('—'),
+        bi: x.kind==='BT'?cb('b.idle',x.b.idle,'Idle',!en('b.idle')):'',
+        tt: hasT?numIn('t.t',x.t.t,en('t.t'),`aria-label="Top °C, phase ${i+1}"`):na('keeps'),
+        tr: hasT?numIn('t.r',x.t.r,en('t.r'),`aria-label="Top ramp s, phase ${i+1}"`):na('—'),
+        th: hasT?numIn('t.h',x.t.h,en('t.h'),`aria-label="Top hold s, phase ${i+1}"`):na('—'),
+        opt: isP?cb('msg',x.msg,'"Action required"',!en('msg')):(x.kind!=='T'?cb('wait',x.wait,'Wait for bottom',!(en('wait')&&!bIdle)):na('—'))
+      };
+      const cls=`${done?'done':''}${isCur?' cur':''}`;
+      if(narrow){
+        return `<div class="pc ${cls}" data-i="${i}"><div class="pch"><b>${i+1}</b>${sel}<span class="grow"></span>${del(i)}</div>`+
+          (isP?`<div class="pcr"><span class="na">Both channels keep their setpoints.</span></div><div class="pcr">${c.opt}</div>`:
+          `<div class="pcr"><span class="pl gB">Bottom</span>${!hasB?na('keeps its setpoint'):bIdle?na('off')+c.bi:x.kind==='BT'?`<label class="fl"><span>°C</span>${c.bt}</label>${na('jump')}${c.bi}`:`<label class="fl"><span>°C</span>${c.bt}</label><label class="fl"><span>Ramp s</span>${c.br}</label><label class="fl"><span>Hold s</span>${c.bh}</label>`}</div>
+           <div class="pcr"><span class="pl gT">Top</span>${!hasT?na('keeps its setpoint'):`<label class="fl"><span>°C</span>${c.tt}</label><label class="fl"><span>Ramp s</span>${c.tr}</label><label class="fl"><span>Hold s</span>${c.th}</label>`}</div>
+           ${x.kind!=='T'?`<div class="pcr">${c.opt}</div>`:''}`)+`</div>`;
+      }
+      return `<tr class="${cls}" data-i="${i}"><td>${i+1}</td><td>${sel}</td>`+
+        (isP?`<td class="bl" colspan="4">${na('keeps its setpoint')}</td><td class="bl" colspan="3">${na('keeps its setpoint')}</td>`:
+        `<td class="bl">${c.bt}</td><td>${c.br}</td><td>${c.bh}</td><td>${c.bi}</td><td class="bl">${c.tt}</td><td>${c.tr}</td><td>${c.th}</td>`)+
+        `<td class="bl">${c.opt}</td><td>${del(i)}</td></tr>`;
+    });
+    let h=narrow?`<div class="pcs">${rows.join('')}</div>`:
+      `<div class="ed-wrap"><table class="ed"><thead><tr><th rowspan="2">#</th><th rowspan="2">Type</th><th colspan="4" class="gB bl">Bottom</th><th colspan="3" class="gT bl">Top</th><th rowspan="2" class="bl">Option</th><th rowspan="2"></th></tr>
+      <tr><th class="bl">°C</th><th>Ramp s</th><th>Hold s</th><th></th><th class="bl">°C</th><th>Ramp s</th><th>Hold s</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+    h+=`<div class="edbar"><button id="addPh" ${run?'disabled':''}>Add phase</button></div>`;
+    $('editor').innerHTML=h;
+  } else {
+    const side=k=>{const L=p[k], q=run?S.tl[k]:null, ke=run?canEditTarget(S,k):null, keptI=ke&&ke.ok&&ke.kept?ke.i:-1;
+      let h=`<h3 style="color:var(${k==='B'?'--bot':'--top'})">${k==='B'?'Bottom preheater':'Top heater'}</h3><div class="ed-wrap"><table class="ed"><thead><tr><th>#</th><th>Step</th><th>°C</th><th>Ramp s</th><th>Hold s</th><th></th></tr></thead><tbody>`;
+      L.forEach((x,i)=>{
+        const done=run&&(q.stage==='done'||i<q.i), isCur=run&&q.stage!=='done'&&i===q.i;
+        const en=f=>{ if(done) return f==='t'&&i===keptI; if(!run) return true; if(isCur) return !x.pause&&(f==='h'||(f==='t'&&!x.idle)); return f!=='kind'; };
+        const kv=x.pause?'pause':x.idle?'idle':'step', opt=(v,t)=>`<option value="${v}"${kv===v?' selected':''}>${t}</option>`;
+        const nm=`${k==='B'?'Bottom':'Top'} step ${i+1}`;
+        h+=`<tr class="${done?'done':''}${isCur?' cur':''}" data-k="${k}" data-i="${i}"><td>${i+1}</td>
+        <td><select data-f="kind" ${run?'disabled':''} aria-label="${nm} kind">${opt('step','Step')}${opt('idle','Idle')}${opt('pause','Pause')}</select></td>`;
+        if(x.pause) h+=`<td colspan="3"><label class="cbl"><input type="checkbox" data-f="msg" ${x.msg?'checked':''} ${en('msg')?'':'disabled'}> "Action required"</label></td>`;
+        else h+=`<td>${x.idle?'<span class="na">off</span>':numIn('t',x.t,en('t'),`aria-label="${nm} °C"`)}</td>
+        <td>${x.idle?'<span class="na">—</span>':numIn('r',x.r,en('r'),`aria-label="${nm} ramp s"`)}</td>
+        <td>${numIn('h',x.h,en('h'),`aria-label="${nm} ${x.idle?'idle':'hold'} s"`)}</td>`;
+        h+=`<td><button class="x" data-del="${i}" ${run?'disabled':''} aria-label="Delete ${nm}" title="Delete step">✕</button></td></tr>`;});
+      h+=`</tbody></table></div><div class="edbar"><button data-add="${k}" ${run?'disabled':''}>Add step</button></div>`;return h;};
+    $('editor').innerHTML=`<div class="tl2"><div>${side('B')}</div><div>${side('T')}</div></div>`;
+  }
+}
+function editorKey(){const p=editProg();return ($('editor').clientWidth<720?'n':'w')+JSON.stringify(p)+'|'+S.running+'|'+(S.running?(S.prog.type==='seq'?S.seq.pi:S.tl.B.i+','+S.tl.B.stage+','+S.tl.T.i+','+S.tl.T.stage):'');}
+function afterStoredEdit(){ const u=UNDO[sel]; if(u.length&&J(u[u.length-1])===J(DRAFT[sel])) u.pop(); reset(true); fillProgSelect(); }
+function toolAct(a){
+  if(S.running) return;
+  if(a==='undo'&&UNDO[sel].length){ REDO[sel].push(structuredClone(DRAFT[sel])); DRAFT[sel]=UNDO[sel].pop(); }
+  else if(a==='redo'&&REDO[sel].length){ UNDO[sel].push(structuredClone(DRAFT[sel])); DRAFT[sel]=REDO[sel].pop(); }
+  else if(a==='save'&&isDirty()){ SAVED[sel]=structuredClone(DRAFT[sel]); log(S,'Program saved'); logLen=-1; }
+  else if(a==='discard'&&isDirty()){ beginStored(); DRAFT[sel]=structuredClone(SAVED[sel]); }
+  else return;
+  reset(true); fillProgSelect();
+}
+document.addEventListener('click',e=>{const b=e.target.closest('button[data-act]'); if(b) toolAct(b.dataset.act);});
+document.addEventListener('keydown',e=>{ if(!(e.ctrlKey||e.metaKey)||e.target.matches('input,select,textarea')) return;
+  const k=e.key.toLowerCase(); if(k==='z'&&!e.shiftKey){toolAct('undo');e.preventDefault();} else if(k==='y'||(k==='z'&&e.shiftKey)){toolAct('redo');e.preventDefault();} });
+function updateTools(){
+  const run=S.running, d=isDirty();
+  document.querySelectorAll('button[data-act]').forEach(b=>{const a=b.dataset.act;
+    b.disabled=run||(a==='undo'&&!UNDO[sel].length)||(a==='redo'&&!REDO[sel].length)||((a==='save'||a==='discard')&&!d);});
+  $('unsaved').textContent=!run&&d?'Unsaved changes':'';
+}
+$('editor').addEventListener('change',e=>{
+  const el=e.target, f=el.dataset.f; if(!f) return;
+  const tr=el.closest('[data-i]'), i=+tr.dataset.i, k=tr.dataset.k, v=el.type==='checkbox'?el.checked:(f==='kind'?el.value:parseFloat(el.value));
+  if(typeof v==='number'&&isNaN(v)) return;
+  if(S.running){
+    if(S.prog.type==='seq'){
+      const x=S.prog.phases[i];
+      if(f==='b.t') seqSetTarget(S,'B',i,v); else if(f==='t.t') seqSetTarget(S,'T',i,v);
+      else if(f==='b.r') seqSetRamp(S,'B',i,v); else if(f==='t.r') seqSetRamp(S,'T',i,v);
+      else if(f==='b.h'||f==='t.h') seqSetHold(S,i,v);
+      else if(f==='wait'||f==='b.idle'||f==='msg'){ if(f==='wait') x.wait=v; else if(f==='msg') x.msg=v; else x.b.idle=v; S.edited=true; log(S,`Phase ${i+1}: ${f==='wait'?'wait for bottom':f==='msg'?'"Action required" message':'bottom Idle'} ${v?'on':'off'}`); }
+    } else {
+      if(f==='t') tlSetTarget(S,k,i,v); else if(f==='r') tlSetRamp(S,k,i,v); else if(f==='h') tlSetHold(S,k,i,v);
+      else if(f==='msg'){ S.prog[k][i].msg=v; S.edited=true; log(S,`${k==='B'?'Bottom':'Top'} step ${i+1}: "Action required" message ${v?'on':'off'}`); }
+    }
+    dirty=true; tableKey=''; return;
+  }
+  const p=beginStored();
+  if(p.type==='seq'){
+    const x=p.phases[i];
+    if(f==='kind'){ x.kind=v; if(v==='P'&&x.msg===undefined) x.msg=true; } else if(f==='wait') x.wait=v; else if(f==='b.idle') x.b.idle=v; else if(f==='msg') x.msg=v;
+    else { const [a,b]=f.split('.'); x[a][b]=b==='t'?v:Math.max(0,v); }
+  } else {
+    const x=p[k][i];
+    if(f==='kind'){ x.idle=v==='idle'; x.pause=v==='pause'; if(x.pause&&x.msg===undefined) x.msg=true; }
+    else if(f==='msg') x.msg=v; else x[f]=f==='t'?v:Math.max(0,v);
+  }
+  afterStoredEdit();
+});
+$('editor').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b||S.running||b.dataset.act) return;
+  const p=beginStored();
+  if(b.id==='addPh'){ p.phases.push(ph('T',false,null,{t:200,r:30,h:20})); afterStoredEdit(); }
+  else if(b.dataset.add){ p[b.dataset.add].push(st(180,30,30)); afterStoredEdit(); }
+  else if(b.dataset.del!=null){ const tr=b.closest('[data-i]'); if(p.type==='seq') p.phases.splice(+b.dataset.del,1); else p[tr.dataset.k].splice(+b.dataset.del,1); afterStoredEdit(); }
+});
+
+/* ---------- log ---------- */
+function updateLog(){
+  if(S.log.length===logLen) return; logLen=S.log.length;
+  $('log').innerHTML=S.log.slice(-80).reverse().map(l=>`<li><span>${fmt(l.rt)}</span>${esc(l.msg)}</li>`).join('')||'<li><span></span>Press Start to run the program.</li>';
+}
+
+/* ---------- chart ---------- */
+let CW=1000,CH=452,CL=58,CR=18,PT=86,PB=410; const LANE={B:22,T:46},LH=18,YMAX=275;
+let xfull=600, V0=0, V1=600;
+const view={fit:true,v0:0,span:600,follow:true};
+function layout(){ const w=Math.floor($('chartbox').clientWidth)||1000; CW=Math.max(280,w); const n=CW<600;
+  CL=n?44:58; CR=n?10:18; CH=n?340:Math.round(Math.min(460,Math.max(380,CW*0.42))); PT=86; PB=CH-40; }
+function plotW(){return CW-CL-CR;}
+function X(t){return CL+plotW()*(t-V0)/(V1-V0);}
+function Y(v){return PB-(PB-PT)*v/YMAX;}
+function tAtX(x){return V0+(x-CL)/plotW()*(V1-V0);}
+function setDomain(){
+  if(view.fit||view.span>=xfull){ view.fit=true; V0=0; V1=xfull; return; }
+  if(S.running&&view.follow&&S.rt>view.v0+view.span*0.85) view.v0=S.rt-view.span*0.3;
+  view.v0=Math.max(0,Math.min(view.v0,xfull-view.span)); V0=view.v0; V1=view.v0+view.span;
+}
+function zoomAt(t,f){ const span=Math.max(20,Math.min(xfull,(view.fit?xfull:view.span)*f)); const v0=view.fit?0:view.v0, sp=view.fit?xfull:view.span;
+  const r=(t-v0)/sp; view.fit=span>=xfull; view.span=span; view.v0=t-r*span; afterView(); }
+function panBy(dt){ if(view.fit) return; view.v0+=dt; afterView(); }
+function afterView(){ if(!view.fit){ view.v0=Math.max(0,Math.min(view.v0,xfull-view.span)); view.follow=S.running&&S.rt>=view.v0&&S.rt<=view.v0+view.span; } lastChart=0; }
+function spAt(samples,k,t){ let best=null,bd=1e9; for(const s of samples){const d=Math.abs(s.rt-t); if(d<bd){bd=d;best=s;}} return best&&best[k].sp!=null?best[k].sp:(best?best[k].pv:0); }
+function pathOf(samples,k,key){ let d='',pen=false; for(const s of samples){ const v=s[k][key]; if(v==null){pen=false;continue;} d+=(pen?'L':'M')+X(s.rt).toFixed(1)+','+Y(v).toFixed(1); pen=true;} return d; }
+function lanes(samples,k){
+  let out='',run=null;
+  const flush=(end)=>{ if(!run) return; const x0=X(run.t0),w=Math.max(X(end)-x0,0.5), y=LANE[k];
+    const col=k==='B'?'var(--bot)':'var(--top)';
+    const m={halt:['url(#hatch)',.9],pause:['var(--muted)',.28],ramp:[col,.35],hold:[col,.85],jump:[col,.6],keep:['var(--muted)',.28],wait:['var(--amber)',.85],manual:[col,.2],end:['var(--muted)',.15]}[run.st];
+    if(m) out+=`<rect x="${x0.toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="${LH}" style="fill:${m[0]};opacity:${m[1]*(run.f?0.75:1)}"/>`;
+    run=null; };
+  for(const s of samples){ const stt=s[k].st; if(!run||run.st!==stt||run.f!==s.f){ flush(s.rt); run={st:stt,t0:s.rt,f:s.f}; } }
+  if(samples.length) flush(samples[samples.length-1].rt);
+  return out;
+}
+function tickStep(){ const span=V1-V0, px=plotW(); for(const st of [5,10,15,30,60,120,300,600]) if(px/(span/st)>=64) return st; return 900; }
+function pauseSym(x,y){ return `<g><circle cx="${x}" cy="${y}" r="11" style="fill:var(--amber)"/><rect x="${x-5}" y="${y-5.5}" width="3.5" height="11" rx="1" style="fill:var(--panel)"/><rect x="${x+1.5}" y="${y-5.5}" width="3.5" height="11" rx="1" style="fill:var(--panel)"/></g>`; }
+function renderChart(){
+  layout();
+  const hist=S.hist, fut=(pred&&pred.samples)||[];
+  const end=Math.max(60,S.rt,pred&&pred.end||0);
+  xfull=Math.ceil(end*1.04/30)*30;
+  setDomain();
+  let s=`<svg width="${CW}" height="${CH}" viewBox="0 0 ${CW} ${CH}" role="img" aria-label="Setpoints and process values of both channels over time">`;
+  s+=`<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" style="fill:var(--amber)"/></pattern><clipPath id="pclip"><rect x="${CL}" y="0" width="${plotW()}" height="${CH}"/></clipPath></defs>`;
+  s+=`<rect class="bg" x="0" y="0" width="${CW}" height="${CH}" style="fill:transparent"/>`;
+  for(let v=0;v<=250;v+=50) s+=`<line x1="${CL}" x2="${CW-CR}" y1="${Y(v)}" y2="${Y(v)}" style="stroke:var(--line)"/><text x="${CL-6}" y="${Y(v)+4}" text-anchor="end" style="fill:var(--muted);font-size:12px">${v}</text>`;
+  s+=`<text x="${CL-6}" y="${PT-8}" text-anchor="end" style="fill:var(--muted);font-size:12px">°C</text>`;
+  const step=tickStep();
+  for(let t=Math.ceil(V0/step)*step;t<=V1+1e-6;t+=step) s+=`<text x="${X(t)}" y="${PB+18}" text-anchor="middle" style="fill:var(--muted);font-size:12px">${fmt(t)}</text>`;
+  for(const k of ['B','T']){ s+=`<text x="${CL-6}" y="${LANE[k]+13}" text-anchor="end" style="fill:var(--muted);font-size:12px">${k==='B'?(CW<600?'Bot':'Bottom'):'Top'}</text><rect x="${CL}" y="${LANE[k]}" width="${plotW()}" height="${LH}" style="fill:none;stroke:var(--line)"/>`; }
+  s+=`<g clip-path="url(#pclip)">`;
+  const futF=fut.map(x=>Object.assign({},x,{f:true}));
+  for(const k of ['B','T']) s+=lanes(hist.concat(futF.filter(x=>x.rt>=S.rt)),k);
+  // program pauses: band while it lasted, thick line and pause symbol at its start
+  const allEv=S.events.concat(((pred&&pred.events)||[]).filter(e=>e.rt>=S.rt-0.01));
+  allEv.forEach((e,n)=>{ if(e.type!=='pause') return;
+    const c=allEv.slice(n+1).find(o=>o.type==='continue'||o.type==='end'); const t1=c?c.rt:(S.running?S.rt:e.rt);
+    if(t1-e.rt>0.6) s+=`<rect x="${X(e.rt)}" y="${LANE.B}" width="${Math.max(0,X(t1)-X(e.rt))}" height="${PB-LANE.B}" style="fill:url(#hatch);opacity:.12"/>`;
+    s+=`<line x1="${X(e.rt)}" x2="${X(e.rt)}" y1="${LANE.B-4}" y2="${PB}" style="stroke:var(--amber);stroke-width:4"/>`+pauseSym(X(e.rt),PB-18);
+  });
+  const evs=S.events.concat((pred&&pred.events)||[]).filter((e,i,a)=>e.type==='phase'&&a.findIndex(o=>o.type==='phase'&&o.pi===e.pi)===i);
+  let lastX=-99, row=0;
+  evs.sort((a,b)=>a.rt-b.rt);
+  for(const e of evs){ const x=X(e.rt); row=x-lastX<36?row+1:0; lastX=x; const dy=row*26;
+    s+=`<line x1="${x}" x2="${x}" y1="${LANE.B-4}" y2="${PB}" style="stroke:var(--muted);stroke-dasharray:2 4;opacity:.6"/><text x="${x+3}" y="${PT-8+dy}" style="fill:var(--muted);font-size:12px;font-weight:600;paint-order:stroke;stroke:var(--panel);stroke-width:3px">P${e.pi+1}</text>`;
+    if(e.pi>0) s+=`<text x="${x+3}" y="${PT+7+dy}" style="fill:var(--text);font-size:11.5px;paint-order:stroke;stroke:var(--panel);stroke-width:3px">${fmt(e.rt)}</text>`; }
+  const endRt=(S.events.find(e=>e.type==='end')||{}).rt ?? (pred&&pred.end);
+  if(endRt!=null&&endRt>0) s+=`<line x1="${X(endRt)}" x2="${X(endRt)}" y1="${LANE.B-4}" y2="${PB}" style="stroke:var(--text);stroke-dasharray:4 3;opacity:.7"/><text x="${X(endRt)+3}" y="${PT-8}" style="fill:var(--muted);font-size:12px;font-weight:600">End</text><text x="${X(endRt)+3}" y="${PT+8}" style="fill:var(--text);font-size:11.5px">${fmt(endRt)}</text>`;
+  if(editProg().type==='tl'){
+    const seen=new Set(), ep=editProg();
+    for(const e of S.events.concat((pred&&pred.events)||[])){
+      if(e.type!=='holdEnd') continue; const key=e.ref.k+e.ref.i; if(seen.has(key)) continue; seen.add(key);
+      const x=ep[e.ref.k][e.ref.i]; if(!x||x.pause) continue;
+      const v=x.idle?5:x.t;
+      s+=`<text x="${X(e.rt)+6}" y="${Y(v)-11}" style="fill:var(--text);font-size:11.5px;paint-order:stroke;stroke:var(--panel);stroke-width:3px">${fmt(e.rt)}</text>`;
+    }
+  }
+  for(const k of ['B','T']){
+    const col=k==='B'?'var(--bot)':'var(--top)';
+    s+=`<path d="${pathOf(hist,k,'pv')}" style="fill:none;stroke:${col};stroke-width:1.5;opacity:.55"/>`;
+    s+=`<path d="${pathOf(hist,k,'sp')}" style="fill:none;stroke:${col};stroke-width:2.5;stroke-linejoin:round"/>`;
+    const f=fut.filter(x=>x.rt>=S.rt-0.5);
+    s+=`<path d="${pathOf(f,k,'pv')}" style="fill:none;stroke:${col};stroke-width:1.5;stroke-dasharray:1 3;opacity:.45"/>`;
+    s+=`<path d="${pathOf(f,k,'sp')}" style="fill:none;stroke:${col};stroke-width:2;stroke-dasharray:6 4;opacity:.9"/>`;
+  }
+  if(S.running) s+=`<line x1="${X(S.rt)}" x2="${X(S.rt)}" y1="${LANE.B-4}" y2="${PB}" style="stroke:var(--text);stroke-width:1.5"/>`;
+  handleList=buildHandles(fut).filter(h=>h.rt>=V0-1&&h.rt<=V1+1);
+  s+=drawHandles(handleList);
+  s+=`</g><g id="ghost"></g></svg>`;
+  $('chartbox').innerHTML=s;
+  // zoom bar
+  const zs=$('zscroll'); zs.hidden=view.fit; $('zfit').disabled=view.fit;
+  if(!view.fit){ zs.max=Math.max(0,xfull-view.span); zs.step=1; if(document.activeElement!==zs) zs.value=view.v0; }
+  $('zrange').textContent=view.fit?'Whole program':`${fmt(V0)} – ${fmt(V1)}`;
+}
+function phaseTimedOf(pi){ const p=editProg().phases[pi]; return p?phaseTimed(p):null; }
+function refTarget(k,ref){ const ep=editProg(); if(ep.type==='seq'){const p=ep.phases[ref]; return p?(k==='B'?p.b.t:p.t.t):null;} const x=ep[k][ref]; return x&&!x.idle?x.t:null; }
+function isCurrentRamp(k,ref){ if(!S.running) return false; return S.prog.type==='seq'?ref.pi<=S.seq.pi:ref.i<=S.tl[k].i; }
+function buildHandles(fut){
+  const H=[]; if(!pred||!pred.events||S.done) return H;
+  const ep=editProg(), seq=ep.type==='seq', now=S.rt-0.01;
+  for(const e of pred.events){
+    if(e.rt<now) continue;
+    if(e.type==='holdEnd'){ const k=seq?phaseTimedOf(e.ref.pi):e.ref.k; if(!k) continue; const src=seq?e.ref.pi:e.ref.i;
+      const v=seq||!ep[k][src].idle?refTarget(k,src):null; H.push({type:'hold',dir:'h',k,ref:e.ref,rt:e.rt,v:v==null?spAt(fut,k,e.rt-0.5):v}); }
+    else if(e.type==='rampEnd'){ const k=e.ref.k, src=seq?e.ref.pi:e.ref.i; if(isCurrentRamp(k,e.ref)) continue;
+      H.push({type:'ramp',dir:'h',k,ref:e.ref,rt:e.rt,v:refTarget(k,src)}); }
+  }
+  for(const k of ['B','T']){
+    const groups=[]; let g=null;
+    for(const x of fut){ if(x.rt<now) continue; const c=x[k]; const ok=c.src!=null&&!c.ramp&&c.sp!=null;
+      if(ok&&g&&g.src===c.src){g.t1=x.rt;g.v=c.sp;} else { if(g) groups.push(g); g=ok?{src:c.src,t0:x.rt,t1:x.rt,v:c.sp}:null; } }
+    if(g) groups.push(g);
+    const seen=new Set();
+    for(const q of groups){ if(seen.has(q.src)) continue; seen.add(q.src); const v=refTarget(k,q.src); if(v==null) continue;
+      H.push({type:'target',dir:'v',k,src:q.src,rt:(q.t0+q.t1)/2,v,w:X(q.t1)-X(q.t0)}); }
+    for(const h of H.filter(h=>h.type==='ramp'&&h.k===k)){ const src=seq?h.ref.pi:h.ref.i; if(seen.has(src)) continue; seen.add(src);
+      H.push({type:'target',dir:'v',k,src,rt:h.rt,v:h.v,lift:-22}); }
+  }
+  for(const h of H) if(h.type==='target'&&!h.lift&&h.w<16) h.lift=-22;
+  for(const h of H.filter(h=>h.type==='hold')){ if(H.some(o=>o!==h&&(o.type==='ramp'||o.type==='target')&&o.k===h.k&&Math.abs(X(o.rt)-X(h.rt))<14&&Math.abs(Y(o.v)-Y(h.v))<14)) h.lift=22; }
+  return H;
+}
+function drawHandles(H){
+  let s='';
+  H.forEach((h,n)=>{
+    const col=h.k==='B'?'var(--bot)':'var(--top)', x=X(h.rt), y0=Y(h.v), y=y0+(h.lift||0);
+    if(h.lift) s+=`<line x1="${x}" y1="${y0}" x2="${x}" y2="${y}" style="stroke:${col};stroke-width:1.5"/>`;
+    const nm=h.k==='B'?'bottom':'top', where=S.prog.type==='seq'?`phase ${(h.ref?h.ref.pi:h.src)+1}`:`${nm} step ${(h.ref?h.ref.i:h.src)+1}`;
+    if(h.type==='hold') s+=`<circle data-h="${n}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7" style="fill:var(--panel);stroke:${col};stroke-width:2.5;cursor:ew-resize"><title>Drag left or right: hold time of ${where}</title></circle>`;
+    else if(h.type==='ramp') s+=`<rect data-h="${n}" x="${(x-6).toFixed(1)}" y="${(y-6).toFixed(1)}" width="12" height="12" transform="rotate(45 ${x.toFixed(1)} ${y.toFixed(1)})" style="fill:var(--panel);stroke:${col};stroke-width:2.5;cursor:ew-resize"><title>Drag left or right: ramp time of ${where}</title></rect>`;
+    else s+=`<rect data-h="${n}" x="${(x-7).toFixed(1)}" y="${(y-7).toFixed(1)}" width="14" height="14" rx="3" style="fill:${col};stroke:var(--panel);stroke-width:2;cursor:ns-resize"><title>Drag up or down: ${nm} target of ${where}</title></rect>`;
+  });
+  return s;
+}
+function svgPt(ev){ const svg=$('chartbox').querySelector('svg'); const pt=svg.createSVGPoint(); pt.x=ev.clientX; pt.y=ev.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); }
+$('chartbox').addEventListener('pointerdown',ev=>{
+  const c=ev.target.closest('[data-h]'); if(!c){ panDown(ev); return; }
+  const h=handleList[+c.dataset.h]; if(!h) return;
+  const p=svgPt(ev);
+  drag={h,px:p.x,py:p.y,t:h.rt,v:h.v};
+  c.setPointerCapture(ev.pointerId); ev.preventDefault();
+});
+$('chartbox').addEventListener('pointermove',ev=>{
+  if(!drag){ panMove(ev); return; } const p=svgPt(ev), h=drag.h, g=$('chartbox').querySelector('#ghost');
+  const col=h.k==='B'?'var(--bot)':'var(--top)';
+  if(h.dir==='h'){
+    let t=h.rt+(p.x-drag.px)/plotW()*(V1-V0); t=Math.max(S.running?S.rt:0,Math.round(t)); drag.t=t;
+    const d=Math.round(t-h.rt), y=Y(h.v)+(h.lift||0);
+    g.innerHTML=`<line x1="${X(t)}" x2="${X(t)}" y1="${PT}" y2="${PB}" style="stroke:var(--acc);stroke-width:2"/><circle cx="${X(t)}" cy="${y}" r="6" style="fill:var(--acc)"/><text x="${X(t)+10}" y="${y-12}" style="fill:var(--text);font-size:13px;font-weight:600">${h.type==='ramp'?'ramp':'hold'} ${d>=0?'+':''}${d} s</text>`;
+  } else {
+    let v=h.v-(p.y-drag.py)/(PB-PT)*YMAX; v=Math.max(0,Math.min(YMAX,Math.round(v))); drag.v=v;
+    const x=X(h.rt);
+    g.innerHTML=`<line x1="${CL}" x2="${CW-CR}" y1="${Y(v)}" y2="${Y(v)}" style="stroke:var(--acc);stroke-width:2"/><rect x="${x-6}" y="${Y(v)-6}" width="12" height="12" rx="3" style="fill:var(--acc)"/><text x="${x+12}" y="${Y(v)-10}" style="fill:var(--text);font-size:13px;font-weight:600">${v} °C</text>`;
+  }
+});
+function endDrag(){
+  if(!drag) return; const h=drag.h, D=Math.round(drag.t-h.rt), V=drag.v; drag=null;
+  const run=S.running, seq=S.prog.type==='seq';
+  if(h.type==='target'){ if(V===h.v){lastChart=0;return;}
+    if(run){ if(seq) seqSetTarget(S,h.k,h.src,V); else tlSetTarget(S,h.k,h.src,V); }
+    else { const p=beginStored(); if(seq){const x=p.phases[h.src]; (h.k==='B'?x.b:x.t).t=V;} else p[h.k][h.src].t=V; afterStoredEdit(); return; }
+  } else if(D!==0){
+    if(h.type==='hold'){
+      if(run){ if(seq){const p=S.prog.phases[h.ref.pi]; seqSetHold(S,h.ref.pi,seqHoldLen(p)+D);} else tlSetHold(S,h.ref.k,h.ref.i,S.prog[h.ref.k][h.ref.i].h+D); }
+      else { const p=beginStored(); if(seq){const x=p.phases[h.ref.pi], part=x.kind==='B'?x.b:x.t; part.h=Math.max(0,part.h+D);} else { const x=p[h.ref.k][h.ref.i]; x.h=Math.max(0,x.h+D);} afterStoredEdit(); return; }
+    } else {
+      if(run){ if(seq){const rp=seqRampPart(S.prog.phases[h.ref.pi],h.k); if(rp) seqSetRamp(S,h.k,h.ref.pi,rp.r+D);} else tlSetRamp(S,h.k,h.ref.i,S.prog[h.k][h.ref.i].r+D); }
+      else { const p=beginStored(); if(seq){const rp=seqRampPart(p.phases[h.ref.pi],h.k); if(rp) rp.r=Math.max(0,rp.r+D);} else { const x=p[h.k][h.ref.i]; x.r=Math.max(0,x.r+D);} afterStoredEdit(); return; }
+    }
+  }
+  dirty=true; lastChart=0;
+}
+$('chartbox').addEventListener('pointerup',ev=>{ panUp(ev); endDrag(); });
+$('chartbox').addEventListener('pointercancel',ev=>{ panUp(ev); drag=null; lastChart=0; });
+const ptrs=new Map(); let pz=null;
+function panDown(ev){ if(ev.pointerType==='mouse'&&ev.button!==0) return; const p=svgPt(ev); ptrs.set(ev.pointerId,p.x);
+  try{ $('chartbox').setPointerCapture(ev.pointerId); }catch(e){}
+  pz={v0:view.fit?0:view.v0, span:view.fit?xfull:view.span, pts:new Map(ptrs), moved:false}; }
+function panMove(ev){ if(!ptrs.has(ev.pointerId)||!pz) return; const p=svgPt(ev); ptrs.set(ev.pointerId,p.x);
+  const ids=[...pz.pts.keys()];
+  if(ptrs.size>=2&&ids.length>=2){ const a0=pz.pts.get(ids[0]), b0=pz.pts.get(ids[1]), a1=ptrs.get(ids[0]), b1=ptrs.get(ids[1]); if(a1==null||b1==null) return;
+    const d0=Math.max(10,Math.abs(b0-a0)), d1=Math.max(10,Math.abs(b1-a1)), m0=(a0+b0)/2, m1=(a1+b1)/2;
+    const span=Math.max(20,Math.min(xfull,pz.span*d0/d1)); const tm=pz.v0+(m0-CL)/plotW()*pz.span;
+    view.fit=span>=xfull; view.span=span; view.v0=tm-(m1-CL)/plotW()*span; afterView(); pz.moved=true; }
+  else if(ptrs.size===1&&!view.fit){ const x0=pz.pts.get(ev.pointerId); if(x0==null) return; view.v0=pz.v0-(p.x-x0)/plotW()*pz.span; afterView(); pz.moved=true; }
+}
+function panUp(ev){ ptrs.delete(ev.pointerId); if(pz){ pz={v0:view.fit?0:view.v0, span:view.fit?xfull:view.span, pts:new Map(ptrs)}; } if(!ptrs.size) pz=null; }
+$('chartbox').addEventListener('wheel',ev=>{
+  if(ev.ctrlKey||ev.metaKey){ ev.preventDefault(); zoomAt(tAtX(svgPt(ev).x), ev.deltaY>0?1.25:0.8); }
+  else if(!view.fit&&(ev.shiftKey||Math.abs(ev.deltaX)>Math.abs(ev.deltaY))){ ev.preventDefault(); panBy((ev.shiftKey?ev.deltaY:ev.deltaX)/plotW()*view.span); }
+},{passive:false});
+const zc=()=>S.running&&S.rt>=V0&&S.rt<=V1?S.rt:(V0+V1)/2;
+$('zin').onclick=()=>zoomAt(zc(),1/1.6);
+$('zout').onclick=()=>zoomAt(zc(),1.6);
+$('zfit').onclick=()=>{view.fit=true;lastChart=0;};
+$('zscroll').oninput=e=>{view.v0=+e.target.value;afterView();};
+let lastW=0; new ResizeObserver(()=>{ const w=$('chartbox').clientWidth; if(w!==lastW){ lastW=w; lastChart=0; } }).observe($('chartbox'));
+
+/* ---------- controls ---------- */
+$('prog').onchange=e=>{sel=+e.target.value;reset(true);};
+$('bStart').onclick=()=>{ if(S.done) reset(true); S.band=+$('band').value||5; S.endAction=$('endAct').value; start(S); dirty=true; tableKey=''; };
+$('hCont').onclick=()=>{ continueRun(S); dirty=true; };
+$('hStop').onclick=()=>{ finish(S,true); dirty=true; };
+$('bPause').onclick=()=>{ if(S.halt){ continueRun(S); dirty=true; return; } S.paused=!S.paused; log(S,S.paused?'Paused: timers stop, setpoints hold':'Resumed'); dirty=true; };
+$('bStop').onclick=()=>{ finish(S,true); dirty=true; };
+$('bNext').onclick=()=>{ seqNext(S); dirty=true; };
+$('bReset').onclick=()=>reset(false);
+$('speed').onchange=e=>speed=+e.target.value;
+$('band').onchange=e=>{S.band=+e.target.value||5;dirty=true;};
+$('endAct').onchange=e=>{S.endAction=e.target.value;dirty=true;};
+$('dSave').onclick=()=>{ const p=structuredClone(S.prog); if(p.type==='tl') for(const k of ['B','T']) p[k].forEach(x=>delete x.ins); UNDO[sel].push(structuredClone(DRAFT[sel])); REDO[sel]=[]; DRAFT[sel]=structuredClone(p); SAVED[sel]=p; fillProgSelect(); log(S,'Run changes saved to the program'); logLen=-1; $('saveDlg').close(); };
+$('dDiscard').onclick=()=>{ log(S,'Run changes discarded; stored program unchanged'); logLen=-1; $('saveDlg').close(); };
+
+/* ---------- loop ---------- */
+let last=performance.now(), acc=0, prevRun=false;
+function frame(now){
+  const real=Math.min(0.25,(now-last)/1000); last=now;
+  acc+=real*speed; let n=0;
+  while(acc>=0.25&&n<4000){ stepSim(S,0.25); acc-=0.25; n++; }
+  if(S.done&&S.edited&&!promptShown){ promptShown=true; if(!$('saveDlg').open) $('saveDlg').showModal(); }
+  if(dirty||(S.running&&now-lastPred>700)){ pred=S.done?null:predict(S); lastPred=now; dirty=false; lastChart=0; }
+  if(S.running!==prevRun){ prevRun=S.running; dirty=true; lastChart=0; }
+  if(!drag&&(lastChart===0||(S.running&&now-lastChart>120))){ renderChart(); lastChart=now; }
+  updateChans(); updateLog();
+  const key=editorKey();
+  const ae=document.activeElement, typing=ae&&$('editor').contains(ae)&&ae.matches('input[type=number]');
+  if(key!==tableKey&&!typing){ const fid=ae&&ae.id; tableKey=key; buildEditor(); if(fid&&$(fid)) $(fid).focus(); }
+  updateTools();
+  const hb=$('halt'), showHalt=S.running&&S.halt&&S.halt.msg; if(hb.hidden===!!showHalt){ hb.hidden=!showHalt; if(showHalt) $('hCont').focus(); }
+  if(showHalt) $('haltWhere').textContent=`${S.prog.name}, ${S.halt.where}. Setpoints are kept until you continue.`;
+  requestAnimationFrame(frame);
+}
+fillProgSelect(); reset(false); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

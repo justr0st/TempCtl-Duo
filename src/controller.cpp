@@ -1,10 +1,15 @@
 #include "controller.h"
 #include "config.h"
+#include "settings_store.h"
 #include <math.h>
 
-void Controller::configure(const Settings& s) {
-  s_ = s;
-  bus_.begin(Serial2, PIN_RS485_RX, PIN_RS485_TX, PIN_RS485_DE, s.baud, serialConfigFor(s), s.timeoutMs);
+void modbusBusBegin(ModbusMaster& bus, const Settings& s) {
+#if HAS_RS485
+  bus.begin(RS485_SERIAL, PIN_RS485_RX, PIN_RS485_TX, PIN_RS485_DE, s.baud, serialConfigFor(s), s.timeoutMs);
+#else
+  (void)bus;
+  (void)s;
+#endif
 }
 
 ValueFlag Controller::classify(int16_t raw) {
@@ -28,8 +33,8 @@ const char* Controller::flagName(uint8_t f) {
 }
 
 MbResult Controller::readBlock(uint16_t addr, uint16_t n, int16_t* out, uint8_t fn) {
-  if (addr == REG_UNSET) return MbResult::NotConfigured;
-  return bus_.readRegs(s_.slaveId, fn ? fn : s_.reg.readFn, addr, n, out);
+  if (addr == REG_UNSET || !bus_) return MbResult::NotConfigured;
+  return bus_->readRegs(m_.slaveId, fn ? fn : m_.reg.readFn, addr, n, out);
 }
 
 MbResult Controller::readRaw(uint16_t addr, int16_t& v) { return readBlock(addr, 1, &v); }
@@ -39,17 +44,17 @@ MbResult Controller::readScaled(uint16_t addr, float& v, uint8_t& flag) {
   const MbResult r = readRaw(addr, raw);
   if (r != MbResult::Ok) return r;
   flag = classify(raw);
-  v = (flag == VAL_OK) ? raw / (s_.reg.scale > 0 ? s_.reg.scale : 1.0f) : NAN;
+  v = (flag == VAL_OK) ? raw / (m_.reg.scale > 0 ? m_.reg.scale : 1.0f) : NAN;
   return r;
 }
 
 MbResult Controller::writeRaw(uint16_t addr, int16_t v) {
-  if (addr == REG_UNSET) return MbResult::NotConfigured;
-  return bus_.writeReg(s_.slaveId, s_.reg.writeFn, addr, v);
+  if (addr == REG_UNSET || !bus_) return MbResult::NotConfigured;
+  return bus_->writeReg(m_.slaveId, m_.reg.writeFn, addr, v);
 }
 
 MbResult Controller::writeScaled(uint16_t addr, float v) {
-  const float sc = s_.reg.scale > 0 ? s_.reg.scale : 1.0f;
+  const float sc = m_.reg.scale > 0 ? m_.reg.scale : 1.0f;
   float raw = roundf(v * sc);
   if (raw > 32000) raw = 32000;
   if (raw < -30000) raw = -30000;

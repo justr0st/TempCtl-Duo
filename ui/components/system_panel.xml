@@ -52,7 +52,7 @@
 			</lv_button>
 		</setting_row>
 
-		<lv_label name="sys_info" width="100%" text="Wi-Fi Workshop  192.168.1.57&#10;http://tempctl.local   firmware 1.2.0">
+		<lv_label name="sys_info" width="100%" text="Wi-Fi Workshop  192.168.1.57&#10;http://tempctl-duo.local   firmware 1.0.0">
 			<style name="style_small" />
 		</lv_label>
 	</view>

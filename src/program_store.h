@@ -3,6 +3,10 @@
 #pragma once
 #include "program.h"
 
+// Mounts LittleFS (formats it on first use) and creates /duo. Safe to call
+// more than once. False = no file system (settings and programs not persistent).
+bool storageBegin();
+
 // Mount the file system and load all programs into `progs`. Missing files
 // become empty programs named "Program N". If no program exists at all,
 // `firstBoot` (if given) becomes program 1.

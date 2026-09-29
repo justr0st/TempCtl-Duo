@@ -13,7 +13,7 @@ static const char WEB_PAGE[] PROGMEM = R"HTML(<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>TempCtl</title>
+<title>TempCtl Duo</title>
 <style>
 /* Look inspired by industrial HMIs (dark panels, tile menu, pale cyan
    controls, yellow highlight for the active item). Offline: no web fonts. */
@@ -269,7 +269,7 @@ tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--hi)}
 </svg>
 
 <aside id="side" aria-label="Pages">
-  <div class="brand">TempCtl <small id="fw"></small></div>
+  <div class="brand">TempCtl Duo <small id="fw"></small></div>
   <div class="tiles">
     <button class="tile" data-v="main"><svg><use href="#i-home"/></svg>Status</button>
     <button class="tile" data-v="prog"><svg><use href="#i-list"/></svg>Programs</button>

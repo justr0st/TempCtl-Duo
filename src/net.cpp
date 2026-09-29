@@ -2,6 +2,7 @@
 #include <ESPmDNS.h>
 #include <WiFi.h>
 #include "app_state.h"
+#include "config.h"
 
 static bool apStarted = false, mdnsStarted = false, haveSta = false;
 static uint32_t t0 = 0;
@@ -15,7 +16,7 @@ static void startAp(const Settings& s) {
   uint8_t mac[6];
   WiFi.macAddress(mac);
   char name[24];
-  snprintf(name, sizeof(name), "TempCtl-%02X%02X", mac[4], mac[5]);
+  snprintf(name, sizeof(name), AP_NAME_PREFIX "-%02X%02X", mac[4], mac[5]);
   apName = name;
   WiFi.mode(haveSta ? WIFI_AP_STA : WIFI_AP);
   WiFi.softAP(name, strlen(s.apPass) >= 8 ? s.apPass : nullptr);
@@ -66,6 +67,8 @@ void netLoop() {
     }
   }
 }
+
+bool netApActive() { return apStarted && WiFi.status() != WL_CONNECTED; }
 
 String netInfo() {
   String out;
