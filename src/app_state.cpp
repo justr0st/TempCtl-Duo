@@ -8,6 +8,8 @@
 #include "program_store.h"
 #include "settings_store.h"
 #include "status_led.h"
+#include "version.h"
+#include <esp_system.h>
 
 Settings gSettings;
 LiveData gLive;
@@ -939,8 +941,8 @@ static void pollChannel(int i) {
     L.coldC = v.coldC;
   }
   if (changed && c.type() != CH_OFF) {  // log link changes, not every failed poll
-    if (ok) Serial.printf("[ch] %s (%s): link ok\n", s.ch[i].name, channelTypeName(c.type()));
-    else Serial.printf("[ch] %s (%s): %s\n", s.ch[i].name, channelTypeName(c.type()), err);
+    if (ok) logEvent("%s (%s): link ok", s.ch[i].name, channelTypeName(c.type()));
+    else logEvent("%s (%s): %s", s.ch[i].name, channelTypeName(c.type()), err);
   }
   // autotune finished / failed: log it once
   static bool wasTuning[NUM_CHANNELS];
@@ -951,10 +953,10 @@ static void pollChannel(int i) {
       LocalTune t;
       localCtrlTuneGet(i, t);
       if (t.state == TuneState::Done)
-        Serial.printf("[tune] %s: %s -> kp %.3f ki %.4f kd %.2f (accept or discard)\n", s.ch[i].name, t.msg, t.res.kp,
+        logEvent("%s: autotune %s -> kp %.3f ki %.4f kd %.2f (accept or discard)", s.ch[i].name, t.msg, t.res.kp,
                       t.res.ki, t.res.kd);
       else
-        Serial.printf("[tune] %s: failed: %s\n", s.ch[i].name, t.msg);
+        logEvent("%s: autotune failed: %s", s.ch[i].name, t.msg);
       say("%s: autotune %s", s.ch[i].name, t.state == TuneState::Done ? "done - accept or discard (web)" : t.msg);
     }
     wasTuning[i] = ls.tuning;
@@ -973,7 +975,6 @@ static void pollChannel(int i) {
     strlcpy(L.faultText, ft, sizeof(L.faultText));
   }
   if (f && !prev) {
-    Serial.printf("[ch] %s: FAULT %s - outputs off\n", s.ch[i].name, ft);
     Manual& m = man[i];
     m.on = m.pending = false;
     m.offPending = false;
@@ -1318,6 +1319,22 @@ static void controlTask(void*) {
 
 // ------------------------------------------------------------------ public API
 
+static const char* resetReasonText() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON: return "power on";
+    case ESP_RST_EXT: return "reset pin";
+    case ESP_RST_SW: return "software restart";
+    case ESP_RST_PANIC: return "crash";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT: return "watchdog";
+    case ESP_RST_DEEPSLEEP: return "deep sleep";
+    case ESP_RST_BROWNOUT: return "brown-out";
+    case ESP_RST_SDIO: return "SDIO";
+    default: return "unknown reset";
+  }
+}
+
 void appInit() {
   // large buffers on the heap (the static DRAM segment is almost full)
   gHist = (History*)calloc(1, sizeof(History));
@@ -1348,6 +1365,7 @@ void appInit() {
     Serial.printf("[settings] channel %d: %s, %s\n", i + 1, gSettings.ch[i].name, channelTypeName(gSettings.ch[i].type));
   }
   programStoreBegin();
+  logEvent("%s %s started (%s)", PRODUCT_NAME, FW_VERSION, resetReasonText());
   gLive.manualSp = gSettings.ch[ENGINE_CH].manualSp;
   histResetLive();
   statusLedBegin();

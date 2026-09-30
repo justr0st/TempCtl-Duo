@@ -35,9 +35,12 @@ static bool parseBody(JsonDocument& d) {
   return deserializeJson(d, server.arg("plain")) == DeserializationError::Ok;
 }
 
-static void setNum(JsonVariant v, float x) {
-  if (isnan(x)) v.set(nullptr);
-  else v.set(roundf(x * 10.0f) / 10.0f);
+// works on a document member (doc["x"]) too: a MemberProxy converted to a
+// JsonVariant does not create the member, so assign through the proxy itself
+template <typename T>
+static void setNum(T v, float x) {
+  if (isnan(x)) v = nullptr;
+  else v = roundf(x * 10.0f) / 10.0f;
 }
 
 static int addrOut(uint16_t a) { return a == REG_UNSET ? -1 : (int)a; }

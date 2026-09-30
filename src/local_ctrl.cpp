@@ -33,6 +33,8 @@ struct Local {
   float pv = NAN, rawC = NAN, coldC = NAN, out = 0;
   uint8_t tcFault = TC_NO_DEVICE;
   uint8_t badReads = 0;
+  float med[3] = {0, 0, 0};  // last good raw readings (spike filter)
+  uint8_t medN = 0;
   uint32_t lastGoodMs = 0;
   bool everGood = false;
   uint8_t fault = FAULT_NONE;
@@ -197,12 +199,24 @@ static void step(int ch, float dt) {
     l.coldC = r.coldC;
     if (r.fault == TC_OK) {
       l.badReads = 0;
-      l.rawC = r.tempC;
-      l.pv = r.tempC * c.calGain + c.calOffset;
+      // median of the last three readings: single-reading spikes (thermocouple wires picking up
+      // noise) don't reach the PID or the display; costs one reading (250 ms) of delay at most
+      l.med[0] = l.med[1];
+      l.med[1] = l.med[2];
+      l.med[2] = r.tempC;
+      if (l.medN < 3) ++l.medN;
+      float t = r.tempC;
+      if (l.medN == 3) {
+        const float a = l.med[0], b = l.med[1], d = l.med[2];
+        t = fmaxf(fminf(a, b), fminf(fmaxf(a, b), d));
+      }
+      l.rawC = t;
+      l.pv = t * c.calGain + c.calOffset;
       l.lastGoodMs = millis();
       l.everGood = true;
-    } else if (l.badReads < 255) {
-      ++l.badReads;
+    } else {
+      if (l.badReads < 255) ++l.badReads;
+      l.medN = 0;
     }
     const bool fresh = l.everGood && millis() - l.lastGoodMs < FRESH_MS && l.badReads == 0;
     char t[64];

@@ -148,6 +148,7 @@ pause / action required · red blinking = fault · purple = AP mode. Priority wh
 amber > purple > blue > green. Low brightness (≈ 20 %). **CYD: the on-board RGB LED (external WS2812 on IO17 in `cyd-2xlocal-2x485`) with the same
 colours** (Rost, 2026-09-29; replaces "blue LED only"): PWM on LEDC channels 1–3, active low.
 
+Wiring picture: `claude/wiring/s3-wiring.png` (2026-09-30; display pins drawn in J1 order, VCC on 5 V).
 Display on J1, all process I/O on J3 (separate cable bundles). All pins become `#define`s in the
 per-board header (`src/board_s3.h`, section 3) — one place to change for a v1.1 board or a different
 wiring.
@@ -1238,6 +1239,14 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   `/f/*.woff2` fonts.
 - Tested: host tests (events, chState), page with a host mock of the API (engine-generated data):
   desktop/phone, dark/light, Sequence / Timeline / idle preview. Not on hardware yet.
+- **1.0.4 (2026-10-01)**: Rost connected MAX31855 #1 + thermocouple to the S3 (bottom channel set to
+  `local`): readings work, but the numbers were missing in the channel cards — **fix**: `setNum()` in
+  `web.cpp` took a `JsonVariant`, and a `doc["key"]` proxy converted to `JsonVariant` does not create the
+  member (ArduinoJson 7), so every number set that way was dropped (`/api/live`, `/api/status`, also on
+  the old page); now it assigns through the proxy. The PV showed single-reading spikes of a few °C:
+  **median of the last 3 readings** in the local task (≤ 250 ms delay); hardware hint: 10 nF across
+  T+/T− at the converter, twisted thermocouple leads away from mains wiring. Event log: boot entry with
+  the reset reason, channel link changes and autotune results go to the log too.
 
 Keep the TempCtl conventions (full web/touch parity, colours via named styles, texts in
 `translations.xml`, widgets bound by name, exported UI code committed) unless Rost decides otherwise.
