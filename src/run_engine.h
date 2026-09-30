@@ -36,13 +36,40 @@ struct StageInfo {
 };
 
 // One piece of a plan curve: from t0 to t1 (seconds from now) the setpoint
-// goes linearly from v0 to v1, or the channel is idle.
+// goes linearly from v0 to v1, or the channel is idle. src = phase/step that
+// set the target (-1 none), ramp = the setpoint is moving.
 struct PlanSeg {
   uint8_t ch;
   bool idle;
+  bool ramp;
+  int16_t src;
   float t0, t1, v0, v1;
 };
 typedef void (*PlanFn)(const PlanSeg& s, void* user);
+
+// Transitions of a run (recorded during the run, and in the forecast):
+// t = run time (real run) or seconds from now (forecast).
+enum PlanEvType : uint8_t {
+  EV_PHASE = 1,    // Sequence: phase idx starts
+  EV_STEP,         // Timeline: step idx of ch starts
+  EV_RAMP_END,     // ramp of phase/step idx (ch) ends
+  EV_HOLD_END,     // hold (or Timeline idle) of phase/step idx ends (Sequence: ch = channel of the hold)
+  EV_PAUSE,        // program pause (Pause phase idx / pause step idx of ch)
+  EV_CONT,         // Continue
+  EV_END,          // program finished
+  EV_STOP,         // stopped (user, fault)
+};
+struct PlanEv {
+  uint8_t type;
+  uint8_t ch;      // 0xFF = not channel specific
+  int16_t idx;
+  float t;
+};
+typedef void (*EvFn)(const PlanEv& e, void* user);
+
+// What a channel does right now (status lines, chart lanes)
+enum class ChState : uint8_t { None = 0, Off, Ramp, Hold, Wait, Jump, Keep, Halt, Pause, Done };
+const char* chStateName(ChState s);  // "none" "off" "ramp" "hold" "wait" "jump" "keep" "halt" "pause" "done"
 
 class RunEngine {
  public:
@@ -57,6 +84,11 @@ class RunEngine {
   bool next();    // "Next phase" (Sequence): one stage further; in a program pause = Continue
   bool cont();    // Continue after a Pause phase / step
   void setBand(float band) { band_ = band; }
+  // receives the transitions of the real run (t = run time)
+  void setEventSink(EvFn fn, void* user) {
+    evFn_ = fn;
+    evUser_ = user;
+  }
 
   // Run edits (spec 9.3.4). idx = phase (Sequence) or step of channel ch
   // (Timeline); -1 = current. Sequence holds ignore ch (a phase has one hold).
@@ -78,13 +110,15 @@ class RunEngine {
   StageInfo lane(int ch) const;   // Timeline: step + stage of a channel
   float elapsed() const { return el_; }  // run time (includes pauses and waits)
   ChOut out(int ch) const;
+  ChState chState(int ch) const;
+  bool canExtend(int ch) const;  // a hold (or Timeline idle) of this channel is running
   bool edited() const { return edited_; }  // the running copy was changed
   const DuoProgram* program() const { return p_; }
 
   // Plan from now to the end (t = 0 is now): waits satisfied at once, pauses
   // take no time, idle channels at pv (may be null) when a ramp starts after
   // Idle. Returns the remaining seconds.
-  float forecast(PlanFn fn, void* user, const float* pv) const;
+  float forecast(PlanFn fn, void* user, const float* pv, EvFn efn = nullptr, void* euser = nullptr) const;
 
  private:
   struct Gen {
@@ -129,6 +163,7 @@ class RunEngine {
   float laneEnd(int ch, int idx, bool rampEnd) const;
   void shiftOther(int ch, float delta, float moment);
   static bool fail(char* err, size_t n, const char* fmt, ...) __attribute__((format(printf, 3, 4)));
+  void ev(uint8_t type, int ch, int idx) const;
 
   DuoProgram* p_ = nullptr;
   RunState st_ = RunState::Idle;
@@ -144,6 +179,9 @@ class RunEngine {
   float lastPv_[NUM_CHANNELS] = {0, 0};
   bool pvOk_[NUM_CHANNELS] = {false, false};
   uint32_t gen_[NUM_CHANNELS] = {0, 0};
+  EvFn evFn_ = nullptr;
+  void* evUser_ = nullptr;
+  float evT_ = 0;  // time of the transitions being processed
 };
 
 // Plan of a program that is not running (t = 0 = start); pv = start values

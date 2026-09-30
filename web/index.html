@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TempCtl Duo</title>
+<style>
+@font-face{font-family:"Barlow";font-weight:400;font-display:swap;src:url(/f/barlow-400.woff2) format("woff2")}
+@font-face{font-family:"Barlow";font-weight:500;font-display:swap;src:url(/f/barlow-500.woff2) format("woff2")}
+@font-face{font-family:"Barlow";font-weight:600 700;font-display:swap;src:url(/f/barlow-600.woff2) format("woff2")}
+@font-face{font-family:"Barlow Semi Condensed";font-weight:500 700;font-display:swap;src:url(/f/barlow-semi-condensed-600.woff2) format("woff2")}
+:root{--bg:#EDF0F1;--panel:#FFFFFF;--sunk:#F4F6F7;--line:#D3DADD;--text:#172024;--muted:#5B6970;--acc:#1F6FB2;--acc-ink:#FFFFFF;--amber:#A87400;--amber-bg:#FFF3D1;--danger:#B3261E;--ok:#2E7D32;--manual:#B85C00;
+--pvB:#1F6FB2;--spB:#4B8CC4;--pvT:#C65A14;--spT:#D9803F;
+--sans:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--cond:"Barlow Semi Condensed","Barlow",system-ui,sans-serif;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#11161A;--panel:#192024;--sunk:#141A1E;--line:#2B353B;--text:#E3E9EB;--muted:#8D9BA2;--acc:#9FD9D5;--acc-ink:#0F2A28;--amber:#F3C335;--amber-bg:#3A3217;--danger:#F2867E;--ok:#7BC47F;--manual:#F0A050;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#11161A;--panel:#192024;--sunk:#141A1E;--line:#2B353B;--text:#E3E9EB;--muted:#8D9BA2;--acc:#9FD9D5;--acc-ink:#0F2A28;--amber:#F3C335;--amber-bg:#3A3217;--danger:#F2867E;--ok:#7BC47F;--manual:#F0A050;color-scheme:dark}
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-padding-top:60px}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.45;font-variant-numeric:tabular-nums}
+a{color:var(--acc)}
+h1{font-family:var(--cond);font-weight:600;font-size:24px;line-height:1.1;margin:0}
+h2{font-family:var(--cond);font-weight:600;font-size:19px;margin:0 0 10px}
+.app{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh;background:linear-gradient(to right,var(--panel) 231px,var(--line) 231px,var(--line) 232px,transparent 232px)}
+aside{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:14px;padding:16px 12px;background:var(--panel);border-right:1px solid var(--line);overflow:auto}
+.brand{padding:2px 6px 8px}.brand b{font-family:var(--cond);font-size:22px;font-weight:600;display:block}.brand small{color:var(--muted)}
+nav{display:flex;flex-direction:column;gap:6px}
+nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;color:var(--text);text-decoration:none;font-weight:500;border:1px solid transparent}
+nav a:hover{border-color:var(--line)}
+nav a.on{background:var(--sunk);border-color:var(--line);box-shadow:inset 3px 0 0 var(--acc)}
+nav svg{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+nav small{color:var(--muted);font-weight:400;margin-left:auto;font-size:12px}
+.foot{margin-top:auto;display:flex;flex-direction:column;gap:6px;font-size:13.5px;color:var(--muted)}
+.foot .lk{display:flex;align-items:center;gap:8px;color:var(--text);font-weight:500}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--danger);flex:none}.dot.ok{background:var(--ok)}
+.foot select{min-height:30px;padding:2px 6px}
+main{min-width:0;padding:0 16px 40px}
+.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;padding:12px 0;background:var(--bg)}
+.top .jump{margin-left:auto;display:flex;gap:6px}
+#menu{display:none}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+.mt{margin-top:12px}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-bottom:12px}
+.bar .sep{width:1px;align-self:stretch;background:var(--line);margin:0 4px}
+label.f{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:14px}
+select{max-width:100%}
+select,input[type=number]{font:inherit;color:var(--text);background:var(--sunk);border:1px solid var(--line);border-radius:6px;padding:5px 7px;min-height:34px}
+input[type=number]{width:76px;text-align:right}
+button,.btn{font:inherit;font-weight:500;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 12px;min-height:34px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+button:hover:not(:disabled){border-color:var(--acc)}
+button.pri{background:var(--acc);color:var(--acc-ink);border-color:var(--acc)}
+button.danger{color:var(--danger)}
+button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.clock{font-family:var(--cond);font-size:22px;font-weight:600;margin-left:auto;display:flex;gap:10px;align-items:baseline}
+.clock small{font-family:var(--sans);font-size:13px;font-weight:500;color:var(--muted)}
+.state{display:inline-block;padding:2px 9px;border-radius:999px;font-size:13px;font-weight:600;background:var(--sunk);border:1px solid var(--line);white-space:nowrap}
+.state.run{color:var(--ok);border-color:currentColor}.state.pause{color:var(--amber);border-color:currentColor}.state.fin{color:var(--acc);border-color:currentColor}.state.stop,.state.fault{color:var(--danger);border-color:currentColor}.state.man{color:var(--manual);border-color:currentColor}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{border:0;border-radius:0;min-height:30px;padding:3px 12px}
+.seg button[aria-pressed=true]{background:var(--sunk);box-shadow:inset 0 -2px 0 var(--acc)}
+.chartbox{margin:0 -4px;touch-action:pan-y;user-select:none;-webkit-user-select:none}
+.chartbox svg{display:block;width:100%;height:auto}
+.zbar{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap}
+.zbar button{min-width:38px;padding:4px 10px}
+.zbar input[type=range]{flex:1;min-width:120px;accent-color:var(--acc)}
+.zr{color:var(--muted);font-size:13px;margin-left:4px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted);margin-top:8px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:18px;height:10px;border-radius:2px}
+.msg{margin-top:8px;font-size:14px;color:var(--muted);min-height:1.4em}.msg.bad{color:var(--danger)}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
+.chan{border-top:4px solid var(--c)}
+.chan .hd{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.chan .nm{font-family:var(--cond);font-weight:600;font-size:19px;color:var(--c)}
+.chan .ty{color:var(--muted);font-size:13px;font-weight:400;margin-left:6px}
+.read{display:flex;gap:22px;align-items:flex-end;flex-wrap:wrap}
+.read div{display:flex;flex-direction:column}
+.read small{color:var(--muted);font-size:12.5px}
+.read b{font-family:var(--cond);font-weight:600;font-size:34px;line-height:1}
+.read b.sp{font-size:24px}
+.read .o{font-size:13px;color:var(--muted)}
+.meter{height:8px;background:var(--sunk);border:1px solid var(--line);border-radius:4px;overflow:hidden;width:120px;margin-top:4px}
+.meter i{display:block;height:100%;background:var(--c);width:0}
+.why{color:var(--muted);font-size:13.5px;min-height:1.4em;margin:8px 0 6px}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
+.row .lbl{color:var(--muted);font-size:13.5px;min-width:86px}
+.row.flt{color:var(--danger);font-weight:600}
+.chan.man{box-shadow:inset 0 0 0 2px var(--manual)}
+.switch{appearance:none;-webkit-appearance:none;width:44px;height:24px;border-radius:12px;background:var(--line);position:relative;cursor:pointer;margin:0;flex:none;transition:background .15s}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--panel);transition:left .15s}
+.switch:checked{background:var(--manual)}.switch:checked::after{left:23px}
+.log{font-size:13.5px;max-height:320px;overflow:auto;margin:0;padding:0;list-style:none}
+.log li{display:grid;grid-template-columns:58px minmax(0,1fr);gap:8px;padding:3px 0;border-bottom:1px dashed var(--line)}
+.log li span{color:var(--muted)}
+.halt{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:24px}
+.halt[hidden]{display:none}
+.halt>div{background:var(--panel);border:3px solid var(--amber);border-radius:14px;padding:28px 32px;max-width:560px;width:100%;text-align:center}
+.halt h2{font-size:44px;line-height:1.05;margin:0 0 10px;color:var(--amber)}
+.halt .txt{font-size:22px;font-weight:600;margin:0 0 8px}
+.halt p{margin:0 0 22px;color:var(--muted);font-size:16px}
+.halt button{font-size:18px;padding:10px 22px;min-height:48px}
+.btns{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;justify-content:flex-end}
+.halt .btns{justify-content:center}
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);max-width:440px;width:calc(100% - 32px)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog p{margin:0}
+@media (max-width:1100px){.grid2{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:860px){
+ .app{grid-template-columns:minmax(0,1fr);background:none}
+ aside{position:fixed;left:0;top:0;z-index:30;width:260px;transform:translateX(-105%);transition:transform .2s;box-shadow:0 0 24px rgba(0,0,0,.35)}
+ aside.open{transform:none}
+ #menu{display:inline-flex}
+ main{padding:0 12px 32px}
+ .clock{margin-left:0;width:100%}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside id="side" aria-label="Pages">
+  <div class="brand"><b>TempCtl Duo</b><small id="fw"></small></div>
+  <nav>
+    <a href="/" class="on" aria-current="page"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 4-7 5 9"/><path d="M3 21h18"/></svg>Status</a>
+    <a href="/old"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Programs<small>old page</small></a>
+    <a href="/old"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>Settings &amp; tools<small>old page</small></a>
+  </nav>
+  <div class="foot">
+    <span class="lk"><i class="dot" id="linkDot"></i><span id="linkTxt">Connecting…</span></span>
+    <span id="net"></span>
+    <span id="clk"></span>
+    <a href="/api/log.csv">Download run log (CSV)</a>
+    <label class="f">Theme <select id="theme"><option value="auto">Auto</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
+  </div>
+</aside>
+<main>
+<div class="top">
+  <button id="menu" aria-label="Menu" aria-expanded="false">☰</button>
+  <h1>Status</h1>
+  <span class="jump"><a class="btn" href="#runP">Run</a><a class="btn" href="#chans">Channels</a><a class="btn" href="#logP">Log</a></span>
+</div>
+
+<section class="panel" id="runP" aria-label="Run">
+  <div class="bar">
+    <label class="f" style="min-width:0;max-width:100%">Program <select id="prog" style="min-width:0"></select></label>
+    <span class="sep"></span>
+    <button id="bStart" class="pri">Start</button>
+    <button id="bPause">Pause</button>
+    <button id="bStop">Stop</button>
+    <button id="bNext" title="Sequence: ramp → hold → next phase; a wait for the bottom is skipped">Next phase</button>
+    <span class="clock"><span id="badge" class="state">Ready</span><span id="clock">0:00</span><small id="remain"></small></span>
+  </div>
+  <div class="bar" style="margin-bottom:6px">
+    <span class="seg" role="group" aria-label="Chart"><button id="vProg" aria-pressed="true">Program</button><button id="vLive" aria-pressed="false">Live</button></span>
+    <span class="zr" id="chartCap"></span>
+  </div>
+  <div class="chartbox" id="chartbox"></div>
+  <div class="zbar" id="zbar"><button id="zout" aria-label="Zoom out">−</button><button id="zin" aria-label="Zoom in">+</button><button id="zfit">Fit</button>
+    <input type="range" id="zscroll" min="0" max="0" value="0" aria-label="Scroll the time axis" hidden><span id="zrange" class="zr"></span></div>
+  <div class="legend" id="legend"></div>
+  <div class="msg" id="msg"></div>
+</section>
+
+<div class="grid2" id="chans"></div>
+
+<section class="panel mt" id="logP" aria-label="Event log"><h2>Event log</h2><ul class="log" id="log"></ul></section>
+</main>
+</div>
+
+<div class="halt" id="halt" hidden role="alertdialog" aria-labelledby="haltTitle">
+  <div><h2 id="haltTitle">Action required</h2><p class="txt" id="haltText"></p><p id="haltWhere"></p>
+  <div class="btns"><button id="hCont" class="pri">Continue program</button><button id="hStop">Stop program</button></div></div>
+</div>
+<dialog id="saveDlg">
+  <h2>Save the run's changes?</h2>
+  <p>This run changed the program (targets, ramps or holds). Save them into the stored program, or keep the program as it was.</p>
+  <div class="btns"><button id="dSave" class="pri">Save to program</button><button id="dDiscard">Keep the stored program</button></div>
+</dialog>
+<dialog id="askDlg"><p id="askTxt"></p><div class="btns"><button id="askOk" class="pri">OK</button><button id="askNo">Cancel</button></div></dialog>
+
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt=t=>{t=Math.max(0,Math.round(t));const h=Math.floor(t/3600),m=Math.floor(t/60)%60,s=String(t%60).padStart(2,'0');return h?`${h}:${String(m).padStart(2,'0')}:${s}`:`${m}:${s}`;};
+const f1=v=>v==null?'–':(+v).toFixed(1);
+const CH=[0,1], KEY=['B','T'], PV=['var(--pvB)','var(--pvT)'], SP=['var(--spB)','var(--spT)'];
+const EV={PHASE:1,STEP:2,RAMP_END:3,HOLD_END:4,PAUSE:5,CONT:6,END:7,STOP:8};
+let live=null, progs=null, progsGen=-1, runProg=null, runProgAt=0, chartData=null, chartAt=0, view='prog', showLast=true;
+const progCache={};
+let logSeq=0, logList=[], prevState='idle', askedSave=false;
+
+async function api(path,body){
+  const o=body===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)};
+  const ctl=new AbortController(), to=setTimeout(()=>ctl.abort(),8000); o.signal=ctl.signal;
+  try{const r=await fetch(path,o); return await r.json();} finally{clearTimeout(to);}
+}
+function ask(text,ok){ return new Promise(res=>{ const d=$('askDlg'); $('askTxt').textContent=text; $('askOk').textContent=ok||'OK';
+  $('askOk').onclick=()=>{d.close();res(true);}; $('askNo').onclick=()=>{d.close();res(false);}; d.onclose=()=>res(false); d.showModal(); }); }
+function note(t,bad){ const m=$('msg'); m.textContent=t||''; m.className='msg'+(bad?' bad':''); }
+
+/* ---------- theme + palette (spec 6: channel colours from the accent) ---------- */
+const hex2rgb=h=>{h=h.replace('#','').trim();if(h.length===3)h=h.replace(/./g,c=>c+c);return[0,2,4].map(i=>parseInt(h.substr(i,2),16)/255);};
+const rgb2hex=c=>'#'+c.map(v=>Math.round(Math.max(0,Math.min(1,v))*255).toString(16).padStart(2,'0')).join('').toUpperCase();
+function rgb2hsl([r,g,b]){const mx=Math.max(r,g,b),mn=Math.min(r,g,b),l=(mx+mn)/2;let h=0,s=0;
+  if(mx!==mn){const d=mx-mn;s=l>.5?d/(2-mx-mn):d/(mx+mn);h=mx===r?(g-b)/d+(g<b?6:0):mx===g?(b-r)/d+2:(r-g)/d+4;h*=60;}return[h,s,l];}
+function hsl2rgb(h,s,l){const k=n=>(n+h/30)%12,a=s*Math.min(l,1-l);return[0,8,4].map(n=>l-a*Math.max(-1,Math.min(k(n)-3,9-k(n),1)));}
+const lum=c=>{const f=v=>v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4);const[r,g,b]=c.map(f);return .2126*r+.7152*g+.0722*b;};
+const contrast=(a,b)=>{const x=lum(a),y=lum(b);return(Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
+function fitC(h,s,l,bg,min,dark){ for(let i=0;i<120;i++){ const c=hsl2rgb(h,s,l); if(contrast(c,bg)>=min||l<=0||l>=1) return[c,l]; l=Math.max(0,Math.min(1,l+(dark?.01:-.01))); } return[hsl2rgb(h,s,l),l]; }
+function isDark(){ const t=document.documentElement.dataset.theme; return t?t==='dark':matchMedia('(prefers-color-scheme: dark)').matches; }
+let palKey='';
+function applyPalette(force){
+  const acc=(live&&live.accent)||'#2196F3', dark=isDark(), key=acc+dark; if(key===palKey&&!force) return; palKey=key;
+  const st=document.documentElement.style; ['--acc','--acc-ink','--pvB','--spB','--pvT','--spT'].forEach(p=>st.removeProperty(p));
+  const bg=hex2rgb(getComputedStyle(document.documentElement).getPropertyValue('--panel'));
+  const [h,s,l]=rgb2hsl(hex2rgb(acc));
+  for(const [ch,dh] of [['B',-150],['T',150]]){ const hh=(h+dh+360)%360, [pv,lp]=fitC(hh,s,l,bg,4.5,dark), [sp]=fitC(hh,s,Math.min(1,lp+.12),bg,3,dark);
+    st.setProperty('--pv'+ch,rgb2hex(pv)); st.setProperty('--sp'+ch,rgb2hex(sp)); }
+  const [a]=fitC(h,s,l,bg,3,dark); st.setProperty('--acc',rgb2hex(a));
+  st.setProperty('--acc-ink',contrast(a,[1,1,1])>=contrast(a,[.06,.08,.09])?'#FFFFFF':'#0F1417');
+  lastChart=0;
+}
+function setTheme(m){ if(m==='auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme=m;
+  try{localStorage.setItem('tcd-theme',m);}catch(e){} applyPalette(true); }
+$('theme').onchange=e=>setTheme(e.target.value);
+try{ const m=localStorage.getItem('tcd-theme')||'auto'; $('theme').value=m; if(m!=='auto') document.documentElement.dataset.theme=m; }catch(e){}
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>applyPalette(true));
+$('menu').onclick=()=>{const o=$('side').classList.toggle('open');$('menu').setAttribute('aria-expanded',o);};
+document.addEventListener('click',e=>{ if($('side').classList.contains('open')&&!e.target.closest('#side,#menu')){$('side').classList.remove('open');$('menu').setAttribute('aria-expanded','false');} });
+
+/* ---------- programs ---------- */
+function chName(i){ return live&&live.ch[i]?live.ch[i].name:(i?'Top':'Bottom'); }
+function progUses(p,i){ if(!p) return false; if(p.type==='tl') return (p[KEY[i]]||[]).length>0; return (p.phases||[]).some(x=>x.kind==='BT'||x.kind===KEY[i]); }
+function hasWaits(p){ return p&&p.type==='seq'&&(p.phases||[]).some(x=>x.wait); }
+async function loadPrograms(){ progs=await api('/api/programs'); progsGen=live?live.progGen:-1; fillProgSelect(); }
+function fillProgSelect(){ if(!progs) return; const s=$('prog'), cur=live?live.sel:progs.sel; if(document.activeElement===s) return;
+  const h=progs.programs.map((p,i)=>`<option value="${i}">${i+1} ${p.used?esc(p.name)+' ('+(p.type==='tl'?'timeline':'sequence')+', '+fmt(p.total)+')':'(empty)'}</option>`).join('');
+  if(s.dataset.h!==h){ s.innerHTML=h; s.dataset.h=h; } s.value=String(cur); }
+async function progOf(i){ const g=live?live.progGen:0, c=progCache[i]; if(c&&c.gen===g) return c.p;
+  const r=await api('/api/program?i='+i); progCache[i]={gen:g,p:r.used?r.program:null}; return progCache[i].p; }
+$('prog').onchange=async e=>{ const i=+e.target.value; showLast=false; await api('/api/select',{i}); if(live) live.sel=i; chartData=null; lastChart=0; poll(); };
+
+// Plan of a stored program from its start (as the device's preview: programmed times, waits met at once, pauses 0 s)
+function planProgram(p,pv){
+  const segs=[[],[]], ev=[], uses=[progUses(p,0),progUses(p,1)];
+  const g=[{idle:true,v:null,src:-1},{idle:true,v:null,src:-1}];
+  const push=(i,t0,t1,v0,v1,src,fl)=>{ if(uses[i]&&t1>t0) segs[i].push({t0,t1,v0,v1,src,fl}); };
+  const flat=(i,t0,t1)=>{ const c=g[i]; if(c.idle) push(i,t0,t1,null,null,-1,1); else push(i,t0,t1,c.v,c.v,c.src,0); };
+  const ramp=(i,t0,tgt,r,src)=>{ const c=g[i], from=c.idle?(pv[i]!=null?pv[i]:25):c.v; r=r||0; if(r>0) push(i,t0,t0+r,from,tgt,src,2); c.idle=false; c.v=tgt; c.src=src; return t0+r; };
+  let t=0;
+  if(p.type==='seq'){
+    (p.phases||[]).forEach((x,k)=>{ ev.push({t,type:EV.PHASE,ch:-1,idx:k});
+      if(x.kind==='P'){ ev.push({t,type:EV.PAUSE,ch:-1,idx:k}); ev.push({t,type:EV.CONT,ch:-1,idx:k}); return; }
+      const c=x.kind==='B'?0:1, sg=x.kind==='B'?x.b:x.t;
+      if(x.kind==='BT'){ if(x.b.idle){ g[0].idle=true; g[0].src=-1; } else { g[0].idle=false; g[0].v=x.b.t; g[0].src=k; } }
+      const o=1-c, t0=t, t1=ramp(c,t,sg.t,sg.r,k), t2=t1+(sg.h||0);
+      ev.push({t:t1,type:EV.RAMP_END,ch:c,idx:k}); flat(c,t1,t2); flat(o,t0,t2); t=t2; ev.push({t,type:EV.HOLD_END,ch:c,idx:k});
+    });
+  } else {
+    const ends=[0,0];
+    for(const i of CH){ let tt=0; (p[KEY[i]]||[]).forEach((x,k)=>{ ev.push({t:tt,type:EV.STEP,ch:i,idx:k});
+      if(x.pause){ ev.push({t:tt,type:EV.PAUSE,ch:i,idx:k}); ev.push({t:tt,type:EV.CONT,ch:i,idx:k}); return; }
+      if(x.idle){ g[i].idle=true; g[i].src=-1; push(i,tt,tt+(x.h||0),null,null,-1,1); tt+=x.h||0; ev.push({t:tt,type:EV.HOLD_END,ch:i,idx:k}); return; }
+      const t1=ramp(i,tt,x.t,x.r,k); ev.push({t:t1,type:EV.RAMP_END,ch:i,idx:k}); flat(i,t1,t1+(x.h||0)); tt=t1+(x.h||0); ev.push({t:tt,type:EV.HOLD_END,ch:i,idx:k}); });
+      ends[i]=tt; }
+    t=Math.max(ends[0],ends[1]); for(const i of CH) if(ends[i]<t) flat(i,ends[i],t);
+  }
+  ev.push({t,type:EV.END,ch:-1,idx:-1});
+  return {segs,ev,end:t};
+}
+
+/* ---------- chart model ---------- */
+// M = {kind:'run'|'last'|'preview'|'live', now, end, prog, hist:[{pv:[[t,v]],sp:[[t,v]]}], lanes:[[{t0,t1,c}]], segs, ev:[{t,type,ch,idx,past}]}
+function laneCode(M,i,s){
+  if(s.fl&1) return 'o'; if(s.fl&2) return 'r';
+  const p=M.prog, tm=(s.t0+s.t1)/2;
+  if(p&&p.type==='seq'){ let k=-1; for(const e of M.ev) if(e.type===EV.PHASE&&e.t<=tm+1e-6) k=e.idx; const x=p.phases&&p.phases[k]; if(!x) return 'k';
+    const tc=x.kind==='B'?0:1; if(x.kind==='BT'&&i===0&&s.src===k) return 'j'; return tc===i&&s.src===k?'h':'k'; }
+  let lastEnd=-1; for(const e of M.ev) if(e.type===EV.HOLD_END&&e.ch===i) lastEnd=Math.max(lastEnd,e.t); return tm>lastEnd&&lastEnd>=0?'d':'h';
+}
+function modelFromRun(d){
+  const M={kind:d.mode,now:d.el,prog:runProg,hist:[],lanes:[],segs:[[],[]],ev:[]};
+  let lastT=0;
+  for(const i of CH){ const pv=[],sp=[],ln=[]; const st=d.st[i]||'';
+    for(let k=0;k<d.pv[i].length;k++){ const t=k*d.bin; if(d.pv[i][k]!=null) pv.push([t,d.pv[i][k]]); if(d.sp[i][k]!=null) sp.push([t,d.sp[i][k]]);
+      const c=st[k]||' '; if(c!==' '){ lastT=Math.max(lastT,(k+1)*d.bin); const t1=Math.min((k+1)*d.bin,d.el); if(ln.length&&ln[ln.length-1].c===c) ln[ln.length-1].t1=t1; else ln.push({t0:t,t1,c}); } }
+    M.hist.push({pv,sp}); M.lanes.push(ln); }
+  for(const e of d.ev) M.ev.push({t:e[0],type:e[1],ch:e[2],idx:e[3],past:true});
+  if(d.mode==='run'){ for(const i of CH) for(const s of d.fc.seg[i]) M.segs[i].push({t0:s[0]+d.el,t1:s[1]+d.el,v0:s[2],v1:s[3],src:s[4],fl:s[5]});
+    for(const e of d.fc.ev) if(e[1]!==EV.PHASE||e[0]>0.01) M.ev.push({t:e[0]+d.el,type:e[1],ch:e[2],idx:e[3],past:false});
+    M.end=d.el+d.rem; for(const i of CH) for(const s of M.segs[i]) M.lanes[i].push({t0:s.t0,t1:s.t1,c:laneCode(M,i,s),f:true}); }
+  else M.end=Math.max(d.el,1);
+  return M;
+}
+function modelPreview(p){
+  const pv=CH.map(i=>live&&live.ch[i].pv!=null?live.ch[i].pv:null), P=planProgram(p,pv);
+  const M={kind:'preview',now:null,prog:p,hist:[{pv:[],sp:[]},{pv:[],sp:[]}],lanes:[[],[]],segs:P.segs,ev:P.ev.map(e=>Object.assign({past:false},e)),end:P.end};
+  for(const i of CH) for(const s of M.segs[i]) M.lanes[i].push({t0:s.t0,t1:s.t1,c:laneCode(M,i,s),f:true});
+  return M;
+}
+function modelLive(d){
+  const M={kind:'live',now:0,hist:[],lanes:[[],[]],segs:[[],[]],ev:[],end:0,t0:-d.span};
+  for(const i of CH){ const pv=[],sp=[]; const n=d.pv[i].length; for(let k=0;k<n;k++){ const t=(k-n+1)*d.bin; if(d.pv[i][k]!=null) pv.push([t,d.pv[i][k]]); if(d.sp[i][k]!=null) sp.push([t,d.sp[i][k]]); } M.hist.push({pv,sp}); }
+  return M;
+}
+let M=null;
+async function refreshChart(){
+  const run=live&&(live.run.state==='running'||live.run.state==='paused');
+  if(view==='live'){ const d=await api('/api/chart?v=live'); M=modelLive(d); lastChart=0; return; }
+  if(run||(showLast&&live&&live.run.prog===live.sel)){
+    const d=await api('/api/chart?v=run');
+    if(d.mode==='run'||d.mode==='last'){ await ensureRunProg(d.mode==='run'); M=modelFromRun(d); lastChart=0; return; }
+  }
+  const p=live?await progOf(live.sel):null;
+  M=p?modelPreview(p):null; lastChart=0;
+}
+async function ensureRunProg(running){ const now=Date.now(); if(!runProg||(running&&now-runProgAt>5000)){ const r=await api('/api/run'); runProg=r.program||null; runProgAt=now; } }
+
+/* ---------- chart drawing (from the 9.3 simulator) ---------- */
+let CW=1000,CHh=452,CL=58,CR=18,PT=86,PB=410,YMAX=250,YMIN=0; const LANE=[22,46],LH=18;
+let xfull=600,V0=0,V1=600,lastChart=0; const zv={fit:true,v0:0,span:600,follow:true};
+function layout(){ const w=Math.floor($('chartbox').clientWidth)||1000; CW=Math.max(280,w); const n=CW<600;
+  CL=n?44:58; CR=n?10:18; CHh=n?340:Math.round(Math.min(460,Math.max(380,CW*0.42))); PT=M&&M.kind==='live'?20:86; PB=CHh-40; }
+const plotW=()=>CW-CL-CR;
+const X=t=>CL+plotW()*(t-V0)/(V1-V0);
+const Y=v=>PB-(PB-PT)*(v-YMIN)/(YMAX-YMIN);
+const tAtX=x=>V0+(x-CL)/plotW()*(V1-V0);
+function setDomain(){
+  if(M.kind==='live'){ V0=M.t0; V1=0; return; }
+  if(zv.fit||zv.span>=xfull){ zv.fit=true; V0=0; V1=xfull; return; }
+  if(M.now!=null&&M.kind==='run'&&zv.follow&&M.now>zv.v0+zv.span*.85) zv.v0=M.now-zv.span*.3;
+  zv.v0=Math.max(0,Math.min(zv.v0,xfull-zv.span)); V0=zv.v0; V1=zv.v0+zv.span;
+}
+function zoomAt(t,f){ if(!M||M.kind==='live') return; const sp0=zv.fit?xfull:zv.span, v0=zv.fit?0:zv.v0, span=Math.max(20,Math.min(xfull,sp0*f)), r=(t-v0)/sp0;
+  zv.fit=span>=xfull; zv.span=span; zv.v0=t-r*span; afterView(); }
+function afterView(){ if(!zv.fit){ zv.v0=Math.max(0,Math.min(zv.v0,xfull-zv.span)); zv.follow=M&&M.kind==='run'&&M.now>=zv.v0&&M.now<=zv.v0+zv.span; } lastChart=0; }
+const pathOf=pts=>{ let d='',pen=false,lt=null; const gap=M.kind==='live'?3:Infinity;
+  for(const [t,v] of pts){ if(v==null){pen=false;continue;} if(lt!=null&&t-lt>gap) pen=false; d+=(pen?'L':'M')+X(t).toFixed(1)+','+Y(v).toFixed(1); pen=true; lt=t; } return d; };
+function segPath(segs){ let d='',lx=null,ly=null; for(const s of segs){ if(s.fl&1||s.v0==null){lx=null;continue;} const x0=X(s.t0),y0=Y(s.v0),x1=X(s.t1),y1=Y(s.v1);
+  d+=(lx!=null&&Math.abs(lx-x0)<.5&&Math.abs(ly-y0)<.5?'L':'M')+x0.toFixed(1)+','+y0.toFixed(1)+'L'+x1.toFixed(1)+','+y1.toFixed(1); lx=x1; ly=y1; } return d; }
+function tickStep(){ const span=V1-V0,px=plotW(); for(const st of [5,10,15,30,60,120,300,600,900,1800]) if(px/(span/st)>=64) return st; return 3600; }
+const pauseSym=(x,y)=>`<g><circle cx="${x}" cy="${y}" r="11" style="fill:var(--amber)"/><rect x="${x-5}" y="${y-5.5}" width="3.5" height="11" rx="1" style="fill:var(--panel)"/><rect x="${x+1.5}" y="${y-5.5}" width="3.5" height="11" rx="1" style="fill:var(--panel)"/></g>`;
+const LANE_ST={x:['url(#hatch)',.9],p:['var(--muted)',.28],r:[null,.35],h:[null,.85],j:[null,.6],k:['var(--muted)',.28],w:['var(--amber)',.85],m:[null,.2],d:['var(--muted)',.15]};
+function lanesSvg(i){ let o=''; for(const r of M.lanes[i]){ const m=LANE_ST[r.c]; if(!m) continue; const x0=X(r.t0),w=Math.max(X(r.t1)-x0,.5);
+  o+=`<rect x="${x0.toFixed(1)}" y="${LANE[i]}" width="${w.toFixed(1)}" height="${LH}" style="fill:${m[0]||PV[i]};opacity:${m[1]*(r.f?.7:1)}"/>`; } return o; }
+function yRange(){ let mx=0,mn=Infinity; const see=v=>{ if(v!=null){ mx=Math.max(mx,v); mn=Math.min(mn,v);} };
+  for(const i of CH){ M.hist[i].pv.forEach(p=>see(p[1])); M.hist[i].sp.forEach(p=>see(p[1])); M.segs[i].forEach(s=>{see(s.v0);see(s.v1);}); }
+  YMAX=Math.max(100,Math.ceil((mx+15)/50)*50); YMIN=M.kind==='live'&&mn!==Infinity?Math.max(0,Math.floor((mn-15)/50)*50):0; if(YMAX-YMIN<50) YMAX=YMIN+50; }
+function renderChart(){
+  const box=$('chartbox');
+  if(!M){ box.innerHTML=`<p class="zr" style="padding:40px 8px">${live&&progs?'The selected program slot is empty.':'Loading…'}</p>`; $('zbar').hidden=true; return; }
+  layout();
+  xfull=M.kind==='live'?-M.t0:Math.max(60,Math.ceil(Math.max(M.end,M.now||0)*1.04/30)*30);
+  setDomain(); yRange();
+  let s=`<svg width="${CW}" height="${CHh}" viewBox="0 0 ${CW} ${CHh}" role="img" aria-label="Setpoints and temperatures of both channels over time">`;
+  s+=`<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" style="fill:var(--amber)"/></pattern><clipPath id="pclip"><rect x="${CL}" y="0" width="${plotW()}" height="${CHh}"/></clipPath></defs>`;
+  const ys=(YMAX-YMIN)>300?100:50;
+  for(let v=YMIN;v<=YMAX;v+=ys) s+=`<line x1="${CL}" x2="${CW-CR}" y1="${Y(v)}" y2="${Y(v)}" style="stroke:var(--line)"/><text x="${CL-6}" y="${Y(v)+4}" text-anchor="end" style="fill:var(--muted);font-size:12px">${v}</text>`;
+  s+=`<text x="${CL-6}" y="${PT-8}" text-anchor="end" style="fill:var(--muted);font-size:12px">°C</text>`;
+  const step=tickStep();
+  for(let t=Math.ceil(V0/step)*step;t<=V1+1e-6;t+=step) s+=`<text x="${X(t)}" y="${PB+18}" text-anchor="middle" style="fill:var(--muted);font-size:12px">${t<0?'−'+fmt(-t):fmt(t)}</text>`;
+  const prog=M.kind!=='live';
+  if(prog) for(const i of CH){ s+=`<text x="${CL-6}" y="${LANE[i]+13}" text-anchor="end" style="fill:var(--muted);font-size:12px">${esc(chName(i).slice(0,CW<600?4:9))}</text><rect x="${CL}" y="${LANE[i]}" width="${plotW()}" height="${LH}" style="fill:none;stroke:var(--line)"/>`; }
+  s+=`<g clip-path="url(#pclip)">`;
+  if(prog){
+    for(const i of CH) s+=lanesSvg(i);
+    const evs=M.ev.slice().sort((a,b)=>a.t-b.t);
+    // program pauses: band while it lasted, thick line and pause symbol at its start
+    evs.forEach((e,n)=>{ if(e.type!==EV.PAUSE) return; const c=evs.slice(n+1).find(o=>o.type===EV.CONT||o.type===EV.END||o.type===EV.STOP);
+      const t1=c?c.t:(e.past&&M.now!=null?M.now:e.t);
+      if(t1-e.t>.6) s+=`<rect x="${X(e.t)}" y="${LANE[0]}" width="${Math.max(0,X(t1)-X(e.t))}" height="${PB-LANE[0]}" style="fill:url(#hatch);opacity:.12"/>`;
+      s+=`<line x1="${X(e.t)}" x2="${X(e.t)}" y1="${LANE[0]-4}" y2="${PB}" style="stroke:var(--amber);stroke-width:4"/>`+pauseSym(X(e.t),PB-18); });
+    const seen=new Set(); let lastX=-99,row=0;
+    for(const e of evs){ if(e.type!==EV.PHASE||seen.has(e.idx)) continue; seen.add(e.idx); const x=X(e.t); row=x-lastX<36?row+1:0; lastX=x; const dy=(row%3)*26;
+      s+=`<line x1="${x}" x2="${x}" y1="${LANE[0]-4}" y2="${PB}" style="stroke:var(--muted);stroke-dasharray:2 4;opacity:.6"/><text x="${x+3}" y="${PT-8+dy}" style="fill:var(--muted);font-size:12px;font-weight:600;paint-order:stroke;stroke:var(--panel);stroke-width:3px">P${e.idx+1}</text>`;
+      if(e.idx>0) s+=`<text x="${x+3}" y="${PT+7+dy}" style="fill:var(--text);font-size:11.5px;paint-order:stroke;stroke:var(--panel);stroke-width:3px">${fmt(e.t)}</text>`; }
+    const endE=evs.find(e=>e.type===EV.END||e.type===EV.STOP), endT=endE?endE.t:(M.kind==='last'?null:M.end);
+    if(endT!=null&&endT>0) s+=`<line x1="${X(endT)}" x2="${X(endT)}" y1="${LANE[0]-4}" y2="${PB}" style="stroke:var(--text);stroke-dasharray:4 3;opacity:.7"/><text x="${X(endT)+3}" y="${PT-8}" style="fill:var(--muted);font-size:12px;font-weight:600">${endE&&endE.type===EV.STOP?'Stop':'End'}</text><text x="${X(endT)+3}" y="${PT+8}" style="fill:var(--text);font-size:11.5px">${fmt(endT)}</text>`;
+    if(M.prog&&M.prog.type==='tl'){ const done=new Set();
+      for(const e of evs){ if(e.type!==EV.HOLD_END) continue; const k=e.ch+':'+e.idx; if(done.has(k)) continue; done.add(k);
+        const x=(M.prog[KEY[e.ch]]||[])[e.idx]; if(!x||x.pause) continue; const v=x.idle?YMIN+5:x.t;
+        s+=`<text x="${X(e.t)+6}" y="${Y(v)-11}" style="fill:var(--text);font-size:11.5px;paint-order:stroke;stroke:var(--panel);stroke-width:3px">${fmt(e.t)}</text>`; } }
+  }
+  for(const i of CH){
+    s+=`<path d="${pathOf(M.hist[i].sp)}" style="fill:none;stroke:${SP[i]};stroke-width:1.8;stroke-linejoin:round"/>`;
+    s+=`<path d="${pathOf(M.hist[i].pv)}" style="fill:none;stroke:${PV[i]};stroke-width:2.5;stroke-linejoin:round"/>`;
+    s+=`<path d="${segPath(M.segs[i])}" style="fill:none;stroke:${SP[i]};stroke-width:2;stroke-dasharray:6 4;opacity:.95"/>`;
+  }
+  if(M.now!=null&&M.kind==='run') s+=`<line x1="${X(M.now)}" x2="${X(M.now)}" y1="${LANE[0]-4}" y2="${PB}" style="stroke:var(--text);stroke-width:1.5"/>`;
+  s+=`</g></svg>`;
+  box.innerHTML=s;
+  const zs=$('zscroll'); $('zbar').hidden=!prog; zs.hidden=zv.fit; $('zfit').disabled=zv.fit;
+  if(!zv.fit){ zs.max=Math.max(0,xfull-zv.span); zs.step=1; if(document.activeElement!==zs) zs.value=zv.v0; }
+  $('zrange').textContent=zv.fit?'Whole program':`${fmt(V0)} – ${fmt(V1)}`;
+  $('chartCap').textContent=M.kind==='live'?`Last ${fmt(-M.t0)}`:M.kind==='preview'?`Preview of “${M.prog?M.prog.name:''}”${hasWaits(M.prog)?' (waits not counted)':''}`:M.kind==='last'?'Last run':'';
+}
+function legend(){ const n=[chName(0),chName(1)];
+  $('legend').innerHTML=CH.map(i=>`<span><i class="sw" style="background:${PV[i]}"></i>${esc(n[i])} PV</span><span><i class="sw" style="background:${SP[i]};height:4px"></i>${esc(n[i])} SP</span>`).join('')+
+  `<span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="var(--muted)" stroke-width="2" stroke-dasharray="6 4"/></svg>Forecast / plan</span>
+  <span><i class="sw" style="background:var(--amber)"></i>Waiting for ${esc(n[0])}</span>
+  <span><svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="7" style="fill:var(--amber)"/><rect x="4.5" y="4.5" width="2.5" height="7" style="fill:var(--panel)"/><rect x="9" y="4.5" width="2.5" height="7" style="fill:var(--panel)"/></svg>Program pause</span>
+  <span><i class="sw" style="background:var(--muted);opacity:.35"></i>Keeps previous target</span>`; }
+function svgPt(ev){ const svg=$('chartbox').querySelector('svg'); const pt=svg.createSVGPoint(); pt.x=ev.clientX; pt.y=ev.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); }
+const ptrs=new Map(); let pz=null;
+$('chartbox').addEventListener('pointerdown',ev=>{ if(!M||M.kind==='live'||!$('chartbox').querySelector('svg')) return; if(ev.pointerType==='mouse'&&ev.button!==0) return;
+  const p=svgPt(ev); ptrs.set(ev.pointerId,p.x); try{$('chartbox').setPointerCapture(ev.pointerId);}catch(e){}
+  pz={v0:zv.fit?0:zv.v0,span:zv.fit?xfull:zv.span,pts:new Map(ptrs)}; });
+$('chartbox').addEventListener('pointermove',ev=>{ if(!ptrs.has(ev.pointerId)||!pz) return; const p=svgPt(ev); ptrs.set(ev.pointerId,p.x); const ids=[...pz.pts.keys()];
+  if(ptrs.size>=2&&ids.length>=2){ const a0=pz.pts.get(ids[0]),b0=pz.pts.get(ids[1]),a1=ptrs.get(ids[0]),b1=ptrs.get(ids[1]); if(a1==null||b1==null) return;
+    const d0=Math.max(10,Math.abs(b0-a0)),d1=Math.max(10,Math.abs(b1-a1)),m0=(a0+b0)/2,m1=(a1+b1)/2, span=Math.max(20,Math.min(xfull,pz.span*d0/d1)), tm=pz.v0+(m0-CL)/plotW()*pz.span;
+    zv.fit=span>=xfull; zv.span=span; zv.v0=tm-(m1-CL)/plotW()*span; afterView(); }
+  else if(ptrs.size===1&&!zv.fit){ const x0=pz.pts.get(ev.pointerId); if(x0==null) return; zv.v0=pz.v0-(p.x-x0)/plotW()*pz.span; afterView(); } });
+const panUp=ev=>{ ptrs.delete(ev.pointerId); if(pz) pz={v0:zv.fit?0:zv.v0,span:zv.fit?xfull:zv.span,pts:new Map(ptrs)}; if(!ptrs.size) pz=null; };
+$('chartbox').addEventListener('pointerup',panUp); $('chartbox').addEventListener('pointercancel',panUp);
+$('chartbox').addEventListener('wheel',ev=>{ if(!M||M.kind==='live') return;
+  if(ev.ctrlKey||ev.metaKey){ ev.preventDefault(); zoomAt(tAtX(svgPt(ev).x),ev.deltaY>0?1.25:.8); }
+  else if(!zv.fit&&(ev.shiftKey||Math.abs(ev.deltaX)>Math.abs(ev.deltaY))){ ev.preventDefault(); zv.v0+=(ev.shiftKey?ev.deltaY:ev.deltaX)/plotW()*zv.span; afterView(); } },{passive:false});
+const zc=()=>M&&M.now!=null&&M.now>=V0&&M.now<=V1?M.now:(V0+V1)/2;
+$('zin').onclick=()=>zoomAt(zc(),1/1.6); $('zout').onclick=()=>zoomAt(zc(),1.6); $('zfit').onclick=()=>{zv.fit=true;lastChart=0;};
+$('zscroll').oninput=e=>{zv.v0=+e.target.value;afterView();};
+let lastW=0; new ResizeObserver(()=>{ const w=$('chartbox').clientWidth; if(w!==lastW){ lastW=w; lastChart=0; } }).observe($('chartbox'));
+function setView(v){ view=v; $('vProg').setAttribute('aria-pressed',v==='prog'); $('vLive').setAttribute('aria-pressed',v==='live'); M=null; chartAt=0; zv.fit=true; lastChart=0; renderChart(); poll(); }
+$('vProg').onclick=()=>setView('prog'); $('vLive').onclick=()=>setView('live');
+
+/* ---------- channel cards ---------- */
+let chansKey='';
+function buildChans(){
+  $('chans').innerHTML=CH.map(i=>`
+  <section class="panel chan" id="card${i}" style="--c:${PV[i]}" aria-label="${esc(chName(i))}">
+    <div class="hd"><span class="nm"><span id="nm${i}"></span><span class="ty" id="ty${i}"></span></span><span class="state" id="st${i}"></span></div>
+    <div class="read">
+      <div><small>PV</small><b id="pv${i}">–</b></div>
+      <div><small>SP</small><b class="sp" id="sp${i}">–</b></div>
+      <div><small>Output <span class="o" id="ov${i}"></span></small><div class="meter"><i id="out${i}"></i></div></div>
+    </div>
+    <div class="why" id="why${i}"></div>
+    <div class="row flt" id="flt${i}" hidden><span id="fltT${i}"></span><button data-ack="${i}">Acknowledge</button></div>
+    <div id="runRows${i}" hidden>
+      <div class="row"><span class="lbl">Target</span>
+        <button data-dt="${i}" data-v="-5" aria-label="Target minus 5 °C">−5</button><button data-dt="${i}" data-v="-1" aria-label="Target minus 1 °C">−1</button>
+        <input type="number" id="tg${i}" step="1" aria-label="Target °C"><button data-dt="${i}" data-v="1" aria-label="Target plus 1 °C">+1</button><button data-dt="${i}" data-v="5" aria-label="Target plus 5 °C">+5</button><button data-set="${i}">Set</button></div>
+      <div class="row"><span class="lbl">Extend hold</span><button data-ex="${i}" data-v="10">+10 s</button><button data-ex="${i}" data-v="30">+30 s</button><button data-ex="${i}" data-v="60">+1 min</button></div>
+    </div>
+    <div class="row" id="manRow${i}" hidden><span class="lbl">Manual</span><input type="checkbox" class="switch" id="man${i}" aria-label="Manual setpoint on / off">
+      <input type="number" id="manSp${i}" step="1" aria-label="Manual setpoint °C"> °C <button data-mset="${i}">Set</button></div>
+  </section>`).join('');
+  for(const i of CH){
+    $('man'+i).onchange=async e=>{ const on=e.target.checked; e.target.busy=Date.now();
+      if(on) await api('/api/manual',{ch:i,sp:+$('manSp'+i).value,on:true});
+      else if(await ask(`Switch manual mode of ${chName(i)} off? Its outputs are switched off.`,'Switch off')) await api('/api/manual',{ch:i,on:false});
+      else e.target.checked=true;
+      poll(); };
+    $('manSp'+i).onkeydown=e=>{ if(e.key==='Enter') document.querySelector(`[data-mset="${i}"]`).click(); };
+    $('tg'+i).onkeydown=e=>{ if(e.key==='Enter') document.querySelector(`[data-set="${i}"]`).click(); };
+  }
+}
+$('chans').addEventListener('click',async e=>{
+  const b=e.target.closest('button'); if(!b||!live) return;
+  const d=b.dataset;
+  if(d.dt!=null){ const i=+d.dt, t=live.ch[i].target; if(t!=null) await runCmd({cmd:'target',ch:i,idx:-1,t:Math.round(t+(+d.v))}); }
+  else if(d.set!=null){ const i=+d.set, v=parseFloat($('tg'+i).value); if(!isNaN(v)){ await runCmd({cmd:'target',ch:i,idx:-1,t:v}); $('tg'+i).blur(); } }
+  else if(d.ex!=null) await runCmd({cmd:'extend',ch:+d.ex,sec:+d.v});
+  else if(d.mset!=null){ const i=+d.mset; await api('/api/manual',{ch:i,sp:+$('manSp'+i).value}); $('manSp'+i).blur(); }
+  else if(d.ack!=null) await api('/api/ack',{ch:+d.ack});
+  poll();
+});
+async function runCmd(body){ await api('/api/run',body); runProgAt=0; chartAt=0; }
+const ST_TXT={none:'',off:'Off',ramp:'Ramp',hold:'Hold',wait:'Waiting',jump:'Jump target',keep:'Keeps target',halt:'Program pause',pause:'Paused',done:'Done'};
+function whyText(c,i,r,active){
+  const T=c.target!=null?f1(c.target)+' °C':'';
+  if(c.type==='off') return 'Channel off (Settings).';
+  if(c.fault) return '';
+  if(c.autotune) return `Autotune ${c.autotune.state}: ${c.autotune.msg}`;
+  if(!active||!c.inProgram){
+    if(active) return `No ${r.type==='tl'?'steps':'phases'} for this channel in “${r.name}”: controlled manually.`;
+    if(c.manual.on) return `Manual setpoint ${f1(c.manual.sp)} °C${c.manual.synced?'':' (writing…)'}.`;
+    return c.ok?'Idle.':'No answer: '+(c.err||'');
+  }
+  const seq=r.type==='seq', L=c.lane, N=seq?r.seq.idx+1:(L?L.idx+1:0), W=seq?`Phase ${N}`:`Step ${N}`;
+  switch(c.state){
+    case 'wait': return `${W}: waiting until PV is within ±${live.band} °C of ${T}.`;
+    case 'ramp': return `${W}: ramping to ${T}.`;
+    case 'hold': { const s=seq?r.seq:L; return `${W}: hold ${fmt(s.el)} of ${fmt(s.dur)}.`; }
+    case 'jump': return `${W}: setpoint jumped to ${T}.`;
+    case 'keep': return `Keeps ${T}${c.kept>=0?` from ${seq?'phase':'step'} ${c.kept+1}`:''}; the target can still be changed.`;
+    case 'done': return `All steps done: keeps ${T} until the other channel is done.`;
+    case 'halt': return `Program pause: ${c.idle?'outputs stay off':'setpoint kept at '+T}. Press Continue.`;
+    case 'pause': return 'Paused: timers and setpoints stop.';
+    case 'off': return c.idle?(seq?'Outputs off until a phase gives this channel a target.':(L&&L.stage==='idle'?`${W}: Idle ${fmt(L.el)} of ${fmt(L.dur)} (outputs off).`:'Outputs off.')):'';
+  }
+  return '';
+}
+function updateChans(){
+  if(!live) return;
+  const key=live.ch.map(c=>c.name+c.type).join('|');
+  if(key!==chansKey){ chansKey=key; buildChans(); legend(); }
+  const r=live.run, active=r.state==='running'||r.state==='paused';
+  for(const i of CH){
+    const c=live.ch[i], man=!(active&&c.inProgram)&&c.type!=='off';
+    $('nm'+i).textContent=c.name; $('ty'+i).textContent=c.type==='modbus'?'Modbus':c.type==='local'?'local':'off';
+    $('pv'+i).textContent=c.pv!=null?f1(c.pv)+' °C':(c.ok&&c.pvFlag&&c.pvFlag!=='ok'?c.pvFlag:'–');
+    $('sp'+i).textContent=c.sp!=null?f1(c.sp)+' °C':(active&&c.inProgram&&c.idle?'off':'–');
+    $('out'+i).style.width=(c.out!=null?Math.max(0,Math.min(100,c.out)):0)+'%'; $('ov'+i).textContent=c.out!=null?Math.round(c.out)+' %':'';
+    let st=c.fault?'Fault':active&&c.inProgram?ST_TXT[c.state]||c.state:c.manual.on?'Manual':c.type==='off'?'Off':c.ok?'Idle':'No link';
+    $('st'+i).textContent=st; $('st'+i).className='state '+(c.fault||(!c.ok&&c.type!=='off')?'fault':active&&c.inProgram?(c.state==='halt'||c.state==='pause'||c.state==='wait'?'pause':'run'):c.manual.on?'man':'');
+    $('card'+i).classList.toggle('man',c.manual.on);
+    $('why'+i).textContent=whyText(c,i,r,active);
+    $('flt'+i).hidden=!c.fault; $('fltT'+i).textContent=c.fault?'Fault: '+c.fault:'';
+    $('runRows'+i).hidden=!(active&&c.inProgram);
+    const canT=active&&c.inProgram&&c.kept>=0&&c.target!=null;
+    document.querySelectorAll(`[data-dt="${i}"],[data-set="${i}"]`).forEach(b=>b.disabled=!canT);
+    const tg=$('tg'+i); tg.disabled=!canT; if(document.activeElement!==tg) tg.value=c.target!=null?Math.round(c.target*10)/10:''; tg.min=c.spMin; tg.max=c.spMax;
+    document.querySelectorAll(`[data-ex="${i}"]`).forEach(b=>b.disabled=!c.canExtend);
+    $('manRow'+i).hidden=!man||!!c.autotune;
+    const sw=$('man'+i); if(!sw.busy||Date.now()-sw.busy>1500){ sw.checked=c.manual.on; sw.busy=0; } sw.disabled=!!c.fault;
+    const ms=$('manSp'+i); if(document.activeElement!==ms) ms.value=c.manual.sp!=null?c.manual.sp:''; ms.min=c.spMin; ms.max=c.spMax;
+  }
+}
+
+/* ---------- run bar, overlays ---------- */
+function updateRun(){
+  if(!live) return;
+  const r=live.run, active=r.state==='running'||r.state==='paused', b=$('badge');
+  if(active&&r.progPause){ b.textContent=r.actionRequired?'Action required':'Program pause'; b.className='state pause'; }
+  else if(r.state==='running'){ b.textContent=r.waiting?'Waiting for '+chName(0):'Running'; b.className='state '+(r.waiting?'pause':'run'); }
+  else if(r.state==='paused'){ b.textContent='Paused'; b.className='state pause'; }
+  else if(r.state==='finished'){ b.textContent='Finished'; b.className='state fin'; }
+  else if(r.state==='stopped'){ b.textContent='Stopped'; b.className='state stop'; }
+  else if(live.ch.some(c=>c.manual.on)){ b.textContent='Manual'; b.className='state man'; }
+  else { b.textContent='Ready'; b.className='state'; }
+  const p=progs&&progs.programs[live.sel];
+  $('clock').textContent=r.prog>=0&&r.state!=='idle'?fmt(r.el):'0:00';
+  const w=(active?hasWaits(runProg):(p&&p.waits))?' + waits':'';
+  $('remain').textContent=active?`${fmt(r.rem)}${w} left${r.name?' · '+r.name:''}`:(p&&p.used?`${fmt(p.total)}${w} total`:'');
+  $('bStart').disabled=r.state==='running'||(!active&&!(p&&p.used)); $('bStart').textContent=r.state==='paused'?'Resume':'Start';
+  $('bPause').disabled=!(r.state==='running'||(active&&r.progPause)); $('bPause').textContent=active&&r.progPause?'Continue':'Pause';
+  $('bStop').disabled=!active;
+  $('bNext').disabled=!active||r.type!=='seq'||r.progPause||r.state==='paused';
+  $('prog').disabled=active;
+  note(r.msg,/cannot|fault|failed|not possible|no answer/i.test(r.msg||''));
+  const showHalt=active&&r.progPause&&r.actionRequired, hb=$('halt');
+  if(hb.hidden===!!showHalt){ hb.hidden=!showHalt; if(showHalt) $('hCont').focus(); }
+  if(showHalt){ $('haltText').textContent=r.pauseText||''; $('haltWhere').textContent=`${r.name}${r.seq?', phase '+(r.seq.idx+1):''}. Setpoints are kept until you continue.`; }
+  // after a run with run edits: offer to save them
+  const ended=(prevState==='running'||prevState==='paused')&&(r.state==='finished'||r.state==='stopped');
+  if(ended){ showLast=true; askedSave=false; chartAt=0; }
+  if((r.state==='finished'||r.state==='stopped')&&r.edited&&!askedSave){ askedSave=true; if(!$('saveDlg').open) $('saveDlg').showModal(); }
+  if(r.state==='running'&&prevState!=='running'&&prevState!=='paused'){ runProg=null; zv.fit=true; showLast=true; }
+  prevState=r.state;
+}
+const cmd=c=>api('/api/cmd',{cmd:c,prog:live?live.sel:-1}).then(()=>{chartAt=0;poll();});
+$('bStart').onclick=()=>{ if(live&&live.run.state==='paused') cmd('resume'); else { showLast=true; cmd('start'); } };
+$('bPause').onclick=()=>{ if(live&&live.run.progPause) cmd('continue'); else cmd('pause'); };
+$('bStop').onclick=async()=>{ if(await ask('Stop the program? Each channel applies its end action.','Stop')) cmd('stop'); };
+$('bNext').onclick=()=>cmd('next');
+$('hCont').onclick=()=>cmd('continue');
+$('hStop').onclick=async()=>{ if(await ask('Stop the program? Each channel applies its end action.','Stop')) cmd('stop'); };
+$('dSave').onclick=async()=>{ $('saveDlg').close(); await api('/api/run',{cmd:'save'}); poll(); };
+$('dDiscard').onclick=()=>$('saveDlg').close();
+
+/* ---------- event log ---------- */
+async function updateLog(){
+  if(!live||live.logSeq===logSeq) return;
+  const d=await api('/api/log?since='+logSeq); logSeq=d.seq;
+  const base=Date.now()/1000-d.up;
+  for(const [seq,up,rt,msg] of d.log) logList.push({seq,wall:base+up,rt,msg});
+  logList=logList.slice(-100);
+  $('log').innerHTML=logList.slice().reverse().map(l=>{ const w=new Date(l.wall*1000);
+    return `<li><span title="${w.toLocaleString()}">${l.rt!=null?fmt(l.rt):w.toTimeString().slice(0,5)}</span>${esc(l.msg)}</li>`; }).join('')||'<li><span></span>No events yet.</li>';
+}
+
+/* ---------- polling ---------- */
+let polling=false, pollTimer=0;
+async function poll(){
+  if(polling) return; polling=true; clearTimeout(pollTimer);
+  try{
+    live=await api('/api/live');
+    $('linkDot').className='dot ok'; $('linkTxt').textContent='Device connected';
+    $('net').textContent=live.net; $('fw').textContent=`v${live.fw} · ${live.board}${live.variant?' '+live.variant:''}`;
+    applyPalette();
+    if(!progs||progsGen!==live.progGen) await loadPrograms(); else fillProgSelect();
+    updateRun(); updateChans();
+    const active=live.run.state==='running'||live.run.state==='paused', now=Date.now();
+    if(!M||now-chartAt>(active||view==='live'?2000:5000)){ chartAt=now; await refreshChart(); }
+    await updateLog();
+  }catch(e){ $('linkDot').className='dot'; $('linkTxt').textContent='Device not reachable'; }
+  finally{ polling=false; pollTimer=setTimeout(poll,1000); }
+}
+function frame(){ if(lastChart===0){ renderChart(); lastChart=1; } $('clk').textContent=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); requestAnimationFrame(frame); }
+applyPalette(true); renderChart(); poll(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>

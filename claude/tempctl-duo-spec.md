@@ -1210,6 +1210,35 @@ control only") until the new UIs; **order of the next steps: 5 → 7 → 6** (we
   then watch `/api/status` `run` (phase, stage, `progPause` after phase 1 → `{"cmd":"continue"}` on
   `/api/cmd`), `POST /api/run {"cmd":"extend","ch":0,"sec":30}` during a hold, `GET /api/run`.
 
+#### 9.10.6 State of step 7a (2026-09-30, version 1.0.3)
+Decided with Rost: **step 7 in sub-steps with a commit each** — 7a page base + Status page, 7b program
+editor (tables + chart handles, drafts, undo/redo, run edits, start without saving), 7c the other pages
+(Programs, Channels, System, Tools), 7d "run interrupted by a reset"; **the TempCtl 1.2 page stays at
+`/old`** until 7c covers it, then it is removed.
+- `web/index.html` = the new page (one file), built from the 9.3 simulator: sidebar (Status, links to
+  `/old`, link status, network, clock, CSV download, theme Auto/Dark/Light in localStorage), run panel,
+  chart (both channels: PV thick, SP thin, state lanes, phase lines + times, Timeline hold-end times, pause
+  marks, forecast dashed, End; zoom/scroll/pinch as in the simulator; "Live" = last 5 min), channel cards
+  (target ±1/±5 + Set, Extend hold +10 s/+30 s/+1 min, manual switch + SP when the channel isn't in the
+  running program, fault + Acknowledge, "why" line), Action required overlay, save-after-run dialog,
+  event log. Palette in JS by the spec 6 rule from `accent` (split-complementary ±150°, SP +0.12 L,
+  contrast PV 4.5 / SP 3 against the panel; the accent itself ≥ 3:1).
+- Preview of a stored program (no run shown) is computed in the page (`planProgram`, same rules as the
+  firmware preview); during a run the forecast comes from the device (`/api/chart?v=run` → `fc`).
+- Fonts: Barlow 400/500/600 + Barlow Semi Condensed 600 from google/fonts (OFL), subset with fontTools to
+  Latin + Latin-1 + Latin Ext-A + a few symbols, woff2 (≈ 22 kB each, 90 kB in all).
+- `tools/web_embed.py` (PlatformIO pre-script) → `src/web_assets.h` (gitignored): page gzip ≈ 17 kB.
+  Flash: S3 30 %, CYD ≈ 64 % of the app partition. Static RAM +7 kB (event log 48 × 96 chars).
+- Firmware: `RunEngine` reports transitions (`PlanEv`: phase / step start, ramp end, hold end, pause,
+  continue, end, stop) during the run and in `forecast()`; `chState()` (off / ramp / hold / wait / jump /
+  keep / halt / pause / done), `canExtend()`; forecast segments carry `src` and a ramp flag. Control task:
+  run events and per-bin state lanes in the history, an engine copy for the web (forecast under gLock),
+  **event log** (`logEvent`, ring of 48, also `[event]` on serial; every run message goes there).
+  API: `/api/live`, `/api/chart?v=run|live`, `/api/log?since=`; `/` = new page, `/old` = old page,
+  `/f/*.woff2` fonts.
+- Tested: host tests (events, chState), page with a host mock of the API (engine-generated data):
+  desktop/phone, dark/light, Sequence / Timeline / idle preview. Not on hardware yet.
+
 Keep the TempCtl conventions (full web/touch parity, colours via named styles, texts in
 `translations.xml`, widgets bound by name, exported UI code committed) unless Rost decides otherwise.
 

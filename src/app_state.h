@@ -50,6 +50,9 @@ struct LiveData {
   float elapsed;      // run time (s)
   float remaining;    // forecast (s), waits and pauses not counted
   ChOut run[NUM_CHANNELS];          // what the run does with each channel
+  uint8_t chSt[NUM_CHANNELS];       // ChState
+  bool canExt[NUM_CHANNELS];        // a hold of this channel is running ("Extend hold")
+  int16_t kept[NUM_CHANNELS];       // phase/step whose target the channel has (-1 none)
   bool spSyncedCh[NUM_CHANNELS];    // last setpoint write succeeded
   uint32_t spWritesCh[NUM_CHANNELS];
 
@@ -67,6 +70,21 @@ struct LiveData {
   char runMsg[128];
 };
 
+constexpr int RUN_EV_MAX = 400;
+
+// Event log (web, serial; later touch): the last LOG_N messages
+constexpr int LOG_N = 48;
+constexpr size_t LOG_LEN = 96;
+struct LogEntry {
+  uint32_t seq;
+  uint32_t upSec;   // uptime
+  float runT;       // run time, NaN outside a run
+  char msg[LOG_LEN];
+};
+void logEvent(const char* fmt, ...) __attribute__((format(printf, 1, 2)));  // any task
+uint32_t logSeq();                                        // newest entry
+int logSince(uint32_t seq, LogEntry* out, int max);       // entries after seq, oldest first
+
 // Chart history, both channels.
 struct History {
   // Rolling live window: one sample per LIVE_SAMPLE_SEC, newest at the end.
@@ -80,6 +98,11 @@ struct History {
   float runPlan[NUM_CHANNELS][CHART_N];
   float runTotal;     // elapsed + remaining
   char runName[PROG_NAME_LEN];
+  char runSt[NUM_CHANNELS][CHART_N];  // channel state per bin (chart lanes): "-orhwjkxpd" = ChState, 'm' manual, ' ' none
+  int16_t runStLast;
+  PlanEv runEv[RUN_EV_MAX];           // phase starts, hold ends, pauses, end (t = run time)
+  uint16_t runEvN;
+  uint32_t runGen;                    // changes when a new run starts
   // preview of the selected program on its own time axis (no run active)
   float plan[NUM_CHANNELS][CHART_N];
   float planBin, planSpan, planTotal;
@@ -178,3 +201,5 @@ void selectProgram(int idx);     // select + persist
 void setManualSp(float v, int ch = ENGINE_CH);  // clamp, persist and send to the control task
 float runSpanFor(float total);   // x axis length for a program: total + spare
 void chartSnapshot(ChartData& d);
+// /api/chart: v = "run" (current / last run with its forecast) or "live" (rolling window)
+void chartJson(String& out, bool run);

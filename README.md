@@ -1,13 +1,14 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
 
-> **Work in progress (version 1.0.2).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
+> **Work in progress (version 1.0.3).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
 > of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
 > (the ESP32-S3 board, env `s3`, and the CYD, envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`,
 > build from the same sources), two channels (Modbus / local / off), local thermocouple + SSR channels,
 > PID + autotune, and the two program types (Sequence, Timeline) with one run engine for both channels.
-> Next: the new web page (step 7) and touch UI (step 6). Until then the TempCtl 1.2 screens and web page
-> below show the **bottom channel**, run control works for both channels, and programs are **read-only**
-> there (they are written through the web API, section 5). On the S3's 480×320 screen the 320×240 TempCtl
+> Step 7 (new web page) has started: the **new Status page** is at `/` (both channels, run control,
+> chart with forecast, event log); the TempCtl 1.2 page stays at **`/old`** for programs, settings and
+> tools until the new pages replace it. The touch screens (TempCtl 1.2, step 6 comes later) show the
+> **bottom channel**; programs are **read-only** there and on `/old` (written through the web API, section 5). On the S3's 480×320 screen the 320×240 TempCtl
 > screens run in the top left corner, next to a bring-up panel.
 
 Firmware for the ESP32-2432S028R ("Cheap Yellow Display") that drives a **PMA KS 40-1 / 41-1 / 42-1**
@@ -27,8 +28,9 @@ start three example programs are created (Lead-free BGA, Leaded BGA, Lead-free B
   - **Setup → System**: rotate the screen by 180°, brightness, colour theme and dark mode, Wi-Fi (scan,
     password, AP password)
   - **Setup → Controller**: controller type, serial link, ramp mode, "bottom reached" band, front-panel lock, end action
-- Web interface with the same functions plus controller parameters (PID, limits, self-tuning), full register
-  map, register read/write tools, a setpoint-address finder and CSV log download
+- Web interface (section 5a): new Status page at `/` (both channels); the TempCtl 1.2 page at `/old` with
+  controller parameters (PID, limits, self-tuning), full register map, register read/write tools, a
+  setpoint-address finder and CSV log download
 - The controller keeps doing the PID control; the ESP32 only feeds it setpoints
 
 ## 1. What the PMA interface description tells us
@@ -313,10 +315,29 @@ Rules so the firmware keeps working:
 - A new component or screen is picked up by the build automatically; to use it from the firmware, add
   a wrapper for its `<name>_create()` function to `src/ui_gen.c` / `ui_gen.h`.
 
+## 5a. Web page
+
+- Source: `web/index.html` (one file: HTML, CSS, JS) and the Barlow / Barlow Semi Condensed fonts in
+  `web/fonts/` (woff2 subsets: Latin, Latin-1, Latin Extended-A and a few symbols; SIL Open Font License,
+  `web/fonts/OFL.txt`). The page works without internet (AP mode): everything comes from the device.
+- `tools/web_embed.py` gzips the page and writes `src/web_assets.h` (generated, not in git). PlatformIO
+  runs it before every build (`extra_scripts` in `platformio.ini`); by hand: `python tools/web_embed.py`.
+  The page is served gzipped (≈ 17 kB), the fonts (≈ 90 kB) with a one-year browser cache.
+- Status page: run panel (program, Start / Pause / Continue / Stop / Next phase, state, run time,
+  remaining time), chart (both channels: temperatures, setpoints, state lanes, phase lines with times,
+  pauses, the forecast of the rest of the run dashed; zoom − / + / Fit, Ctrl + wheel, drag, pinch;
+  "Live" shows the last 5 minutes), channel cards (PV, SP, output, what the channel does, target
+  −5 / −1 / +1 / +5 / Set and Extend hold during a run, manual switch + setpoint otherwise, fault +
+  Acknowledge), the "Action required" overlay, "Save the run's changes?" after a run with run edits, and
+  the event log. Channel colours come from the device's accent colour (spec 6); theme Auto / Dark / Light
+  (remembered by the browser).
+- Next sub-steps: program editor with tables and chart handles (7b), Programs / Channels / System / Tools
+  pages (7c), then `/old` goes away.
+
 ## 5. Web API
 
-TempCtl Duo: two channels. Until the new web page arrives, the old page, the chart and the TempCtl 1.2
-endpoints show the **bottom channel**; the run engine drives both channels. `channels` and `run` in
+TempCtl Duo: two channels. The old page (`/old`), its chart and the TempCtl 1.2 endpoints show the
+**bottom channel**; the run engine drives both channels. `channels` and `run` in
 `/api/status`, `/api/run`, `/api/program`, `ch` in `/api/manual` and the bus tools, and `/api/config`
 cover both.
 
@@ -330,6 +351,10 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 
 | Method | Path | Body / query |
 |---|---|---|
+| GET | `/api/live` | new page, polled every second: both channels (pv, sp, out, state, target, kept, canExtend, manual, fault, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg), `sel`, `accent`, `progGen`, `logSeq` |
+| GET | `/api/chart?v=run` | current / last run: 300 bins of `pv`, `sp` and state lanes `st` per channel, past events `ev` [t, type, ch, idx], forecast `fc` (`seg` [t0, t1, v0, v1, src, flags] per channel, `ev`; times from now) |
+| GET | `/api/chart?v=live` | last 5 minutes of `pv` / `sp` per channel |
+| GET | `/api/log?since=n` | event log entries after n: [seq, uptime s, run time s or null, text] |
 | GET | `/api/status` | live values (bottom), manual setpoint, selected program; `channels`: both channels (name, type, ok, err, pv, sp, out, mode, manual); `run`: state, `type` (`seq`/`tl`), `seq` (phase `idx`, `stage`, `el`, `dur`), `waiting`, `progPause`, `actionRequired`, `pauseText`, `elapsed`, `remaining`, `edited`, `channels[]` (inProgram, idle, sp, target, moving, Timeline `lane`) |
 | GET/POST | `/api/config` | the whole settings document (= `/duo/settings.json` without passwords). POST changes only the keys given, e.g. `{"channels":[null,{"type":"modbus","modbus":{"addr":2}}]}`; errors come back as `{"ok":false,"err":"channels[1].type: one of …"}` |
 | GET | `/api/history` | chart data (300 points): `pv`, `sp`, `plan` (bottom), with `?both=1` also `pvT`, `spT`, `planT` (top); `mode` = `live`/`run`, `planActive`, `spActive` |
@@ -382,7 +407,9 @@ src/tc_sensor.*, pid.*, runaway.*, autotune.*  MAX31855/MAX6675 decoding, PID, r
 src/app_state.*           control task: polling both channels, run engine, manual setpoint per channel, chart history
 src/ui.*                  touch UI behaviour: event callbacks, dialogs, bring-up panel
 src/ui_gen.*              bridge to the exported UI code (create functions, constants, font fallbacks)
-src/web.*, web_page.h     HTTP server, JSON API, single-page web UI
+src/web.*                 HTTP server, JSON API
+web/, tools/web_embed.py  new web page + fonts → src/web_assets.h (generated before each build)
+src/web_page.h            TempCtl 1.2 page (at /old until the new pages replace it)
 test/host_test.cpp        g++ -std=c++17 -Isrc -I<ArduinoJson>/src test/host_test.cpp src/program.cpp src/duo_program.cpp src/run_engine.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp && ./a.out
 ```
 

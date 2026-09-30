@@ -25,6 +25,18 @@ const char* stageName(Stage s) {
   return i < 7 ? N[i] : "?";
 }
 
+const char* chStateName(ChState s) {
+  static const char* const N[] = {"none", "off", "ramp", "hold", "wait", "jump", "keep", "halt", "pause", "done"};
+  const unsigned i = (unsigned)s;
+  return i < 10 ? N[i] : "?";
+}
+
+void RunEngine::ev(uint8_t type, int ch, int idx) const {
+  if (!evFn_) return;
+  PlanEv e = {type, (uint8_t)(ch < 0 ? 0xFF : ch), (int16_t)idx, evT_};
+  evFn_(e, evUser_);
+}
+
 bool RunEngine::fail(char* err, size_t n, const char* fmt, ...) {
   if (err && n) {
     va_list ap;
@@ -100,6 +112,7 @@ void RunEngine::freeze() {
 void RunEngine::finish() {
   freeze();
   st_ = RunState::Finished;
+  ev(EV_END, -1, -1);
 }
 
 // ------------------------------------------------------------------ Sequence
@@ -124,6 +137,7 @@ void RunEngine::startPhase(int k) {
     finish();
     return;
   }
+  ev(EV_PHASE, -1, k);
   const SeqPhase& f = p_->ph[k];
   switch (f.kind) {
     case PH_B:
@@ -148,6 +162,7 @@ void RunEngine::startPhase(int k) {
       seq_.st = Stage::Pause;
       progPause_ = true;
       bumpAll();
+      ev(EV_PAUSE, -1, k);
       break;
   }
 }
@@ -161,6 +176,7 @@ bool RunEngine::seqStep() {
       Gen& g = g_[rampCh(f)];
       if (!genDone(g)) return false;
       g.stageRamp = 0;
+      ev(EV_RAMP_END, rampCh(f), seq_.i);
       seq_.st = (f.kind == PH_B && f.wait) ? Stage::Wait : Stage::Hold;
       seq_.el = 0;
       return true;
@@ -177,11 +193,13 @@ bool RunEngine::seqStep() {
       return true;
     case Stage::Hold:
       if (seq_.el < (float)holdOf(seq_.i) - T_EPS) return false;
+      ev(EV_HOLD_END, rampCh(f), seq_.i);
       startPhase(seq_.i + 1);
       return true;
     case Stage::Pause:
       if (!forecast_) return false;
       progPause_ = false;
+      ev(EV_CONT, -1, seq_.i);
       startPhase(seq_.i + 1);
       return true;
     default:
@@ -205,6 +223,7 @@ void RunEngine::startStep(int ch, int k) {
     return;
   }
   const TlStep& s = p_->st[ch][k];
+  ev(EV_STEP, ch, k);
   switch (s.kind) {
     case ST_TARGET:
       startRamp(ch, s.s.t, s.s.r, k);
@@ -218,6 +237,7 @@ void RunEngine::startStep(int ch, int k) {
       L.st = Stage::Pause;
       progPause_ = true;
       bumpAll();
+      ev(EV_PAUSE, ch, k);
       break;
   }
 }
@@ -229,6 +249,7 @@ bool RunEngine::laneStep(int ch) {
       Gen& g = g_[ch];
       if (!genDone(g)) return false;
       g.stageRamp = 0;
+      ev(EV_RAMP_END, ch, L.i);
       L.st = Stage::Hold;
       L.el = 0;
       return true;
@@ -236,10 +257,12 @@ bool RunEngine::laneStep(int ch) {
     case Stage::Hold:
     case Stage::Idle:
       if (L.el < (float)p_->st[ch][L.i].s.h - T_EPS) return false;
+      ev(EV_HOLD_END, ch, L.i);
       startStep(ch, L.i + 1);
       return true;
     case Stage::Pause:
       if (!forecast_) return false;
+      ev(EV_CONT, ch, L.i);
       startStep(ch, L.i + 1);
       updatePause();
       return true;
@@ -304,9 +327,13 @@ void RunEngine::advance(float d) {
 bool RunEngine::start(DuoProgram* p, const float* pv, const bool* pvOk, float band) {
   if (!p || progItems(*p) == 0) return false;
   const uint32_t g0 = gen_[0], g1 = gen_[1];
+  const EvFn efn = evFn_;
+  void* const eu = evUser_;
   *this = RunEngine();
   gen_[0] = g0;
   gen_[1] = g1;
+  evFn_ = efn;
+  evUser_ = eu;
   p_ = p;
   band_ = band;
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
@@ -316,6 +343,7 @@ bool RunEngine::start(DuoProgram* p, const float* pv, const bool* pvOk, float ba
     setIdle(ch);
   }
   st_ = RunState::Running;
+  evT_ = 0;
   if (p->type == PROG_SEQ) {
     startPhase(0);
   } else {
@@ -334,10 +362,12 @@ void RunEngine::tick(float dt, const float* pv, const bool* pvOk) {
     if (pvOk_[ch]) lastPv_[ch] = pv[ch];
   }
   if (!active() || !(dt > 0)) return;
+  const float t0 = el_;
   el_ += dt;
   if (st_ != RunState::Running) return;
   float rem = dt;
   for (int guard = 0; guard < GUARD; ++guard) {
+    evT_ = t0 + (dt - rem);
     settle();
     if (st_ != RunState::Running || rem <= 0) break;
     if (progPause_) {  // only free ramps (edited kept targets) move
@@ -360,6 +390,7 @@ void RunEngine::pause() {
 void RunEngine::resume() {
   if (st_ != RunState::Paused) return;
   st_ = RunState::Running;
+  evT_ = el_;
   bumpAll();
   settle();
 }
@@ -368,16 +399,23 @@ void RunEngine::stop() {
   if (!active()) return;
   freeze();
   st_ = RunState::Aborted;
+  evT_ = el_;
+  ev(EV_STOP, -1, -1);
 }
 
 bool RunEngine::cont() {
   if (!active() || !progPause_) return false;
   progPause_ = false;
+  if (!forecast_) evT_ = el_;
   if (p_->type == PROG_SEQ) {
+    ev(EV_CONT, -1, seq_.i);
     startPhase(seq_.i + 1);
   } else {
     for (int ch = 0; ch < NUM_CHANNELS; ++ch)
-      if (lane_[ch].st == Stage::Pause) startStep(ch, lane_[ch].i + 1);
+      if (lane_[ch].st == Stage::Pause) {
+        ev(EV_CONT, ch, lane_[ch].i);
+        startStep(ch, lane_[ch].i + 1);
+      }
     updatePause();
   }
   bumpAll();
@@ -390,6 +428,7 @@ bool RunEngine::next() {
   if (progPause_) return cont();
   if (p_->type != PROG_SEQ || seq_.i >= p_->nPh) return false;
   const SeqPhase& f = p_->ph[seq_.i];
+  evT_ = el_;
   switch (seq_.st) {
     case Stage::Ramp: {  // straight to the hold with the setpoint at the target (a wait is skipped)
       const int c = rampCh(f);
@@ -397,6 +436,7 @@ bool RunEngine::next() {
       g.el = g.dur;
       g.stageRamp = 0;
       bump(c);
+      ev(EV_RAMP_END, c, seq_.i);
       seq_.st = Stage::Hold;
       seq_.el = 0;
       break;
@@ -411,6 +451,7 @@ bool RunEngine::next() {
       }
       break;
     case Stage::Hold:
+      ev(EV_HOLD_END, rampCh(f), seq_.i);
       startPhase(seq_.i + 1);
       break;
     default:
@@ -494,6 +535,37 @@ ChOut RunEngine::out(int ch) const {
   o.moving = active() && !genDone(g) && canMove(g);
   o.rampLeft = o.moving ? genLeft(g) : 0;
   return o;
+}
+
+ChState RunEngine::chState(int ch) const {
+  if (!active() || ch < 0 || ch >= NUM_CHANNELS || !used_[ch]) return ChState::None;
+  if (st_ == RunState::Paused) return ChState::Pause;
+  if (progPause_) return ChState::Halt;
+  const Gen& g = g_[ch];
+  if (p_->type == PROG_TL) {
+    switch (lane_[ch].st) {
+      case Stage::Ramp: return ChState::Ramp;
+      case Stage::Hold: return ChState::Hold;
+      case Stage::Idle: return ChState::Off;
+      case Stage::Done: return g.idle ? ChState::Off : ChState::Done;
+      default: return g.idle ? ChState::Off : ChState::Keep;
+    }
+  }
+  if (g.idle) return ChState::Off;
+  if (seq_.i >= p_->nPh) return ChState::Keep;
+  const SeqPhase& f = p_->ph[seq_.i];
+  const int tc = rampCh(f);
+  if (seq_.st == Stage::Ramp && tc == ch) return ChState::Ramp;
+  if (seq_.st == Stage::Hold && tc == ch) return ChState::Hold;
+  if (seq_.st == Stage::Wait && ch == CH_BOTTOM) return ChState::Wait;
+  if (f.kind == PH_BT && ch == CH_BOTTOM && g.src == seq_.i) return ChState::Jump;
+  return ChState::Keep;
+}
+
+bool RunEngine::canExtend(int ch) const {
+  if (!active() || ch < 0 || ch >= NUM_CHANNELS) return false;
+  if (p_->type == PROG_TL) return lane_[ch].st == Stage::Hold || lane_[ch].st == Stage::Idle;
+  return seq_.st == Stage::Hold && seq_.i < p_->nPh && rampCh(p_->ph[seq_.i]) == ch;
 }
 
 int RunEngine::keptIdx(int ch) const {
@@ -619,6 +691,7 @@ void RunEngine::shiftOther(int ch, float delta, float moment) {
 
 bool RunEngine::setHold(int ch, int idx, float sec, char* err, size_t n) {
   if (!active()) return fail(err, n, "No program is running");
+  evT_ = el_;
   if (!(sec >= 0)) sec = 0;
   if (sec > (float)PROG_MAX_SEC) sec = (float)PROG_MAX_SEC;
   if (p_->type == PROG_SEQ) {
@@ -681,6 +754,7 @@ bool RunEngine::setRamp(int ch, int idx, float sec, char* err, size_t n) {
 
 bool RunEngine::setTarget(int ch, int idx, float t, char* err, size_t n) {
   if (!active()) return fail(err, n, "No program is running");
+  evT_ = el_;
   if (ch < 0 || ch >= NUM_CHANNELS) return fail(err, n, "Channel missing");
   if (!isfinite(t)) return fail(err, n, "Target is not a number");
   if (idx < 0) idx = keptIdx(ch);
@@ -757,6 +831,8 @@ void RunEngine::emit(PlanFn fn, void* user, float t, float d) const {
     PlanSeg s;
     s.ch = (uint8_t)ch;
     s.idle = g.idle;
+    s.ramp = false;
+    s.src = g.idle ? -1 : g.src;
     s.t0 = t;
     s.t1 = t + d;
     if (g.idle) {
@@ -771,22 +847,28 @@ void RunEngine::emit(PlanFn fn, void* user, float t, float d) const {
     } else if (left < d) {
       s.t1 = t + left;
       s.v1 = g.to;
+      s.ramp = true;
       fn(s, user);
+      s.ramp = false;
       s.t0 = s.t1;
       s.t1 = t + d;
       s.v0 = g.to;
       s.v1 = g.to;
     } else {
+      s.ramp = true;
       s.v1 = g.from + (g.to - g.from) * ((g.el + d) / g.dur);
     }
     fn(s, user);
   }
 }
 
-float RunEngine::forecast(PlanFn fn, void* user, const float* pv) const {
+float RunEngine::forecast(PlanFn fn, void* user, const float* pv, EvFn efn, void* euser) const {
   if (!active()) return 0;
   RunEngine s = *this;
   s.forecast_ = true;
+  s.evFn_ = efn;
+  s.evUser_ = euser;
+  s.evT_ = 0;
   if (pv)
     for (int ch = 0; ch < NUM_CHANNELS; ++ch)
       if (!isnan(pv[ch])) {
@@ -805,6 +887,7 @@ float RunEngine::forecast(PlanFn fn, void* user, const float* pv) const {
       s.advance(ev);
       t += ev;
     }
+    s.evT_ = t;
     s.settle();
   }
   return t;

@@ -1,5 +1,6 @@
 #include "app_state.h"
 #include <math.h>
+#include <stdarg.h>
 #include <string.h>
 #include "controller.h"
 #include "local_ctrl.h"
@@ -60,7 +61,16 @@ static Manual man[NUM_CHANNELS];
 
 // ------------------------------------------------------------------ helpers
 
-static void setMsg(const char* m) { strlcpy(runMsg, m, sizeof(runMsg)); }
+// status message (web run.msg, touch message line) + event log + serial
+static void say(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+static void say(const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(runMsg, sizeof(runMsg), fmt, ap);
+  va_end(ap);
+  logEvent("%s", runMsg);
+}
+static void setMsg(const char* m) { say("%s", m); }
 
 static float clampSp(int ch, float v) {
   if (v < s.ch[ch].spMin) v = s.ch[ch].spMin;
@@ -136,8 +146,12 @@ static void histStartRun(float total) {
     fillNan(gHist->runPv[ch], CHART_N);
     fillNan(gHist->runSp[ch], CHART_N);
     fillNan(gHist->runPlan[ch], CHART_N);
+    memset(gHist->runSt[ch], ' ', CHART_N);
   }
   gHist->runTotal = total;
+  gHist->runEvN = 0;
+  gHist->runStLast = -1;
+  ++gHist->runGen;
 }
 
 // the run got longer than the chart: half the resolution, double the span
@@ -150,12 +164,83 @@ static void histCompress() {
     for (int i = CHART_N / 2; i < CHART_N; ++i) a[i] = NAN;
   };
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    char* st = gHist->runSt[ch];
+    for (int i = 0; i < CHART_N / 2; ++i) st[i] = st[2 * i + 1] != ' ' ? st[2 * i + 1] : st[2 * i];
+    memset(st + CHART_N / 2, ' ', CHART_N / 2);
+  }
+  gHist->runStLast = (int16_t)(gHist->runStLast >= 0 ? gHist->runStLast / 2 : -1);
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
     half(gHist->runPv[ch], true);
     half(gHist->runSp[ch], true);
     half(gHist->runPlan[ch], false);
   }
   gHist->runBin *= 2;
   gHist->runSpan *= 2;
+}
+
+// ---- run events (chart: phase lines, pauses, step end times) and the event log
+
+static const char CH_STATE_CODE[] = "-orhwjkxpd";  // ChState -> chart lane code ('m' = manual)
+static PlanEv pendEv[48];                          // from the engine, flushed into gHist each cycle
+static int pendN = 0;
+static RunEngine gEngSnap;                         // copy of the engine for the web (under gLock)
+
+static void recordEv(const PlanEv& e, void*) {
+  if (pendN < (int)(sizeof(pendEv) / sizeof(pendEv[0]))) pendEv[pendN++] = e;
+}
+
+// call with the lock free
+static void flushRunEvents() {
+  for (int i = 0; i < pendN; ++i) {
+    const PlanEv& e = pendEv[i];
+    if (e.type == EV_PHASE && e.idx < runProg->nPh)
+      logEvent("Phase %d (%s)", e.idx + 1, phaseKindName(runProg->ph[e.idx].kind));
+    else if (e.type == EV_STEP && e.ch < NUM_CHANNELS)
+      logEvent("%s step %d", s.ch[e.ch].name, e.idx + 1);
+  }
+  Guard g;
+  for (int i = 0; i < pendN; ++i) {
+    const PlanEv& e = pendEv[i];
+    if (e.type == EV_RAMP_END || e.type == EV_STEP) continue;  // not drawn for the past
+    if (gHist->runEvN < RUN_EV_MAX) gHist->runEv[gHist->runEvN++] = e;
+  }
+  pendN = 0;
+}
+
+// ---- event log (any task)
+
+static LogEntry logBuf[LOG_N];
+static uint32_t logNext = 1;
+static portMUX_TYPE logMux = portMUX_INITIALIZER_UNLOCKED;
+static volatile float logRunT = NAN;
+
+void logEvent(const char* fmt, ...) {
+  char m[LOG_LEN];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(m, sizeof(m), fmt, ap);
+  va_end(ap);
+  const float rt = logRunT;
+  Serial.printf("[event] %s\n", m);
+  portENTER_CRITICAL(&logMux);
+  LogEntry& e = logBuf[logNext % LOG_N];
+  e.seq = logNext++;
+  e.upSec = millis() / 1000;
+  e.runT = rt;
+  memcpy(e.msg, m, sizeof(e.msg));
+  portEXIT_CRITICAL(&logMux);
+}
+
+uint32_t logSeq() { return logNext - 1; }
+
+int logSince(uint32_t seq, LogEntry* out, int max) {
+  int n = 0;
+  portENTER_CRITICAL(&logMux);
+  uint32_t first = logNext > LOG_N ? logNext - LOG_N : 1;
+  if (seq + 1 > first) first = seq + 1;
+  for (uint32_t q = first; q < logNext && n < max; ++q) out[n++] = logBuf[q % LOG_N];
+  portEXIT_CRITICAL(&logMux);
+  return n;
 }
 
 // ---- plan curves (control task; written into gHist under gLock)
@@ -269,6 +354,189 @@ void chartSnapshot(ChartData& d) {
   }
 }
 
+// ---- /api/chart (web task; built under gLock, sent afterwards)
+
+static void jNum(String& o, float v, const char* fmt = "%.1f") {
+  if (isnan(v) || isinf(v)) {
+    o += "null";
+    return;
+  }
+  char b[20];
+  snprintf(b, sizeof(b), fmt, v);
+  o += b;
+}
+
+static void jArr(String& o, const float* a, int n) {
+  o += '[';
+  for (int i = 0; i < n; ++i) {
+    if (i) o += ',';
+    jNum(o, a[i]);
+  }
+  o += ']';
+}
+
+// forecast segments per channel, pieces of the same course merged
+struct FcSink {
+  String seg[NUM_CHANNELS];
+  String ev;
+  bool has[NUM_CHANNELS];
+  PlanSeg last[NUM_CHANNELS];
+};
+
+static void fcFlush(FcSink& k, int ch) {
+  if (!k.has[ch]) return;
+  const PlanSeg& g = k.last[ch];
+  String& o = k.seg[ch];
+  if (o.length()) o += ',';
+  o += '[';
+  jNum(o, g.t0);
+  o += ',';
+  jNum(o, g.t1);
+  o += ',';
+  jNum(o, g.idle ? NAN : g.v0);
+  o += ',';
+  jNum(o, g.idle ? NAN : g.v1);
+  o += ',';
+  o += String((int)g.src);
+  o += ',';
+  o += String((g.idle ? 1 : 0) | (g.ramp ? 2 : 0));
+  o += ']';
+  k.has[ch] = false;
+}
+
+static void fcSeg(const PlanSeg& g, void* u) {
+  FcSink& k = *(FcSink*)u;
+  const int ch = g.ch;
+  if (k.has[ch]) {
+    PlanSeg& l = k.last[ch];
+    bool same = l.idle == g.idle && l.ramp == g.ramp && l.src == g.src && fabsf(l.t1 - g.t0) < 0.01f;
+    if (same && !g.idle) {
+      if (!g.ramp) same = l.v1 == g.v0 && g.v0 == g.v1;
+      else {
+        const float s1 = (l.v1 - l.v0) / fmaxf(l.t1 - l.t0, 1e-3f), s2 = (g.v1 - g.v0) / fmaxf(g.t1 - g.t0, 1e-3f);
+        same = fabsf(l.v1 - g.v0) < 0.05f && fabsf(s1 - s2) < 1e-3f;
+      }
+    }
+    if (same) {
+      l.t1 = g.t1;
+      l.v1 = g.v1;
+      return;
+    }
+    fcFlush(k, ch);
+  }
+  k.last[ch] = g;
+  k.has[ch] = true;
+}
+
+static void jEv(String& o, const PlanEv& e) {
+  if (o.length() && o[o.length() - 1] != '[') o += ',';
+  o += '[';
+  jNum(o, e.t);
+  o += ',';
+  o += String((int)e.type);
+  o += ',';
+  o += e.ch == 0xFF ? String(-1) : String((int)e.ch);
+  o += ',';
+  o += String((int)e.idx);
+  o += ']';
+}
+
+static void fcEv(const PlanEv& e, void* u) {
+  FcSink& k = *(FcSink*)u;
+  if (e.type == EV_STEP) return;
+  jEv(k.ev, e);
+}
+
+void chartJson(String& o, bool run) {
+  o.reserve(run ? 9000 : 6000);
+  if (!run) {
+    Guard g;
+    o = "{\"mode\":\"live\",\"bin\":";
+    o += String(LIVE_SAMPLE_SEC);
+    o += ",\"span\":";
+    o += String(CHART_N * LIVE_SAMPLE_SEC);
+    o += ",\"pv\":[";
+    for (int c = 0; c < NUM_CHANNELS; ++c) {
+      if (c) o += ',';
+      jArr(o, gHist->livePv[c], CHART_N);
+    }
+    o += "],\"sp\":[";
+    for (int c = 0; c < NUM_CHANNELS; ++c) {
+      if (c) o += ',';
+      jArr(o, gHist->liveSp[c], CHART_N);
+    }
+    o += "]}";
+    return;
+  }
+  static FcSink sink;  // web task only
+  for (int c = 0; c < NUM_CHANNELS; ++c) {
+    sink.seg[c] = "";
+    sink.has[c] = false;
+  }
+  sink.ev = "";
+  Guard g;
+  if (!gHist->runValid) {
+    o = "{\"mode\":\"none\"}";
+    return;
+  }
+  const bool active = gEngSnap.active();
+  float rem = 0;
+  if (active) {
+    float pv[NUM_CHANNELS];
+    for (int c = 0; c < NUM_CHANNELS; ++c) pv[c] = gLive.ch[c].pvValid ? gLive.ch[c].pv : NAN;
+    rem = gEngSnap.forecast(fcSeg, &sink, pv, fcEv, &sink);
+    for (int c = 0; c < NUM_CHANNELS; ++c) fcFlush(sink, c);
+  }
+  o = "{\"mode\":\"";
+  o += active ? "run" : "last";
+  o += "\",\"gen\":";
+  o += String(gHist->runGen);
+  o += ",\"name\":\"";
+  for (const char* p = gHist->runName; *p; ++p) {
+    if (*p == '"' || *p == '\\') o += '\\';
+    o += *p;
+  }
+  o += "\",\"bin\":";
+  jNum(o, gHist->runBin, "%.3f");
+  o += ",\"span\":";
+  jNum(o, gHist->runSpan);
+  o += ",\"el\":";
+  jNum(o, gEngSnap.elapsed());
+  o += ",\"rem\":";
+  jNum(o, rem);
+  o += ",\"pv\":[";
+  for (int c = 0; c < NUM_CHANNELS; ++c) {
+    if (c) o += ',';
+    jArr(o, gHist->runPv[c], CHART_N);
+  }
+  o += "],\"sp\":[";
+  for (int c = 0; c < NUM_CHANNELS; ++c) {
+    if (c) o += ',';
+    jArr(o, gHist->runSp[c], CHART_N);
+  }
+  o += "],\"st\":[";
+  for (int c = 0; c < NUM_CHANNELS; ++c) {
+    if (c) o += ',';
+    o += '"';
+    for (int i = 0; i < CHART_N; ++i) o += gHist->runSt[c][i];
+    o += '"';
+  }
+  o += "],\"ev\":[";
+  String evs;
+  for (int i = 0; i < gHist->runEvN; ++i) jEv(evs, gHist->runEv[i]);
+  o += evs;
+  o += "],\"fc\":{\"seg\":[";
+  for (int c = 0; c < NUM_CHANNELS; ++c) {
+    if (c) o += ',';
+    o += '[';
+    o += sink.seg[c];
+    o += ']';
+  }
+  o += "],\"ev\":[";
+  o += sink.ev;
+  o += "]}}";
+}
+
 // ------------------------------------------------------------------ commands
 
 static bool anyFault() {
@@ -303,11 +571,11 @@ static void startProgram(int idx) {
     loaded = programLoad(idx, p, err, sizeof(err));
   }
   if (!loaded) {
-    snprintf(runMsg, sizeof(runMsg), "Cannot start: %s", err);
+    say("Cannot start: %s", err);
     return;
   }
   if (progItems(p) == 0) {
-    snprintf(runMsg, sizeof(runMsg), "Cannot start: \"%s\" has no phases/steps", p.name);
+    say("Cannot start: \"%s\" has no phases/steps", p.name);
     return;
   }
   float pv[NUM_CHANNELS];
@@ -325,24 +593,24 @@ static void startProgram(int idx) {
     if (!progUses(p, ch)) continue;
     const char* n = names[ch];
     if (s.ch[ch].type == CH_OFF) {
-      snprintf(runMsg, sizeof(runMsg), "Cannot start: \"%s\" uses %s, which is off (Settings)", p.name, n);
+      say("Cannot start: \"%s\" uses %s, which is off (Settings)", p.name, n);
       return;
     }
     if (tuning(ch)) {
-      snprintf(runMsg, sizeof(runMsg), "Cannot start: autotune is running on %s", n);
+      say("Cannot start: autotune is running on %s", n);
       return;
     }
     if (!chan(ch).spConfigured()) {
-      snprintf(runMsg, sizeof(runMsg), "Cannot start: %s has no setpoint register (web: Controller)", n);
+      say("Cannot start: %s has no setpoint register (web: Controller)", n);
       return;
     }
     if (!ok[ch]) {
-      snprintf(runMsg, sizeof(runMsg), "Cannot start: no valid temperature from %s", n);
+      say("Cannot start: no valid temperature from %s", n);
       return;
     }
   }
   if (!progCheckLimits(p, lo, hi, err, sizeof(err), names)) {
-    snprintf(runMsg, sizeof(runMsg), "Cannot start: %s", err);
+    say("Cannot start: %s", err);
     return;
   }
   // The controller silently clamps setpoints to SP.LO..SP.Hi: check before starting
@@ -357,7 +625,7 @@ static void startProgram(int idx) {
     const float cl[NUM_CHANNELS] = {ch == 0 ? l : -1e9f, ch == 1 ? l : -1e9f};
     const float chh[NUM_CHANNELS] = {ch == 0 ? h : 1e9f, ch == 1 ? h : 1e9f};
     if (!progCheckLimits(p, cl, chh, err, sizeof(err), names)) {
-      snprintf(runMsg, sizeof(runMsg), "Cannot start (controller limits): %.90s", err);
+      say("Cannot start (controller limits): %.90s", err);
       return;
     }
   }
@@ -392,8 +660,7 @@ static void startProgram(int idx) {
     histStartRun(eng.forecast(nullptr, nullptr, pv));
   }
   updatePlan(pv, rem);
-  snprintf(runMsg, sizeof(runMsg), "Program \"%s\" started", p.name);
-  Serial.printf("[run] \"%s\" (%s) started\n", p.name, p.type == PROG_TL ? "Timeline" : "Sequence");
+  say("Program \"%s\" started", p.name);
 }
 
 static void manualSwitch(int ch, bool on) {
@@ -403,20 +670,20 @@ static void manualSwitch(int ch, bool on) {
   const char* name = s.ch[ch].name;
   if (on) {
     if (inRun(ch)) {
-      snprintf(runMsg, sizeof(runMsg), "%s is in the running program (stop it first)", name);
+      say("%s is in the running program (stop it first)", name);
       return;
     }
     if (c.type() == CH_OFF) {
-      snprintf(runMsg, sizeof(runMsg), "%s is off (Settings: channel type)", name);
+      say("%s is off (Settings: channel type)", name);
       return;
     }
     char ft[64];
     if (c.fault(ft, sizeof(ft))) {
-      snprintf(runMsg, sizeof(runMsg), "%s: acknowledge the fault first (%s)", name, ft);
+      say("%s: acknowledge the fault first (%s)", name, ft);
       return;
     }
     if (tuning(ch)) {
-      snprintf(runMsg, sizeof(runMsg), "%s: autotune is running (stop it first)", name);
+      say("%s: autotune is running (stop it first)", name);
       return;
     }
     if (!c.spConfigured()) {
@@ -426,13 +693,13 @@ static void manualSwitch(int ch, bool on) {
     m.on = true;
     m.pending = true;
     m.offPending = false;
-    snprintf(runMsg, sizeof(runMsg), "%s: manual setpoint on", name);
+    say("%s: manual setpoint on", name);
   } else {
     if (!m.on) return;
     m.on = false;
     m.pending = false;
     m.offPending = c.canSwitchOff();
-    snprintf(runMsg, sizeof(runMsg), m.offPending ? "%s: manual off, outputs switched off"
+    say(m.offPending ? "%s: manual off, outputs switched off"
                                                   : "%s: manual off (no outputs-off register: controller keeps its setpoint)",
              name);
   }
@@ -446,7 +713,7 @@ static void applySettings(const Settings& prev, bool first) {
     const bool typeChanged = first || prev.ch[i].type != s.ch[i].type;
     if (typeChanged && !first && inRun(i)) {
       eng.stop();
-      snprintf(runMsg, sizeof(runMsg), "Stopped: type of channel %s changed", s.ch[i].name);
+      say("Stopped: type of channel %s changed", s.ch[i].name);
     }
     slots[i].configure(i, &bus, s.ch[i]);
     if (!first && !man[i].on) man[i].sp = s.ch[i].manualSp;  // may have been changed through the API
@@ -495,10 +762,10 @@ static void runEdit(const Cmd& c) {
   if (ok) {
     ++editCount;
     static const char* const W[] = {"hold time", "hold extended", "ramp time", "target"};
-    snprintf(runMsg, sizeof(runMsg), "Run edit (%s, %s): %s%.1f", name, c.sub < 4 ? W[c.sub] : "?",
+    say("Run edit (%s, %s): %s%.1f", name, c.sub < 4 ? W[c.sub] : "?",
              c.sub == EDIT_EXTEND && c.value > 0 ? "+" : "", c.value);
   } else {
-    snprintf(runMsg, sizeof(runMsg), "Run edit not possible: %s", err);
+    say("Run edit not possible: %s", err);
   }
 }
 
@@ -515,9 +782,9 @@ static void saveRun() {
   }
   if (ok) {
     savedCount = editCount;
-    snprintf(runMsg, sizeof(runMsg), "Run changes saved into \"%s\"", runProg->name);
+    say("Run changes saved into \"%s\"", runProg->name);
   } else {
-    snprintf(runMsg, sizeof(runMsg), "Saving the run changes failed: %s", err);
+    say("Saving the run changes failed: %s", err);
   }
 }
 
@@ -559,10 +826,9 @@ static void handleCmd(const Cmd& c) {
       if (c.arg < 0 || c.arg >= NUM_CHANNELS) break;
       char err[80] = "";
       if (chan(c.arg).ack(err, sizeof(err))) {
-        snprintf(runMsg, sizeof(runMsg), "%s: fault acknowledged", s.ch[c.arg].name);
-        Serial.printf("[ch] %s: fault acknowledged\n", s.ch[c.arg].name);
+        say("%s: fault acknowledged", s.ch[c.arg].name);
       } else {
-        snprintf(runMsg, sizeof(runMsg), "%s: fault not cleared: %s", s.ch[c.arg].name, err);
+        say("%s: fault not cleared: %s", s.ch[c.arg].name, err);
       }
       break;
     }
@@ -570,28 +836,27 @@ static void handleCmd(const Cmd& c) {
       if (c.arg < 0 || c.arg >= NUM_CHANNELS) break;
       const char* name = s.ch[c.arg].name;
       if (s.ch[c.arg].type != CH_LOCAL) {
-        snprintf(runMsg, sizeof(runMsg), "%s: autotune is for local channels (Modbus controllers tune themselves)", name);
+        say("%s: autotune is for local channels (Modbus controllers tune themselves)", name);
         break;
       }
       if (inRun(c.arg)) {
-        snprintf(runMsg, sizeof(runMsg), "%s: stop the program before the autotune", name);
+        say("%s: stop the program before the autotune", name);
         break;
       }
       Manual& m = man[c.arg];  // the tune takes over the channel
       m.on = m.pending = m.offPending = false;
       char err[96];
       if (localCtrlTuneStart(c.arg, c.value, err, sizeof(err))) {
-        snprintf(runMsg, sizeof(runMsg), "%s: autotune started at %.0f C", name, c.value);
-        Serial.printf("[tune] %s: started at %.0f C\n", name, c.value);
+        say("%s: autotune started at %.0f C", name, c.value);
       } else {
-        snprintf(runMsg, sizeof(runMsg), "%s: autotune not started: %s", name, err);
+        say("%s: autotune not started: %s", name, err);
       }
       break;
     }
     case CMD_TUNE_STOP:
       if (c.arg < 0 || c.arg >= NUM_CHANNELS) break;
       localCtrlTuneStop(c.arg);
-      snprintf(runMsg, sizeof(runMsg), "%s: autotune stopped", s.ch[c.arg].name);
+      say("%s: autotune stopped", s.ch[c.arg].name);
       break;
     case CMD_MANUAL_SP:
       if (c.arg < 0 || c.arg >= NUM_CHANNELS) break;
@@ -690,7 +955,7 @@ static void pollChannel(int i) {
                       t.res.ki, t.res.kd);
       else
         Serial.printf("[tune] %s: failed: %s\n", s.ch[i].name, t.msg);
-      snprintf(runMsg, sizeof(runMsg), "%s: autotune %s", s.ch[i].name, t.state == TuneState::Done ? "done - accept or discard (web)" : t.msg);
+      say("%s: autotune %s", s.ch[i].name, t.state == TuneState::Done ? "done - accept or discard (web)" : t.msg);
     }
     wasTuning[i] = ls.tuning;
   } else {
@@ -715,9 +980,9 @@ static void pollChannel(int i) {
     if (eng.active()) {
       // a fault stops the run (spec 9.2, 9.3.5); on the faulted channel the outputs stay off
       eng.stop();
-      snprintf(runMsg, sizeof(runMsg), "Stopped: %s fault: %s - acknowledge it (web)", s.ch[i].name, ft);
+      say("Stopped: %s fault: %s - acknowledge it (web)", s.ch[i].name, ft);
     } else {
-      snprintf(runMsg, sizeof(runMsg), "%s fault: %s - acknowledge it (web)", s.ch[i].name, ft);
+      say("%s fault: %s - acknowledge it (web)", s.ch[i].name, ft);
     }
   }
 }
@@ -861,7 +1126,7 @@ static void cycle(float dt) {
     for (int i = 0; i < NUM_CHANNELS; ++i) {
       if (!inRun(i) || millis() - lastOk[i] <= (uint32_t)s.commLossSec * 1000UL) continue;
       eng.pause();
-      snprintf(runMsg, sizeof(runMsg), "Paused: no answer from %s for %us", s.ch[i].name, s.commLossSec);
+      say("Paused: no answer from %s for %us", s.ch[i].name, s.commLossSec);
       break;
     }
   }
@@ -870,9 +1135,8 @@ static void cycle(float dt) {
   eng.tick(dt, pv, pvOk);
   if (eng.progPaused() && !wasPause) {
     const char* t = eng.pauseText();
-    snprintf(runMsg, sizeof(runMsg), "%s%s%s - press Continue", eng.pauseMsg() ? "Action required" : "Program pause",
+    say("%s%s%s - press Continue", eng.pauseMsg() ? "Action required" : "Program pause",
              *t ? ": " : "", t);
-    Serial.printf("[run] %s\n", runMsg);
   }
   for (int i = 0; i < NUM_CHANNELS; ++i) lastErr[i][0] = 0;
   if (eng.active())
@@ -886,8 +1150,8 @@ static void cycle(float dt) {
   const bool wasActive = prevState == RunState::Running || prevState == RunState::Paused;
   if (wasActive && (st == RunState::Finished || st == RunState::Aborted)) {
     for (int i = 0; i < NUM_CHANNELS; ++i) drv[i].endPending = eng.out(i).inProgram;
-    Serial.printf("[run] \"%s\" %s after %.0f s\n", runProg->name, st == RunState::Finished ? "finished" : "stopped",
-                  eng.elapsed());
+    logEvent("\"%s\" %s after %d:%02d", runProg->name, st == RunState::Finished ? "finished" : "stopped",
+             (int)eng.elapsed() / 60, (int)eng.elapsed() % 60);
   }
   bool endOpen = false, endDone = false;
   for (int i = 0; i < NUM_CHANNELS; ++i) {
@@ -915,7 +1179,9 @@ static void cycle(float dt) {
     const float runSp = (eng.active() && out[i].inProgram) ? out[i].sp : NAN;
     spNow[i] = spEffOk[i] ? spEff[i] : !isnan(runSp) ? runSp : (man[i].on ? man[i].sp : NAN);
   }
+  flushRunEvents();
   Guard g;
+  gEngSnap = eng;
   if (eng.active() && gHist->runValid) {
     int idx = (int)(eng.elapsed() / gHist->runBin);
     if (idx >= CHART_N) idx = CHART_N - 1;
@@ -923,7 +1189,12 @@ static void cycle(float dt) {
     for (int i = 0; i < NUM_CHANNELS; ++i) {
       gHist->runPv[i][idx] = pvOk[i] ? pv[i] : NAN;
       gHist->runSp[i][idx] = spNow[i];
+      const ChState cs = eng.chState(i);
+      const char code = cs == ChState::None ? (man[i].on ? 'm' : '-') : CH_STATE_CODE[(int)cs];
+      for (int k = gHist->runStLast + 1; k <= idx; ++k) gHist->runSt[i][k] = code;
+      gHist->runSt[i][idx] = code;
     }
+    gHist->runStLast = (int16_t)idx;
   }
   // rolling window: one slot per LIVE_SAMPLE_SEC even if polling is slower
   const uint32_t slotMs = LIVE_SAMPLE_SEC * 1000UL;
@@ -948,6 +1219,12 @@ static void cycle(float dt) {
     gLive.progType = runProg->type;
     gLive.phases = runProg->nPh;
     for (int i = 0; i < NUM_CHANNELS; ++i) gLive.steps[i] = runProg->nSt[i];
+  }
+  logRunT = eng.active() ? eng.elapsed() : NAN;
+  for (int i = 0; i < NUM_CHANNELS; ++i) {
+    gLive.chSt[i] = (uint8_t)eng.chState(i);
+    gLive.canExt[i] = eng.canExtend(i);
+    gLive.kept[i] = (int16_t)eng.keptIdx(i);
   }
   gLive.seq = eng.seq();
   for (int i = 0; i < NUM_CHANNELS; ++i) gLive.lane[i] = eng.lane(i);
@@ -1017,6 +1294,7 @@ static void controlTask(void*) {
     s = gSettings;
   }
   applySettings(s, true);
+  eng.setEventSink(recordEv, nullptr);
   for (int i = 0; i < NUM_CHANNELS; ++i) man[i].sp = s.ch[i].manualSp;
   uint32_t lastPoll = 0, lastTick = millis();
   for (;;) {

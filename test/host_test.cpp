@@ -324,6 +324,65 @@ static void testTimelineRun() {
   }
 }
 
+struct EvRec {
+  PlanEv e[64];
+  int n = 0;
+};
+static void evFn(const PlanEv& e, void* u) {
+  EvRec& r = *(EvRec*)u;
+  if (r.n < 64) r.e[r.n++] = e;
+}
+static const PlanEv* findEv(const EvRec& r, uint8_t type, int idx, int ch = -2) {
+  for (int i = 0; i < r.n; ++i)
+    if (r.e[i].type == type && r.e[i].idx == idx && (ch == -2 || r.e[i].ch == ch)) return &r.e[i];
+  return nullptr;
+}
+
+static void testEvents() {
+  static DuoProgram p;
+  progExample(0, p);
+  Sim s;
+  s.start(p);
+  EvRec f;
+  CHECK(near(s.e.forecast(nullptr, nullptr, nullptr, evFn, &f), 420));
+  const PlanEv* e = findEv(f, EV_PHASE, 2);
+  CHECK(e && near(e->t, 120) && findEv(f, EV_PAUSE, 1) && findEv(f, EV_CONT, 1));
+  e = findEv(f, EV_RAMP_END, 2, CH_TOP);
+  CHECK(e && near(e->t, 180));
+  e = findEv(f, EV_HOLD_END, 5, CH_TOP);
+  CHECK(e && near(e->t, 380));
+  e = findEv(f, EV_END, -1);
+  CHECK(e && near(e->t, 420));
+  // the real run reports its transitions with the run time
+  EvRec r;
+  progExample(0, p);
+  Sim q;
+  q.e.setEventSink(evFn, &r);
+  q.start(p);
+  CHECK(r.n >= 1 && r.e[0].type == EV_PHASE && r.e[0].idx == 0);
+  q.runTo(150);
+  e = findEv(r, EV_PAUSE, 1);
+  CHECK(e && near(e->t, 120) && q.e.chState(0) == ChState::Halt);
+  q.e.cont();
+  e = findEv(r, EV_CONT, 1);
+  CHECK(e && near(e->t, 150) && q.e.chState(0) == ChState::Wait && q.e.chState(1) == ChState::Off);
+  q.runTo(155);
+  CHECK(q.e.chState(1) == ChState::Ramp && q.e.chState(0) == ChState::Jump && !q.e.canExtend(1));
+  q.runTo(215);
+  CHECK(q.e.chState(1) == ChState::Hold && q.e.canExtend(1) && !q.e.canExtend(0));
+  q.runTo(250);
+  CHECK(q.e.chState(0) == ChState::Keep);
+  q.e.pause();
+  CHECK(q.e.chState(1) == ChState::Pause);
+  q.e.stop();
+  CHECK(r.e[r.n - 1].type == EV_STOP && near(r.e[r.n - 1].t, 250));
+  // forecast segments carry the source phase and the ramp flag
+  progExample(2, p);
+  Sim t;
+  t.start(p);
+  CHECK(t.e.chState(1) == ChState::Off && t.e.chState(0) == ChState::Ramp);
+}
+
 static void testSeqEdits() {
   static DuoProgram p;
   char err[100];
@@ -729,6 +788,7 @@ int main() {
   testTimelineRun();
   testSeqEdits();
   testTimelineEdits();
+  testEvents();
   testSettingsDefaults();
   testSettingsJson();
   testSettingsMerge();
