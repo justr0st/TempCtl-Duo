@@ -1,6 +1,7 @@
 // Settings: defaults, validation and JSON conversion (pure C++, host-tested).
 // File storage: settings_store.cpp.
 #include "settings.h"
+#include "duo_program.h"  // PROG_MAX
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -90,8 +91,6 @@ void settingsDefaults(Settings& s, const BoardLimits& lim) {
   s.pollMs = 1000;
   s.commLossSec = 30;
   s.bottomBand = 5;
-  s.guaranteedSoak = 0;
-  s.soakBand = 5.0f;
   copyStr(s.apPass, sizeof(s.apPass), "tempctl123");
   copyStr(s.hostname, sizeof(s.hostname), DEFAULT_HOSTNAME);
   s.brightness = 200;
@@ -163,8 +162,6 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
   clampv<uint16_t>(s.pollMs, 250, 10000);
   clampv<uint16_t>(s.commLossSec, 0, 3600);
   clampv(s.bottomBand, 0.5f, 50.0f);
-  s.guaranteedSoak = s.guaranteedSoak ? 1 : 0;
-  clampv(s.soakBand, 0.1f, 500.0f);
   s.ssid[sizeof(s.ssid) - 1] = 0;
   s.pass[sizeof(s.pass) - 1] = 0;
   s.apPass[sizeof(s.apPass) - 1] = 0;
@@ -236,7 +233,7 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
     addMsg(msg, n, t);
     ok = false;
   }
-  if (s.selProgram >= 100) s.selProgram = 0;
+  if (s.selProgram >= PROG_MAX) s.selProgram = 0;
   return ok;
 }
 
@@ -288,8 +285,6 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
   b["commLossSec"] = s.commLossSec;
   JsonObject r = o["run"].to<JsonObject>();
   r["bottomBand"] = s.bottomBand;
-  r["guaranteedSoak"] = s.guaranteedSoak != 0;
-  r["soakBand"] = s.soakBand;
   JsonObject w = o["wifi"].to<JsonObject>();
   w["ssid"] = s.ssid;
   w["hostname"] = s.hostname;
@@ -440,8 +435,6 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
   JsonObjectConst r = R.obj(o, "", "run");
   if (!r.isNull()) {
     R.num(r, "run.", "bottomBand", s.bottomBand);
-    R.flag(r, "run.", "guaranteedSoak", s.guaranteedSoak);
-    R.num(r, "run.", "soakBand", s.soakBand);
   }
   JsonObjectConst w = R.obj(o, "", "wifi");
   if (!w.isNull()) {

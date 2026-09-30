@@ -418,8 +418,7 @@ tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--hi)}
         <option value="1">Controller ramps (r.SP), fewer writes</option></select></label>
       <label>Minimum step between writes<input id="minStep" type="number" step="0.1"></label>
       <label>Minimum seconds between writes<input id="minWriteSec" type="number"></label>
-      <label class="sw">Hold only counts inside band (guaranteed soak)<input type="checkbox" class="switch" id="guaranteedSoak"></label>
-      <label>Soak band ±<input id="soakBand" type="number" step="0.1"></label>
+      <label>"Bottom reached" band ± (wait for bottom)<input id="soakBand" type="number" step="0.1"></label>
       <label>When the program ends or stops<select id="endAction"><option value="0">Keep current setpoint</option>
         <option value="1">Set end setpoint</option><option value="2">Switch controller outputs off</option></select></label>
       <label>End setpoint<input id="endSp" type="number" step="0.1"></label>
@@ -628,7 +627,7 @@ async function pollStatus(){
   $('sideNet').textContent=s.net;$('fw').textContent=s.fw?'v'+s.fw:'';
   $('pv').textContent=s.pv!=null?f1(s.pv):(s.comm.ok&&s.pvFlag!=='ok'?s.pvFlag:'---.-');
   $('sp').textContent=f1(s.spEff);
-  let stTxt=r.state[0].toUpperCase()+r.state.slice(1)+(r.soakWait?' (waiting for band)':'');
+  let stTxt=r.state[0].toUpperCase()+r.state.slice(1)+(r.soakWait?' (waiting for bottom)':'')+(r.progPause?(r.actionRequired?' - action required':' - program pause'):'');
   if(!active&&s.manual.on)stTxt='Manual';
   $('state').textContent=stTxt;
   $('stateCell').className=!active&&s.manual.on?'st-manual':(r.state!=='idle'?'st-'+r.state:'');
@@ -641,7 +640,7 @@ async function pollStatus(){
   $('spWarn').classList.toggle('hide',s.spConfigured);
   $('bStart').lastChild.textContent=r.state==='paused'?'Resume':'Start';
   $('bStart').disabled=r.state==='running';$('bPause').disabled=r.state!=='running';
-  $('bSkip').disabled=!active;$('bStop').disabled=!active;$('mainProg').disabled=active;
+  $('bSkip').disabled=!active||(r.type==='tl'&&!r.progPause);$('bSkip').lastChild.textContent=r.progPause?'Continue':'Next phase';$('bStop').disabled=!active;$('mainProg').disabled=active;
   $('manState').textContent=s.manual.on?(s.manual.synced?'on':'writing...'):'off';
   $('manState').classList.toggle('on',s.manual.on);
   if(!$('manSw').busy){$('manSw').checked=s.manual.on;$('manSw').disabled=active&&!s.manual.on;}
@@ -672,7 +671,7 @@ async function pollHistory(){
 const cmd=(c,extra)=>api('/api/cmd',Object.assign({cmd:c},extra||{})).then(pollStatus);
 $('bStart').onclick=()=>status&&status.run.state==='paused'?cmd('resume'):cmd('start',{prog:+$('mainProg').value});
 $('bPause').onclick=()=>cmd('pause');
-$('bSkip').onclick=async()=>{if(await ask('Skip to the next phase?','Skip'))cmd('skip');};
+$('bSkip').onclick=async()=>{if(status&&status.run.progPause)cmd('continue');else if(await ask('Skip to the next phase?','Skip'))cmd('skip');};
 $('bStop').onclick=async()=>{if(await ask('Stop the program? The end action from the Controller settings is applied.','Stop'))cmd('stop');};
 $('mainProg').onchange=async()=>{await api('/api/select',{i:+$('mainProg').value});await loadPrograms();pollStatus();pollHistory();};
 $('bManSet').onclick=async()=>{await api('/api/manual',{sp:+$('manSp').value});$('manSp').blur();pollStatus();};
@@ -686,7 +685,12 @@ $('manSw').onchange=async()=>{const sw=$('manSw');sw.busy=true;
 // ---------- program editor
 const unitOf=sec=>sec>0&&sec%60!==0?'s':'min';
 async function loadProgram(i){edit=await api('/api/program?i='+i);editIdx=i;dirty=false;selRow=-1;
-  fillProgSelect($('progSel'),i);$('progName').value=edit.name;renderRows();$('progMsg').textContent='';}
+  fillProgSelect($('progSel'),i);$('progName').value=edit.name;renderRows();$('progMsg').textContent='';
+  if(edit.readOnly)lockEditor();}
+// TempCtl Duo: programs are edited with the new web page (step 7); this page shows them read-only
+function lockEditor(){document.querySelectorAll('#v-prog input,#v-prog button,#v-prog select:not(#progSel)').forEach(e=>e.disabled=true);
+  $('progMsg').textContent=(edit.used?(edit.program.type==='tl'?'Timeline':'Sequence')+' program, shown as the Bottom channel in steps. ':'Empty slot. ')+
+    'Read only until the new web page; programs can be written with POST /api/program.';}
 function timeCell(sec,label){const u=unitOf(sec);const v=u==='min'?sec/60:sec;
   return`<span class="inl"><input type="number" min="0" step="any" value="${v}" aria-label="${label}">
     <select aria-label="${label} unit"><option ${u==='min'?'selected':''}>min</option><option ${u==='s'?'selected':''}>s</option></select></span>`;}
@@ -734,7 +738,7 @@ const setv=(el,v)=>{if(el.type==='checkbox')el.checked=!!v;else el.value=String(
 const getv=el=>el.type==='checkbox'?el.checked:(v=>v==='true'?true:v==='false'?false:+v)(el.value);
 const regKeys=['pv','spEff','out','status','alarm','sp','spLo','spHi','rampRate','ctrlOff','remote','scale','readFn','writeFn','offRaw'];
 const topKeys=['profile','slaveId','baud','parity','stopBits','timeoutMs','pollMs','rampMode','minStep','minWriteSec',
-  'guaranteedSoak','soakBand','endAction','endSp','lockFront','commLossSec','spMin','spMax'];
+  'soakBand','endAction','endSp','lockFront','commLossSec','spMin','spMax'];
 async function loadSettings(){settings=await api('/api/settings');
   topKeys.forEach(k=>setv($(k),settings[k]));regKeys.forEach(k=>$('r_'+k).value=settings.reg[k]);
   $('scanFrom').value=settings.scanFrom;$('scanTo').value=settings.scanTo;

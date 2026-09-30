@@ -11,9 +11,7 @@
 Settings gSettings;
 LiveData gLive;
 History* gHist = nullptr;
-Program* gPrograms = nullptr;
 SemaphoreHandle_t gLock;
-volatile uint32_t gProgGen = 0;
 
 static QueueHandle_t cmdQ;
 static SemaphoreHandle_t reqMutex, reqDone;
@@ -23,27 +21,33 @@ static volatile bool reqPending = false;
 static ModbusMaster bus;                  // the one RS485 bus, shared by the Modbus channels
 static ChannelSlot slots[NUM_CHANNELS];   // bottom, top
 static uint8_t busTurn = 0;               // next channel to poll on the bus (round robin)
-static ProgramEngine eng;                 // single-channel engine on ENGINE_CH (until step 5)
+static RunEngine eng;                     // one run engine for both channels (spec 9.3)
 static Settings s;  // control task's private copy of the settings
-#define EC (s.ch[ENGINE_CH])              // settings of the engine's channel
-
-static Channel& ech() { return *slots[ENGINE_CH].active; }
-static Controller* emb() { return slots[ENGINE_CH].active->modbus(); }  // null if not Modbus
-static Program startBuf;  // program being started (kept off the task stack)
-static int8_t runProg = -1;
-
-// setpoint output bookkeeping
-static uint32_t syncedGen = 0xFFFFFFFF;
-static bool hostFallback = false;       // controller-ramp mode, segment too slow -> host stepping
-static float lastWritten = NAN;
-static uint32_t lastWriteMs = 0;
-static uint32_t spWrites = 0;
-static bool rampSaved = false;
-static int16_t rampOriginal = 0;
-static bool endPending = false;
+static DuoProgram* runProg = nullptr;     // running copy (run edits change it; read by the web under gLock)
+static DuoProgram* selProg = nullptr;     // selected program, for the preview
+static DuoProgram* scratch = nullptr;     // loop task (UI, web)
+static int8_t runIdx = -1;                // slot of the running / last program
+static uint32_t editCount = 0, savedCount = 0;  // run edits / edits stored with "save run"
+static bool selValid = false;
+static int selLoaded = -1;
+static uint32_t selGen = 0;
 static RunState prevState = RunState::Idle;
 static char runMsg[128] = "";
 static char lastErr[NUM_CHANNELS][80];  // write errors of this cycle, per channel
+
+// setpoint output of one channel during a run
+struct Drive {
+  uint32_t syncedGen = 0xFFFFFFFF;
+  bool hostFallback = false;   // controller-ramp mode, ramp too slow/fast -> host stepping
+  float lastWritten = NAN;
+  uint32_t lastWriteMs = 0;
+  uint32_t spWrites = 0;
+  bool rampSaved = false;      // controller's own gradient, restored at the end
+  int16_t rampOriginal = 0;
+  int8_t outOn = -1;           // outputs switched by the run: -1 unknown, 0 off, 1 on
+  bool endPending = false;     // end action still to be written
+};
+static Drive drv[NUM_CHANNELS];
 
 // manual setpoint, per channel
 struct Manual {
@@ -64,38 +68,42 @@ static float clampSp(int ch, float v) {
   return v;
 }
 
-// setpoint of the engine's channel
-static bool writeSp(float v) {
-  v = clampSp(ENGINE_CH, v);
-  if (ech().writeSp(v, lastErr[ENGINE_CH], sizeof(lastErr[0]))) {
-    lastWritten = v;
-    lastWriteMs = millis();
-    ++spWrites;
+static Channel& chan(int ch) { return *slots[ch].active; }
+static Controller* mbOf(int ch) { return slots[ch].active->modbus(); }  // null if not Modbus
+static bool inRun(int ch) { return eng.active() && eng.out(ch).inProgram; }
+
+static bool writeSp(int ch, float v) {
+  v = clampSp(ch, v);
+  if (chan(ch).writeSp(v, lastErr[ch], sizeof(lastErr[0]))) {
+    Drive& d = drv[ch];
+    d.lastWritten = v;
+    d.lastWriteMs = millis();
+    ++d.spWrites;
     return true;
   }
   return false;
 }
 
-// Modbus-only extras of the engine's channel (true = nothing to do)
-static bool hasRampReg() { return emb() && emb()->reg().rampRate != REG_UNSET; }
+// Modbus-only extras (true = nothing to do)
+static bool hasRampReg(int ch) { return mbOf(ch) && mbOf(ch)->reg().rampRate != REG_UNSET; }
 
-static bool mbWrite(uint16_t addr, int16_t raw, const char* what) {
-  Controller* c = emb();
+static bool mbWrite(int ch, uint16_t addr, int16_t raw, const char* what) {
+  Controller* c = mbOf(ch);
   if (!c || addr == REG_UNSET) return true;
   const MbResult r = c->writeRaw(addr, raw);
-  if (r != MbResult::Ok) mbDescribe(r, c->lastException(), what, lastErr[ENGINE_CH], sizeof(lastErr[0]));
+  if (r != MbResult::Ok) mbDescribe(r, c->lastException(), what, lastErr[ch], sizeof(lastErr[0]));
   return r == MbResult::Ok;
 }
 
-static bool writeRampOff() {
-  if (!hasRampReg()) return true;
-  return mbWrite(emb()->reg().rampRate, emb()->reg().offRaw, "Ramp-rate write");
+static bool writeRampOff(int ch) {
+  if (!hasRampReg(ch)) return true;
+  return mbWrite(ch, mbOf(ch)->reg().rampRate, mbOf(ch)->reg().offRaw, "Ramp-rate write");
 }
 
-static bool writeRampRate(float perMin) {
-  Controller* c = emb();
+static bool writeRampRate(int ch, float perMin) {
+  Controller* c = mbOf(ch);
   const MbResult r = c->writeScaled(c->reg().rampRate, perMin);
-  if (r != MbResult::Ok) mbDescribe(r, c->lastException(), "Ramp-rate write", lastErr[ENGINE_CH], sizeof(lastErr[0]));
+  if (r != MbResult::Ok) mbDescribe(r, c->lastException(), "Ramp-rate write", lastErr[ch], sizeof(lastErr[0]));
   return r == MbResult::Ok;
 }
 
@@ -106,19 +114,118 @@ float runSpanFor(float total) {
   return total + spare;
 }
 
+static void fillNan(float* a, int n) {
+  for (int i = 0; i < n; ++i) a[i] = NAN;
+}
+
 static void histResetLive() {
-  for (int i = 0; i < CHART_N; ++i) gHist->livePv[i] = gHist->liveSp[i] = NAN;
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    fillNan(gHist->livePv[ch], CHART_N);
+    fillNan(gHist->liveSp[ch], CHART_N);
+    fillNan(gHist->plan[ch], CHART_N);
+    fillNan(gHist->runPlan[ch], CHART_N);
+  }
   gHist->runValid = false;
 }
 
-static void histStartRun(const Program& p, float startTemp, float total) {
+static void histStartRun(float total) {
   gHist->runValid = true;
-  gHist->runTotal = total;
   gHist->runSpan = runSpanFor(total);
   gHist->runBin = gHist->runSpan / CHART_N;
-  gHist->runStart = startTemp;
-  gHist->runProg = p;
-  for (int i = 0; i < CHART_N; ++i) gHist->runPv[i] = gHist->runSp[i] = NAN;
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    fillNan(gHist->runPv[ch], CHART_N);
+    fillNan(gHist->runSp[ch], CHART_N);
+    fillNan(gHist->runPlan[ch], CHART_N);
+  }
+  gHist->runTotal = total;
+}
+
+// the run got longer than the chart: half the resolution, double the span
+static void histCompress() {
+  auto half = [](float* a, bool mean) {
+    for (int i = 0; i < CHART_N / 2; ++i) {
+      const float x = a[2 * i], y = a[2 * i + 1];
+      a[i] = !mean ? x : isnan(x) ? y : isnan(y) ? x : (x + y) / 2;
+    }
+    for (int i = CHART_N / 2; i < CHART_N; ++i) a[i] = NAN;
+  };
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    half(gHist->runPv[ch], true);
+    half(gHist->runSp[ch], true);
+    half(gHist->runPlan[ch], false);
+  }
+  gHist->runBin *= 2;
+  gHist->runSpan *= 2;
+}
+
+// ---- plan curves (control task; written into gHist under gLock)
+
+struct PlanFill {
+  float* a[NUM_CHANNELS];
+  float off;    // seconds added to the segment times
+  float bin;
+  int from;     // first bin to write
+};
+
+static void planFn(const PlanSeg& g, void* u) {
+  PlanFill& f = *(PlanFill*)u;
+  const float t0 = f.off + g.t0, t1 = f.off + g.t1;
+  int i = (int)ceilf(t0 / f.bin - 1e-4f);
+  if (i < f.from) i = f.from;
+  for (; i < CHART_N; ++i) {
+    const float t = i * f.bin;
+    if (t > t1 + 1e-4f) break;
+    f.a[g.ch][i] = g.idle ? NAN : g.v0 + (g.v1 - g.v0) * (t1 > t0 ? (t - t0) / (t1 - t0) : 1);
+  }
+}
+
+// selected program: (re)load it when the selection or the stored program changed
+static void refreshSelected() {
+  int sel;
+  {
+    Guard g;
+    sel = gSettings.selProgram;
+  }
+  const uint32_t gen = programStoreGen();
+  if (sel == selLoaded && gen == selGen) return;
+  selLoaded = sel;
+  selGen = gen;
+  char err[96];
+  selValid = programLoad(sel, *selProg, err, sizeof(err));
+}
+
+// run: forecast into gHist->runPlan; else preview of the selected program into gHist->plan.
+// Returns the (projected) total; remaining = the run's forecast.
+static float updatePlan(const float* pv, float& remaining) {
+  remaining = 0;
+  if (eng.active()) {
+    // keep the plan in range: double the span while elapsed + remaining does not fit
+    remaining = eng.forecast(nullptr, nullptr, pv);
+    Guard g;
+    for (int k = 0; k < 20 && eng.elapsed() + remaining > gHist->runSpan; ++k) histCompress();
+    const int now = (int)ceilf(eng.elapsed() / gHist->runBin - 1e-4f);
+    for (int ch = 0; ch < NUM_CHANNELS; ++ch)
+      for (int i = now < 0 ? 0 : now; i < CHART_N; ++i) gHist->runPlan[ch][i] = NAN;
+    PlanFill f{{gHist->runPlan[0], gHist->runPlan[1]}, eng.elapsed(), gHist->runBin, now};
+    eng.forecast(planFn, &f, pv);
+    gHist->runTotal = eng.elapsed() + remaining;
+    strlcpy(gHist->runName, runProg->name, sizeof(gHist->runName));
+    return gHist->runTotal;
+  }
+  refreshSelected();
+  const float total = selValid ? programPreview(*selProg, nullptr, nullptr, nullptr) : 0;
+  Guard g;
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) fillNan(gHist->plan[ch], CHART_N);
+  gHist->planTotal = total;
+  gHist->planSpan = runSpanFor(total);
+  gHist->planBin = gHist->planSpan / CHART_N;
+  gHist->planName[0] = 0;
+  if (selValid) {
+    PlanFill f{{gHist->plan[0], gHist->plan[1]}, 0, gHist->planBin, 0};
+    programPreview(*selProg, pv, planFn, &f);
+    strlcpy(gHist->planName, selProg->name, sizeof(gHist->planName));
+  }
+  return total;
 }
 
 void chartSnapshot(ChartData& d) {
@@ -127,36 +234,38 @@ void chartSnapshot(ChartData& d) {
   d.run = active && gHist->runValid;
   d.planActive = d.run;
   d.spActive = d.run || gLive.manualOn;
+  const int T = CH_TOP, B = ENGINE_CH;
   if (d.run) {
     d.binSec = gHist->runBin;
     d.span = gHist->runSpan;
     d.planSpan = gHist->runSpan;
     d.planTotal = gHist->runTotal;
     d.elapsed = gLive.elapsed;
-    strlcpy(d.progName, gHist->runProg.name, sizeof(d.progName));
+    strlcpy(d.progName, gHist->runName, sizeof(d.progName));
     for (int i = 0; i < CHART_N; ++i) {
-      const float t = i * d.binSec;
-      d.pv[i] = gHist->runPv[i];
-      d.sp[i] = gHist->runSp[i];
-      d.plan[i] = t <= d.planTotal ? ProgramEngine::plannedAt(gHist->runProg, gHist->runStart, t) : NAN;
+      d.pv[i] = gHist->runPv[B][i];
+      d.sp[i] = gHist->runSp[B][i];
+      d.plan[i] = gHist->runPlan[B][i];
+      d.pvT[i] = gHist->runPv[T][i];
+      d.spT[i] = gHist->runSp[T][i];
+      d.planT[i] = gHist->runPlan[T][i];
     }
     return;
   }
-  // idle: rolling window + preview of the selected program on its own timeline
-  const Program& p = gPrograms[gSettings.selProgram < MAX_PROGRAMS ? gSettings.selProgram : 0];
+  // idle: rolling window + preview of the selected program on its own time axis
+  d.planSpan = gHist->planSpan;
+  d.planTotal = gHist->planTotal;
+  strlcpy(d.progName, gHist->planName, sizeof(d.progName));
   d.binSec = LIVE_SAMPLE_SEC;
   d.span = CHART_N * LIVE_SAMPLE_SEC;
-  d.planTotal = ProgramEngine::plannedTotal(p);
-  d.planSpan = runSpanFor(d.planTotal);
   d.elapsed = 0;
-  strlcpy(d.progName, p.name, sizeof(d.progName));
-  const float start = gLive.pvValid ? gLive.pv : (gLive.spEffValid ? gLive.spEff : 20.0f);
-  const float pb = d.planSpan / CHART_N;
   for (int i = 0; i < CHART_N; ++i) {
-    const float t = i * pb;
-    d.pv[i] = gHist->livePv[i];
-    d.sp[i] = gHist->liveSp[i];
-    d.plan[i] = (p.count > 0 && t <= d.planTotal) ? ProgramEngine::plannedAt(p, start, t) : NAN;
+    d.pv[i] = gHist->livePv[B][i];
+    d.sp[i] = gHist->liveSp[B][i];
+    d.plan[i] = gHist->plan[B][i];
+    d.pvT[i] = gHist->livePv[T][i];
+    d.spT[i] = gHist->liveSp[T][i];
+    d.planT[i] = gHist->plan[T][i];
   }
 }
 
@@ -182,98 +291,119 @@ static void startProgram(int idx) {
     setMsg("Cannot start: acknowledge the channel fault first");
     return;
   }
-  if (tuning(ENGINE_CH)) {
-    snprintf(runMsg, sizeof(runMsg), "Cannot start: autotune is running on %s", EC.name);
-    return;
-  }
-  if (EC.type == CH_OFF) {
-    snprintf(runMsg, sizeof(runMsg), "Cannot start: channel %s is off", EC.name);
-    return;
-  }
-  if (!ech().spConfigured()) {
-    setMsg("Set the setpoint register address first (web: Controller)");
-    return;
-  }
-  bool pvOk;
-  float pv;
-  {
+  if (idx < 0 || idx >= PROG_MAX) {
     Guard g;
-    pvOk = gLive.pvValid;
-    pv = gLive.pv;
+    idx = gSettings.selProgram < PROG_MAX ? gSettings.selProgram : 0;
   }
-  if (!pvOk) {
-    setMsg("Cannot start: no valid temperature from controller");
-    return;
-  }
+  DuoProgram& p = *runProg;
+  char err[96];
+  bool loaded;
   {
-    Guard g;
-    if (idx < 0 || idx >= MAX_PROGRAMS) idx = gSettings.selProgram;
-    if (idx >= MAX_PROGRAMS) idx = 0;
-    startBuf = gPrograms[idx];
+    Guard g;  // the web reads the running copy under the lock
+    loaded = programLoad(idx, p, err, sizeof(err));
   }
-  Program& p = startBuf;
-  if (p.count == 0) {
-    snprintf(runMsg, sizeof(runMsg), "Cannot start: \"%s\" has no steps", p.name);
+  if (!loaded) {
+    snprintf(runMsg, sizeof(runMsg), "Cannot start: %s", err);
     return;
   }
-  programSanitize(p, EC.spMin, EC.spMax);
-  // The controller silently clamps setpoints to SP.LO..SP.Hi; with guaranteed
-  // soak that would stall the program forever, so check before starting.
-  Controller* mc = emb();
-  if (mc && mc->reg().spLo != REG_UNSET && mc->reg().spHi != REG_UNSET) {
-    float lo, hi;
+  if (progItems(p) == 0) {
+    snprintf(runMsg, sizeof(runMsg), "Cannot start: \"%s\" has no phases/steps", p.name);
+    return;
+  }
+  float pv[NUM_CHANNELS];
+  bool ok[NUM_CHANNELS];
+  const char* names[NUM_CHANNELS] = {s.ch[0].name, s.ch[1].name};
+  float lo[NUM_CHANNELS], hi[NUM_CHANNELS];
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    {
+      Guard g;
+      ok[ch] = gLive.ch[ch].pvValid;
+      pv[ch] = gLive.ch[ch].pv;
+    }
+    lo[ch] = s.ch[ch].spMin;
+    hi[ch] = s.ch[ch].spMax;
+    if (!progUses(p, ch)) continue;
+    const char* n = names[ch];
+    if (s.ch[ch].type == CH_OFF) {
+      snprintf(runMsg, sizeof(runMsg), "Cannot start: \"%s\" uses %s, which is off (Settings)", p.name, n);
+      return;
+    }
+    if (tuning(ch)) {
+      snprintf(runMsg, sizeof(runMsg), "Cannot start: autotune is running on %s", n);
+      return;
+    }
+    if (!chan(ch).spConfigured()) {
+      snprintf(runMsg, sizeof(runMsg), "Cannot start: %s has no setpoint register (web: Controller)", n);
+      return;
+    }
+    if (!ok[ch]) {
+      snprintf(runMsg, sizeof(runMsg), "Cannot start: no valid temperature from %s", n);
+      return;
+    }
+  }
+  if (!progCheckLimits(p, lo, hi, err, sizeof(err), names)) {
+    snprintf(runMsg, sizeof(runMsg), "Cannot start: %s", err);
+    return;
+  }
+  // The controller silently clamps setpoints to SP.LO..SP.Hi: check before starting
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    Controller* mc = progUses(p, ch) ? mbOf(ch) : nullptr;
+    if (!mc || mc->reg().spLo == REG_UNSET || mc->reg().spHi == REG_UNSET) continue;
+    float l, h;
     uint8_t f1 = 0, f2 = 0;
-    if (mc->readScaled(mc->reg().spLo, lo, f1) == MbResult::Ok && mc->readScaled(mc->reg().spHi, hi, f2) == MbResult::Ok &&
-        f1 == VAL_OK && f2 == VAL_OK) {
-      for (int i = 0; i < p.count; ++i) {
-        if (p.s[i].target < lo || p.s[i].target > hi) {
-          snprintf(runMsg, sizeof(runMsg), "Step %d target %.1f is outside controller limits %.1f..%.1f", i + 1,
-                   p.s[i].target, lo, hi);
-          return;
-        }
-      }
+    if (mc->readScaled(mc->reg().spLo, l, f1) != MbResult::Ok || mc->readScaled(mc->reg().spHi, h, f2) != MbResult::Ok ||
+        f1 != VAL_OK || f2 != VAL_OK)
+      continue;
+    const float cl[NUM_CHANNELS] = {ch == 0 ? l : -1e9f, ch == 1 ? l : -1e9f};
+    const float chh[NUM_CHANNELS] = {ch == 0 ? h : 1e9f, ch == 1 ? h : 1e9f};
+    if (!progCheckLimits(p, cl, chh, err, sizeof(err), names)) {
+      snprintf(runMsg, sizeof(runMsg), "Cannot start (controller limits): %.90s", err);
+      return;
     }
   }
-  if (!eng.start(p, pv)) {
-    setMsg("Cannot start: the program has no steps");
+  if (!eng.start(&p, pv, ok, s.bottomBand)) {
+    setMsg("Cannot start: the program has no phases/steps");
     return;
   }
-  runProg = (int8_t)idx;
-  // a program takes over from manual mode on its channel; make sure the outputs are on
-  Manual& m = man[ENGINE_CH];
-  m.on = m.pending = m.offPending = false;
-  ech().setOutputs(true, lastErr[ENGINE_CH], sizeof(lastErr[0]));
-  // remember the controller's own gradient so we can restore it at the end
-  rampSaved = false;
-  if (hasRampReg()) {
-    int16_t raw;
-    if (mc->readRaw(mc->reg().rampRate, raw) == MbResult::Ok) {
-      rampOriginal = raw;
-      rampSaved = true;
+  runIdx = (int8_t)idx;
+  editCount = savedCount = 0;
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    drv[ch] = Drive();
+    if (!progUses(p, ch)) continue;  // manual channel: untouched
+    // the program takes over from manual mode on its channels
+    Manual& m = man[ch];
+    m.on = m.pending = m.offPending = false;
+    Controller* mc = mbOf(ch);
+    if (hasRampReg(ch)) {  // remember the controller's own gradient to restore it at the end
+      int16_t raw;
+      if (mc->readRaw(mc->reg().rampRate, raw) == MbResult::Ok) {
+        drv[ch].rampOriginal = raw;
+        drv[ch].rampSaved = true;
+      }
+      writeRampOff(ch);
     }
-    writeRampOff();
+    if (mc && s.ch[ch].mb.lockFront) mbWrite(ch, mc->reg().remote, 1, "Front-lock write");
+    if (!chan(ch).canSwitchOff() && s.ch[ch].type == CH_MODBUS)
+      Serial.printf("[run] %s has no outputs-off register: Idle keeps the controller's setpoint\n", names[ch]);
   }
-  if (mc && EC.mb.lockFront) mbWrite(mc->reg().remote, 1, "Front-lock write");
-  lastWritten = NAN;
-  syncedGen = 0xFFFFFFFF;
-  hostFallback = false;
-  spWrites = 0;
-  endPending = false;
+  float rem;
   {
     Guard g;
-    histStartRun(p, pv, eng.total());
+    histStartRun(eng.forecast(nullptr, nullptr, pv));
   }
+  updatePlan(pv, rem);
   snprintf(runMsg, sizeof(runMsg), "Program \"%s\" started", p.name);
+  Serial.printf("[run] \"%s\" (%s) started\n", p.name, p.type == PROG_TL ? "Timeline" : "Sequence");
 }
 
 static void manualSwitch(int ch, bool on) {
   if (ch < 0 || ch >= NUM_CHANNELS) return;
   Manual& m = man[ch];
-  Channel& c = *slots[ch].active;
+  Channel& c = chan(ch);
   const char* name = s.ch[ch].name;
   if (on) {
-    if (ch == ENGINE_CH && eng.active()) {
-      snprintf(runMsg, sizeof(runMsg), "%s: stop the program before switching to manual", name);
+    if (inRun(ch)) {
+      snprintf(runMsg, sizeof(runMsg), "%s is in the running program (stop it first)", name);
       return;
     }
     if (c.type() == CH_OFF) {
@@ -311,18 +441,16 @@ static void manualSwitch(int ch, bool on) {
 // (Re)opens the bus and selects the channel backends after a settings change
 static void applySettings(const Settings& prev, bool first) {
   modbusBusBegin(bus, s);
+  eng.setBand(s.bottomBand);
   for (int i = 0; i < NUM_CHANNELS; ++i) {
     const bool typeChanged = first || prev.ch[i].type != s.ch[i].type;
+    if (typeChanged && !first && inRun(i)) {
+      eng.stop();
+      snprintf(runMsg, sizeof(runMsg), "Stopped: type of channel %s changed", s.ch[i].name);
+    }
     slots[i].configure(i, &bus, s.ch[i]);
     if (!first && !man[i].on) man[i].sp = s.ch[i].manualSp;  // may have been changed through the API
-    if (typeChanged && !first) {
-      man[i].on = man[i].pending = man[i].offPending = false;
-      if (i == ENGINE_CH && eng.active()) {
-        eng.stop();
-        endPending = false;
-        snprintf(runMsg, sizeof(runMsg), "Stopped: type of channel %s changed", s.ch[i].name);
-      }
-    }
+    if (typeChanged && !first) man[i].on = man[i].pending = man[i].offPending = false;
     Guard g;
     gLive.ch[i].type = s.ch[i].type;
     strlcpy(gLive.ch[i].name, s.ch[i].name, sizeof(gLive.ch[i].name));
@@ -333,13 +461,88 @@ static void applySettings(const Settings& prev, bool first) {
   }
 }
 
+static void runEdit(const Cmd& c) {
+  const int ch = c.arg;
+  if (!eng.active()) {
+    setMsg("No program is running");
+    return;
+  }
+  if (ch < 0 || ch >= NUM_CHANNELS) {
+    setMsg("Run edit: channel must be 0 (bottom) or 1 (top)");
+    return;
+  }
+  char err[96] = "";
+  bool ok;
+  const char* name = s.ch[ch].name;
+  {
+    Guard g;  // the edits change the running copy, which the web reads
+    switch (c.sub) {
+      case EDIT_HOLD: ok = eng.setHold(ch, c.idx, c.value, err, sizeof(err)); break;
+      case EDIT_EXTEND: ok = eng.extendHold(ch, c.value, err, sizeof(err)); break;
+      case EDIT_RAMP: ok = eng.setRamp(ch, c.idx, c.value, err, sizeof(err)); break;
+      case EDIT_TARGET:
+        if (c.value < s.ch[ch].spMin || c.value > s.ch[ch].spMax) {
+          snprintf(err, sizeof(err), "%.1f is outside the %s limits %.0f .. %.0f", c.value, name, s.ch[ch].spMin,
+                   s.ch[ch].spMax);
+          ok = false;
+        } else {
+          ok = eng.setTarget(ch, c.idx, c.value, err, sizeof(err));
+        }
+        break;
+      default: ok = false; strlcpy(err, "unknown edit", sizeof(err)); break;
+    }
+  }
+  if (ok) {
+    ++editCount;
+    static const char* const W[] = {"hold time", "hold extended", "ramp time", "target"};
+    snprintf(runMsg, sizeof(runMsg), "Run edit (%s, %s): %s%.1f", name, c.sub < 4 ? W[c.sub] : "?",
+             c.sub == EDIT_EXTEND && c.value > 0 ? "+" : "", c.value);
+  } else {
+    snprintf(runMsg, sizeof(runMsg), "Run edit not possible: %s", err);
+  }
+}
+
+static void saveRun() {
+  if (runIdx < 0 || editCount == 0) {
+    setMsg("No run edits to save");
+    return;
+  }
+  char err[96];
+  bool ok;
+  {
+    Guard g;
+    ok = programSave(runIdx, *runProg, err, sizeof(err));
+  }
+  if (ok) {
+    savedCount = editCount;
+    snprintf(runMsg, sizeof(runMsg), "Run changes saved into \"%s\"", runProg->name);
+  } else {
+    snprintf(runMsg, sizeof(runMsg), "Saving the run changes failed: %s", err);
+  }
+}
+
 static void handleCmd(const Cmd& c) {
   switch (c.type) {
     case CMD_START: startProgram(c.arg); break;
-    case CMD_PAUSE: eng.pause(); setMsg("Paused"); break;
-    case CMD_RESUME: eng.resume(); setMsg("Resumed"); break;
-    case CMD_STOP: eng.stop(); setMsg("Stopped by user"); break;
-    case CMD_SKIP: eng.skip(); setMsg("Skipped to next phase"); break;
+    case CMD_PAUSE:
+      if (eng.state() == RunState::Running) { eng.pause(); setMsg("Paused"); }
+      break;
+    case CMD_RESUME:
+      if (eng.state() == RunState::Paused) { eng.resume(); setMsg("Resumed"); }
+      break;
+    case CMD_STOP:
+      if (eng.active()) { eng.stop(); setMsg("Stopped by user"); }
+      break;
+    case CMD_NEXT:
+      if (eng.progPaused()) { eng.cont(); setMsg("Continued"); }
+      else if (eng.next()) setMsg("Next phase");
+      else if (eng.active() && eng.type() == PROG_TL) setMsg("Next phase is not available for Timeline programs");
+      break;
+    case CMD_CONTINUE:
+      if (eng.cont()) setMsg("Continued");
+      break;
+    case CMD_RUN_EDIT: runEdit(c); break;
+    case CMD_SAVE_RUN: saveRun(); break;
     case CMD_SETTINGS_CHANGED: {
       static Settings prev;  // static: large
       prev = s;
@@ -355,7 +558,7 @@ static void handleCmd(const Cmd& c) {
     case CMD_ACK_FAULT: {
       if (c.arg < 0 || c.arg >= NUM_CHANNELS) break;
       char err[80] = "";
-      if (slots[c.arg].active->ack(err, sizeof(err))) {
+      if (chan(c.arg).ack(err, sizeof(err))) {
         snprintf(runMsg, sizeof(runMsg), "%s: fault acknowledged", s.ch[c.arg].name);
         Serial.printf("[ch] %s: fault acknowledged\n", s.ch[c.arg].name);
       } else {
@@ -370,7 +573,7 @@ static void handleCmd(const Cmd& c) {
         snprintf(runMsg, sizeof(runMsg), "%s: autotune is for local channels (Modbus controllers tune themselves)", name);
         break;
       }
-      if (c.arg == ENGINE_CH && eng.active()) {
+      if (inRun(c.arg)) {
         snprintf(runMsg, sizeof(runMsg), "%s: stop the program before the autotune", name);
         break;
       }
@@ -510,7 +713,7 @@ static void pollChannel(int i) {
     m.on = m.pending = false;
     m.offPending = false;
     if (eng.active()) {
-      // a fault stops the run (spec 9.2); on the faulted channel the outputs stay off
+      // a fault stops the run (spec 9.2, 9.3.5); on the faulted channel the outputs stay off
       eng.stop();
       snprintf(runMsg, sizeof(runMsg), "Stopped: %s fault: %s - acknowledge it (web)", s.ch[i].name, ft);
     } else {
@@ -533,84 +736,104 @@ static void pollChannels() {
   }
 }
 
-static void driveSetpoint() {
-  const RunState st = eng.state();
-  if (st != RunState::Running && st != RunState::Paused) return;
-  const uint32_t gen = eng.generation();
-  const bool needSync = gen != syncedGen;
-  const bool ctrlRamp = EC.mb.rampMode == RAMP_CONTROLLER && hasRampReg();
+static void driveSetpoint(int ch) {
+  const ChOut o = eng.out(ch);
+  if (!o.inProgram) return;
+  Drive& d = drv[ch];
+  Channel& c = chan(ch);
+  char* err = lastErr[ch];
+  if (o.idle) {  // no target yet / Idle: outputs off
+    if (d.outOn != 0) {
+      bool ok = writeRampOff(ch);
+      if (c.canSwitchOff()) ok = ok && c.setOutputs(false, err, sizeof(lastErr[0]));
+      if (ok) d.outOn = 0;
+    }
+    d.syncedGen = 0xFFFFFFFF;
+    return;
+  }
+  if (d.outOn != 1) {
+    if (!c.setOutputs(true, err, sizeof(lastErr[0]))) return;
+    d.outOn = 1;
+  }
+  const bool needSync = o.gen != d.syncedGen;
+  const bool ctrlRamp = s.ch[ch].type == CH_MODBUS && s.ch[ch].mb.rampMode == RAMP_CONTROLLER && hasRampReg(ch);
 
   if (ctrlRamp && needSync) {
     bool ok = true;
-    hostFallback = false;
-    if (st == RunState::Paused) {
-      ok = writeRampOff() && writeSp(eng.setpoint());  // freeze where we are
-    } else if (eng.phase() == Phase::Ramp && eng.phaseRemaining() > 1.0f) {
-      const float cur = eng.setpoint(), tgt = eng.target();
-      const float rate = fabsf(tgt - cur) / (eng.phaseRemaining() / 60.0f);
+    d.hostFallback = false;
+    if (!o.moving) {
+      ok = writeRampOff(ch) && writeSp(ch, o.sp);  // hold, jump, or frozen (pause)
+    } else if (o.rampLeft > 1.0f) {
+      const float rate = fabsf(o.target - o.sp) / (o.rampLeft / 60.0f);
       // 1dP gradient: 0.1/min resolution, and the raw value must fit in int16
-      if (rate >= 0.1f && rate * emb()->reg().scale <= 30000.0f) {
+      if (rate >= 0.1f && rate * mbOf(ch)->reg().scale <= 30000.0f) {
         // start the controller's own ramp from the current program value
-        ok = writeRampOff() && writeSp(cur) && writeRampRate(rate) && writeSp(tgt);
+        ok = writeRampOff(ch) && writeSp(ch, o.sp) && writeRampRate(ch, rate) && writeSp(ch, o.target);
       } else {
-        hostFallback = true;  // too slow/fast for the controller gradient: step from here
-        ok = writeRampOff() && writeSp(cur);
+        d.hostFallback = true;  // too slow/fast for the controller gradient: step from here
+        ok = writeRampOff(ch) && writeSp(ch, o.sp);
       }
     } else {
-      ok = writeRampOff() && writeSp(eng.target());
+      ok = writeRampOff(ch) && writeSp(ch, o.target);
     }
-    if (ok) syncedGen = gen;
+    if (ok) d.syncedGen = o.gen;
     return;
   }
 
-  if (!ctrlRamp || hostFallback) {
-    const float sp = eng.setpoint();
+  if (!ctrlRamp || d.hostFallback) {
     // a local channel takes every new value (no controller EEPROM to spare)
-    const bool local = EC.type == CH_LOCAL;
-    const float minStep = local ? 0.0f : EC.mb.minStep;
-    const uint32_t minMs = local ? 0 : (uint32_t)EC.mb.minWriteSec * 1000UL;
-    const bool due = needSync || isnan(lastWritten) ||
-                     (fabsf(sp - lastWritten) >= minStep && sp != lastWritten && millis() - lastWriteMs >= minMs);
-    if (due && writeSp(sp)) syncedGen = gen;
+    const bool local = s.ch[ch].type == CH_LOCAL;
+    const float minStep = local ? 0.0f : s.ch[ch].mb.minStep;
+    const uint32_t minMs = local ? 0 : (uint32_t)s.ch[ch].mb.minWriteSec * 1000UL;
+    const bool due = needSync || isnan(d.lastWritten) ||
+                     (fabsf(o.sp - d.lastWritten) >= minStep && o.sp != d.lastWritten && millis() - d.lastWriteMs >= minMs);
+    if (due && writeSp(ch, o.sp)) d.syncedGen = o.gen;
   }
 }
 
-static void applyEndAction() {
+// end action of one channel (spec 9.3.5); true when everything was written
+static bool applyEndAction(int ch) {
   bool ok = true;
   const bool aborted = eng.state() == RunState::Aborted;
-  if (hasRampReg()) ok &= writeRampOff();  // freeze a running controller ramp
-  float hold = eng.setpoint();
+  const ChOut o = eng.out(ch);
+  Channel& c = chan(ch);
+  char* err = lastErr[ch];
+  char ft[64];
+  if (c.fault(ft, sizeof(ft))) return true;  // latched fault: the outputs stay off
+  if (hasRampReg(ch)) ok &= writeRampOff(ch);  // freeze a running controller ramp
+  float hold = o.sp;
   {
     Guard g;
-    if (aborted && gLive.spEffValid) hold = gLive.spEff;
+    if (aborted && s.ch[ch].type == CH_MODBUS && gLive.ch[ch].spEffValid) hold = gLive.ch[ch].spEff;
   }
-  switch (EC.endAction) {
-    case END_KEEP: ok &= writeSp(hold); break;
-    case END_SET_SP: ok &= writeSp(EC.endSp); break;
+  switch (s.ch[ch].endAction) {
+    case END_KEEP:
+      if (o.idle) {
+        if (c.canSwitchOff()) ok &= c.setOutputs(false, err, sizeof(lastErr[0]));
+      } else {
+        ok &= writeSp(ch, hold);
+      }
+      break;
+    case END_SET_SP:
+      ok &= c.setOutputs(true, err, sizeof(lastErr[0])) && writeSp(ch, s.ch[ch].endSp);
+      break;
     case END_OUTPUTS_OFF:
-      ok &= writeSp(hold);
-      if (ech().canSwitchOff()) ok &= ech().setOutputs(false, lastErr[ENGINE_CH], sizeof(lastErr[0]));
+      if (!o.idle) ok &= writeSp(ch, hold);
+      if (c.canSwitchOff()) ok &= c.setOutputs(false, err, sizeof(lastErr[0]));
       break;
   }
-  if (rampSaved && emb()) ok &= mbWrite(emb()->reg().rampRate, rampOriginal, "Ramp-rate restore");
-  if (EC.mb.lockFront && emb()) ok &= mbWrite(emb()->reg().remote, 0, "Front-lock write");
-  endPending = !ok;
-  if (!aborted && ok) setMsg("Program finished");
+  Drive& d = drv[ch];
+  if (d.rampSaved && mbOf(ch)) ok &= mbWrite(ch, mbOf(ch)->reg().rampRate, d.rampOriginal, "Ramp-rate restore");
+  if (s.ch[ch].mb.lockFront && mbOf(ch)) ok &= mbWrite(ch, mbOf(ch)->reg().remote, 0, "Front-lock write");
+  return ok;
 }
 
 static void driveManual(int ch) {
   Manual& m = man[ch];
-  Channel& c = *slots[ch].active;
+  Channel& c = chan(ch);
   char* err = lastErr[ch];
   if (m.on && m.pending) {
-    if (c.setOutputs(true, err, sizeof(lastErr[0])) && c.writeSp(clampSp(ch, m.sp), err, sizeof(lastErr[0]))) {
-      m.pending = false;
-      if (ch == ENGINE_CH) {
-        lastWritten = clampSp(ch, m.sp);
-        lastWriteMs = millis();
-        ++spWrites;
-      }
-    }
+    if (c.setOutputs(true, err, sizeof(lastErr[0])) && writeSp(ch, m.sp)) m.pending = false;
   }
   if (!m.on && m.offPending) {
     if (c.setOutputs(false, err, sizeof(lastErr[0]))) m.offPending = false;
@@ -620,50 +843,87 @@ static void driveManual(int ch) {
 static void cycle(float dt) {
   pollChannels();
 
-  bool pvValid, commOk;
-  float pv, spEff;
-  bool spEffValid;
-  uint32_t lastOk;
-  bool commCh[NUM_CHANNELS];
+  float pv[NUM_CHANNELS], spEff[NUM_CHANNELS];
+  bool pvOk[NUM_CHANNELS], spEffOk[NUM_CHANNELS], commOk[NUM_CHANNELS];
+  uint32_t lastOk[NUM_CHANNELS];
   {
     Guard g;
-    const ChannelLive& E = gLive.ch[ENGINE_CH];
-    pvValid = E.pvValid; pv = E.pv; commOk = E.commOk;
-    spEff = E.spEff; spEffValid = E.spEffValid; lastOk = E.lastOkMs;
-    for (int i = 0; i < NUM_CHANNELS; ++i) commCh[i] = gLive.ch[i].commOk;
+    for (int i = 0; i < NUM_CHANNELS; ++i) {
+      const ChannelLive& L = gLive.ch[i];
+      pv[i] = L.pv; pvOk[i] = L.pvValid;
+      spEff[i] = L.spEff; spEffOk[i] = L.spEffValid;
+      commOk[i] = L.commOk; lastOk[i] = L.lastOkMs;
+    }
   }
 
-  // communication watchdog
-  if (eng.state() == RunState::Running && s.commLossSec > 0 &&
-      millis() - lastOk > (uint32_t)s.commLossSec * 1000UL) {
-    eng.pause();
-    snprintf(runMsg, sizeof(runMsg), "Paused: no answer from controller for %us", s.commLossSec);
+  // communication watchdog (channels of the running program)
+  if (eng.state() == RunState::Running && s.commLossSec > 0) {
+    for (int i = 0; i < NUM_CHANNELS; ++i) {
+      if (!inRun(i) || millis() - lastOk[i] <= (uint32_t)s.commLossSec * 1000UL) continue;
+      eng.pause();
+      snprintf(runMsg, sizeof(runMsg), "Paused: no answer from %s for %us", s.ch[i].name, s.commLossSec);
+      break;
+    }
   }
 
-  eng.tick(dt, pv, pvValid, s.guaranteedSoak, s.soakBand);
+  const bool wasPause = eng.progPaused();
+  eng.tick(dt, pv, pvOk);
+  if (eng.progPaused() && !wasPause) {
+    const char* t = eng.pauseText();
+    snprintf(runMsg, sizeof(runMsg), "%s%s%s - press Continue", eng.pauseMsg() ? "Action required" : "Program pause",
+             *t ? ": " : "", t);
+    Serial.printf("[run] %s\n", runMsg);
+  }
   for (int i = 0; i < NUM_CHANNELS; ++i) lastErr[i][0] = 0;
-  if (commOk) driveSetpoint();
+  if (eng.active())
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+      if (commOk[i]) driveSetpoint(i);
   for (int i = 0; i < NUM_CHANNELS; ++i)
-    if (commCh[i]) driveManual(i);
+    if (commOk[i]) driveManual(i);
 
-  // end of program (finished or aborted)
+  // end of program (finished or aborted): end action per channel of the program
   const RunState st = eng.state();
   const bool wasActive = prevState == RunState::Running || prevState == RunState::Paused;
-  if (wasActive && (st == RunState::Finished || st == RunState::Aborted)) endPending = true;
-  if (endPending && commOk) applyEndAction();
+  if (wasActive && (st == RunState::Finished || st == RunState::Aborted)) {
+    for (int i = 0; i < NUM_CHANNELS; ++i) drv[i].endPending = eng.out(i).inProgram;
+    Serial.printf("[run] \"%s\" %s after %.0f s\n", runProg->name, st == RunState::Finished ? "finished" : "stopped",
+                  eng.elapsed());
+  }
+  bool endOpen = false, endDone = false;
+  for (int i = 0; i < NUM_CHANNELS; ++i) {
+    Drive& d = drv[i];
+    if (!d.endPending || !commOk[i]) {
+      endOpen |= d.endPending;
+      continue;
+    }
+    d.endPending = !applyEndAction(i);
+    endOpen |= d.endPending;
+    endDone |= !d.endPending;
+  }
+  if (endDone && !endOpen && st == RunState::Finished) setMsg("Program finished");
   prevState = st;
+
+  float remaining;
+  updatePlan(pv, remaining);
 
   // history + publish
   static uint32_t lastLive = 0;
-  const Manual& em = man[ENGINE_CH];
-  const float spNow = spEffValid ? spEff : (eng.active() ? eng.setpoint() : (em.on ? em.sp : NAN));
+  float spNow[NUM_CHANNELS];
+  ChOut out[NUM_CHANNELS];
+  for (int i = 0; i < NUM_CHANNELS; ++i) {
+    out[i] = eng.out(i);
+    const float runSp = (eng.active() && out[i].inProgram) ? out[i].sp : NAN;
+    spNow[i] = spEffOk[i] ? spEff[i] : !isnan(runSp) ? runSp : (man[i].on ? man[i].sp : NAN);
+  }
   Guard g;
   if (eng.active() && gHist->runValid) {
     int idx = (int)(eng.elapsed() / gHist->runBin);
     if (idx >= CHART_N) idx = CHART_N - 1;
     if (idx < 0) idx = 0;
-    gHist->runPv[idx] = pvValid ? pv : NAN;
-    gHist->runSp[idx] = spNow;
+    for (int i = 0; i < NUM_CHANNELS; ++i) {
+      gHist->runPv[i][idx] = pvOk[i] ? pv[i] : NAN;
+      gHist->runSp[i][idx] = spNow[i];
+    }
   }
   // rolling window: one slot per LIVE_SAMPLE_SEC even if polling is slower
   const uint32_t slotMs = LIVE_SAMPLE_SEC * 1000UL;
@@ -671,27 +931,44 @@ static void cycle(float dt) {
   if (n) {
     lastLive = (n > CHART_N) ? millis() : lastLive + n * slotMs;
     if (n > CHART_N) n = CHART_N;
-    memmove(gHist->livePv, gHist->livePv + n, sizeof(float) * (CHART_N - n));
-    memmove(gHist->liveSp, gHist->liveSp + n, sizeof(float) * (CHART_N - n));
-    for (uint32_t i = CHART_N - n; i < CHART_N; ++i) {
-      gHist->livePv[i] = pvValid ? pv : NAN;
-      gHist->liveSp[i] = spNow;
+    for (int c = 0; c < NUM_CHANNELS; ++c) {
+      memmove(gHist->livePv[c], gHist->livePv[c] + n, sizeof(float) * (CHART_N - n));
+      memmove(gHist->liveSp[c], gHist->liveSp[c] + n, sizeof(float) * (CHART_N - n));
+      for (uint32_t i = CHART_N - n; i < CHART_N; ++i) {
+        gHist->livePv[c][i] = pvOk[c] ? pv[c] : NAN;
+        gHist->liveSp[c][i] = spNow[c];
+      }
     }
   }
+  // run
   gLive.state = st;
-  gLive.phase = eng.phase();
-  gLive.step = (int8_t)eng.step();
-  gLive.stepCount = (uint8_t)eng.stepCount();
-  gLive.runProg = runProg;
-  strlcpy(gLive.runName, eng.program().name, sizeof(gLive.runName));
+  gLive.runProg = runIdx;
+  if (runIdx >= 0) {
+    strlcpy(gLive.runName, runProg->name, sizeof(gLive.runName));
+    gLive.progType = runProg->type;
+    gLive.phases = runProg->nPh;
+    for (int i = 0; i < NUM_CHANNELS; ++i) gLive.steps[i] = runProg->nSt[i];
+  }
+  gLive.seq = eng.seq();
+  for (int i = 0; i < NUM_CHANNELS; ++i) gLive.lane[i] = eng.lane(i);
+  gLive.waiting = eng.waiting();
+  gLive.progPause = eng.progPaused();
+  gLive.pauseMsg = eng.pauseMsg();
+  strlcpy(gLive.pauseText, eng.pauseText(), sizeof(gLive.pauseText));
+  gLive.runEdited = editCount != savedCount;
+  gLive.elapsed = eng.elapsed();
+  gLive.remaining = remaining;
   for (int i = 0; i < NUM_CHANNELS; ++i) {
+    gLive.run[i] = out[i];
+    gLive.spSyncedCh[i] = lastErr[i][0] == 0;
+    gLive.spWritesCh[i] = drv[i].spWrites;
     ChannelLive& L = gLive.ch[i];
     L.manualOn = man[i].on;
     L.manualSp = man[i].sp;
     L.manualSynced = !man[i].pending && !man[i].offPending;
     if (lastErr[i][0]) strlcpy(L.lastErr, lastErr[i], sizeof(L.lastErr));
   }
-  // flat mirror of the engine's channel (old UIs)
+  // legacy views for the old UIs: bottom channel, Sequence phase / bottom step
   {
     const ChannelLive& E = gLive.ch[ENGINE_CH];
     gLive.commOk = E.commOk;
@@ -707,17 +984,22 @@ static void cycle(float dt) {
     gLive.manualOn = E.manualOn;
     gLive.manualSp = E.manualSp;
     gLive.manualSynced = E.manualSynced;
+    const bool tl = gLive.progType == PROG_TL;
+    const int lc = (tl && gLive.steps[ENGINE_CH] == 0) ? CH_TOP : ENGINE_CH;  // Timeline lane shown
+    const StageInfo& si = tl ? gLive.lane[lc] : gLive.seq;
+    gLive.phase = si.st;
+    gLive.step = si.idx;
+    gLive.stepCount = tl ? gLive.steps[lc] : gLive.phases;
+    gLive.phaseEl = si.el;
+    gLive.phaseDur = si.dur > si.el ? si.dur : si.el;  // wait / pause: nothing "left"
+    gLive.total = gLive.elapsed + remaining;
+    gLive.soakWait = gLive.waiting;
+    gLive.hostSp = out[ENGINE_CH].sp;
+    gLive.target = out[ENGINE_CH].target;  // NaN while the bottom is idle
+    gLive.spSynced = gLive.spSyncedCh[ENGINE_CH];
+    gLive.lastWrittenSp = drv[ENGINE_CH].lastWritten;
+    gLive.spWrites = drv[ENGINE_CH].spWrites;
   }
-  gLive.phaseEl = eng.phaseElapsed();
-  gLive.phaseDur = eng.phaseDuration();
-  gLive.elapsed = eng.elapsed();
-  gLive.total = eng.total();
-  gLive.soakWait = eng.soakWaiting();
-  gLive.hostSp = eng.setpoint();
-  gLive.target = eng.target();
-  gLive.spSynced = lastErr[ENGINE_CH][0] == 0;
-  gLive.lastWrittenSp = lastWritten;
-  gLive.spWrites = spWrites;
   strlcpy(gLive.runMsg, runMsg, sizeof(gLive.runMsg));
 
   bool fault = false, active = eng.active();
@@ -726,7 +1008,7 @@ static void cycle(float dt) {
     if (s.ch[i].type != CH_OFF && (!gLive.ch[i].commOk || gLive.ch[i].fault)) fault = true;
     if (man[i].on) active = true;
   }
-  statusLedSet(statusLedPick(fault, st == RunState::Paused, netApActive(), active));
+  statusLedSet(statusLedPick(fault, st == RunState::Paused || eng.progPaused(), netApActive(), active));
 }
 
 static void controlTask(void*) {
@@ -761,8 +1043,10 @@ static void controlTask(void*) {
 void appInit() {
   // large buffers on the heap (the static DRAM segment is almost full)
   gHist = (History*)calloc(1, sizeof(History));
-  gPrograms = (Program*)calloc(MAX_PROGRAMS, sizeof(Program));
-  if (!gHist || !gPrograms) {
+  runProg = (DuoProgram*)calloc(1, sizeof(DuoProgram));
+  selProg = (DuoProgram*)calloc(1, sizeof(DuoProgram));
+  scratch = (DuoProgram*)calloc(1, sizeof(DuoProgram));
+  if (!gHist || !runProg || !selProg || !scratch) {
     Serial.println("Out of memory");
     abort();
   }
@@ -774,6 +1058,7 @@ void appInit() {
   gLive.hostSp = gLive.target = gLive.lastWrittenSp = NAN;
   gLive.step = -1;
   gLive.runProg = -1;
+  for (int i = 0; i < NUM_CHANNELS; ++i) gLive.run[i] = eng.out(i);
   if (!settingsLoad(gSettings)) settingsSave(gSettings);
   localCtrlBegin();  // before the control task configures the channels
   for (int i = 0; i < NUM_CHANNELS; ++i) {
@@ -784,9 +1069,7 @@ void appInit() {
     L.manualSp = gSettings.ch[i].manualSp;
     Serial.printf("[settings] channel %d: %s, %s\n", i + 1, gSettings.ch[i].name, channelTypeName(gSettings.ch[i].type));
   }
-  static Program example;  // static: large
-  programExample(example);
-  programStoreBegin(gPrograms, &example);
+  programStoreBegin();
   gLive.manualSp = gSettings.ch[ENGINE_CH].manualSp;
   histResetLive();
   statusLedBegin();
@@ -796,8 +1079,8 @@ void controlTaskStart() {
   xTaskCreatePinnedToCore(controlTask, "control", 8192, nullptr, 3, nullptr, 0);
 }
 
-bool sendCmd(CmdType c, int arg, float value) {
-  Cmd m{c, (int16_t)arg, value};
+bool sendCmd(CmdType c, int arg, float value, int idx, uint8_t sub) {
+  Cmd m{c, sub, (int16_t)arg, (int16_t)idx, value};
   return xQueueSend(cmdQ, &m, pdMS_TO_TICKS(50)) == pdTRUE;
 }
 
@@ -835,20 +1118,29 @@ void saveSettingsQuiet() {
   settingsSave(copy);
 }
 
-bool saveProgram(int idx) {
-  if (idx < 0 || idx >= MAX_PROGRAMS) return false;
-  static Program copy;
-  {
-    Guard g;
-    programSanitize(gPrograms[idx], gSettings.ch[ENGINE_CH].spMin, gSettings.ch[ENGINE_CH].spMax);
-    copy = gPrograms[idx];
-    ++gProgGen;
+DuoProgram& scratchProgram() { return *scratch; }
+
+bool loadLegacyView(int idx, Program& out) {
+  char err[96];
+  if (!programLoad(idx, *scratch, err, sizeof(err))) {
+    char name[PROG_NAME_LEN];
+    snprintf(name, sizeof(name), "Program %d", idx + 1);
+    programClear(out, name);
+    return false;
   }
-  return programStoreSave(idx, copy);
+  programLegacyView(*scratch, out);
+  return true;
+}
+
+bool runProgramJson(JsonObject o) {
+  Guard g;
+  if (runIdx < 0) return false;
+  progToJson(*runProg, o);
+  return true;
 }
 
 void selectProgram(int idx) {
-  if (idx < 0 || idx >= MAX_PROGRAMS) return;
+  if (idx < 0 || idx >= PROG_MAX) return;
   {
     Guard g;
     if (gSettings.selProgram == idx) return;

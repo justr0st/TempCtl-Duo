@@ -47,6 +47,62 @@ static uint16_t addrIn(JsonVariantConst v, uint16_t cur) {
 }
 
 // ------------------------------------------------------------ status / history
+static void stageJson(JsonObject o, const StageInfo& si) {
+  o["idx"] = si.idx;
+  o["stage"] = stageName(si.st);
+  o["el"] = roundf(si.el * 10) / 10;
+  o["dur"] = roundf(si.dur * 10) / 10;
+}
+
+// "run" object of /api/status: the fields of the old page (bottom channel /
+// Sequence phase) plus the Duo run state for both channels
+static void runStatusJson(JsonObject r, const LiveData& L) {
+  r["state"] = runStateName(L.state);
+  r["phase"] = stageName(L.phase);  // legacy: ramp / hold / wait / ...
+  r["step"] = L.step;
+  r["phaseEl"] = L.phaseEl;
+  r["phaseDur"] = L.phaseDur;
+  r["elapsed"] = L.elapsed;
+  r["total"] = L.total;
+  r["remaining"] = L.remaining;
+  r["soakWait"] = L.soakWait;
+  setNum(r["hostSp"], L.hostSp);
+  setNum(r["target"], L.target);
+  r["spSynced"] = L.spSynced;
+  r["spWrites"] = L.spWrites;
+  r["msg"] = L.runMsg;
+  r["prog"] = L.runProg;
+  r["name"] = L.runName;
+  r["steps"] = L.stepCount;
+  if (L.runProg < 0) return;
+  r["type"] = progTypeName(L.progType);
+  r["waiting"] = L.waiting;
+  r["progPause"] = L.progPause;
+  r["actionRequired"] = L.pauseMsg;
+  r["pauseText"] = L.pauseText;
+  r["edited"] = L.runEdited;
+  if (L.progType == PROG_SEQ) {
+    stageJson(r["seq"].to<JsonObject>(), L.seq);
+    r["phases"] = L.phases;
+  }
+  JsonArray a = r["channels"].to<JsonArray>();
+  for (int i = 0; i < NUM_CHANNELS; ++i) {
+    const ChOut& o = L.run[i];
+    JsonObject c = a.add<JsonObject>();
+    c["inProgram"] = o.inProgram;
+    c["idle"] = o.idle;
+    setNum(c["sp"], o.sp);
+    setNum(c["target"], o.target);
+    c["moving"] = o.moving;
+    c["synced"] = L.spSyncedCh[i];
+    c["spWrites"] = L.spWritesCh[i];
+    if (L.progType == PROG_TL) {
+      stageJson(c["lane"].to<JsonObject>(), L.lane[i]);
+      c["steps"] = L.steps[i];
+    }
+  }
+}
+
 static void handleStatus() {
   LiveData L;
   Settings S;
@@ -71,33 +127,18 @@ static void handleStatus() {
   }
   if (L.alarmValid) d["alarm"] = L.alarm;
   JsonObject r = d["run"].to<JsonObject>();
-  r["state"] = runStateName(L.state);
-  r["phase"] = phaseName(L.phase);
-  r["step"] = L.step;
-  r["phaseEl"] = L.phaseEl;
-  r["phaseDur"] = L.phaseDur;
-  r["elapsed"] = L.elapsed;
-  r["total"] = L.total;
-  r["soakWait"] = L.soakWait;
-  setNum(r["hostSp"], L.hostSp);
-  setNum(r["target"], L.target);
-  r["spSynced"] = L.spSynced;
-  r["spWrites"] = L.spWrites;
-  r["msg"] = L.runMsg;
-  r["prog"] = L.runProg;
-  r["name"] = L.runName;
-  r["steps"] = L.stepCount;
+  runStatusJson(r, L);
   JsonObject m = d["manual"].to<JsonObject>();
   m["on"] = L.manualOn;
   setNum(m["sp"], S.ch[ENGINE_CH].manualSp);
   m["synced"] = L.manualSynced;
   d["sel"] = S.selProgram;
   {
-    Guard g;
-    const Program& p = gPrograms[S.selProgram < MAX_PROGRAMS ? S.selProgram : 0];
-    d["selName"] = p.name;
-    d["selSteps"] = p.count;
-    d["plannedTotal"] = ProgramEngine::plannedTotal(p);
+    ProgSummary ps;
+    const bool used = programSummary(S.selProgram, ps);
+    d["selName"] = used ? ps.name : "";
+    d["selSteps"] = used ? ps.items : 0;
+    d["plannedTotal"] = used ? ps.total : 0;
   }
   d["spConfigured"] = S.ch[ENGINE_CH].mb.reg.sp != REG_UNSET;
   d["profile"] = S.ch[ENGINE_CH].mb.profile;
@@ -177,59 +218,89 @@ static void handleHistory() {
   h["elapsed"] = d.elapsed;
   h["name"] = d.progName;
   String out;
-  out.reserve(6500);
+  out.reserve(server.hasArg("both") ? 13000 : 6500);
   serializeJson(h, out);
   out.remove(out.length() - 1);  // drop '}' and append the arrays
   appendArray(out, "pv", d.pv);
   appendArray(out, "sp", d.sp);
   appendArray(out, "plan", d.plan);
+  if (server.hasArg("both")) {  // top channel too (the old page shows the bottom only)
+    appendArray(out, "pvT", d.pvT);
+    appendArray(out, "spT", d.spT);
+    appendArray(out, "planT", d.planT);
+  }
   out += '}';
   server.send(200, "application/json", out);
 }
 
-// Log of the last program run (if there was one since boot), else the live window.
+// Log of the last program run (if there was one since boot), else the live window. Both channels.
 static void handleCsv() {
-  String out = "time_s,process_value,setpoint,planned\n";
-  out.reserve(CHART_N * 24 + 40);
-  char line[64];
+  String out = "time_s,bottom_pv,bottom_sp,bottom_plan,top_pv,top_sp,top_plan\n";
+  out.reserve(CHART_N * 48 + 80);
+  char line[112];
   bool run;
+  auto num = [](char* b, size_t n, float v) {
+    if (isnan(v)) b[0] = 0;
+    else snprintf(b, n, "%.1f", v);
+  };
   {
     Guard g;  // build the text under the lock, send it afterwards
     run = gHist->runValid;
     for (int i = 0; i < CHART_N; ++i) {
-      const float pv = run ? gHist->runPv[i] : gHist->livePv[i];
-      const float sp = run ? gHist->runSp[i] : gHist->liveSp[i];
+      float v[6];
+      for (int c = 0; c < NUM_CHANNELS; ++c) {
+        v[c * 3] = run ? gHist->runPv[c][i] : gHist->livePv[c][i];
+        v[c * 3 + 1] = run ? gHist->runSp[c][i] : gHist->liveSp[c][i];
+        v[c * 3 + 2] = run ? gHist->runPlan[c][i] : NAN;
+      }
+      if (isnan(v[0]) && isnan(v[1]) && isnan(v[3]) && isnan(v[4])) continue;
       const float t = run ? i * gHist->runBin : -(float)(CHART_N - 1 - i) * LIVE_SAMPLE_SEC;
-      const float pl =
-          (run && t <= gHist->runTotal) ? ProgramEngine::plannedAt(gHist->runProg, gHist->runStart, t) : NAN;
-      if (isnan(pv) && isnan(sp)) continue;
-      snprintf(line, sizeof(line), "%.0f,%s,%s,%s\n", t, isnan(pv) ? "" : String(pv, 1).c_str(),
-               isnan(sp) ? "" : String(sp, 1).c_str(), isnan(pl) ? "" : String(pl, 1).c_str());
+      char f[6][12];
+      for (int k = 0; k < 6; ++k) num(f[k], sizeof(f[k]), v[k]);
+      snprintf(line, sizeof(line), "%.0f,%s,%s,%s,%s,%s,%s\n", t, f[0], f[1], f[2], f[3], f[4], f[5]);
       out += line;
     }
   }
-  server.sendHeader("Content-Disposition", run ? "attachment; filename=tempctl-run.csv"
-                                               : "attachment; filename=tempctl-live.csv");
+  server.sendHeader("Content-Disposition", run ? "attachment; filename=tempctl-duo-run.csv"
+                                               : "attachment; filename=tempctl-duo-live.csv");
   server.send(200, "text/csv", out);
 }
 
 // ------------------------------------------------------------ program / commands
 static void handleGetPrograms() {
+  static ProgSummary list[PROG_MAX];
+  programSummaries(list);
   JsonDocument d;
   {
     Guard g;
     d["sel"] = gSettings.selProgram;
-    d["max"] = MAX_PROGRAMS;
-    d["maxSteps"] = MAX_STEPS;
     d["spMin"] = gSettings.ch[ENGINE_CH].spMin;
     d["spMax"] = gSettings.ch[ENGINE_CH].spMax;
-    JsonArray a = d["programs"].to<JsonArray>();
-    for (int i = 0; i < MAX_PROGRAMS; ++i) {
-      JsonObject o = a.add<JsonObject>();
-      o["name"] = gPrograms[i].name;
-      o["steps"] = gPrograms[i].count;
-      o["total"] = ProgramEngine::plannedTotal(gPrograms[i]);
+  }
+  d["max"] = PROG_MAX;
+  d["maxPhases"] = PROG_MAX_PHASES;
+  d["maxSteps"] = PROG_MAX_STEPS;
+  JsonArray a = d["programs"].to<JsonArray>();
+  for (int i = 0; i < PROG_MAX; ++i) {
+    const ProgSummary& p = list[i];
+    JsonObject o = a.add<JsonObject>();
+    o["used"] = p.used != 0;
+    if (!p.used) {
+      char n[16];
+      snprintf(n, sizeof(n), "Program %d", i + 1);
+      o["name"] = n;
+      o["steps"] = 0;
+      o["total"] = 0;
+      continue;
     }
+    o["name"] = p.name;
+    o["type"] = progTypeName(p.type);
+    o["steps"] = p.items;  // phases (Sequence) / steps of both channels (Timeline)
+    o["total"] = p.total;
+    o["waits"] = p.waits != 0;
+    JsonArray u = o["uses"].to<JsonArray>();
+    u.add((p.uses & 1) != 0);
+    u.add((p.uses & 2) != 0);
   }
   sendJson(d);
 }
@@ -241,70 +312,73 @@ static int progIndexArg(JsonVariantConst v) {
   return gSettings.selProgram;
 }
 
+// {"i":0,"used":true,"program":{Duo program JSON},"steps":[legacy bottom view],...}
 static void sendProgram(int i) {
-  static Program p;
-  float lo, hi;
-  {
-    Guard g;
-    p = gPrograms[i];
-    lo = gSettings.ch[ENGINE_CH].spMin;
-    hi = gSettings.ch[ENGINE_CH].spMax;
-  }
+  DuoProgram& p = scratchProgram();
+  char err[96];
+  const bool used = programLoad(i, p, err, sizeof(err));
+  static Program legacy;
+  if (used) programLegacyView(p, legacy);
+  else loadLegacyView(i, legacy);
   JsonDocument d;
   d["i"] = i;
-  d["name"] = p.name;
-  d["spMin"] = lo;
-  d["spMax"] = hi;
+  d["used"] = used;
+  if (used) progToJson(p, d["program"].to<JsonObject>());
+  // old page (read-only editor): bottom channel as TempCtl steps
+  d["readOnly"] = true;
+  d["name"] = legacy.name;
+  {
+    Guard g;
+    d["spMin"] = gSettings.ch[ENGINE_CH].spMin;
+    d["spMax"] = gSettings.ch[ENGINE_CH].spMax;
+  }
   d["maxSteps"] = MAX_STEPS;
   JsonArray a = d["steps"].to<JsonArray>();
-  for (int k = 0; k < p.count; ++k) {
+  for (int k = 0; k < legacy.count; ++k) {
     JsonObject o = a.add<JsonObject>();
-    o["t"] = p.s[k].target;
-    o["r"] = p.s[k].rampSec;
-    o["h"] = p.s[k].holdSec;
+    o["t"] = legacy.s[k].target;
+    o["r"] = legacy.s[k].rampSec;
+    o["h"] = legacy.s[k].holdSec;
   }
   sendJson(d);
 }
 
 static void handleGetProgram() {
   const int i = progIndexArg(JsonVariantConst());
-  if (i < 0 || i >= MAX_PROGRAMS) return sendError("Program index out of range");
+  if (i < 0 || i >= PROG_MAX) return sendError("Program index out of range");
   sendProgram(i);
 }
 
-// Body: {"i":0,"name":"Bisque","steps":[{"t":100,"r":1800,"h":600}, ...]}  (r, h in seconds)
+// Body: {"i":0,"program":{"fmt":1,"name":"...","type":"seq","phases":[...]}}  (spec 9.3.5)
+//       {"i":0,"delete":true}
 static void handlePostProgram() {
   JsonDocument d;
   if (!parseBody(d)) return sendError("Invalid JSON");
   const int i = progIndexArg(d["i"]);
-  if (i < 0 || i >= MAX_PROGRAMS) return sendError("Program index out of range");
-  JsonArrayConst a = d["steps"].as<JsonArrayConst>();
-  if (a.isNull()) return sendError("Missing steps");
-  if (a.size() > (size_t)MAX_STEPS) return sendError("Too many steps (max 100)");
-  static Program p;
+  if (i < 0 || i >= PROG_MAX) return sendError("Program index out of range");
+  if (d["delete"] | false) {
+    if (!programDelete(i)) return sendError("Deleting the program failed", 500);
+    return sendProgram(i);
+  }
+  if (!d["steps"].isNull() && d["program"].isNull())
+    return sendError("Program editing on this page is read-only until the new web page (use \"program\": {...})");
+  DuoProgram& p = scratchProgram();
+  char err[128];
+  const char* names[NUM_CHANNELS];
+  float lo[NUM_CHANNELS], hi[NUM_CHANNELS];
+  static char nameBuf[NUM_CHANNELS][CH_NAME_LEN];
   {
     Guard g;
-    p = gPrograms[i];
+    for (int c = 0; c < NUM_CHANNELS; ++c) {
+      strlcpy(nameBuf[c], gSettings.ch[c].name, sizeof(nameBuf[c]));
+      names[c] = nameBuf[c];
+      lo[c] = gSettings.ch[c].spMin;
+      hi[c] = gSettings.ch[c].spMax;
+    }
   }
-  if (d["name"].is<const char*>()) {
-    const char* n = d["name"];
-    while (*n == ' ') ++n;
-    if (*n) strlcpy(p.name, n, sizeof(p.name));
-  }
-  p.count = 0;
-  for (JsonObjectConst o : a) {
-    Step st;
-    st.target = o["t"] | 0.0f;
-    const float r = o["r"] | 0.0f, h = o["h"] | 0.0f;
-    st.rampSec = r > 0 ? (uint32_t)lroundf(fminf(r, (float)MAX_STEP_SEC)) : 0;
-    st.holdSec = h > 0 ? (uint32_t)lroundf(fminf(h, (float)MAX_STEP_SEC)) : 0;
-    programInsertStep(p, p.count, st);
-  }
-  {
-    Guard g;
-    gPrograms[i] = p;
-  }
-  if (!saveProgram(i)) return sendError("Writing the program to flash failed", 500);
+  if (!progFromJson(d["program"].as<JsonObjectConst>(), p, err, sizeof(err), names)) return sendError(err);
+  if (!progCheckLimits(p, lo, hi, err, sizeof(err), names)) return sendError(err);
+  if (!programSave(i, p, err, sizeof(err))) return sendError(err, 500);
   sendProgram(i);
 }
 
@@ -312,11 +386,53 @@ static void handleSelect() {
   JsonDocument d;
   if (!parseBody(d)) return sendError("Invalid JSON");
   const int i = d["i"] | -1;
-  if (i < 0 || i >= MAX_PROGRAMS) return sendError("Program index out of range");
+  if (i < 0 || i >= PROG_MAX) return sendError("Program index out of range");
   selectProgram(i);
   JsonDocument r;
   r["ok"] = true;
   r["sel"] = i;
+  sendJson(r);
+}
+
+// GET: the running (or last) program's running copy, with its run edits
+static void handleGetRun() {
+  JsonDocument d;
+  LiveData L;
+  {
+    Guard g;
+    L = gLive;
+  }
+  runStatusJson(d["run"].to<JsonObject>(), L);
+  if (!runProgramJson(d["program"].to<JsonObject>())) d.remove("program");
+  sendJson(d);
+}
+
+// Run control and run edits (spec 9.3.4); results in /api/status run.msg
+//   {"cmd":"extend","ch":0,"sec":30}           current hold +30 s (Sequence: ch ignored)
+//   {"cmd":"hold","ch":1,"idx":4,"sec":45}      hold time of phase / step idx (-1 = current)
+//   {"cmd":"ramp","ch":1,"idx":5,"sec":40}      later ramps only
+//   {"cmd":"target","ch":0,"idx":-1,"t":170}    current / kept target (or a later one)
+//   {"cmd":"save"}                              store the run edits into the program
+//   {"cmd":"next"} / {"cmd":"continue"}
+static void handlePostRun() {
+  JsonDocument d;
+  if (!parseBody(d)) return sendError("Invalid JSON");
+  const char* c = d["cmd"] | "";
+  const int ch = d["ch"] | 0;
+  const int idx = d["idx"] | -1;
+  bool ok;
+  if (!strcmp(c, "extend")) ok = sendCmd(CMD_RUN_EDIT, ch, d["sec"] | 0.0f, -1, EDIT_EXTEND);
+  else if (!strcmp(c, "hold")) ok = sendCmd(CMD_RUN_EDIT, ch, d["sec"] | 0.0f, idx, EDIT_HOLD);
+  else if (!strcmp(c, "ramp")) ok = sendCmd(CMD_RUN_EDIT, ch, d["sec"] | 0.0f, idx, EDIT_RAMP);
+  else if (!strcmp(c, "target")) {
+    if (!d["t"].is<float>()) return sendError("t (target) missing");
+    ok = sendCmd(CMD_RUN_EDIT, ch, d["t"].as<float>(), idx, EDIT_TARGET);
+  } else if (!strcmp(c, "save")) ok = sendCmd(CMD_SAVE_RUN);
+  else if (!strcmp(c, "next")) ok = sendCmd(CMD_NEXT);
+  else if (!strcmp(c, "continue")) ok = sendCmd(CMD_CONTINUE);
+  else return sendError("cmd must be extend, hold, ramp, target, save, next or continue");
+  JsonDocument r;
+  r["ok"] = ok;
   sendJson(r);
 }
 
@@ -399,7 +515,8 @@ static void handleCmd() {
   else if (c == "pause") t = CMD_PAUSE;
   else if (c == "resume") t = CMD_RESUME;
   else if (c == "stop") t = CMD_STOP;
-  else if (c == "skip") t = CMD_SKIP;
+  else if (c == "skip" || c == "next") t = CMD_NEXT;  // "skip": old page
+  else if (c == "continue") t = CMD_CONTINUE;
   else return sendError("Unknown command");
   JsonDocument r;
   r["ok"] = sendCmd(t, arg);
@@ -440,8 +557,7 @@ static void handleGetSettings() {
   d["rampMode"] = S.ch[ENGINE_CH].mb.rampMode;
   d["minStep"] = S.ch[ENGINE_CH].mb.minStep;
   d["minWriteSec"] = S.ch[ENGINE_CH].mb.minWriteSec;
-  d["guaranteedSoak"] = S.guaranteedSoak != 0;
-  d["soakBand"] = S.soakBand;
+  d["soakBand"] = S.bottomBand;  // old page: "bottom reached" band
   d["endAction"] = S.ch[ENGINE_CH].endAction;
   d["endSp"] = S.ch[ENGINE_CH].endSp;
   d["lockFront"] = S.ch[ENGINE_CH].mb.lockFront != 0;
@@ -521,8 +637,7 @@ static void handlePostSettings() {
     upd<uint8_t>(d["rampMode"], S.ch[ENGINE_CH].mb.rampMode, 0, 1);
     upd<float>(d["minStep"], S.ch[ENGINE_CH].mb.minStep, 0.1f, 100.0f);
     upd<uint16_t>(d["minWriteSec"], S.ch[ENGINE_CH].mb.minWriteSec, 1, 3600);
-    if (!d["guaranteedSoak"].isNull()) S.guaranteedSoak = d["guaranteedSoak"].as<bool>();
-    upd<float>(d["soakBand"], S.soakBand, 0.1f, 500.0f);
+    upd<float>(d["soakBand"], S.bottomBand, 0.5f, 50.0f);
     upd<uint8_t>(d["endAction"], S.ch[ENGINE_CH].endAction, 0, 2);
     upd<float>(d["endSp"], S.ch[ENGINE_CH].endSp, -1999.0f, 9999.0f);
     if (!d["lockFront"].isNull()) S.ch[ENGINE_CH].mb.lockFront = d["lockFront"].as<bool>();
@@ -769,6 +884,8 @@ void webBegin() {
   server.on("/api/program", HTTP_GET, handleGetProgram);
   server.on("/api/program", HTTP_POST, handlePostProgram);
   server.on("/api/select", HTTP_POST, handleSelect);
+  server.on("/api/run", HTTP_GET, handleGetRun);
+  server.on("/api/run", HTTP_POST, handlePostRun);
   server.on("/api/manual", HTTP_POST, handleManual);
   server.on("/api/cmd", HTTP_POST, handleCmd);
   server.on("/api/ack", HTTP_POST, handleAck);

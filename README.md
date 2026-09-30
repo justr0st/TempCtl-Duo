@@ -1,29 +1,32 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
 
-> **Work in progress (version 1.0.0).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
-> of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **step 1, hardware bring-up** —
-> the ESP32-S3 board (env `s3`) and the CYD (envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`) build from the same sources; the single-channel
-> TempCtl 1.2 functions below still apply. On the S3's 480×320 screen the 320×240 TempCtl screens run in
-> the top left corner, next to a bring-up panel (version, free memory, touch coordinates with a red dot
-> at the touched point).
+> **Work in progress (version 1.0.2).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
+> of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
+> (the ESP32-S3 board, env `s3`, and the CYD, envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`,
+> build from the same sources), two channels (Modbus / local / off), local thermocouple + SSR channels,
+> PID + autotune, and the two program types (Sequence, Timeline) with one run engine for both channels.
+> Next: the new web page (step 7) and touch UI (step 6). Until then the TempCtl 1.2 screens and web page
+> below show the **bottom channel**, run control works for both channels, and programs are **read-only**
+> there (they are written through the web API, section 5). On the S3's 480×320 screen the 320×240 TempCtl
+> screens run in the top left corner, next to a bring-up panel.
 
 Firmware for the ESP32-2432S028R ("Cheap Yellow Display") that drives a **PMA KS 40-1 / 41-1 / 42-1**
-(or another Modbus RTU temperature controller) over RS485. It stores **up to 10 named programs with up to
-100 ramp/soak steps each** and can also hold a **manual setpoint**.
-Main use: the heater of a **BGA rework station** (reflow / desolder profiles); on the first start
-program 1 is an example lead-free GPU desolder profile ("GPU desolder (LeadFree)", 4 steps, 4:40).
+(or another Modbus RTU temperature controller) over RS485. It stores **up to 20 named programs** for both
+heaters (Sequence or Timeline, see "Programs" below) and can also hold a **manual setpoint** per channel.
+Main use: the bottom and top heater of a **BGA rework station** (reflow / desolder profiles); on the first
+start three example programs are created (Lead-free BGA, Leaded BGA, Lead-free BGA as a Timeline).
 
 - LVGL 9.6 touch GUI, designed as an **LVGL Pro Editor** project (`ui/`, see section 4a):
-  - **Main**: live values, manual setpoint (numeric entry + on/off), program selection and Start / Pause / Stop / Skip
-  - **Program**: pick one of 10 programs, rename it with the on-screen keyboard, add / remove / move steps
-    (only configured steps are shown), times in minutes or seconds
+  - **Main**: live values, manual setpoint (numeric entry + on/off), program selection and Start / Pause / Stop /
+    Next phase (= Continue in a program pause)
+  - **Program**: read-only view of a program (the bottom channel as steps) until the new touch UI
   - **Chart**: updated every second. Idle: rolling 5-minute window (PV scrolls from right to left) plus a
     preview of the selected program on its own time scale. Running: fixed time axis covering the whole program
     plus spare time; the program curve and the PV trace grow from the left. Program and setpoint lines are
     solid while active and dashed while not active.
   - **Setup → System**: rotate the screen by 180°, brightness, colour theme and dark mode, Wi-Fi (scan,
     password, AP password)
-  - **Setup → Controller**: controller type, serial link, ramp mode, soak, front-panel lock, end action
+  - **Setup → Controller**: controller type, serial link, ramp mode, "bottom reached" band, front-panel lock, end action
 - Web interface with the same functions plus controller parameters (PID, limits, self-tuning), full register
   map, register read/write tools, a setpoint-address finder and CSV log download
 - The controller keeps doing the PID control; the ESP32 only feeds it setpoints
@@ -76,17 +79,34 @@ firmware reads both and refuses to start if an enabled step's target lies outsid
 
 The web *Main* page shows the number of setpoint writes in the current run.
 
-### Program behaviour
+### Programs (TempCtl Duo, spec 9.3)
 
-- Up to 10 programs, each with a name (23 characters) and 1…100 steps. Stored on the LittleFS partition,
-  one file per program; settings stay in NVS.
-- Each step: target, ramp time (0 = jump), hold time. The first ramp starts at the PV measured at Start.
-- **Seconds:** times are stored in seconds. In the editors each time can be entered in minutes or seconds
-  (the table shows `30 min` or `45 s`). Second-resolution timing always works with *ESP32 writes setpoint
-  steps* (set *minimum seconds between writes* low enough, e.g. 1). With *Controller ramps (r.SP)* the
-  KS 4x-1 gradient is per minute, so a short ramp only uses the controller gradient if it fits the register
-  (see above); otherwise the ESP32 steps the setpoint itself.
-- Starting a program switches the controller outputs on (`C.Off` = 0) and ends manual mode.
+- **One program drives both channels.** Up to 20 programs, name up to 31 characters, stored as JSON files
+  `/duo/prog0.json` … `/duo/prog19.json` on LittleFS (safe save: temp file + rename). Two types:
+  - **Sequence**: up to 100 phases, one after another. `B` (bottom: target, ramp, hold), `T` (top: target,
+    ramp, hold), `BT` (both: the bottom setpoint jumps to its target or goes Idle = outputs off, the top
+    ramps and holds), `P` (pause: waits for Continue, optional "Action required" and a text up to 40
+    characters). `B` and `BT` phases can **wait for the bottom** to reach its target (± the "bottom reached"
+    band, default 5 °C) before the hold (`B`) or the top ramp (`BT`) starts. A channel keeps its last
+    target while other phases run.
+  - **Timeline**: two independent step lists (up to 100 steps each) started together: target steps
+    (target, ramp, hold), `idle` steps (outputs off for a time) and `pause` steps (the whole run pauses).
+    A channel that finishes earlier keeps its last target until the other one is done.
+- The first ramp of a channel, and the first ramp after Idle, starts at its measured temperature; later
+  ramps start at the previous target. A ramp of 0 is a jump. A channel without phases/steps in the program
+  stays under manual control during the run; the program's channels start with their outputs off until
+  they get a target.
+- **Next phase** (Sequence): ramp → hold (setpoint at the target, a wait is skipped), wait → hold / top ramp,
+  hold → next phase; in a pause it continues. Timelines have no Next phase (only Continue in a pause).
+- **Run edits** (`POST /api/run`): extend or change a hold (not below the time already held; down to now
+  ends it), change later ramp times, change targets (current, later, or the target a channel keeps). Slopes
+  are kept and times adapt; in a Timeline a timing change of one channel shifts the other one through its
+  holds. The edits go to the running copy; `{"cmd":"save"}` stores them into the program.
+- End: each channel of the program applies its own end action (keep setpoint / end setpoint / outputs off).
+  A fault on any channel stops the run.
+- **Seconds:** times are stored in seconds. With *Controller ramps (r.SP)* the KS 4x-1 gradient is per
+  minute, so a short ramp only uses the controller gradient if it fits the register (see above); otherwise
+  the ESP32 steps the setpoint itself.
 
 ### Manual setpoint
 
@@ -95,12 +115,12 @@ The web *Main* page shows the number of setpoint writes in the current run.
   no outputs-off register is configured, *off* only stops the ESP32 from writing; the controller keeps its
   last setpoint.
 - Manual mode is always off after a restart; the last value is remembered.
-- *Guaranteed soak*: hold time only counts while PV is within ± band of the target.
-- Pause freezes program time (and the controller ramp). Skip jumps to the next phase.
+- Pause freezes program time (and the controller ramps).
 - End/stop action: keep setpoint, set an end setpoint, or switch controller outputs off (`C.Off`).
   The original `r.SP` is restored afterwards.
-- If the controller doesn't answer for 30 s (configurable) the program pauses.
-- If the ESP32 resets, the program stops; the controller keeps controlling at its last setpoint.
+- If a channel of the program doesn't answer for 30 s (configurable) the program pauses.
+- If the ESP32 resets, the program stops; a Modbus controller keeps controlling at its last setpoint (local
+  channels start with the SSR off). "Run interrupted by a reset" with a resume button comes later.
 
 ## 2. Hardware
 
@@ -295,9 +315,10 @@ Rules so the firmware keeps working:
 
 ## 5. Web API
 
-TempCtl Duo (step 2): two channels. Until the new web page and run engine arrive, the program engine, the
-chart and the TempCtl 1.2 endpoints below work on the **bottom channel**; `channels` in `/api/status`,
-`ch` in `/api/manual` and the bus tools, and `/api/config` cover both.
+TempCtl Duo: two channels. Until the new web page arrives, the old page, the chart and the TempCtl 1.2
+endpoints show the **bottom channel**; the run engine drives both channels. `channels` and `run` in
+`/api/status`, `/api/run`, `/api/program`, `ch` in `/api/manual` and the bus tools, and `/api/config`
+cover both.
 
 **Local channels** (type `local`, step 3): thermocouple converter MAX31855 or MAX6675 (`local.sensor`) read
 every 250 ms, calibration `true = raw * calGain + calOffset`, PID (`kp`, `ki`, `kd`, or from the autotune: relay test around a
@@ -309,17 +330,20 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 
 | Method | Path | Body / query |
 |---|---|---|
-| GET | `/api/status` | live values (bottom), run state, manual setpoint, selected program; `channels`: both channels (name, type, ok, err, pv, sp, out, mode, manual) |
+| GET | `/api/status` | live values (bottom), manual setpoint, selected program; `channels`: both channels (name, type, ok, err, pv, sp, out, mode, manual); `run`: state, `type` (`seq`/`tl`), `seq` (phase `idx`, `stage`, `el`, `dur`), `waiting`, `progPause`, `actionRequired`, `pauseText`, `elapsed`, `remaining`, `edited`, `channels[]` (inProgram, idle, sp, target, moving, Timeline `lane`) |
 | GET/POST | `/api/config` | the whole settings document (= `/duo/settings.json` without passwords). POST changes only the keys given, e.g. `{"channels":[null,{"type":"modbus","modbus":{"addr":2}}]}`; errors come back as `{"ok":false,"err":"channels[1].type: one of …"}` |
-| GET | `/api/history` | chart data (300 points): `pv`, `sp`, `plan`, `mode` = `live`/`run`, `planActive`, `spActive` |
-| GET | `/api/log.csv` | last program run (or the live window) as CSV |
-| GET | `/api/programs` | names, step counts and durations of all 10 programs, `sel` |
-| GET/POST | `/api/program?i=0` | `{"i":0,"name":"Bisque","steps":[{"t":100,"r":1800,"h":600}, …]}` (r, h in seconds) |
+| GET | `/api/history` | chart data (300 points): `pv`, `sp`, `plan` (bottom), with `?both=1` also `pvT`, `spT`, `planT` (top); `mode` = `live`/`run`, `planActive`, `spActive` |
+| GET | `/api/log.csv` | last program run (or the live window) as CSV, both channels |
+| GET | `/api/programs` | all 20 slots: `used`, `name`, `type`, `steps` (phases / steps), `total` (s), `uses` [bottom, top], `waits`; `sel` |
+| GET | `/api/program?i=0` | `program`: the program JSON (spec 9.3.5); `steps`: read-only bottom view for the old page |
+| POST | `/api/program` | `{"i":0,"program":{…}}` save (validated, setpoint limits checked) or `{"i":0,"delete":true}` |
+| GET | `/api/run` | `run` (as in `/api/status`) + `program`: the running copy with its run edits |
+| POST | `/api/run` | `{"cmd":"extend","ch":0,"sec":30}`, `{"cmd":"hold","ch":1,"idx":4,"sec":45}`, `{"cmd":"ramp","ch":1,"idx":5,"sec":40}`, `{"cmd":"target","ch":0,"idx":-1,"t":170}` (`idx` = phase / step, -1 = current / kept), `{"cmd":"save"}`, `"next"`, `"continue"`; the result shows in `run.msg` |
 | POST | `/api/select` | `{"i":index}` select the program for Main / Chart |
 | POST | `/api/manual` | `{"sp":150}` and/or `{"on":true}`, optional `"ch":1` (top; default 0 = bottom) |
 | POST | `/api/autotune` | local channels: `{"ch":1,"cmd":"start","sp":200}`, `"stop"`, `"accept"` (proposed kp/ki/kd → settings), `"discard"`; progress and result in `/api/status` → `channels[].autotune` |
 | POST | `/api/ack` | `{"ch":0}` acknowledge a channel fault (runaway, sensor, over temperature); refused while the cause is still there. The outputs stay off until switched on again |
-| POST | `/api/cmd` | `{"cmd":"start"|"pause"|"resume"|"stop"|"skip", "prog":index}` |
+| POST | `/api/cmd` | `{"cmd":"start"|"pause"|"resume"|"stop"|"next"|"continue", "prog":index}` (`skip` = `next`) |
 | GET/POST | `/api/settings` | TempCtl 1.2 form (bottom channel + common); partial updates allowed; `{"profile":0,"loadDefaults":true}`, `{"rotate180":true}` |
 | POST | `/api/wifi` | `{"ssid","pass","apPass"}`, reconnects without restart |
 | GET | `/api/mb/read?addr=&n=&fn=&ch=` | raw registers (`ch`: channel whose controller address is used, default 0; also in the POST tools below) |
@@ -342,8 +366,10 @@ src/board_s3.h, board_cyd.h  pins, display, touch and LED per board
 src/lcd.*                 display: LVGL's ST7796 / ILI9341 driver on ESP-IDF spi_master with DMA
 src/touch.h, touch_ft6336.cpp, touch_xpt2046.cpp  touch drivers (own FT6336U driver / XPT2046_Touchscreen)
 src/status_led.*          status LED (WS2812 / single LED)
-src/program.*             ramp/soak engine + step editing helpers (pure C++, unit-tested)
-src/program_store.*       10 programs on LittleFS
+src/duo_program.*         programs (Sequence / Timeline): model, JSON, limits, examples (pure C++, unit-tested)
+src/run_engine.*          one run engine for both types and channels, run edits, plan forecast (pure C++, unit-tested)
+src/program.*             read-only TempCtl step view of a program for the old UIs (pure C++)
+src/program_store.*       20 programs as JSON files on LittleFS
 src/modbus_frame.h        Modbus RTU framing + CRC (pure C++, unit-tested)
 src/modbus_rtu.*          half-duplex Modbus master (UART1 on the S3, UART2 on the CYD)
 src/controller.*          register access of one controller on the shared bus, PMA parameter/action tables
@@ -353,11 +379,11 @@ src/channel.*             channel interface: Modbus backend (+ runaway check), l
 src/local_ctrl.*          local channels: task reading the thermocouples, PID, SSR time proportioning, safety
 src/tc_sensor.*, pid.*, runaway.*, autotune.*  MAX31855/MAX6675 decoding, PID, runaway check, relay autotune
                           (pure C++, unit-tested)
-src/app_state.*           control task: polling both channels, program (bottom), manual setpoint per channel, chart history
+src/app_state.*           control task: polling both channels, run engine, manual setpoint per channel, chart history
 src/ui.*                  touch UI behaviour: event callbacks, dialogs, bring-up panel
 src/ui_gen.*              bridge to the exported UI code (create functions, constants, font fallbacks)
 src/web.*, web_page.h     HTTP server, JSON API, single-page web UI
-test/host_test.cpp        g++ -std=c++17 -Isrc -I<ArduinoJson>/src test/host_test.cpp src/program.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp && ./a.out
+test/host_test.cpp        g++ -std=c++17 -Isrc -I<ArduinoJson>/src test/host_test.cpp src/program.cpp src/duo_program.cpp src/run_engine.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp && ./a.out
 ```
 
 ## 7. Safety

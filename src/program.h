@@ -1,12 +1,15 @@
-// Ramp/soak profile engine. Pure C++ (no Arduino deps) so it can be
-// unit-tested on a PC (see test/host_test.cpp).
+// Legacy single-channel program view for the TempCtl 1.2 touch UI and web
+// page, which stay in use until the new UIs (steps 6 and 7). They show a
+// program read-only as the bottom channel's plan in TempCtl steps (target,
+// ramp, hold). The Duo programs are in duo_program.h, the engine in
+// run_engine.h. Pure C++ (host-tested).
 #pragma once
 #include <stdint.h>
+#include "duo_program.h"
+#include "run_engine.h"
 
-constexpr int MAX_PROGRAMS = 10;    // stored programs
-constexpr int MAX_STEPS = 100;      // steps per program
-constexpr int PROG_NAME_LEN = 24;   // including the terminating 0
-constexpr uint32_t MAX_STEP_SEC = 9999UL * 60UL;  // longest ramp/hold
+constexpr int MAX_PROGRAMS = PROG_MAX;  // stored programs
+constexpr int MAX_STEPS = 100;          // steps of the legacy view
 
 struct Step {
   float target;       // target temperature
@@ -20,69 +23,11 @@ struct Program {
   Step s[MAX_STEPS];
 };
 
-// Program editing helpers (bounds-checked; return false if not possible)
 void programClear(Program& p, const char* name);
 bool programInsertStep(Program& p, int at, const Step& st);  // at = 0..count
-bool programRemoveStep(Program& p, int idx);
-bool programMoveStep(Program& p, int from, int to);
-void programSanitize(Program& p, float spMin, float spMax);  // clamp values, fix count/name
+float programTotal(const Program& p);                        // ramps + holds
 
-enum class RunState : uint8_t { Idle = 0, Running, Paused, Finished, Aborted };
-enum class Phase : uint8_t { None = 0, Ramp, Hold };
-
-const char* runStateName(RunState s);
-const char* phaseName(Phase p);
-
-class ProgramEngine {
- public:
-  // Start a program. The first ramp starts at startTemp (normally the current PV).
-  // Returns false if the program has no steps.
-  bool start(const Program& p, float startTemp);
-  void pause();
-  void resume();
-  void stop();   // abort
-  void skip();   // jump to next phase
-
-  // Advance program time by dt seconds.
-  // guaranteedSoak: hold time only counts while |pv - target| <= band.
-  void tick(float dtSec, float pv, bool pvValid, bool guaranteedSoak, float band);
-
-  RunState state() const { return st_; }
-  bool active() const { return st_ == RunState::Running || st_ == RunState::Paused; }
-  Phase phase() const { return ph_; }
-  int step() const { return step_; }              // 0..count-1, -1 if none
-  int stepCount() const { return p_.count; }
-  float setpoint() const;                          // current (host-computed) setpoint
-  float target() const;                            // target of current step
-  float phaseElapsed() const { return phEl_; }     // seconds
-  float phaseDuration() const;                     // seconds
-  float phaseRemaining() const;                    // seconds
-  float elapsed() const;                           // program seconds (planned timeline)
-  float total() const { return total_; }           // planned total seconds
-  bool soakWaiting() const { return soakWait_; }
-  uint32_t generation() const { return gen_; }     // increments on every phase/state change
-  float startTemp() const { return start_; }
-  const Program& program() const { return p_; }
-
-  static float plannedTotal(const Program& p);
-  static float plannedAt(const Program& p, float startTemp, float tSec);
-
- private:
-  void advance();
-  void finish();
-  float rampSec(int i) const;
-  float holdSec(int i) const;
-
-  Program p_{};
-  RunState st_ = RunState::Idle;
-  Phase ph_ = Phase::None;
-  int step_ = -1;
-  float phEl_ = 0;     // elapsed in current phase
-  float done_ = 0;     // planned seconds of completed phases
-  float start_ = 0;
-  float prev_ = 0;     // value the current ramp starts from
-  float total_ = 0;
-  float lastSp_ = 0;   // setpoint after finish/abort
-  bool soakWait_ = false;
-  uint32_t gen_ = 0;
-};
+// The bottom channel's plan of a Duo program as TempCtl steps (Idle parts
+// become holds, first ramps start at 25 C). A program without bottom phases
+// shows the top channel.
+void programLegacyView(const DuoProgram& d, Program& out);

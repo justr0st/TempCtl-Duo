@@ -1,6 +1,7 @@
 // Host-side tests. Build & run on a PC (ArduinoJson 7 headers, e.g. from .pio/libdeps/<env>/ArduinoJson/src):
-//   g++ -std=c++17 -I../src -I<ArduinoJson>/src host_test.cpp ../src/program.cpp ../src/settings.cpp 
-//       ../src/tc_sensor.cpp ../src/pid.cpp ../src/runaway.cpp ../src/autotune.cpp -o host_test
+//   g++ -std=c++17 -I../src -I<ArduinoJson>/src host_test.cpp ../src/program.cpp ../src/duo_program.cpp
+//       ../src/run_engine.cpp ../src/settings.cpp ../src/tc_sensor.cpp ../src/pid.cpp ../src/runaway.cpp
+//       ../src/autotune.cpp -o host_test
 //   ./host_test
 #include <cassert>
 #include <cmath>
@@ -9,6 +10,8 @@
 #include <string>
 #include "modbus_frame.h"
 #include "program.h"
+#include "duo_program.h"
+#include "run_engine.h"
 #include "autotune.h"
 #include "pid.h"
 #include "runaway.h"
@@ -58,113 +61,336 @@ static void testParse() {
   CHECK(w16[1] == 16 && w16[6] == 2 && w16[7] == 0xFF && w16[8] == 0xFB && mbCheckCrc(w16, 11));
 }
 
-static Step st(float t, uint32_t r, uint32_t h) { return Step{t, r, h}; }
+// ------------------------------------------------------------------ programs (JSON, limits)
 
-static Program demo() {
-  Program p;
-  programClear(p, "demo");
-  programInsertStep(p, 0, st(100, 600, 300));   // ramp 10 min to 100, hold 5
-  programInsertStep(p, 1, st(200, 0, 600));     // jump to 200, hold 10
-  programInsertStep(p, 2, st(50, 900, 0));      // ramp down 15 min, no hold
-  return p;
+static std::string progJson(const DuoProgram& p) {
+  JsonDocument d;
+  progToJson(p, d.to<JsonObject>());
+  std::string s;
+  serializeJson(d, s);
+  return s;
 }
 
-static void testEdit() {
-  Program p;
-  programClear(p, "edit");
-  CHECK(p.count == 0 && strcmp(p.name, "edit") == 0);
-  CHECK(!programInsertStep(p, 1, st(1, 0, 0)));  // beyond end
-  for (int i = 0; i < MAX_STEPS; ++i) CHECK(programInsertStep(p, p.count, st((float)i, 0, 0)));
-  CHECK(p.count == MAX_STEPS);
-  CHECK(!programInsertStep(p, 0, st(-1, 0, 0)));  // full
-  CHECK(programRemoveStep(p, 0) && p.count == MAX_STEPS - 1 && p.s[0].target == 1);
-  CHECK(!programRemoveStep(p, p.count));
-  Program q;
-  programClear(q, "q");
-  for (int i = 0; i < 4; ++i) programInsertStep(q, q.count, st((float)i, 0, 0));  // 0 1 2 3
-  CHECK(programMoveStep(q, 0, 3));   // 1 2 3 0
-  CHECK(q.s[0].target == 1 && q.s[3].target == 0);
-  CHECK(programMoveStep(q, 3, 1));   // 1 0 2 3
-  CHECK(q.s[0].target == 1 && q.s[1].target == 0 && q.s[2].target == 2 && q.s[3].target == 3);
-  CHECK(!programMoveStep(q, 0, 4));
-  CHECK(programInsertStep(q, 1, st(9, 0, 0)) && q.s[1].target == 9 && q.s[2].target == 0 && q.count == 5);
-  q.s[0].target = 5000;
-  q.s[1].rampSec = 0xFFFFFFFF;
-  programSanitize(q, 0, 900);
-  CHECK(q.s[0].target == 900 && q.s[1].rampSec == MAX_STEP_SEC);
+static bool progParse(const char* json, DuoProgram& p, char* err, size_t n) {
+  JsonDocument d;
+  if (deserializeJson(d, json) != DeserializationError::Ok) return false;
+  return progFromJson(d.as<JsonObjectConst>(), p, err, n);
 }
 
-static void testPlan() {
-  Program p = demo();
-  CHECK(near(ProgramEngine::plannedTotal(p), 600 + 300 + 0 + 600 + 900));
-  CHECK(near(ProgramEngine::plannedAt(p, 20, 0), 20));
-  CHECK(near(ProgramEngine::plannedAt(p, 20, 300), 60));      // halfway ramp 20->100
-  CHECK(near(ProgramEngine::plannedAt(p, 20, 700), 100));     // hold
-  CHECK(near(ProgramEngine::plannedAt(p, 20, 900), 200));     // step 2 hold
-  CHECK(near(ProgramEngine::plannedAt(p, 20, 1500 + 450), 125));  // halfway 200->50
-  CHECK(near(ProgramEngine::plannedAt(p, 20, 99999), 50));
-  // seconds resolution
-  Program s;
-  programClear(s, "sec");
-  programInsertStep(s, 0, st(30, 10, 5));
-  CHECK(near(ProgramEngine::plannedTotal(s), 15));
-  CHECK(near(ProgramEngine::plannedAt(s, 20, 5), 25));
+static DuoProgram P1, P2;  // static: large
+
+static const char* pauseTextOf(const DuoProgram& p, int phase) { return progText(p, p.ph[phase].text); }
+
+static void testProgJson() {
+  char err[120];
+  for (int i = 0; i < PROG_EXAMPLES; ++i) {
+    progExample(i, P1);
+    const std::string j = progJson(P1);
+    CHECK(progParse(j.c_str(), P2, err, sizeof(err)));
+    CHECK(progJson(P2) == j);
+  }
+  progExample(0, P1);
+  CHECK(P1.type == PROG_SEQ && P1.nPh == 7 && P1.ph[1].kind == PH_P && P1.ph[1].msg && P1.ph[6].bIdle);
+  CHECK(progUses(P1, CH_BOTTOM) && progUses(P1, CH_TOP));
+  // the sketch from spec 9.3.5
+  CHECK(progParse(R"({"fmt":1,"name":" Lead-free BGA ","type":"seq","phases":[
+    {"kind":"B","wait":true,"b":{"t":150,"r":60,"h":60}},
+    {"kind":"P","msg":true,"text":"Place the IR head"},
+    {"kind":"BT","wait":true,"b":{"t":160},"t":{"t":150,"r":60,"h":20}},
+    {"kind":"BT","b":{"idle":true},"t":{"t":150,"r":40,"h":0}}],"extra":1})", P1, err, sizeof(err)));
+  CHECK(!strcmp(P1.name, "Lead-free BGA") && P1.nPh == 4 && !strcmp(pauseTextOf(P1, 1), "Place the IR head"));
+  CHECK(P1.ph[2].kind == PH_BT && P1.ph[2].wait && near(P1.ph[2].b.t, 160) && P1.ph[3].bIdle && !P1.ph[3].wait);
+  CHECK(progParse(R"({"type":"tl","name":"x","B":[{"t":150,"r":60,"h":150},{"idle":true,"h":60}],
+    "T":[{"pause":true,"msg":true,"text":"Check flux"},{"t":200}]})", P1, err, sizeof(err)));
+  CHECK(P1.type == PROG_TL && P1.nSt[0] == 2 && P1.nSt[1] == 2 && P1.st[0][1].kind == ST_IDLE && P1.st[0][1].s.h == 60);
+  CHECK(P1.st[1][0].kind == ST_PAUSE && P1.st[1][1].s.r == 0 && progItems(P1) == 4);
+  // errors
+  CHECK(!progParse(R"({"type":"seq","phases":[{"kind":"X"}]})", P1, err, sizeof(err)) && strstr(err, "kind"));
+  CHECK(!progParse(R"({"type":"seq","phases":[{"kind":"B","b":{"r":5}}]})", P1, err, sizeof(err)) &&
+        strstr(err, "Phase 1: Bottom target missing"));
+  CHECK(!progParse(R"({"type":"seq","phases":[{"kind":"T","t":{"t":100,"r":-5}}]})", P1, err, sizeof(err)) &&
+        strstr(err, "ramp"));
+  CHECK(!progParse(R"({"name":"x"})", P1, err, sizeof(err)) && strstr(err, "type"));
+  CHECK(!progParse(R"({"fmt":2,"type":"seq"})", P1, err, sizeof(err)) && strstr(err, "newer"));
+  CHECK(!progParse(R"({"type":"seq","name":"0123456789012345678901234567890123"})", P1, err, sizeof(err)) &&
+        strstr(err, "31"));
+  CHECK(progParse(R"({"type":"seq","name":"0123456789012345678901234567890"})", P1, err, sizeof(err)));
+  CHECK(!progParse(R"({"type":"tl","T":[{"pause":true,"text":"01234567890123456789012345678901234567890"}]})", P1, err,
+                   sizeof(err)) && strstr(err, "40"));
+  std::string many = R"({"type":"seq","phases":[)";
+  for (int i = 0; i < 101; ++i) many += std::string(i ? "," : "") + R"({"kind":"T","t":{"t":100}})";
+  CHECK(!progParse((many + "]}").c_str(), P1, err, sizeof(err)) && strstr(err, "Too many"));
+  std::string texts = R"({"type":"seq","phases":[)";
+  for (int i = 0; i < 17; ++i) texts += std::string(i ? "," : "") + R"({"kind":"P","text":"t)" + std::to_string(i) + "\"}";
+  CHECK(!progParse((texts + "]}").c_str(), P1, err, sizeof(err)) && strstr(err, "texts"));
+  // limits
+  progExample(0, P1);
+  const float lo[2] = {0, 0}, hi[2] = {400, 240};
+  CHECK(!progCheckLimits(P1, lo, hi, err, sizeof(err)) && strstr(err, "Phase 6: Top target 245.0"));
+  const float hi2[2] = {400, 400};
+  CHECK(progCheckLimits(P1, lo, hi2, err, sizeof(err)));
 }
 
-static void testRun() {
-  Program p = demo();
-  ProgramEngine e;
-  CHECK(e.start(p, 20));
-  CHECK(e.state() == RunState::Running && e.step() == 0 && e.phase() == Phase::Ramp);
-  CHECK(near(e.setpoint(), 20));
-  for (int i = 0; i < 300; ++i) e.tick(1, 0, true, false, 5);
-  CHECK(near(e.setpoint(), 60));
-  e.pause();
-  uint32_t g = e.generation();
-  for (int i = 0; i < 100; ++i) e.tick(1, 0, true, false, 5);
-  CHECK(near(e.setpoint(), 60));  // frozen
-  e.resume();
-  CHECK(e.generation() != g);
-  for (int i = 0; i < 300; ++i) e.tick(1, 0, true, false, 5);
-  CHECK(e.phase() == Phase::Hold && e.step() == 0 && near(e.setpoint(), 100));
-  // guaranteed soak: PV far away -> hold time doesn't advance
-  for (int i = 0; i < 1000; ++i) e.tick(1, 40, true, true, 5);
-  CHECK(e.phase() == Phase::Hold && e.step() == 0 && e.soakWaiting());
-  for (int i = 0; i < 300; ++i) e.tick(1, 98, true, true, 5);
-  // step 1 has zero ramp -> directly hold at 200
-  CHECK(e.step() == 1 && e.phase() == Phase::Hold && near(e.setpoint(), 200));
-  CHECK(near(e.elapsed(), 900, 1.5f));
-  e.skip();  // skip the hold -> step 2 ramp
-  CHECK(e.step() == 2 && e.phase() == Phase::Ramp && near(e.setpoint(), 200));
-  for (int i = 0; i < 450; ++i) e.tick(1, 0, true, false, 5);
-  CHECK(near(e.setpoint(), 125, 0.5f));
-  for (int i = 0; i < 460; ++i) e.tick(1, 0, true, false, 5);
-  CHECK(e.state() == RunState::Finished && near(e.setpoint(), 50));
-  CHECK(near(e.elapsed(), e.total()));
+// ------------------------------------------------------------------ run engine
 
-  // abort keeps the last setpoint
-  ProgramEngine a;
-  a.start(p, 20);
-  for (int i = 0; i < 150; ++i) a.tick(1, 0, true, false, 5);
-  a.stop();
-  CHECK(a.state() == RunState::Aborted && near(a.setpoint(), 40));
-
-  // empty program refuses to start
-  Program none;
-  programClear(none, "");
-  ProgramEngine z;
-  CHECK(!z.start(none, 20) && z.state() == RunState::Idle);
-
-  // a 100-step program with second-resolution steps runs to the end
-  Program big;
-  programClear(big, "big");
-  for (int i = 0; i < MAX_STEPS; ++i) programInsertStep(big, big.count, st((float)(i % 2 ? 50 : 60), 3, 2));
-  ProgramEngine b;
-  CHECK(b.start(big, 20) && near(b.total(), MAX_STEPS * 5));
-  for (int i = 0; i < MAX_STEPS * 5 * 2; ++i) b.tick(0.5f, 0, true, false, 5);
-  CHECK(b.state() == RunState::Finished && near(b.setpoint(), 50));
+// value of each channel's plan at time t
+struct Probe {
+  float t;
+  float v[NUM_CHANNELS];
+  bool idle[NUM_CHANNELS];
+};
+static void probeFn(const PlanSeg& s, void* u) {
+  Probe& p = *(Probe*)u;
+  if (p.t < s.t0 || p.t >= s.t1) return;
+  p.idle[s.ch] = s.idle;
+  p.v[s.ch] = s.idle ? NAN : s.v0 + (s.v1 - s.v0) * (p.t - s.t0) / (s.t1 - s.t0);
+}
+static Probe planAt(const DuoProgram& p, float t, float pv = 25) {
+  Probe r{t, {NAN, NAN}, {false, false}};
+  const float v[2] = {pv, pv};
+  programPreview(p, v, probeFn, &r);
+  return r;
 }
 
+// the heaters follow their setpoints at once (idle: the temperature stays)
+struct Sim {
+  RunEngine e;
+  float pv[NUM_CHANNELS] = {25, 25};
+  bool ok[NUM_CHANNELS] = {true, true};
+  float t = 0;
+  bool autoCont = false;
+  bool start(DuoProgram& p) {
+    t = 0;
+    return e.start(&p, pv, ok, 5);
+  }
+  void step(float dt) {
+    if (autoCont && e.progPaused()) e.cont();
+    e.tick(dt, pv, ok);
+    t += dt;
+    for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+      const ChOut o = e.out(ch);
+      if (!o.idle) pv[ch] = o.sp;
+    }
+  }
+  void runTo(float until, float dt = 1) {
+    while (t < until - 1e-4f && e.active()) step(dt);
+  }
+  float sp(int ch) const { return e.out(ch).sp; }
+};
+
+static float remainingOf(const RunEngine& e) { return e.forecast(nullptr, nullptr, nullptr); }
+
+static void testPreview() {
+  const float tot[PROG_EXAMPLES] = {420, 375, 450};
+  for (int i = 0; i < PROG_EXAMPLES; ++i) {
+    progExample(i, P1);
+    CHECK(near(programPreview(P1, nullptr, nullptr, nullptr), tot[i]));
+  }
+  progExample(0, P1);
+  Probe a = planAt(P1, 30);
+  CHECK(near(a.v[0], 87.5f) && a.idle[1]);
+  a = planAt(P1, 150);  // Both phase: bottom jumped to 160, top ramps from 25 to 150 in 60 s
+  CHECK(near(a.v[0], 160) && near(a.v[1], 87.5f));
+  a = planAt(P1, 400);  // last phase: bottom Idle, top ramps 245 -> 150 in 40 s from 380
+  CHECK(a.idle[0] && near(a.v[1], 245 - 95 * 0.5f));
+  progExample(2, P1);
+  a = planAt(P1, 130);  // Timeline: top idle for 120 s, then 25 -> 150 in 40 s
+  CHECK(near(a.v[0], 150) && near(a.v[1], 25 + 125 * 0.25f));
+  a = planAt(P1, 420);  // top done at 390, keeps 150; bottom idle 390..450
+  CHECK(a.idle[0] && near(a.v[1], 150));
+  // legacy view (old UIs): bottom plan as TempCtl steps
+  progExample(0, P1);
+  static Program L;
+  programLegacyView(P1, L);
+  CHECK(L.count == 2 && near(L.s[0].target, 150) && L.s[0].rampSec == 60 && L.s[0].holdSec == 60);
+  CHECK(near(L.s[1].target, 160) && L.s[1].rampSec == 0 && L.s[1].holdSec == 300 && near(programTotal(L), 420));
+}
+
+static void testSeqRun() {
+  static DuoProgram p;
+  progExample(0, p);
+  Sim s;
+  CHECK(s.start(p));
+  CHECK(near(remainingOf(s.e), 420));
+  s.runTo(30);
+  CHECK(near(s.sp(0), 87.5f) && s.e.out(1).idle && s.e.out(1).inProgram);
+  CHECK(s.e.seq().idx == 0 && s.e.seq().st == Stage::Ramp && near(s.e.seq().el, 30) && near(s.e.seq().dur, 60));
+  CHECK(s.e.out(0).moving && near(s.e.out(0).rampLeft, 30) && near(s.e.out(0).target, 150));
+  s.runTo(61);  // ramp done, the bottom is there: no wait
+  CHECK(s.e.seq().st == Stage::Hold && near(s.sp(0), 150));
+  s.runTo(125);
+  CHECK(s.e.progPaused() && s.e.pauseMsg() && s.e.seq().idx == 1 && s.e.seq().st == Stage::Pause);
+  s.runTo(200);  // nothing moves during the pause
+  CHECK(s.e.progPaused() && near(s.e.elapsed(), 200) && near(s.sp(0), 150));
+  CHECK(s.e.cont());
+  CHECK(s.e.seq().idx == 2 && s.e.waiting() && near(s.sp(0), 160) && s.e.out(1).idle);
+  s.step(1);  // the bottom heater gets to 160 during this tick
+  CHECK(s.e.waiting());
+  s.step(1);  // it is there -> the top ramp starts from its measured 25
+  CHECK(!s.e.waiting() && s.e.seq().st == Stage::Ramp && s.e.out(1).moving);
+  s.runTo(231);  // ramp from 201
+  CHECK(near(s.sp(1), 25 + 125 * 30 / 60.0f, 0.1f));
+  s.runTo(900);
+  CHECK(s.e.state() == RunState::Finished && s.e.out(0).idle && near(s.sp(1), 150));
+  // total: 120 + pause 80 + wait 1 + 300
+  CHECK(near(s.e.elapsed(), 501, 1.01f));
+
+  // wait for bottom: a slow bottom heater keeps the top waiting
+  progExample(0, p);
+  Sim w;
+  w.autoCont = true;
+  w.start(p);
+  w.runTo(119);
+  w.ok[0] = false;  // no bottom temperature: waits
+  w.runTo(160);
+  CHECK(w.e.waiting() && w.e.seq().idx == 2 && near(w.e.seq().el, 40, 1.01f));
+  CHECK(near(remainingOf(w.e), 300));  // the forecast treats the wait as done
+  w.ok[0] = true;
+  w.runTo(162);
+  CHECK(!w.e.waiting());
+}
+
+static void testNextPause() {
+  static DuoProgram p;
+  progExample(0, p);
+  Sim s;
+  s.start(p);
+  s.runTo(10);
+  CHECK(s.e.next());  // ramp -> hold, setpoint at the target
+  CHECK(s.e.seq().st == Stage::Hold && near(s.sp(0), 150));
+  CHECK(s.e.next() && s.e.progPaused());   // hold -> pause phase
+  CHECK(s.e.next() && s.e.waiting());      // Next = Continue; Both phase waits for the bottom (at 150)
+  CHECK(s.e.next() && s.e.seq().st == Stage::Ramp && s.e.out(1).moving);  // wait skipped: top ramp
+  CHECK(s.e.next() && s.e.seq().st == Stage::Hold && near(s.sp(1), 150));
+  CHECK(s.e.next() && s.e.seq().idx == 3);
+  // user pause freezes the ramp
+  s.runTo(s.t + 10);
+  const float sp = s.sp(1);
+  s.e.pause();
+  CHECK(s.e.state() == RunState::Paused && !s.e.out(1).moving);
+  const uint32_t g = s.e.out(1).gen;
+  s.runTo(s.t + 20);
+  CHECK(near(s.sp(1), sp) && s.e.seq().st == Stage::Ramp);
+  s.e.resume();
+  CHECK(s.e.out(1).gen != g);
+  s.runTo(s.t + 30);  // 40 s ramp: 10 before + 30 after the pause
+  CHECK(s.e.seq().st == Stage::Hold && near(s.sp(1), 190));
+  s.e.stop();
+  CHECK(s.e.state() == RunState::Aborted && near(s.sp(1), 190) && !s.e.next());
+  // Timeline: no "Next phase"
+  progExample(2, p);
+  s.start(p);
+  CHECK(!s.e.next());
+}
+
+static void testTimelineRun() {
+  static DuoProgram p;
+  progExample(2, p);
+  Sim s;
+  s.start(p);
+  CHECK(near(remainingOf(s.e), 450));
+  s.runTo(30);
+  CHECK(near(s.sp(0), 87.5f) && s.e.out(1).idle && s.e.lane(1).st == Stage::Idle);
+  s.runTo(130);
+  CHECK(near(s.sp(1), 25 + 125 * 10 / 40.0f) && s.e.lane(0).st == Stage::Hold && s.e.lane(1).idx == 1);
+  s.runTo(400);
+  CHECK(s.e.lane(1).st == Stage::Done && near(s.sp(1), 150) && s.e.out(0).idle && s.e.active());
+  s.runTo(460);
+  CHECK(s.e.state() == RunState::Finished && near(s.e.elapsed(), 450));
+  // a pause step on the top pauses both channels
+  progExample(2, p);
+  TlStep ps = {ST_PAUSE, 1, NO_TEXT, {0, 0, 0}};
+  progAddText(p, "Check flux", ps.text);
+  memmove(&p.st[1][3], &p.st[1][2], sizeof(TlStep) * 4);
+  p.st[1][2] = ps;  // after 150/40/20: reached at 180
+  ++p.nSt[1];
+  s.start(p);
+  s.runTo(185);
+  CHECK(s.e.progPaused() && s.e.pauseMsg() && !strcmp(s.e.pauseText(), "Check flux"));
+  const float el0 = s.e.lane(0).el;
+  s.runTo(215);
+  CHECK(near(s.e.lane(0).el, el0) && s.e.lane(0).st == Stage::Hold);
+  CHECK(s.e.cont() && !s.e.progPaused());
+  s.runTo(900);
+  CHECK(s.e.state() == RunState::Finished && near(s.e.elapsed(), 450 + 35, 1.01f));
+  // the result does not depend on the tick length
+  const float dts[] = {0.25f, 1, 7.3f};
+  for (float dt : dts) {
+    progExample(2, p);
+    Sim q;
+    q.start(p);
+    q.runTo(1000, dt);
+    CHECK(q.e.state() == RunState::Finished && q.e.elapsed() >= 450 - 1e-3f && q.e.elapsed() < 450 + dt + 1e-3f);
+  }
+}
+
+static void testSeqEdits() {
+  static DuoProgram p;
+  char err[100];
+  progExample(0, p);
+  Sim s;
+  s.autoCont = true;
+  s.start(p);
+  s.runTo(30);
+  // target change while ramping: same slope (125/60 per s) from the current 87.5
+  CHECK(s.e.setTarget(0, -1, 200, err, sizeof(err)));
+  CHECK(near(s.e.out(0).rampLeft, 54) && p.ph[0].b.r == 84 && near(p.ph[0].b.t, 200) && s.e.edited());
+  s.runTo(84);
+  CHECK(near(s.sp(0), 200, 0.1f));
+  s.runTo(90);
+  CHECK(s.e.seq().st == Stage::Hold);
+  // target change while holding: ramps with the phase's slope, the hold keeps running
+  CHECK(s.e.setTarget(0, 0, 175, err, sizeof(err)));
+  s.runTo(96);
+  CHECK(near(s.sp(0), 200 - 6 * 125 / 60.0f, 0.1f));
+  // extend the hold
+  CHECK(s.e.extendHold(0, 30, err, sizeof(err)) && p.ph[0].b.h == 90);
+  const float rem = remainingOf(s.e);
+  s.runTo(173);  // hold 84 .. 174
+  CHECK(s.e.seq().st == Stage::Hold && near(s.sp(0), 175));
+  // shorten below the elapsed time: the hold ends at once
+  CHECK(s.e.setHold(0, 0, 5, err, sizeof(err)) && s.e.seq().idx == 1 && p.ph[0].b.h == 89);
+  CHECK(rem > 300);
+  s.runTo(180);  // Continue (auto) -> Both phase: bottom jumps to 160, waits, top ramps
+  // finished phase: locked
+  CHECK(!s.e.setTarget(0, 0, 150, err, sizeof(err)) && strstr(err, "finished"));
+  // future ramp: can change; the running one can't
+  CHECK(!s.e.setRamp(1, 2, 10, err, sizeof(err)));
+  CHECK(s.e.setRamp(1, 4, 60, err, sizeof(err)) && p.ph[4].t.r == 60);
+  // future target: its ramp keeps its slope (225 -> 245 in 20 s), the next one too (245 -> 150 in 40 s)
+  CHECK(s.e.setTarget(1, 5, 255, err, sizeof(err)) && p.ph[5].t.r == 30 && p.ph[6].t.r == 44);
+  s.runTo(265);  // phase 2 175 .. 255; phase 3: top ramps 150 -> 190 (1 C/s); the bottom keeps 160 (phase 2)
+  CHECK(s.e.seq().idx == 3 && s.e.keptIdx(0) == 2 && s.e.keptIdx(1) == 3);
+  CHECK(s.e.setTarget(0, -1, 170, err, sizeof(err)) && near(s.sp(0), 170) && near(p.ph[2].b.t, 170));  // jump target
+  // current top ramp -> 200: continues at 1 C/s; the next ramp (190 -> 225 in 30 s) keeps its slope
+  CHECK(s.e.seq().st == Stage::Ramp && s.e.setTarget(1, 3, 200, err, sizeof(err)));
+  CHECK(p.ph[4].t.r == 43);  // setRamp above made it 60 s for 35 C; from 200: 25 C -> 42.9 s
+  // Idle / Pause have no target
+  CHECK(!s.e.setTarget(0, 6, 100, err, sizeof(err)) && !s.e.setHold(0, 1, 10, err, sizeof(err)));
+}
+
+static void testTimelineEdits() {
+  static DuoProgram p;
+  char err[100];
+  progExample(2, p);
+  Sim s;
+  s.start(p);
+  s.runTo(100);  // bottom holds 150 until 210; top idle until 120
+  // bottom hold +30: the top is shifted through its first hold at/after 210 (step 2: hold 220..250)
+  CHECK(s.e.extendHold(0, 30, err, sizeof(err)) && p.st[0][0].s.h == 180 && p.st[1][2].s.h == 60);
+  CHECK(near(remainingOf(s.e), 380));
+  // and back: the same hold gets shorter again
+  CHECK(s.e.setHold(0, 0, 150, err, sizeof(err)) && p.st[0][0].s.h == 150 && p.st[1][2].s.h == 30);
+  s.runTo(130);  // top ramps 25 -> 150 (3.125 C/s), 56.25 now
+  CHECK(s.e.setTarget(1, -1, 175, err, sizeof(err)));
+  CHECK(p.st[1][1].s.r == 48 && p.st[1][2].s.r == 15);   // current ramp +8 s, next ramp 150->190 (1 C/s) from 175
+  CHECK(p.st[0][0].s.h == 158 && p.st[0][1].s.h == 125);  // bottom: +8 in the current hold, -25 in the next one
+  // a finished channel keeps its last target, which stays adjustable
+  s.runTo(395);
+  CHECK(s.e.lane(1).st == Stage::Done && s.e.keptIdx(1) == 5);
+  CHECK(s.e.setTarget(1, -1, 120, err, sizeof(err)) && s.e.out(1).moving && near(p.st[1][5].s.t, 120));
+  CHECK(!s.e.extendHold(1, 10, err, sizeof(err)));
+}
 
 // ------------------------------------------------------------------ settings (JSON, validation)
 
@@ -496,9 +722,13 @@ static void testAutotune() {
 int main() {
   testCrc();
   testParse();
-  testEdit();
-  testPlan();
-  testRun();
+  testProgJson();
+  testPreview();
+  testSeqRun();
+  testNextPause();
+  testTimelineRun();
+  testSeqEdits();
+  testTimelineEdits();
   testSettingsDefaults();
   testSettingsJson();
   testSettingsMerge();

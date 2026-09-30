@@ -1,79 +1,20 @@
 #include "program_store.h"
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <LittleFS.h>
+#include "run_engine.h"
 
-static constexpr uint32_t PROG_MAGIC = 0x50524731;  // "PRG1"
 static bool fsOk = false;
+static ProgSummary sums[PROG_MAX];
+static SemaphoreHandle_t sumLock = nullptr;
+static volatile uint32_t storeGen = 1;
 
-struct FileHeader {
-  uint32_t magic;
-  char name[PROG_NAME_LEN];
-  uint8_t count;
-  uint8_t reserved[3];
+struct SumGuard {
+  SumGuard() { xSemaphoreTake(sumLock, portMAX_DELAY); }
+  ~SumGuard() { xSemaphoreGive(sumLock); }
 };
 
-static void pathFor(int idx, char* out, size_t n) { snprintf(out, n, "/prog%d.bin", idx); }
-
-static void defaultName(int idx, char* out, size_t n) { snprintf(out, n, "Program %d", idx + 1); }
-
-// Example for the first start: lead-free (SAC305) BGA desolder profile for a GPU
-// core on a rework station: preheat, soak, ramp to reflow, peak for removal.
-// Targets in degrees C, times in seconds. Adapt to the station, the board and
-// where the thermocouple sits.
-void programExample(Program& p) {
-  programClear(p, "GPU desolder (LeadFree)");
-  const Step steps[] = {
-      {160, 60, 30},  // preheat
-      {190, 40, 40},  // soak
-      {225, 30, 20},  // ramp towards liquidus (217 C)
-      {245, 20, 40},  // peak: lift the chip
-  };
-  for (const Step& s : steps) programInsertStep(p, p.count, s);
-}
-
-static bool loadOne(int idx, Program& p) {
-  char path[20];
-  pathFor(idx, path, sizeof(path));
-  if (!fsOk || !LittleFS.exists(path)) return false;
-  File f = LittleFS.open(path, "r");
-  if (!f) return false;
-  FileHeader h;
-  bool ok = f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == PROG_MAGIC && h.count <= MAX_STEPS;
-  if (ok) {
-    programClear(p, nullptr);
-    memcpy(p.name, h.name, sizeof(p.name));
-    p.name[PROG_NAME_LEN - 1] = 0;
-    const size_t len = sizeof(Step) * h.count;
-    ok = f.read((uint8_t*)p.s, len) == len;
-    p.count = ok ? h.count : 0;
-  }
-  f.close();
-  return ok;
-}
-
-bool programStoreSave(int idx, const Program& p) {
-  if (!fsOk || idx < 0 || idx >= MAX_PROGRAMS) return false;
-  char path[20], tmp[24];
-  pathFor(idx, path, sizeof(path));
-  snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-  File f = LittleFS.open(tmp, "w");
-  if (!f) return false;
-  FileHeader h{};
-  h.magic = PROG_MAGIC;
-  memcpy(h.name, p.name, sizeof(h.name));
-  h.name[PROG_NAME_LEN - 1] = 0;
-  h.count = p.count > MAX_STEPS ? MAX_STEPS : p.count;
-  const size_t len = sizeof(Step) * h.count;
-  bool ok = f.write((const uint8_t*)&h, sizeof(h)) == sizeof(h) && f.write((const uint8_t*)p.s, len) == len;
-  f.close();
-  if (!ok) {
-    LittleFS.remove(tmp);
-    return false;
-  }
-  // write-then-rename so a power loss never leaves a half-written program
-  LittleFS.remove(path);
-  return LittleFS.rename(tmp, path);
-}
+static void pathFor(int idx, char* out, size_t n) { snprintf(out, n, "/duo/prog%d.json", idx); }
 
 bool storageBegin() {
   static bool tried = false;
@@ -88,20 +29,142 @@ bool storageBegin() {
   return true;
 }
 
-void programStoreBegin(Program* progs, const Program* firstBoot) {
+void programSummarize(const DuoProgram& p, ProgSummary& s) {
+  memset(&s, 0, sizeof(s));
+  strlcpy(s.name, p.name, sizeof(s.name));
+  s.used = 1;
+  s.type = p.type;
+  s.items = (uint16_t)progItems(p);
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    if (progUses(p, ch)) s.uses |= (uint8_t)(1 << ch);
+    s.steps[ch] = p.type == PROG_TL ? p.nSt[ch] : 0;
+  }
+  if (p.type == PROG_SEQ)
+    for (int i = 0; i < p.nPh; ++i)
+      if (p.ph[i].wait) s.waits = 1;
+  s.total = programPreview(p, nullptr, nullptr, nullptr);
+}
+
+bool programLoad(int idx, DuoProgram& p, char* err, size_t n) {
+  if (idx < 0 || idx >= PROG_MAX) {
+    snprintf(err, n, "Program number out of range");
+    return false;
+  }
+  char path[24];
+  pathFor(idx, path, sizeof(path));
+  if (!fsOk || !LittleFS.exists(path)) {
+    snprintf(err, n, "Program %d is empty", idx + 1);
+    return false;
+  }
+  File f = LittleFS.open(path, "r");
+  if (!f) {
+    snprintf(err, n, "Cannot open %s", path);
+    return false;
+  }
+  JsonDocument d;
+  const DeserializationError e = deserializeJson(d, f);
+  f.close();
+  if (e) {
+    snprintf(err, n, "%s: %s", path, e.c_str());
+    return false;
+  }
+  return progFromJson(d.as<JsonObjectConst>(), p, err, n);
+}
+
+bool programSave(int idx, const DuoProgram& p, char* err, size_t n) {
+  if (idx < 0 || idx >= PROG_MAX) {
+    snprintf(err, n, "Program number out of range");
+    return false;
+  }
+  if (!fsOk) {
+    snprintf(err, n, "No file system");
+    return false;
+  }
+  char path[24], tmp[28];
+  pathFor(idx, path, sizeof(path));
+  snprintf(tmp, sizeof(tmp), "/duo/prog%d.tmp", idx);
+  JsonDocument d;
+  progToJson(p, d.to<JsonObject>());
+  File f = LittleFS.open(tmp, "w");
+  if (!f) {
+    snprintf(err, n, "Cannot write %s", tmp);
+    return false;
+  }
+  const size_t len = measureJson(d);
+  const bool ok = serializeJson(d, f) == len;
+  f.close();
+  // write-then-rename so a power loss never leaves a half-written program
+  if (!ok || (LittleFS.exists(path) && !LittleFS.remove(path)) || !LittleFS.rename(tmp, path)) {
+    LittleFS.remove(tmp);
+    snprintf(err, n, "Writing %s failed (flash full?)", path);
+    return false;
+  }
+  ProgSummary s;
+  programSummarize(p, s);
+  {
+    SumGuard g;
+    sums[idx] = s;
+  }
+  ++storeGen;
+  return true;
+}
+
+bool programDelete(int idx) {
+  if (idx < 0 || idx >= PROG_MAX || !fsOk) return false;
+  char path[24];
+  pathFor(idx, path, sizeof(path));
+  if (LittleFS.exists(path) && !LittleFS.remove(path)) return false;
+  {
+    SumGuard g;
+    memset(&sums[idx], 0, sizeof(sums[idx]));
+  }
+  ++storeGen;
+  return true;
+}
+
+void programSummaries(ProgSummary* out) {
+  SumGuard g;
+  memcpy(out, sums, sizeof(sums));
+}
+
+bool programSummary(int idx, ProgSummary& out) {
+  if (idx < 0 || idx >= PROG_MAX) return false;
+  SumGuard g;
+  out = sums[idx];
+  return out.used;
+}
+
+uint32_t programStoreGen() { return storeGen; }
+
+void programStoreBegin() {
+  if (!sumLock) sumLock = xSemaphoreCreateMutex();
   storageBegin();
+  DuoProgram* p = (DuoProgram*)malloc(sizeof(DuoProgram));
+  if (!p) return;
+  char err[96];
   bool any = false;
-  for (int i = 0; i < MAX_PROGRAMS; ++i) {
-    if (loadOne(i, progs[i])) {
+  for (int i = 0; i < PROG_MAX; ++i) {
+    char path[24];
+    pathFor(i, path, sizeof(path));
+    ProgSummary s;
+    memset(&s, 0, sizeof(s));
+    if (fsOk && LittleFS.exists(path)) {
       any = true;
-    } else {
-      char n[PROG_NAME_LEN];
-      defaultName(i, n, sizeof(n));
-      programClear(progs[i], n);
+      if (programLoad(i, *p, err, sizeof(err))) {
+        programSummarize(*p, s);
+      } else {
+        Serial.printf("[prog] %s\n", err);  // the slot shows as empty; the file is kept
+      }
     }
+    SumGuard g;
+    sums[i] = s;
   }
-  if (!any && firstBoot) {
-    progs[0] = *firstBoot;
-    programStoreSave(0, progs[0]);
+  if (!any && fsOk) {
+    for (int i = 0; i < PROG_EXAMPLES; ++i) {
+      progExample(i, *p);
+      if (!programSave(i, *p, err, sizeof(err))) Serial.printf("[prog] example %d: %s\n", i + 1, err);
+    }
+    Serial.println("[prog] example programs created");
   }
+  free(p);
 }

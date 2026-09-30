@@ -95,10 +95,6 @@ struct Settings {
 
   // Run
   float bottomBand;     // "bottom reached" band (+-degC) for "wait for bottom"
-  // TempCtl 1.2 engine options, used by the single-channel engine until the
-  // new run engine (step 5) removes them. Not part of the Duo design.
-  uint8_t guaranteedSoak;
-  float soakBand;
 
   // Network
   char ssid[33];

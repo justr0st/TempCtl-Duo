@@ -186,11 +186,12 @@ static bool programActive(RunState s) { return s == RunState::Running || s == Ru
 // "1 Name\n2 Name ..." for the program dropdowns
 static void buildProgramOptions(char* out, size_t n) {
   out[0] = 0;
-  Guard g;
+  static ProgSummary list[MAX_PROGRAMS];
+  programSummaries(list);
   for (int i = 0; i < MAX_PROGRAMS; ++i) {
     char line[64];
-    snprintf(line, sizeof(line), "%s%d %s%s%s", i ? "\n" : "", i + 1, gPrograms[i].name,
-             gPrograms[i].count ? "" : " ", gPrograms[i].count ? "" : T("prog_empty"));
+    if (list[i].used) snprintf(line, sizeof(line), "%s%d %s", i ? "\n" : "", i + 1, list[i].name);
+    else snprintf(line, sizeof(line), "%s%d %s", i ? "\n" : "", i + 1, T("prog_empty"));
     strlcat(out, line, n);
   }
 }
@@ -334,7 +335,7 @@ static lv_obj_t *ddEditProg, *table, *lblProgInfo, *lblProgUnsaved, *btnAdd, *bt
 static char editProgOpts[MAX_PROGRAMS * 40];
 static Program uiProg;          // program being edited
 static int editIdx = 0;         // which stored program uiProg belongs to
-static uint32_t loadedGen = 0;  // gProgGen when uiProg was loaded
+static uint32_t loadedGen = 0;  // programStoreGen() when uiProg was loaded
 static int selRow = -1;         // selected step (-1 = none)
 static bool progDirty = false;
 static int pendingSwitch = -1;  // program to switch to after the save/discard question
@@ -367,7 +368,7 @@ extern "C" void ui_on_start(lv_event_t*) {
   else sendCmd(CMD_START, ddMainProg ? (int)lv_dropdown_get_selected(ddMainProg) : -1);
 }
 extern "C" void ui_on_pause(lv_event_t*) { sendCmd(CMD_PAUSE); }
-extern "C" void ui_on_skip(lv_event_t*) { sendCmd(CMD_SKIP); }
+extern "C" void ui_on_skip(lv_event_t*) { sendCmd(CMD_NEXT); }  // Continue in a program pause
 
 static void onStopAnswer(lv_event_t* e) {
   lv_obj_t* m = (lv_obj_t*)lv_event_get_user_data(e);
@@ -445,7 +446,7 @@ static void updateMain(const LiveData& L, const Settings& S) {
 
   const bool active = programActive(L.state);
   if (active) {
-    fmtTemp(true, L.target, a, sizeof(a));
+    fmtTemp(!isnan(L.target), L.target, a, sizeof(a));
     setText(lblTarget, trf(buf, sizeof(buf), "step_target", a));
   } else {
     setText(lblTarget, S.ch[ENGINE_CH].mb.reg.sp == REG_UNSET ? T("sp_reg_unset") : "");
@@ -473,19 +474,16 @@ static void updateMain(const LiveData& L, const Settings& S) {
   if (active) {
     fmtDur(L.phaseDur - L.phaseEl, a, sizeof(a));
     if (L.soakWait) setText(lblPhase, T("ph_soak_wait"));
-    else setText(lblPhase, trf(buf, sizeof(buf), L.phase == Phase::Ramp ? "ph_ramp" : "ph_hold", a));
+    else if (L.progPause) setText(lblPhase, L.pauseMsg ? "Action required - Next = Continue" : "Program pause - Next = Continue");
+    else setText(lblPhase, trf(buf, sizeof(buf), L.phase == Stage::Ramp ? "ph_ramp" : "ph_hold", a));
     fmtDur(L.total - L.elapsed, a, sizeof(a));
     setText(lblTotal, trf(buf, sizeof(buf), "run_left", L.runName, a));
   } else {
     setText(lblPhase, L.manualOn ? (L.manualSynced ? T("man_written") : T("man_writing")) : "");
-    char name[PROG_NAME_LEN];
-    {
-      Guard g;
-      const Program& sel = gPrograms[S.selProgram < MAX_PROGRAMS ? S.selProgram : 0];
-      fmtDur(ProgramEngine::plannedTotal(sel), a, sizeof(a));
-      strlcpy(name, sel.name, sizeof(name));
-    }
-    setText(lblTotal, trf(buf, sizeof(buf), "prog_total", name, a));
+    ProgSummary sel;
+    if (!programSummary(S.selProgram, sel)) strlcpy(sel.name, T("prog_empty"), sizeof(sel.name));
+    fmtDur(sel.used ? sel.total : 0, a, sizeof(a));
+    setText(lblTotal, trf(buf, sizeof(buf), "prog_total", sel.name, a));
   }
   if (barProg) {  // progress in the bar's own range (min/max in the XML)
     const int32_t lo = lv_bar_get_min_value(barProg), hi = lv_bar_get_max_value(barProg);
@@ -551,16 +549,16 @@ static void refreshTable() {
     lv_table_set_cell_value(table, i, COL_HOLD, buf);
   }
   if (selRow >= uiProg.count) selRow = uiProg.count - 1;
-  char d[16], c[12], m[12], info[80];
-  fmtDur(ProgramEngine::plannedTotal(uiProg), d, sizeof(d));
-  snprintf(c, sizeof(c), "%d", uiProg.count);
-  snprintf(m, sizeof(m), "%d", MAX_STEPS);
-  setText(lblProgInfo, trf(info, sizeof(info), "prog_info", c, m, d));
-  setText(lblProgUnsaved, progDirty ? T("prog_unsaved") : "");
-  setEnabled(btnAdd, uiProg.count < MAX_STEPS);
-  setEnabled(btnDel, selRow >= 0);
-  setEnabled(btnUp, selRow > 0);
-  setEnabled(btnDown, selRow >= 0 && selRow < uiProg.count - 1);
+  // TempCtl Duo: read-only view (bottom channel as steps) until the new touch UI (step 6)
+  char d[16], info[96];
+  fmtDur(programTotal(uiProg), d, sizeof(d));
+  snprintf(info, sizeof(info), "%d steps, %s - read only (Bottom channel)", uiProg.count, d);
+  setText(lblProgInfo, info);
+  setText(lblProgUnsaved, "");
+  setEnabled(btnAdd, false);
+  setEnabled(btnDel, false);
+  setEnabled(btnUp, false);
+  setEnabled(btnDown, false);
   lv_obj_invalidate(table);
 }
 
@@ -578,11 +576,8 @@ static void scrollToRow(int row) {
 
 static void loadProgram(int idx) {
   if (idx < 0 || idx >= MAX_PROGRAMS) idx = 0;
-  {
-    Guard g;
-    uiProg = gPrograms[idx];
-    loadedGen = gProgGen;
-  }
+  loadedGen = programStoreGen();
+  loadLegacyView(idx, uiProg);
   editIdx = idx;
   progDirty = false;
   selRow = uiProg.count ? 0 : -1;
@@ -591,6 +586,10 @@ static void loadProgram(int idx) {
 static void markDirty() {
   progDirty = true;
   refreshTable();
+}
+
+static void readOnlyNote() {
+  toast("Read only", "Programs are edited on the new web page / touch UI (coming). Until then: web API POST /api/program.");
 }
 
 static void applyCell(float v, int arg) {
@@ -603,7 +602,7 @@ static void applyCell(float v, int arg) {
     lo = gSettings.ch[ENGINE_CH].spMin;
     hi = gSettings.ch[ENGINE_CH].spMax;
   }
-  const uint32_t sec = (v <= 0) ? 0 : (uint32_t)lroundf(fminf(v, (float)MAX_STEP_SEC));
+  const uint32_t sec = (v <= 0) ? 0 : (uint32_t)lroundf(fminf(v, (float)PROG_MAX_SEC));
   if (col == COL_TARGET) s.target = constrain(v, lo, hi);
   if (col == COL_RAMP) s.rampSec = sec;
   if (col == COL_HOLD) s.holdSec = sec;
@@ -638,6 +637,8 @@ extern "C" void ui_on_table(lv_event_t*) {
   selRow = row;
   refreshTable();
   if (col == COL_NUM) return;  // the number column only selects the row
+  readOnlyNote();
+  return;
   char title[80], n[12];
   snprintf(n, sizeof(n), "%lu", (unsigned long)row + 1);
   if (col == COL_TARGET) {
@@ -652,6 +653,8 @@ extern "C" void ui_on_table(lv_event_t*) {
 }
 
 extern "C" void ui_on_add_step(lv_event_t*) {
+  readOnlyNote();
+  return;
   Step st{100, 10 * 60, 10 * 60};
   float lo, hi;
   {
@@ -668,20 +671,9 @@ extern "C" void ui_on_add_step(lv_event_t*) {
   scrollToRow(selRow);
 }
 
-extern "C" void ui_on_del_step(lv_event_t*) {
-  if (programRemoveStep(uiProg, selRow)) {
-    if (selRow >= uiProg.count) selRow = uiProg.count - 1;
-    markDirty();
-  }
-}
+extern "C" void ui_on_del_step(lv_event_t*) { readOnlyNote(); }
 
-static void moveStep(int dir) {
-  if (programMoveStep(uiProg, selRow, selRow + dir)) {
-    selRow += dir;
-    markDirty();
-    scrollToRow(selRow);
-  }
-}
+static void moveStep(int) { readOnlyNote(); }
 extern "C" void ui_on_step_up(lv_event_t*) { moveStep(-1); }
 extern "C" void ui_on_step_down(lv_event_t*) { moveStep(1); }
 
@@ -695,38 +687,19 @@ static void applyName(const char* t, int) {
 }
 
 extern "C" void ui_on_rename(lv_event_t*) {
+  readOnlyNote();
+  return;
   char title[64], n[12];
   snprintf(n, sizeof(n), "%d", editIdx + 1);
   openTextEditor(trf(title, sizeof(title), "ed_prog_name", n), uiProg.name, PROG_NAME_LEN - 1, false, applyName, 0);
 }
 
-static void saveEdited() {
-  {
-    Guard g;
-    gPrograms[editIdx] = uiProg;
-  }
-  const bool ok = saveProgram(editIdx);
-  {
-    Guard g;
-    uiProg = gPrograms[editIdx];  // sanitized copy
-    loadedGen = gProgGen;
-  }
+static void saveEdited() {  // read-only view: nothing to save
   progDirty = false;
-  editProgOpts[0] = 0;
-  mainProgOpts[0] = 0;
   refreshTable();
-  RunState st;
-  int8_t running;
-  {
-    Guard g;
-    st = gLive.state;
-    running = gLive.runProg;
-  }
-  if (!ok) toast(T("not_saved_title"), T("not_saved_text"));
-  else if (programActive(st) && running == editIdx) toast(T("saved_title"), T("saved_next_run"));
 }
 
-extern "C" void ui_on_prog_save(lv_event_t*) { saveEdited(); }
+extern "C" void ui_on_prog_save(lv_event_t*) { readOnlyNote(); }
 
 extern "C" void ui_on_prog_revert(lv_event_t*) {
   loadProgram(editIdx);
@@ -795,7 +768,7 @@ static void bindProgram() {
 
 static void updateProgramTab(const Settings& S) {
   // follow a selection made on the Main tab or the web page (or a program saved from the web)
-  if (!progDirty && !modal && pendingSwitch < 0 && (S.selProgram != editIdx || gProgGen != loadedGen)) {
+  if (!progDirty && !modal && pendingSwitch < 0 && (S.selProgram != editIdx || programStoreGen() != loadedGen)) {
     loadProgram(S.selProgram);
     refreshTable();
   }
@@ -1213,8 +1186,9 @@ static void refreshController() {
     if (BAUDS[i] == S.baud && ddBaud) lv_dropdown_set_selected(ddBaud, i);
   if (ddFormat) lv_dropdown_set_selected(ddFormat, S.parity == 1 ? 1 : S.parity == 2 ? 2 : (S.stopBits == 2 ? 3 : 0));
   if (ddRamp) lv_dropdown_set_selected(ddRamp, S.ch[ENGINE_CH].mb.rampMode);
-  setChecked(swSoak, S.guaranteedSoak);
-  snprintf(b, sizeof(b), "%.1f", S.soakBand);
+  setChecked(swSoak, false);  // guaranteed soak is gone in TempCtl Duo
+  setEnabled(swSoak, false);
+  snprintf(b, sizeof(b), "%.1f", S.bottomBand);  // field reused: "bottom reached" band
   setText(lblBand, b);
   setChecked(swLock, S.ch[ENGINE_CH].mb.lockFront);
   if (ddEnd) lv_dropdown_set_selected(ddEnd, S.ch[ENGINE_CH].endAction);
@@ -1246,8 +1220,6 @@ extern "C" void ui_on_controller_changed(lv_event_t* e) {
     S.stopBits = (f == 3) ? 2 : 1;
   } else if (t == ddRamp) {
     S.ch[ENGINE_CH].mb.rampMode = lv_dropdown_get_selected(ddRamp) ? RAMP_CONTROLLER : RAMP_HOST;
-  } else if (t == swSoak) {
-    S.guaranteedSoak = lv_obj_has_state(swSoak, LV_STATE_CHECKED);
   } else if (t == swLock) {
     S.ch[ENGINE_CH].mb.lockFront = lv_obj_has_state(swLock, LV_STATE_CHECKED);
   } else if (t == ddEnd) {
@@ -1266,7 +1238,7 @@ static void applySlave(float v, int) {
 static void applyBand(float v, int) {
   {
     Guard g;
-    gSettings.soakBand = constrain(v, 0.1f, 500.0f);
+    gSettings.bottomBand = constrain(v, 0.5f, 50.0f);
   }
   refreshController();
 }
@@ -1282,7 +1254,7 @@ extern "C" void ui_on_band(lv_event_t*) {
   float cur;
   {
     Guard g;
-    cur = gSettings.soakBand;
+    cur = gSettings.bottomBand;
   }
   openNumEditor(T("ed_band"), cur, applyBand, 0);
 }

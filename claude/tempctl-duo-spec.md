@@ -1160,6 +1160,56 @@ chart work on the **bottom channel** (`ENGINE_CH`); the top channel is polled, s
 - To test with hardware (thermocouple + SSR + heater): `{"ch":1,"cmd":"start","sp":150}`, watch
   `channels[1].autotune`, then accept; afterwards a manual SP should settle without overshoot.
 
+#### 9.10.5 State of step 5 (2026-09-30, version 1.0.2)
+Decided with Rost before the step: the **old touch / web program editors become read-only** ("run
+control only") until the new UIs; **order of the next steps: 5 → 7 → 6** (web page before touch UI).
+- `src/duo_program.*` (pure, host-tested): `DuoProgram` (name 32, type, Sequence `SeqPhase ph[100]`
+  {kind B/T/BT/P, wait, bIdle, msg, text, Seg b, Seg t} or Timeline `TlStep st[2][100]` {kind target /
+  idle / pause, msg, text, Seg} in a union; Seg = {t, r, h}, times uint32 s <= 599940) ≈ 3.9 kB. Pause
+  texts in a pool of **16 different texts per program** (40 characters each; decided by me, enough for
+  real programs, keeps the struct small). JSON codec exactly as sketched in 9.3.5 (`fmt` 1; unknown keys
+  ignored; r/h/wait/msg default; a missing target, wrong kind, > 100 phases / steps, name > 31 or text > 40
+  bytes, fmt > 1 are errors with "Phase 3: Top target missing"-style messages using the channel names);
+  `progCheckLimits` (spMin/spMax per channel); the three examples of 9.9.
+- `src/run_engine.*` (pure, host-tested) replaces `ProgramEngine`. Per channel a setpoint generator
+  (from → to over dur, or Idle = outputs off; slope kept for edits); Sequence stages Ramp → [Wait] → Hold,
+  Pause; Timeline lanes Ramp → Hold, Idle, Pause, Done. Time advances **event by event** inside `tick()`,
+  so results don't depend on the tick length (tested with 0.25 / 1 / 7.3 s). Program pause freezes the
+  stage timers and the ramps that belong to a running stage; user pause freezes everything. Outputs per
+  channel `ChOut` {inProgram, idle, moving, sp, target, rampLeft, gen}. Run edits `setHold` / `extendHold`
+  / `setRamp` / `setTarget` (idx -1 = current / kept target) follow 9.3.4; Timeline shifts use the **old
+  end time of the changed ramp/hold as "that moment"** (my reading of 9.3.4: things of the other channel
+  before the change point stay aligned). `forecast()` runs a copy to the end (waits satisfied, pauses 0 s)
+  and emits plan segments; `programPreview()` does the same from the start.
+- `src/program_store.*`: `/duo/progN.json`, N = 0–19, safe save (`progN.tmp` + rename), summaries
+  (name, type, items, uses, waits, planned total) kept in RAM; the examples are created when no program
+  file exists. Nothing from TempCtl `/progN.bin` is read (9.5).
+- Control task: one `RunEngine` drives both channels; per channel: outputs off while idle / on when it
+  gets a target, host stepping or controller ramp (Modbus RAMP_CONTROLLER, per channel), end action per
+  program channel (a faulted channel is skipped), ramp-register restore and front lock per Modbus channel;
+  comm watchdog on the program's channels; manual mode and autotune refused only on the program's
+  channels. Start checks: program not empty, used channels not Off / tuning / without SP register /
+  without PV, setpoint limits, controller SP.LO/SP.HI. The running copy lives in the control task (web
+  reads it under gLock); `CMD_RUN_EDIT` (sub hold / extend / ramp / target), `CMD_NEXT` (Continue in a
+  program pause), `CMD_CONTINUE`, `CMD_SAVE_RUN` (writes the running copy into its slot). History and
+  plan for both channels; the run chart doubles its span when the run gets longer than planned; the
+  plan = the run's setpoints so far + the forecast.
+- Settings: `guaranteedSoak` / `soakBand` removed (the old touch "soak band" field and the old page's
+  `soakBand` now edit `bottomBand`).
+- Web: `/api/programs` (20 slots), `/api/program` GET (Duo JSON + legacy `steps` view) / POST
+  (`{"i":n,"program":{…}}` or `{"i":n,"delete":true}`), `/api/run` GET (run state + running copy) / POST
+  (extend, hold, ramp, target, save, next, continue), `/api/status` `run` extended, `/api/history?both=1`,
+  CSV with both channels. Old page: program editor locked with a note, "Next phase" becomes "Continue" in
+  a program pause. Old touch UI: Program tab read-only (bottom channel as steps), Next = Continue.
+- Not done yet (later sub-step, before or with step 7): **"Run interrupted by a reset"** (`/duo/run.json`
+  + RTC memory, resume button) and "Start without saving" (start from a draft sent by the web page).
+- To test now (bare S3): `/api/programs` shows the 3 examples; `/api/program?i=0` returns the JSON;
+  POST a changed program back (and a wrong one → error message); Start program 1 → "Cannot start: …
+  uses Top, which is off" (default top = Off), with top set to `local` → "no valid temperature from …".
+  Runs need a PV on the program's channels, so run tests wait for the thermocouple converters / PMA:
+  then watch `/api/status` `run` (phase, stage, `progPause` after phase 1 → `{"cmd":"continue"}` on
+  `/api/cmd`), `POST /api/run {"cmd":"extend","ch":0,"sec":30}` during a hold, `GET /api/run`.
+
 Keep the TempCtl conventions (full web/touch parity, colours via named styles, texts in
 `translations.xml`, widgets bound by name, exported UI code committed) unless Rost decides otherwise.
 
