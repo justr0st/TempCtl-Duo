@@ -179,10 +179,20 @@ lv_display_t* lcdInit(bool rotate180) {
     return nullptr;
   }
 
-  // two draw buffers in internal DMA-capable RAM
+#ifdef BOARD_HAS_PSRAM
+#define LCD_DOUBLE_BUF 1
+#else
+#define LCD_DOUBLE_BUF 0
+#endif
+  // draw buffers in internal DMA-capable RAM: two (LVGL renders while the last part is sent);
+  // one on boards without PSRAM (CYD: DRAM is short)
   void* buf1 = heap_caps_malloc(bufBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+#ifdef BOARD_HAS_PSRAM
   void* buf2 = heap_caps_malloc(bufBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-  if (!buf1 || !buf2) {
+#else
+  void* buf2 = nullptr;
+#endif
+  if (!buf1 || (!buf2 && LCD_DOUBLE_BUF)) {
     Serial.printf("[lcd] no RAM for the draw buffers (2 x %u bytes)\n", (unsigned)bufBytes);
     return nullptr;
   }
@@ -196,7 +206,7 @@ lv_display_t* lcdInit(bool rotate180) {
   lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
   lv_display_set_buffers(disp, buf1, buf2, bufBytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
   lcdSetRotation(rotate180);
-  Serial.printf("[lcd] %dx%d, SPI %d MHz, 2 x %u bytes draw buffer\n", (int)lv_display_get_horizontal_resolution(disp),
-                (int)lv_display_get_vertical_resolution(disp), LCD_SPI_HZ / 1000000, (unsigned)bufBytes);
+  Serial.printf("[lcd] %dx%d, SPI %d MHz, %d x %u bytes draw buffer\n", (int)lv_display_get_horizontal_resolution(disp),
+                (int)lv_display_get_vertical_resolution(disp), LCD_SPI_HZ / 1000000, LCD_DOUBLE_BUF ? 2 : 1, (unsigned)bufBytes);
   return disp;
 }

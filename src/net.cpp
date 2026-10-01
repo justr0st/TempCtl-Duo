@@ -69,7 +69,28 @@ void netBegin() {
     s = gSettings;
   }
   WiFi.onEvent([](arduino_event_id_t) { gotIpSinceApply = true; }, ARDUINO_EVENT_WIFI_STA_GOT_IP);
+  // connection state in the serial log (helps with link problems)
+  WiFi.onEvent([](arduino_event_id_t e, arduino_event_info_t info) {
+    switch (e) {
+      case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+        Serial.printf("[wifi] connected to %s, IP %s, RSSI %d dBm\n", WiFi.SSID().c_str(),
+                      WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
+        break;
+      case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+        Serial.printf("[wifi] disconnected (reason %u)\n", (unsigned)info.wifi_sta_disconnected.reason);
+        break;
+      case ARDUINO_EVENT_WIFI_AP_START:
+        Serial.printf("[wifi] access point %s started, %s\n", WiFi.softAPSSID().c_str(), WiFi.softAPIP().toString().c_str());
+        break;
+      case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
+        Serial.println("[wifi] a device joined the access point");
+        break;
+      default:
+        break;
+    }
+  });
   WiFi.persistent(false);
+  WiFi.setSleep(false);  // no modem sleep: steadier transfers (the device is mains powered)
   WiFi.setHostname(s.hostname);
   haveSta = s.ssid[0] != 0;
   if (haveSta) {

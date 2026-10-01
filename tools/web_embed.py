@@ -27,6 +27,9 @@ ASSETS = [
     ("/favicon.svg", "icons/logo.svg", "image/svg+xml", True, False),
     ("/favicon.ico", "icons/favicon.ico", "image/x-icon", False, False),
     ("/apple-touch-icon.png", "icons/apple-touch-icon.png", "image/png", False, False),
+    # the page without the web fonts (system fonts): boards without PSRAM (CYD) serve this one,
+    # four 22 kB font downloads at once need more RAM than the CYD has left
+    ("/nofonts", "index.html", "text/html; charset=utf-8", True, False),
 ]
 
 
@@ -60,6 +63,8 @@ def build():
     for n, (url, rel, ctype, gz, imm) in enumerate(ASSETS):
         with open(os.path.join(WEB, rel), "rb") as f:
             data = f.read()
+        if url == "/nofonts":
+            data = b"\n".join(l for l in data.split(b"\n") if not l.lstrip().startswith(b"@font-face"))
         if gz:
             data = gzip.compress(data, compresslevel=9, mtime=0)
         total += len(data)

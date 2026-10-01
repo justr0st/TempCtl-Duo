@@ -26,9 +26,34 @@ static uint8_t appliedBrightness = 0;
 static bool rotated = false;
 static void bringupUpdate();  // S3 bring-up panel (see "bring-up panel" below)
 
+// The touch drivers report screen coordinates (as the user sees the image, SCREEN_W x SCREEN_H).
+// LVGL rotates pointer input by the display rotation itself (lv_display_rotate_point), so give it
+// the point in the panel's native orientation; otherwise it is rotated twice and lands outside
+// the screen ("Y is 269 which is greater than ver. res" on the CYD).
+static void touchToNative(int32_t& x, int32_t& y) {
+  const int32_t sx = x, sy = y;
+  switch (disp ? lv_display_get_rotation(disp) : LV_DISPLAY_ROTATION_0) {
+    case LV_DISPLAY_ROTATION_90:  // LVGL: x' = H - 1 - y, y' = x  (H = native height)
+      x = sy;
+      y = LCD_NATIVE_H - 1 - sx;
+      break;
+    case LV_DISPLAY_ROTATION_270:  // LVGL: x' = y, y' = W - 1 - x  (W = native width)
+      x = LCD_NATIVE_W - 1 - sy;
+      y = sx;
+      break;
+    case LV_DISPLAY_ROTATION_180:
+      x = LCD_NATIVE_W - 1 - sx;
+      y = LCD_NATIVE_H - 1 - sy;
+      break;
+    default:
+      break;
+  }
+}
+
 static void touchCb(lv_indev_t*, lv_indev_data_t* data) {
   int32_t x, y;
   if (touchRead(&x, &y)) {
+    touchToNative(x, y);
     data->point.x = x;
     data->point.y = y;
     data->state = LV_INDEV_STATE_PRESSED;
@@ -816,7 +841,7 @@ static void fmtAxisTime(float sec, char* out, size_t n) {
 
 static int32_t toCoord(float v) { return isnan(v) ? LV_CHART_POINT_NONE : (int32_t)lroundf(v * 10.0f); }
 
-static float pairMean(const float* a, int k) {
+static float pairMean(const Tenth16* a, int k) {
   const float x = a[2 * k], y = a[2 * k + 1];
   if (isnan(x)) return y;
   if (isnan(y)) return x;

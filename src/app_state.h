@@ -73,7 +73,11 @@ struct LiveData {
 constexpr int RUN_EV_MAX = 400;
 
 // Event log (web, serial; later touch): the last LOG_N messages
+#ifdef BOARD_HAS_PSRAM
 constexpr int LOG_N = 48;
+#else
+constexpr int LOG_N = 32;  // CYD: DRAM is short
+#endif
 constexpr size_t LOG_LEN = 96;
 struct LogEntry {
   uint32_t seq;
@@ -85,17 +89,40 @@ void logEvent(const char* fmt, ...) __attribute__((format(printf, 1, 2)));  // a
 uint32_t logSeq();                                        // newest entry
 int logSince(uint32_t seq, LogEntry* out, int max);       // entries after seq, oldest first
 
+// Chart value in 0.1 degC, assigned / read as float; NaN (no value) = the type's minimum.
+// Tenth (32 bit) is only ever accessed as a whole word, so the chart history can live in the
+// ESP32's IRAM heap (32-bit access only) on the CYD, which has no PSRAM and little DRAM left.
+// Tenth16 halves the RAM of the touch chart's copy (DRAM).
+struct Tenth {
+  int32_t v;
+  Tenth& operator=(float f) {
+    v = (isnan(f) || f > 3.0e5f || f < -3.0e5f) ? INT32_MIN : (int32_t)lroundf(f * 10.0f);
+    return *this;
+  }
+  operator float() const { return v == INT32_MIN ? NAN : v * 0.1f; }
+};
+struct Tenth16 {
+  int16_t v;
+  Tenth16& operator=(float f) {
+    v = (isnan(f) || f > 3276.0f || f < -3276.0f) ? (int16_t)INT16_MIN : (int16_t)lroundf(f * 10.0f);
+    return *this;
+  }
+  operator float() const { return v == INT16_MIN ? NAN : v * 0.1f; }
+};
+typedef Tenth TenthRow[CHART_N];
+
 // Chart history, both channels.
 struct History {
   // Rolling live window: one sample per LIVE_SAMPLE_SEC, newest at the end.
-  float livePv[NUM_CHANNELS][CHART_N], liveSp[NUM_CHANNELS][CHART_N];
+  // (the value arrays are pointers into one block, see appInit(): IRAM on the CYD)
+  TenthRow *livePv, *liveSp;  // [NUM_CHANNELS]
   // Current / last program run: run time 0..runSpan in CHART_N bins (the
   // span doubles when the run gets longer than planned).
   bool runValid;
   float runBin, runSpan;
-  float runPv[NUM_CHANNELS][CHART_N], runSp[NUM_CHANNELS][CHART_N];
+  TenthRow *runPv, *runSp;
   // run's program curve: its setpoints so far + the forecast (kept after the run for the CSV)
-  float runPlan[NUM_CHANNELS][CHART_N];
+  TenthRow* runPlan;
   float runTotal;     // elapsed + remaining
   char runName[PROG_NAME_LEN];
   char runSt[NUM_CHANNELS][CHART_N];  // channel state per bin (chart lanes): "-orhwjkxpd" = ChState, 'm' manual, ' ' none
@@ -104,7 +131,7 @@ struct History {
   uint16_t runEvN;
   uint32_t runGen;                    // changes when a new run starts
   // preview of the selected program on its own time axis (no run active)
-  float plan[NUM_CHANNELS][CHART_N];
+  TenthRow* plan;
   float planBin, planSpan, planTotal;
   char planName[PROG_NAME_LEN];
 };
@@ -120,8 +147,8 @@ struct ChartData {
   float planTotal;      // program duration (run: elapsed + remaining)
   float elapsed;        // run: program time
   char progName[PROG_NAME_LEN];
-  float pv[CHART_N], sp[CHART_N], plan[CHART_N];     // bottom (ENGINE_CH)
-  float pvT[CHART_N], spT[CHART_N], planT[CHART_N];  // top
+  Tenth16 pv[CHART_N], sp[CHART_N], plan[CHART_N];     // bottom (ENGINE_CH)
+  Tenth16 pvT[CHART_N], spT[CHART_N], planT[CHART_N];  // top
 };
 
 enum CmdType : uint8_t {
@@ -187,12 +214,21 @@ struct Guard {
 
 void appInit();                  // create locks/queues, load settings and programs
 void controlTaskStart();
+unsigned controlTaskStackFree();  // bytes of the control task's stack never used so far
 bool sendCmd(CmdType c, int arg = 0, float value = 0, int idx = -1, uint8_t sub = 0);
 bool busRequest(BusRequest& r, uint32_t timeoutMs = 20000);  // blocks until done
 void saveSettingsAndNotify();    // persist gSettings and tell the control task (reopens the link)
 void saveSettingsQuiet();        // persist gSettings only (display, selection, manual SP)
-// Loop task (UI + web) scratch program buffer (one task: no lock needed)
-DuoProgram& scratchProgram();
+// A temporary program buffer (≈ 3.9 kB, heap) for the loop task (UI, web), freed at the end of the scope
+struct ScratchProg {
+  DuoProgram* p;
+  ScratchProg() : p((DuoProgram*)malloc(sizeof(DuoProgram))) {}
+  ~ScratchProg() { free(p); }
+  ScratchProg(const ScratchProg&) = delete;
+  ScratchProg& operator=(const ScratchProg&) = delete;
+  explicit operator bool() const { return p != nullptr; }
+  DuoProgram& operator*() { return *p; }
+};
 // The bottom channel's plan of stored program idx as TempCtl steps (old UIs)
 bool loadLegacyView(int idx, Program& out);
 // "Start without saving" (web): starts program slot idx with this content instead of the stored one

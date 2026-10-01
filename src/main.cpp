@@ -3,6 +3,8 @@
 // controllers. Boards: ESP32-S3-DevKitC-1 + 4.0" ST7796 (env s3) and the
 // ESP32-2432S028R "CYD" (env cyd), see src/board_*.h.
 #include <Arduino.h>
+#include <WiFi.h>
+#include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
 #include "app_state.h"
 #include "config.h"
@@ -14,7 +16,21 @@
 // setup() and loop() run in the Arduino loop task, whose default stack is 8 kB.
 // LVGL (creating the screen, drawing the keyboards and the chart) needs about
 // 14 kB; an overflow reboots the board. The stack is taken from the heap.
+#ifdef BOARD_HAS_PSRAM
 SET_LOOP_TASK_STACK_SIZE(24 * 1024);
+#else
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);  // CYD: ~7.5 kB used (measured, incl. Wi-Fi scan list); DRAM is short
+#endif
+
+// Internal byte-addressable RAM (DRAM): free, largest block, lowest so far; plus the IRAM heap, which
+// only takes 32-bit data (chart history on the CYD). ESP.getFreeHeap() counts both, so it looked
+// better than it was on the CYD (no PSRAM).
+static void memLog(const char* where) {
+  const uint32_t caps = MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL;
+  Serial.printf("[mem] %s: DRAM free %u, largest %u, min %u; IRAM free %u\n", where,
+                (unsigned)heap_caps_get_free_size(caps), (unsigned)heap_caps_get_largest_free_block(caps),
+                (unsigned)heap_caps_get_minimum_free_size(caps), (unsigned)heap_caps_get_free_size(MALLOC_CAP_EXEC));
+}
 
 void setup() {
   localCtrlEarlyInit();  // SSR outputs low (off) before anything else
@@ -26,14 +42,19 @@ void setup() {
 #endif
   Serial.println();
   appInit();          // settings, shared state
+  // the control task first: it installs the RS485 UART driver while the heap is still unfragmented
+  // (on the CYD the driver allocation failed once Wi-Fi, web and the first screen draw were running)
+  controlTaskStart(); // Modbus + program engine on core 0
+  delay(50);
+  memLog("after settings/programs/control");
   Serial.println("[boot] ui");
   uiInit();           // display, touch, LVGL screens
-  Serial.printf("[boot] net (free heap %u bytes)\n", ESP.getFreeHeap());
+  memLog("after ui");
   netBegin();         // Wi-Fi STA (or AP fallback)
+  memLog("after wifi");
   webBegin();         // HTTP UI + JSON API
-  controlTaskStart(); // Modbus + program engine on core 0
-  Serial.printf("[mem] free heap %u bytes, largest block %u, loop stack unused %u bytes\n", ESP.getFreeHeap(),
-                ESP.getMaxAllocHeap(), (unsigned)uxTaskGetStackHighWaterMark(nullptr));
+  memLog("after web");
+  memLog("setup done");
   // Watchdog for the loop: if it gets stuck (frozen touch screen) the board
   // prints a backtrace and restarts. 15 s because the longest intended wait
   // in the loop is a 5 s bus request from the touch UI.
@@ -42,6 +63,17 @@ void setup() {
 }
 
 void loop() {
+#ifndef BOARD_HAS_PSRAM
+  // CYD (no PSRAM): heap check once a minute (free, largest block, lowest so far)
+  static uint32_t memAt = 0;
+  if (millis() - memAt > 60000) {
+    memAt = millis();
+    memLog("running");
+    Serial.printf("[mem] stack free: loop %u, control %u bytes\n", (unsigned)uxTaskGetStackHighWaterMark(nullptr),
+                  controlTaskStackFree());
+    if (WiFi.status() == WL_CONNECTED) Serial.printf("[wifi] RSSI %d dBm\n", (int)WiFi.RSSI());
+  }
+#endif
   uiLoop();
   webLoop();
   netLoop();

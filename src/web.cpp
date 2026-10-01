@@ -4,6 +4,9 @@
 #include <ArduinoJson.h>
 #include <WebServer.h>
 #include <WiFi.h>
+#include <errno.h>
+#include <esp_heap_caps.h>
+#include <lwip/sockets.h>
 #include <math.h>
 #include "app_state.h"
 #include "controller.h"
@@ -15,10 +18,68 @@
 static WebServer server(80);
 
 // ------------------------------------------------------------ helpers
+// Every response (status line, headers and body) is written straight on the socket, non-blocking,
+// in TCP-sized pieces. WiFiClient::write retries a stuck connection for 10 s per call and blocks the
+// loop (touch UI, watchdog); here a connection without progress for 5 s is dropped and logged.
+static String extraHeaders;  // set before sendBody(): "Name: value\r\n" lines
+
+static bool sendRaw(int fd, const uint8_t* data, size_t len, size_t& sent, uint32_t& last) {
+  size_t done = 0;
+  while (done < len) {
+    const size_t n = len - done < 1436 ? len - done : 1436;
+    const int w = send(fd, data + done, n, MSG_DONTWAIT);
+    if (w > 0) {
+      done += (size_t)w;
+      sent += (size_t)w;
+      last = millis();
+      feedLoopWDT();
+      continue;
+    }
+    if (w < 0 && errno != EAGAIN && errno != EWOULDBLOCK) return false;  // closed / reset by the browser
+    if (millis() - last > 5000) return false;
+    delay(2);
+  }
+  return true;
+}
+
+static void sendBody(int code, const char* type, const uint8_t* data, size_t len, const char* what) {
+  WiFiClient c = server.client();
+  const int fd = c.fd();
+  String head;
+  head.reserve(160 + extraHeaders.length());
+  head = "HTTP/1.1 ";
+  head += code;
+  head += code == 200 ? " OK" : code == 404 ? " Not Found" : code == 500 ? " Internal Server Error" : " Bad Request";
+  head += "\r\nContent-Type: ";
+  head += type;
+  head += "\r\nContent-Length: ";
+  head += (unsigned)len;
+  head += "\r\nConnection: close\r\n";
+  head += extraHeaders;
+  head += "\r\n";
+  extraHeaders = "";
+  size_t sent = 0;
+  uint32_t last = millis();
+  const bool ok = fd >= 0 && sendRaw(fd, (const uint8_t*)head.c_str(), head.length(), sent, last) &&
+                  sendRaw(fd, data, len, sent, last);
+  if (!ok && fd >= 0 && millis() - last > 5000)
+    Serial.printf("[web] %s: no progress for 5 s after %u of %u bytes - dropped (DRAM %u free, %u min, "
+                  "%u largest)\n",
+                  what, (unsigned)sent, (unsigned)(head.length() + len),
+                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
+                  (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
+  if (!ok) c.stop();
+}
+
+static void sendText(int code, const char* type, const String& body) {
+  sendBody(code, type, (const uint8_t*)body.c_str(), body.length(), server.uri().c_str());
+}
+
 static void sendJson(JsonDocument& d, int code = 200) {
   String out;
   serializeJson(d, out);
-  server.send(code, "application/json", out);
+  sendText(code, "application/json", out);
 }
 
 static void sendError(const char* msg, int code = 400) {
@@ -191,48 +252,6 @@ static void handleStatus() {
   sendJson(d);
 }
 
-static void appendArray(String& out, const char* name, const float* v) {
-  char num[16];
-  out += ",\"";
-  out += name;
-  out += "\":[";
-  for (int i = 0; i < CHART_N; ++i) {
-    if (i) out += ',';
-    if (isnan(v[i])) out += "null";
-    else { snprintf(num, sizeof(num), "%.1f", v[i]); out += num; }
-  }
-  out += ']';
-}
-
-static void handleHistory() {
-  static ChartData d;
-  chartSnapshot(d);
-  JsonDocument h;
-  h["mode"] = d.run ? "run" : "live";
-  h["planActive"] = d.planActive;
-  h["spActive"] = d.spActive;
-  h["binSec"] = d.binSec;
-  h["span"] = d.span;
-  h["planSpan"] = d.planSpan;
-  h["planTotal"] = d.planTotal;
-  h["elapsed"] = d.elapsed;
-  h["name"] = d.progName;
-  String out;
-  out.reserve(server.hasArg("both") ? 13000 : 6500);
-  serializeJson(h, out);
-  out.remove(out.length() - 1);  // drop '}' and append the arrays
-  appendArray(out, "pv", d.pv);
-  appendArray(out, "sp", d.sp);
-  appendArray(out, "plan", d.plan);
-  if (server.hasArg("both")) {  // top channel too (the old page shows the bottom only)
-    appendArray(out, "pvT", d.pvT);
-    appendArray(out, "spT", d.spT);
-    appendArray(out, "planT", d.planT);
-  }
-  out += '}';
-  server.send(200, "application/json", out);
-}
-
 // Log of the last program run (if there was one since boot), else the live window. Both channels.
 static void handleCsv() {
   String out = "time_s,bottom_pv,bottom_sp,bottom_plan,top_pv,top_sp,top_plan\n";
@@ -261,9 +280,9 @@ static void handleCsv() {
       out += line;
     }
   }
-  server.sendHeader("Content-Disposition", run ? "attachment; filename=tempctl-duo-run.csv"
-                                               : "attachment; filename=tempctl-duo-live.csv");
-  server.send(200, "text/csv", out);
+  extraHeaders = String("Content-Disposition: ") + (run ? "attachment; filename=tempctl-duo-run.csv"
+                                               : "attachment; filename=tempctl-duo-live.csv") + "\r\n";
+  sendText(200, "text/csv", out);
 }
 
 // ------------------------------------------------------------ program / commands
@@ -314,7 +333,9 @@ static int progIndexArg(JsonVariantConst v) {
 
 // {"i":0,"used":true,"program":{Duo program JSON}}
 static void sendProgram(int i) {
-  DuoProgram& p = scratchProgram();
+  ScratchProg sp;
+  if (!sp) return sendError("Out of memory", 500);
+  DuoProgram& p = *sp;
   char err[96];
   const bool used = programLoad(i, p, err, sizeof(err));
   JsonDocument d;
@@ -342,7 +363,9 @@ static void handlePostProgram() {
     return sendProgram(i);
   }
   if (!d["program"].is<JsonObjectConst>()) return sendError("program missing");
-  DuoProgram& p = scratchProgram();
+  ScratchProg sp;
+  if (!sp) return sendError("Out of memory", 500);
+  DuoProgram& p = *sp;
   char err[128];
   const char* names[NUM_CHANNELS];
   float lo[NUM_CHANNELS], hi[NUM_CHANNELS];
@@ -412,7 +435,9 @@ static void handlePostRun() {
   else if (!strcmp(c, "start")) {  // "Start without saving": {"cmd":"start","i":n,"program":{...}}
     const int i = d["i"] | -1;
     if (i < 0 || i >= PROG_MAX) return sendError("Program index out of range");
-    DuoProgram& p = scratchProgram();
+    ScratchProg sp;
+    if (!sp) return sendError("Out of memory", 500);
+    DuoProgram& p = *sp;
     char err[128];
     const char* names[NUM_CHANNELS];
     float lo[NUM_CHANNELS], hi[NUM_CHANNELS];
@@ -817,9 +842,9 @@ static void handleAction() {
 // ------------------------------------------------------------ new page (step 7)
 
 static void sendAsset(const WebAsset& a) {
-  if (a.gzip) server.sendHeader("Content-Encoding", "gzip");
-  server.sendHeader("Cache-Control", a.immutable ? "public, max-age=31536000, immutable" : "no-cache");
-  server.send_P(200, a.type, (const char*)a.data, a.len);
+  extraHeaders = a.gzip ? "Content-Encoding: gzip\r\n" : "";
+  extraHeaders += a.immutable ? "Cache-Control: public, max-age=31536000, immutable\r\n" : "Cache-Control: no-cache\r\n";
+  sendBody(200, a.type, a.data, a.len, a.path);
 }
 
 static const char* const CH_KEYS[NUM_CHANNELS] = {"b", "t"};
@@ -913,8 +938,8 @@ static void handleLive() {
 static void handleChart() {
   String out;
   chartJson(out, server.arg("v") != "live");
-  server.sendHeader("Cache-Control", "no-store");
-  server.send(200, "application/json", out);
+  extraHeaders = "Cache-Control: no-store\r\n";
+  sendText(200, "application/json", out);
 }
 
 // ?since=n: event log entries after n
@@ -941,16 +966,27 @@ static void handleLog() {
 
 // ------------------------------------------------------------ setup
 void webBegin() {
+#ifdef BOARD_HAS_PSRAM
   server.on("/", HTTP_GET, [] { sendAsset(WEB_ASSETS[0]); });
+#endif
   for (size_t i = 1; i < WEB_ASSET_COUNT; ++i) {
     const WebAsset* a = &WEB_ASSETS[i];
+#ifdef BOARD_HAS_PSRAM
+    if (!strcmp(a->path, "/nofonts")) continue;
+#else
+    // no PSRAM (CYD): the page without web fonts, no font downloads (system fonts instead)
+    if (!strcmp(a->path, "/nofonts")) {
+      server.on("/", HTTP_GET, [a] { sendAsset(*a); });
+      continue;
+    }
+    if (!strncmp(a->path, "/f/", 3) && strcmp(a->path, "/f/OFL.txt")) continue;
+#endif
     server.on(a->path, HTTP_GET, [a] { sendAsset(*a); });
   }
   server.on("/api/live", HTTP_GET, handleLive);
   server.on("/api/chart", HTTP_GET, handleChart);
   server.on("/api/log", HTTP_GET, handleLog);
   server.on("/api/status", HTTP_GET, handleStatus);
-  server.on("/api/history", HTTP_GET, handleHistory);
   server.on("/api/log.csv", HTTP_GET, handleCsv);
   server.on("/api/programs", HTTP_GET, handleGetPrograms);
   server.on("/api/program", HTTP_GET, handleGetProgram);
@@ -974,7 +1010,7 @@ void webBegin() {
   server.on("/api/params", HTTP_GET, handleGetParams);
   server.on("/api/params", HTTP_POST, handlePostParam);
   server.on("/api/action", HTTP_POST, handleAction);
-  server.onNotFound([] { server.send(404, "text/plain", "Not found"); });
+  server.onNotFound([] { sendBody(404, "text/plain", (const uint8_t*)"Not found", 9, "404"); });
   server.begin();
 }
 

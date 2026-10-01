@@ -1276,7 +1276,7 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
 
 #### 9.10.8 State of step 7c (2026-10-01, version 1.0.8)
 - **The TempCtl 1.2 page (`/old`, `src/web_page.h`) and `/api/settings` are removed** (flash −44 kB in all on
-  the S3); `/api/program` no longer sends the legacy `steps` view. `/api/status` and `/api/history` stay
+  the S3); `/api/program` no longer sends the legacy `steps` view. `/api/status` stays (`/api/history` removed in 1.0.15)
   for scripts.
 - The other pages are in the same page file, chosen by the address (`#/programs`, `#/channels`,
   `#/system`, `#/tools`, anything else = Status; my choice: one file keeps the drafts while switching
@@ -1345,6 +1345,60 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   changed key to `/api/config`; the brightness slider previews on the touch screen while dragged
   (`POST /api/brightness`, not saved, ≤ 1 per 120 ms) and saves on release. The UI loop already picks up
   brightness / rotation / theme changes from the settings.
+- **1.0.15 — CYD out of memory at boot (Rost)**: 1.0.14 on `cyd-1xlocal-1x485` aborted in `webBegin()`
+  (`operator new` failed while registering the routes); with `[mem]` logging the next try got to the end of
+  `setup()` (49 kB free) but the RS485 UART driver could not be installed by the control task (it ran
+  while the first screen was drawn and Wi-Fi was busy). Measured (1.0.15 diag): 242 kB at boot, 201 kB
+  after settings/programs, 115 kB after the UI, 63 kB after Wi-Fi, 58 kB after web (TempCtl 1.2: 158 kB
+  after UI, 97 kB at the end). Fixes: **control task (UART driver) starts right after `appInit()`**,
+  before UI / Wi-Fi; CYD draw buffers 20 → 10 lines (−12.8 kB); chart history and the touch chart copy
+  stored as **0.1 °C int16** (`Tenth`, −7.2 kB heap, −3.6 kB static); **`/api/history` removed** (old
+  page only; −7.3 kB static). `[mem]` lines at boot stay (free, largest block, minimum).
+  Second CYD try: boots (65 kB free at the end of `setup()`), but the page did not load: the "/"
+  response stalled (`WiFiClient write(): errno 11` once per second) and the loop watchdog restarted the
+  board. Now: assets are sent in 1436-byte pieces straight on the socket (non-blocking, a connection
+  without progress for 5 s is dropped and logged with the heap numbers; no watchdog reset), Wi-Fi
+  modem sleep off (`WiFi.setSleep(false)`), CYD: `[mem] running` once a minute.
+  Third try: still stalled, now in the JSON answers (the open browser tab polls right after boot;
+  `WiFiClient::write` again), touch dead while the loop hangs, watchdog reset. Now **every** response
+  body uses the same non-blocking sender (`sendBody`), plus Wi-Fi events (connected / IP / RSSI,
+  disconnect reason, AP start) and the RSSI once a minute in the log. Open question: why TCP sends
+  stall on the CYD (memory, Wi-Fi link, or something on the board); the log of the next try decides.
+  Fourth try (CYD runs its own AP, a PC joined it): no crash any more, but even the first bytes of a
+  small answer (`/api/live`, headers) cannot be sent (EAGAIN from the start, 50 kB heap free at that
+  moment) — TCP sends on the CYD's AP do not get out. Responses are now written completely on the socket
+  (status line + headers too; `extraHeaders`), so nothing blocks the loop for more than 5 s.
+  **Touch bug found**: the touch drivers report screen coordinates, but LVGL 9 rotates pointer input by
+  the display rotation itself → rotated twice, off screen (`Y is 269 which is greater than ver. res`).
+  `ui.cpp` now converts to the panel's native orientation first (`touchToNative`, checked for 0/90/180/
+  270°). The same applies to the S3 (its touch is untested so far).
+  Fifth try (touch works): Wi-Fi scan from the touch screen → LVGL "No memory" for a 320-byte glyph
+  buffer → abort; joining Rost's network → `disconnected (reason 202)` (auth failed) again and again.
+  **Finding: the `[mem]` numbers were misleading** — `ESP.getFreeHeap()` / `getMaxAllocHeap()` count the
+  IRAM heap too (`MALLOC_CAP_INTERNAL`), which only takes 32-bit data and is useless for Wi-Fi, lwIP,
+  LVGL; the "largest block 47092" that never changed is that IRAM block. Real DRAM left after `setup()`
+  was only ≈ 18 kB, so Wi-Fi (TX/handshake), lwIP and LVGL ran out — the stalls, the scan crash and
+  probably the auth failures. Now: `[mem]` shows DRAM (8-bit internal) free / largest / minimum and the
+  IRAM free size, plus loop / control task stack reserve once a minute; **chart history values in the
+  IRAM heap** on boards without PSRAM (`Tenth` = int32, accessed word by word only, no memset/memmove;
+  −7.2 kB DRAM); the program buffer of the loop task (web, UI) is allocated per request
+  (`ScratchProg`, −3.9 kB) and the "start without saving" buffer is freed after the start.
+  S3: same code paths (PSRAM: history in normal RAM); worked as AP and on Rost's network with 1.0.14.
+  Sixth try: boots, joins Rost's network at once, AP works. Real DRAM: 172 kB after settings, 86 kB
+  after the UI (the TempCtl 1.2 touch UI takes 86 kB), 34–37 kB after Wi-Fi, 29–32 kB after web. Loading
+  the page (4 font downloads of 22 kB in parallel, plus the API) drove DRAM down to < 1 kB → stalls, and a
+  Wi-Fi scan list then crashed LVGL (out of memory). Measured stack use: loop ≈ 7.5 kB of 24, control
+  ≈ 3 kB of 8. Now, on boards without PSRAM: loop stack 16 kB (−8 kB), control task 6 kB (−2 kB), one
+  LVGL draw buffer instead of two (−6.4 kB), event log 32 entries (−1.7 kB), the selected program's
+  preview loaded into a temporary buffer only when it has to be recomputed (selection / stored program
+  changed, start PV moved ≥ 1 °C, or every 10 s; −3.9 kB on all boards), and **the page without web fonts**
+  (`/` = a variant without `@font-face` built by `tools/web_embed.py`, font routes not registered;
+  system fonts). Step 6 should give the CYD a lean touch UI (the old one is the biggest user).
+  **Result (Rost, 2026-10-02): CYD and S3 work** (page, page switching, touch, AP and Rost's network).
+  CYD DRAM: 55 kB free after `setup()`, lowest seen 13 kB while the page was used; stack reserve loop
+  8.9 kB of 16, control 3.1 kB of 6. Still tight: watch the `[mem] running` minimum; the lean CYD touch
+  UI in step 6 is the real fix. Some `disconnected (reason 202)` while joining with the AP running.
+  Committed as 1.0.15.
 - Next: 7d "Run interrupted by a reset", then step 6 (touch UI, incl. the polling interval in Setup).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
   add phase, save (POST body checked), start without saving, new Timeline in an empty slot with a pause

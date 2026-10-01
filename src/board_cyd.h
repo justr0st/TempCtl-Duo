@@ -18,8 +18,9 @@
 #define LCD_SPI_HZ 40000000
 #define LCD_BGR 1
 #define LCD_INVERT 0
-// Draw buffers (2 x, internal DMA RAM; the CYD has no PSRAM)
-#define LCD_BUF_LINES 20
+// Draw buffers (2 x, internal DMA RAM; the CYD has no PSRAM). 10 lines = 2 x 6.4 kB: the heap is
+// tight with Wi-Fi + web server + two channels (20 lines took 12.8 kB more)
+#define LCD_BUF_LINES 10
 
 #define PIN_BACKLIGHT 21
 

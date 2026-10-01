@@ -1,6 +1,6 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
 
-> **Work in progress (version 1.0.14).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
+> **Work in progress (version 1.0.15).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
 > of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
 > (the ESP32-S3 board, env `s3`, and the CYD, envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`,
 > build from the same sources), two channels (Modbus / local / off), local thermocouple + SSR channels,
@@ -326,6 +326,7 @@ Rules so the firmware keeps working:
 - `tools/web_embed.py` gzips the page and writes `src/web_assets.h` (generated, not in git). PlatformIO
   runs it before every build (`extra_scripts` in `platformio.ini`); by hand: `python tools/web_embed.py`.
   The page is served gzipped (≈ 40 kB), the fonts (≈ 90 kB) with a one-year browser cache.
+  Boards without PSRAM (CYD) serve the page without the web fonts (system fonts; RAM is short there).
 - Icons: `web/icons/` (`logo.svg` = favicon and sidebar logo, `favicon.ico` 16/32/48 px,
   `apple-touch-icon.png` 180 px), made from the logo in `logo/` (SVG cleaned up for size, PNGs rendered
   from it); served at `/favicon.svg`, `/favicon.ico`, `/apple-touch-icon.png` (≈ 10 kB in all).
@@ -367,7 +368,7 @@ Rules so the firmware keeps working:
 
 ## 5. Web API
 
-TempCtl Duo: two channels. The flat fields of `/api/status` and `/api/history` (TempCtl 1.2) show the
+TempCtl Duo: two channels. The flat fields of `/api/status` (TempCtl 1.2) show the
 **bottom channel**; everything else covers both (`ch` = 0 bottom, 1 top).
 
 **Local channels** (type `local`, step 3): thermocouple converter MAX31855 or MAX6675 (`local.sensor`) read
@@ -386,7 +387,6 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 | GET | `/api/log?since=n` | event log entries after n: [seq, uptime s, run time s or null, text] |
 | GET | `/api/status` | live values (bottom), manual setpoint, selected program; `channels`: both channels (name, type, ok, err, pv, sp, out, mode, manual); `run`: state, `type` (`seq`/`tl`), `seq` (phase `idx`, `stage`, `el`, `dur`), `waiting`, `progPause`, `actionRequired`, `pauseText`, `elapsed`, `remaining`, `edited`, `channels[]` (inProgram, idle, sp, target, moving, Timeline `lane`) |
 | GET/POST | `/api/config` | the whole settings document (= `/duo/settings.json` without passwords) + `limits` (`rs485`, `localMax` of this board variant). POST changes only the keys given, e.g. `{"channels":[null,{"type":"modbus","modbus":{"addr":2}}]}`; `"modbus":{"loadDefaults":true}` loads the register map of the channel's controller type; errors come back as `{"ok":false,"err":"channels[1].type: one of …"}` |
-| GET | `/api/history` | chart data (300 points): `pv`, `sp`, `plan` (bottom), with `?both=1` also `pvT`, `spT`, `planT` (top); `mode` = `live`/`run`, `planActive`, `spActive` |
 | GET | `/api/log.csv` | last program run (or the live window) as CSV, both channels |
 | GET | `/api/programs` | all 20 slots: `used`, `name`, `type`, `steps` (phases / steps), `total` (s), `uses` [bottom, top], `waits`; `sel` |
 | GET | `/api/program?i=0` | `used`, `program`: the program JSON (spec 9.3.5) |

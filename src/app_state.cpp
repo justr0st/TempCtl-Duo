@@ -1,4 +1,5 @@
 #include "app_state.h"
+#include <esp_heap_caps.h>
 #include <math.h>
 #include <stdarg.h>
 #include <string.h>
@@ -27,8 +28,6 @@ static uint8_t busTurn = 0;               // next channel to poll on the bus (ro
 static RunEngine eng;                     // one run engine for both channels (spec 9.3)
 static Settings s;  // control task's private copy of the settings
 static DuoProgram* runProg = nullptr;     // running copy (run edits change it; read by the web under gLock)
-static DuoProgram* selProg = nullptr;     // selected program, for the preview
-static DuoProgram* scratch = nullptr;     // loop task (UI, web)
 static int8_t runIdx = -1;                // slot of the running / last program
 static uint32_t editCount = 0, savedCount = 0;  // run edits / edits stored with "save run"
 static bool selValid = false;
@@ -126,7 +125,8 @@ float runSpanFor(float total) {
   return total + spare;
 }
 
-static void fillNan(float* a, int n) {
+template <typename T>
+static void fillNan(T* a, int n) {
   for (int i = 0; i < n; ++i) a[i] = NAN;
 }
 
@@ -158,7 +158,7 @@ static void histStartRun(float total) {
 
 // the run got longer than the chart: half the resolution, double the span
 static void histCompress() {
-  auto half = [](float* a, bool mean) {
+  auto half = [](Tenth* a, bool mean) {
     for (int i = 0; i < CHART_N / 2; ++i) {
       const float x = a[2 * i], y = a[2 * i + 1];
       a[i] = !mean ? x : isnan(x) ? y : isnan(y) ? x : (x + y) / 2;
@@ -248,7 +248,7 @@ int logSince(uint32_t seq, LogEntry* out, int max) {
 // ---- plan curves (control task; written into gHist under gLock)
 
 struct PlanFill {
-  float* a[NUM_CHANNELS];
+  Tenth* a[NUM_CHANNELS];
   float off;    // seconds added to the segment times
   float bin;
   int from;     // first bin to write
@@ -266,19 +266,53 @@ static void planFn(const PlanSeg& g, void* u) {
   }
 }
 
-// selected program: (re)load it when the selection or the stored program changed
-static void refreshSelected() {
+// Preview of the selected program (gHist->plan), recomputed when the selection or the stored program
+// changed, when a start temperature (PV) moved by 1 degC or more, or every 10 s. The program is loaded
+// into a temporary buffer each time (no permanent 3.9 kB copy: DRAM is short on the CYD).
+static float selTotal = 0;
+static float selPvKey[NUM_CHANNELS] = {NAN, NAN};
+static uint32_t selAt = 0;
+static bool selForce = true;
+
+static float updatePreview(const float* pv) {
   int sel;
   {
     Guard g;
     sel = gSettings.selProgram;
   }
   const uint32_t gen = programStoreGen();
-  if (sel == selLoaded && gen == selGen) return;
+  bool moved = false;
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    const float a = pv ? pv[ch] : NAN, b = selPvKey[ch];
+    if (isnan(a) != isnan(b) || (!isnan(a) && fabsf(a - b) >= 1.0f)) moved = true;
+  }
+  if (!selForce && sel == selLoaded && gen == selGen && !moved && millis() - selAt < 10000) return selTotal;
+  DuoProgram* p = (DuoProgram*)malloc(sizeof(DuoProgram));
+  if (!p) return selTotal;  // try again next time
+  selForce = false;
   selLoaded = sel;
   selGen = gen;
+  selAt = millis();
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) selPvKey[ch] = pv ? pv[ch] : NAN;
   char err[96];
-  selValid = programLoad(sel, *selProg, err, sizeof(err));
+  selValid = programLoad(sel, *p, err, sizeof(err));
+  const float total = selValid ? programPreview(*p, nullptr, nullptr, nullptr) : 0;
+  {
+    Guard g;
+    for (int ch = 0; ch < NUM_CHANNELS; ++ch) fillNan(gHist->plan[ch], CHART_N);
+    gHist->planTotal = total;
+    gHist->planSpan = runSpanFor(total);
+    gHist->planBin = gHist->planSpan / CHART_N;
+    gHist->planName[0] = 0;
+    if (selValid) {
+      PlanFill f{{gHist->plan[0], gHist->plan[1]}, 0, gHist->planBin, 0};
+      programPreview(*p, pv, planFn, &f);
+      strlcpy(gHist->planName, p->name, sizeof(gHist->planName));
+    }
+  }
+  free(p);
+  selTotal = total;
+  return total;
 }
 
 // run: forecast into gHist->runPlan; else preview of the selected program into gHist->plan.
@@ -297,22 +331,10 @@ static float updatePlan(const float* pv, float& remaining) {
     eng.forecast(planFn, &f, pv);
     gHist->runTotal = eng.elapsed() + remaining;
     strlcpy(gHist->runName, runProg->name, sizeof(gHist->runName));
+    selForce = true;  // the preview is rebuilt after the run
     return gHist->runTotal;
   }
-  refreshSelected();
-  const float total = selValid ? programPreview(*selProg, nullptr, nullptr, nullptr) : 0;
-  Guard g;
-  for (int ch = 0; ch < NUM_CHANNELS; ++ch) fillNan(gHist->plan[ch], CHART_N);
-  gHist->planTotal = total;
-  gHist->planSpan = runSpanFor(total);
-  gHist->planBin = gHist->planSpan / CHART_N;
-  gHist->planName[0] = 0;
-  if (selValid) {
-    PlanFill f{{gHist->plan[0], gHist->plan[1]}, 0, gHist->planBin, 0};
-    programPreview(*selProg, pv, planFn, &f);
-    strlcpy(gHist->planName, selProg->name, sizeof(gHist->planName));
-  }
-  return total;
+  return updatePreview(pv);
 }
 
 void chartSnapshot(ChartData& d) {
@@ -368,7 +390,7 @@ static void jNum(String& o, float v, const char* fmt = "%.1f") {
   o += b;
 }
 
-static void jArr(String& o, const float* a, int n) {
+static void jArr(String& o, const Tenth* a, int n) {
   o += '[';
   for (int i = 0; i < n; ++i) {
     if (i) o += ',';
@@ -587,6 +609,8 @@ static void startProgram(int idx, bool draft) {
       loaded = startBuf != nullptr;
       if (loaded) p = *startBuf;
       else strlcpy(err, "no draft to start", sizeof(err));
+      free(startBuf);  // only needed for this start (heap is short on the CYD)
+      startBuf = nullptr;
     } else {
       loaded = programLoad(idx, p, err, sizeof(err));
     }
@@ -1223,8 +1247,11 @@ static void cycle(float dt) {
     lastLive = (n > CHART_N) ? millis() : lastLive + n * slotMs;
     if (n > CHART_N) n = CHART_N;
     for (int c = 0; c < NUM_CHANNELS; ++c) {
-      memmove(gHist->livePv[c], gHist->livePv[c] + n, sizeof(float) * (CHART_N - n));
-      memmove(gHist->liveSp[c], gHist->liveSp[c] + n, sizeof(float) * (CHART_N - n));
+      // word by word (no memmove: the arrays may be in IRAM, 32-bit access only)
+      for (int i = 0; i + n < CHART_N; ++i) {
+        gHist->livePv[c][i] = gHist->livePv[c][i + n];
+        gHist->liveSp[c][i] = gHist->liveSp[c][i + n];
+      }
       for (uint32_t i = CHART_N - n; i < CHART_N; ++i) {
         gHist->livePv[c][i] = pvOk[c] ? pv[c] : NAN;
         gHist->liveSp[c][i] = spNow[c];
@@ -1358,9 +1385,26 @@ void appInit() {
   // large buffers on the heap (the static DRAM segment is almost full)
   gHist = (History*)calloc(1, sizeof(History));
   runProg = (DuoProgram*)calloc(1, sizeof(DuoProgram));
-  selProg = (DuoProgram*)calloc(1, sizeof(DuoProgram));
-  scratch = (DuoProgram*)calloc(1, sizeof(DuoProgram));
-  if (!gHist || !runProg || !selProg || !scratch) {
+  // chart values: 6 x 2 x CHART_N words. No PSRAM (CYD): in the IRAM heap, which the rest of the
+  // firmware can't use (32-bit access only); DRAM is what runs short there (Wi-Fi, LVGL, web)
+  const size_t hvBytes = sizeof(TenthRow) * NUM_CHANNELS * 6;
+#ifdef BOARD_HAS_PSRAM
+  TenthRow* hv = (TenthRow*)malloc(hvBytes);
+#else
+  TenthRow* hv = (TenthRow*)heap_caps_malloc(hvBytes, MALLOC_CAP_EXEC | MALLOC_CAP_32BIT | MALLOC_CAP_INTERNAL);
+  if (!hv) hv = (TenthRow*)malloc(hvBytes);
+#endif
+  if (gHist && hv) {
+    gHist->livePv = hv;
+    gHist->liveSp = hv + NUM_CHANNELS;
+    gHist->runPv = hv + 2 * NUM_CHANNELS;
+    gHist->runSp = hv + 3 * NUM_CHANNELS;
+    gHist->runPlan = hv + 4 * NUM_CHANNELS;
+    gHist->plan = hv + 5 * NUM_CHANNELS;
+    for (int r = 0; r < 6 * NUM_CHANNELS; ++r)
+      for (int i = 0; i < CHART_N; ++i) hv[r][i] = NAN;
+  }
+  if (!gHist || !hv || !runProg) {
     Serial.println("Out of memory");
     abort();
   }
@@ -1390,9 +1434,16 @@ void appInit() {
   statusLedBegin();
 }
 
+static TaskHandle_t controlHandle = nullptr;
 void controlTaskStart() {
-  xTaskCreatePinnedToCore(controlTask, "control", 8192, nullptr, 3, nullptr, 0);
+#ifdef BOARD_HAS_PSRAM
+  const uint32_t stack = 8192;
+#else
+  const uint32_t stack = 6144;  // CYD: ~3 kB used (measured), DRAM is short
+#endif
+  xTaskCreatePinnedToCore(controlTask, "control", stack, nullptr, 3, &controlHandle, 0);
 }
+unsigned controlTaskStackFree() { return controlHandle ? (unsigned)uxTaskGetStackHighWaterMark(controlHandle) : 0; }
 
 bool sendCmd(CmdType c, int arg, float value, int idx, uint8_t sub) {
   Cmd m{c, sub, (int16_t)arg, (int16_t)idx, value};
@@ -1433,17 +1484,16 @@ void saveSettingsQuiet() {
   settingsSave(copy);
 }
 
-DuoProgram& scratchProgram() { return *scratch; }
-
 bool loadLegacyView(int idx, Program& out) {
   char err[96];
-  if (!programLoad(idx, *scratch, err, sizeof(err))) {
+  ScratchProg sp;
+  if (!sp || !programLoad(idx, *sp, err, sizeof(err))) {
     char name[PROG_NAME_LEN];
     snprintf(name, sizeof(name), "Program %d", idx + 1);
     programClear(out, name);
     return false;
   }
-  programLegacyView(*scratch, out);
+  programLegacyView(*sp, out);
   return true;
 }
 
