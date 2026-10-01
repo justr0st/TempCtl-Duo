@@ -1113,7 +1113,7 @@ function mkForm(id,box,groups,o={}){
   box.innerHTML=(o.title?`<h2>${esc(o.title)}</h2>`:'')+(o.top||'')+groups.map((g,gi)=>{
     const body=(g.note?`<p class="hint">${esc(g.note)}</p>`:'')+`<div class="form">${g.fields.map(fldHtml).join('')}</div>`+(g.extra||'');
     return g.det?`<details class="grp" data-g="${gi}"><summary>${esc(g.h)}</summary>${body}</details>`:`<div data-g="${gi}">${g.h?`<h3>${esc(g.h)}</h3>`:''}${body}</div>`;
-  }).join('')+`<div class="fbar"><button class="pri" data-fsave="${id}">${esc(o.save||'Save')}</button><button data-frev="${id}">Revert</button><span class="msg" data-fmsg></span></div>`;
+  }).join('')+(o.auto?'<div class="msg" data-fmsg></div>':`<div class="fbar"><button class="pri" data-fsave="${id}">${esc(o.save||'Save')}</button><button data-frev="${id}">Revert</button><span class="msg" data-fmsg></span></div>`);
   fillForm(F); return F;
 }
 const fEl=(F,f)=>F.box.querySelector(`[data-k="${f.k}"]`);
@@ -1141,8 +1141,8 @@ function updForm(F){ if(!CFG) return;
   for(const f of F.fields){ const el=fEl(F,f); if(!el) continue; const lab=el.closest('.fld'), v=readIn(F,f), ch=!same(v,cfgVal(f)), vis=!f.show||f.show(g), b=vis&&isBad(f,v);
     lab.hidden=!vis; lab.classList.toggle('chg',ch); lab.classList.toggle('bad',b); dirty=dirty||ch; bad=bad||b; decor(F,f,el); }
   F.groups.forEach((gr,gi)=>{ if(gr.show){ const e=F.box.querySelector(`[data-g="${gi}"]`); if(e) e.hidden=!gr.show(g); } });
-  F.box.querySelector('[data-fsave]').disabled=!dirty||bad; F.box.querySelector('[data-frev]').disabled=!dirty;
-  if(F.o.sticky) F.box.querySelector('.fbar').classList.toggle('sticky',dirty);
+  if(!F.o.auto){ F.box.querySelector('[data-fsave]').disabled=!dirty||bad; F.box.querySelector('[data-frev]').disabled=!dirty; }
+  if(F.o.sticky&&!F.o.auto) F.box.querySelector('.fbar').classList.toggle('sticky',dirty);
   F.dirty=dirty; if(F.o.onUpd) F.o.onUpd(F); }
 function fMsg(F,t,bad){ const m=F.box.querySelector('[data-fmsg]'); m.textContent=t||''; m.className='msg'+(bad?' bad':''); }
 async function postCfg(body){ try{ return await api('/api/config',body); }catch(e){ return {err:'Device not reachable.'}; } }
@@ -1150,13 +1150,21 @@ async function saveForm(F){
   const ch=changedFields(F).filter(f=>!isBad(f,readIn(F,f))); if(!ch.length) return;
   const body={}, sent=ch.map(f=>[f,readIn(F,f)]); for(const [f,v] of sent) sp(body,f.k,v);
   if(F.o.confirm&&!(await F.o.confirm(F,body))) return;
+  const seq=F.seq=(F.seq||0)+1;
   fMsg(F,'Saving…'); const r=await postCfg(body);
-  if(r.err){ fMsg(F,r.err,true); return; }
-  CFG=r; for(const G of Object.values(FORMS)) if(G===F||!G.dirty) fillForm(G);
+  if(r.err){ fMsg(F,r.err,true); if(F.o.auto&&seq===F.seq) fillForm(F); return; }
+  CFG=r; for(const G of Object.values(FORMS)) if((G===F&&seq===F.seq)||!G.dirty) fillForm(G);
+  if(seq!==F.seq) return;
   const adj=sent.filter(([f,v])=>!same(v,cfgVal(f))).map(([f])=>f.l.replace(/^[…\s]+/,''));
   fMsg(F,adj.length?'Saved. Adjusted to the allowed range: '+adj.join(', ')+'.':'Saved.'); poll(); }
 document.addEventListener('input',e=>{ const b=e.target.closest('[data-form]'); if(b&&FORMS[b.dataset.form]&&e.target.closest('[data-k]')) updForm(FORMS[b.dataset.form]); });
-document.addEventListener('change',e=>{ const b=e.target.closest('[data-form]'); if(b&&FORMS[b.dataset.form]&&e.target.closest('[data-k]')) updForm(FORMS[b.dataset.form]); });
+document.addEventListener('change',e=>{ const b=e.target.closest('[data-form]'), F=b&&FORMS[b.dataset.form]; if(!F||!e.target.closest('[data-k]')) return;
+  if(e.target.dataset.k==='display.brightness'){ clearTimeout(brT); brT=0; }
+  updForm(F); if(F.o.auto&&F.dirty) saveForm(F); });
+// brightness: the touch screen follows the slider while it is dragged (not saved; saved on release)
+let brT=0, brV=null;
+document.addEventListener('input',e=>{ const el=e.target; if(el.dataset.k!=='display.brightness') return; brV=+el.value;
+  if(!brT) brT=setTimeout(()=>{ brT=0; api('/api/brightness',{v:brV}).catch(()=>{}); },120); });
 document.addEventListener('click',e=>{ const s=e.target.closest('[data-fsave]'); if(s){ saveForm(FORMS[s.dataset.fsave]); return; }
   const r=e.target.closest('[data-frev]'); if(r){ const F=FORMS[r.dataset.frev]; fillForm(F); fMsg(F,''); } });
 window.addEventListener('beforeunload',e=>{ if(Object.values(FORMS).some(F=>F.dirty)||Object.keys(DRAFT).some(i=>isDirty(+i))){ e.preventDefault(); e.returnValue=''; } });
@@ -1362,7 +1370,7 @@ function updSystem(){
       {k:'display.accent',l:'Accent colour',t:'accent',h:'Used on the touch screen and on this page; the channel colours follow from it.'},
       {k:'display.themeDark',l:'Touch screen theme',t:'theme',def:true},
       {k:'display.brightness',l:'Touch screen brightness',t:'range',min:10,max:255,w:true,fmt:v=>Math.round(v/255*100)+' %'},
-      {k:'display.rotate180',l:'Rotate the screen by 180°',t:'sw'}]}],{title:'Display',save:'Save display settings'}); }
+      {k:'display.rotate180',l:'Rotate the screen by 180°',t:'sw'}]}],{title:'Display',auto:true}); }
   const host=CFG.wifi.hostname;
   const kv=[['Firmware','TempCtl Duo '+live.fw],['Board',live.board+(live.variant?' · '+live.variant:'')],['Network',live.net],['Host name',`<a href="http://${esc(host)}.local/">${esc(host)}.local</a>`],['Uptime',upTxt(live.up)]]
     .map(([k,v])=>`<dt>${k}</dt><dd>${k==='Host name'?v:esc(v)}</dd>`).join('');

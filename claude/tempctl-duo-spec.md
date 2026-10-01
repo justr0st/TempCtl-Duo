@@ -1341,6 +1341,10 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   **thick brightness slider** (accent fill, value in %); **masonry tiles**: `.cards` grids give each
   tile a row span from its height (4 px rows), so short tiles move up next to tall ones (one column:
   normal flow).
+- **1.0.14 (Rost)**: the Display settings apply **at once** (no Save / Revert): each change posts the
+  changed key to `/api/config`; the brightness slider previews on the touch screen while dragged
+  (`POST /api/brightness`, not saved, ≤ 1 per 120 ms) and saves on release. The UI loop already picks up
+  brightness / rotation / theme changes from the settings.
 - Next: 7d "Run interrupted by a reset", then step 6 (touch UI, incl. the polling interval in Setup).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
   add phase, save (POST body checked), start without saving, new Timeline in an empty slot with a pause

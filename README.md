@@ -1,6 +1,6 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
 
-> **Work in progress (version 1.0.13).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
+> **Work in progress (version 1.0.14).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
 > of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
 > (the ESP32-S3 board, env `s3`, and the CYD, envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`,
 > build from the same sources), two channels (Modbus / local / off), local thermocouple + SSR channels,
@@ -359,7 +359,8 @@ Rules so the firmware keeps working:
     of the selected type. Changed fields are marked; Save sends only the changed values
     (`POST /api/config`) and lists values the device had to adjust to the allowed range.
   - **System** (tiles fill the free space): device info, restart, Wi-Fi (with network scan, show / hide
-    password, optional fixed IP address), touch display (light / dark switch, brightness slider) (accent colour, theme,
+    password, optional fixed IP address), touch display (light / dark switch, brightness slider;
+    applied at once, no Save button — the screen follows the slider while it is dragged) (accent colour, theme,
     brightness, rotation).
   - **Tools**: Modbus tools for a Modbus channel (find the setpoint address, read registers, write one
     register); backup / restore of the settings and of all programs as JSON files.
@@ -399,6 +400,7 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 | POST | `/api/cmd` | `{"cmd":"start"|"pause"|"resume"|"stop"|"next"|"continue", "prog":index}` (`skip` = `next`) |
 | POST | `/api/wifi` | `{"ssid","pass","apPass"}`, reconnects without restart |
 | GET | `/api/wifiscan` | `?start=1` starts a network scan; then `{"busy":true}` until `{"networks":[…]}` (strongest first) |
+| POST | `/api/brightness` | `{"v":128}` touch screen brightness while the web slider moves (not saved) |
 | POST | `/api/restart` | restarts the device (refused while a program runs) |
 | GET | `/api/mb/read?addr=&n=&fn=&ch=` | raw registers (`ch`: channel whose controller address is used, default 0; also in the POST tools below) |
 | POST | `/api/mb/write` | `{"addr","value"}` raw |

@@ -623,6 +623,24 @@ static void handleWifiScan() {
   sendJson(d);
 }
 
+// POST /api/brightness {"v":128}: touch screen brightness while the web slider is dragged
+// (applied by the UI loop, not saved; the slider saves through /api/config when released)
+static void handleBrightness() {
+  JsonDocument d;
+  if (!parseBody(d)) return sendError("Invalid JSON");
+  int v = d["v"] | -1;
+  if (v < 0) return sendError("v missing");
+  if (v < 10) v = 10;
+  if (v > 255) v = 255;
+  {
+    Guard g;
+    gSettings.brightness = (uint8_t)v;
+  }
+  JsonDocument r;
+  r["ok"] = true;
+  sendJson(r);
+}
+
 // POST /api/restart (refused while a program runs)
 static uint32_t restartAt = 0;
 static void handleRestart() {
@@ -947,6 +965,7 @@ void webBegin() {
   server.on("/api/wifi", HTTP_POST, handleWifi);
   server.on("/api/wifiscan", HTTP_GET, handleWifiScan);
   server.on("/api/restart", HTTP_POST, handleRestart);
+  server.on("/api/brightness", HTTP_POST, handleBrightness);
   server.on("/api/config", HTTP_GET, handleGetConfig);
   server.on("/api/config", HTTP_POST, handlePostConfig);
   server.on("/api/mb/read", HTTP_GET, handleMbRead);
