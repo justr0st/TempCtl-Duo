@@ -1,6 +1,6 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
 
-> **Work in progress (version 1.0.5).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
+> **Work in progress (version 1.0.6).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
 > of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
 > (the ESP32-S3 board, env `s3`, and the CYD, envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`,
 > build from the same sources), two channels (Modbus / local / off), local thermocouple + SSR channels,
@@ -151,8 +151,8 @@ Wiring picture: `claude/wiring/s3-wiring.png` (display on J1, RS485 / thermocoup
 Flash and watch the log through the USB port labelled **"UART"**. The native "USB" port is kept for the
 serial console / Web Serial page (later steps).
 
-Status LED (WS2812): green = idle, blue = running, amber blinking = paused / waiting, fault = slowly breathing magenta
-for now (no answer from a channel, latched fault), purple = access point mode.
+Status LED (WS2812): green = idle, blue = running, amber blinking = paused / waiting, red blinking = fault
+(no answer from a channel, latched fault), purple = access point mode.
 
 Bring-up checks: if the colours look inverted set `LCD_INVERT 1`; if touches land in the wrong place change
 `TOUCH_SWAP_XY` / `TOUCH_INVERT_X` / `TOUCH_INVERT_Y` in `board_s3.h` (the bring-up panel shows the raw
@@ -203,7 +203,7 @@ set `PIN_RS485_DE` to `-1` in `src/board_cyd.h` / `src/board_s3.h`.
   Many cheap modules have a 120 Ω resistor fitted; remove it if communication is flaky on a short line, and make
   sure the module has fail-safe bias resistors.
 - CYD status LED: the on-board RGB LED (external WS2812 in `cyd-2xlocal-2x485`) with the same colours as the S3 (green = idle, blue = running,
-  amber blinking = paused / waiting, fault = breathing magenta for now, purple = access point mode).
+  amber blinking = paused / waiting, red blinking = fault, purple = access point mode).
 - Free CYD pins: only IO22 (P3-2 and CN1-3), IO27 (CN1-2, 10 k pull-up) and IO35 (P3-3, input only) are
   on connectors. The SD slot pins (IO5, IO18, IO19, IO23) are reached with a micro-SD breakout adapter
   (no SD card in the slot). IO6–IO11 are the module's flash and not usable.

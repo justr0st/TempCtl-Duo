@@ -144,8 +144,7 @@ Unusable / kept free:
 | Spare | 4, 5, 6 | J1 | e.g. buzzer, door / E-stop input |
 
 **Status LED (decided)**: green = idle · blue = running · amber blinking = waiting for bottom / program
-pause / action required · red blinking = fault (**for now: slowly breathing magenta**, Rost 2026-10-01, until the
-status indication is reworked) · purple = AP mode. Priority when several apply: fault >
+pause / action required · red blinking = fault · purple = AP mode. Priority when several apply: fault >
 amber > purple > blue > green. Low brightness (≈ 20 %). **CYD: the on-board RGB LED (external WS2812 on IO17 in `cyd-2xlocal-2x485`) with the same
 colours** (Rost, 2026-09-29; replaces "blue LED only"): PWM on LEDC channels 1–3, active low.
 
@@ -1269,7 +1268,7 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   edits can be saved into it after the run) / Cancel.
 - During a run the tables and handles edit the running copy through `/api/run` (target / ramp / hold);
   type, wait, pause options, add / delete are locked during a run (the engine has no structural edits).
-- Status LED: fault = slowly breathing magenta for now (Rost; replaced by the status rework later).
+- Status LED: fault breathing magenta was tried and taken back (1.0.6): red blinking again.
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
   add phase, save (POST body checked), start without saving, new Timeline in an empty slot with a pause
   text, phone width (no sideways scrolling).
