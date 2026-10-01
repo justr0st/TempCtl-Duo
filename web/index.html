@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>TempCtl Duo</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <style>
 @font-face{font-family:"Barlow";font-weight:400;font-display:swap;src:url(/f/barlow-400.woff2) format("woff2")}
 @font-face{font-family:"Barlow";font-weight:500;font-display:swap;src:url(/f/barlow-500.woff2) format("woff2")}
@@ -23,7 +26,7 @@ h1{font-family:var(--cond);font-weight:600;font-size:24px;line-height:1.1;margin
 h2{font-family:var(--cond);font-weight:600;font-size:19px;margin:0 0 10px}
 .app{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh;background:linear-gradient(to right,var(--panel) 231px,var(--line) 231px,var(--line) 232px,transparent 232px)}
 aside{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:14px;padding:16px 12px;background:var(--panel);border-right:1px solid var(--line);overflow:auto}
-.brand{padding:2px 6px 8px}.brand b{font-family:var(--cond);font-size:22px;font-weight:600;display:block}.brand small{color:var(--muted)}
+.brand{padding:2px 6px 8px;display:flex;align-items:center;gap:10px}.brand img{width:40px;height:40px;flex:none}.brand b{font-family:var(--cond);font-size:22px;font-weight:600;display:block}.brand small{color:var(--muted)}
 nav{display:flex;flex-direction:column;gap:6px}
 nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;color:var(--text);text-decoration:none;font-weight:500;border:1px solid transparent}
 nav a:hover{border-color:var(--line)}
@@ -222,7 +225,7 @@ table.t input{width:90px}
 <body>
 <div class="app">
 <aside id="side" aria-label="Pages">
-  <div class="brand"><b>TempCtl Duo</b><small id="fw"></small></div>
+  <div class="brand"><img src="/favicon.svg" alt=""><span><b>TempCtl Duo</b><small id="fw"></small></span></div>
   <nav>
     <a href="#/" data-pg="status" class="on" aria-current="page"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 4-7 5 9"/><path d="M3 21h18"/></svg>Status</a>
     <a href="#/programs" data-pg="programs"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Programs</a>

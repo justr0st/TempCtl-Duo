@@ -1329,6 +1329,9 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   button** (eye) inside both password fields. Touch Setup gets the same in step 6 (parity).
   ArduinoJson pinned to `^7.3.0` (before 7.3 a `const char*` was stored by pointer — found by the
   sanitizer in a new host test; Rost builds with 7.4.3, the cloud build now too).
+- **1.0.11**: logo from `logo/` (Rost) as favicon (`/favicon.svg`, `/favicon.ico` 16/32/48,
+  `/apple-touch-icon.png` 180 px, square for iOS) and next to the name in the sidebar; files in
+  `web/icons/`, embedded by `tools/web_embed.py`. (The touch UI could show it in step 6.)
 - Next: 7d "Run interrupted by a reset", then step 6 (touch UI, incl. the polling interval in Setup).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
   add phase, save (POST body checked), start without saving, new Timeline in an empty slot with a pause

@@ -1,6 +1,6 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
 
-> **Work in progress (version 1.0.10).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
+> **Work in progress (version 1.0.11).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
 > of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
 > (the ESP32-S3 board, env `s3`, and the CYD, envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`,
 > build from the same sources), two channels (Modbus / local / off), local thermocouple + SSR channels,
@@ -326,6 +326,9 @@ Rules so the firmware keeps working:
 - `tools/web_embed.py` gzips the page and writes `src/web_assets.h` (generated, not in git). PlatformIO
   runs it before every build (`extra_scripts` in `platformio.ini`); by hand: `python tools/web_embed.py`.
   The page is served gzipped (≈ 40 kB), the fonts (≈ 90 kB) with a one-year browser cache.
+- Icons: `web/icons/` (`logo.svg` = favicon and sidebar logo, `favicon.ico` 16/32/48 px,
+  `apple-touch-icon.png` 180 px), made from the logo in `logo/` (SVG cleaned up for size, PNGs rendered
+  from it); served at `/favicon.svg`, `/favicon.ico`, `/apple-touch-icon.png` (≈ 10 kB in all).
 - Status page: run panel (program, Start / Pause / Continue / Stop / Next phase, state, run time,
   remaining time), chart (both channels: temperatures, setpoints, state lanes, phase lines with times,
   pauses, the forecast of the rest of the run dashed; zoom − / + / Fit, Ctrl + wheel, drag, pinch;

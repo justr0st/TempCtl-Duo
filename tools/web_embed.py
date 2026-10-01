@@ -1,5 +1,5 @@
-# Embeds the web page (web/index.html, gzipped) and the Barlow fonts
-# (web/fonts/*.woff2) into src/web_assets.h, served by src/web.cpp.
+# Embeds the web page (web/index.html, gzipped), the Barlow fonts (web/fonts/*.woff2)
+# and the icons (web/icons/, made from logo/) into src/web_assets.h, served by src/web.cpp.
 #
 # Runs automatically before every PlatformIO build (platformio.ini:
 # extra_scripts = pre:tools/web_embed.py) and rewrites the header only when
@@ -24,6 +24,9 @@ ASSETS = [
     ("/f/barlow-600.woff2", "fonts/barlow-600.woff2", "font/woff2", False, True),
     ("/f/barlow-semi-condensed-600.woff2", "fonts/barlow-semi-condensed-600.woff2", "font/woff2", False, True),
     ("/f/OFL.txt", "fonts/OFL.txt", "text/plain; charset=utf-8", True, True),
+    ("/favicon.svg", "icons/logo.svg", "image/svg+xml", True, False),
+    ("/favicon.ico", "icons/favicon.ico", "image/x-icon", False, False),
+    ("/apple-touch-icon.png", "icons/apple-touch-icon.png", "image/png", False, False),
 ]
 
 
