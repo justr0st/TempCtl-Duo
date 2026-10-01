@@ -139,6 +139,66 @@ button.x{min-width:32px;padding:3px 8px;min-height:30px;color:var(--muted)}
 .tl2 h3{font-family:var(--cond);font-size:17px;margin:0 0 6px}
 @media (max-width:760px){.tl2{grid-template-columns:minmax(0,1fr)}.tl2>div{padding:0}.tl2>div:first-child{border-right:0;border-bottom:3px double var(--line);padding-bottom:12px;margin-bottom:12px}}
 .chartbox [data-h]{touch-action:none}
+/* settings pages */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr));gap:12px;align-items:start}
+.sub{min-width:0}
+h3{font-family:var(--cond);font-weight:600;font-size:16.5px;margin:16px 0 8px}
+.sub>h3:first-child,.panel>h3:first-child{margin-top:0}
+.hint{color:var(--muted);font-size:13.5px;margin:0 0 10px}
+.edhead .hint{margin:0}
+.form{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr));gap:10px 16px}
+.fld{display:flex;flex-direction:column;gap:3px;font-size:13.5px;color:var(--muted);min-width:0}
+.fld.wide,.form .wide{grid-column:1/-1}
+.fld .in{display:flex;align-items:center;gap:6px;color:var(--text);min-height:34px}
+.fld small{font-size:12.5px}
+.fld input[type=number]{width:104px}
+.fld input[type=text],.fld input[type=password]{width:100%;min-width:0;flex:1}
+input[type=password]{font:inherit;color:var(--text);background:var(--sunk);border:1px solid var(--line);border-radius:6px;padding:5px 7px;min-height:34px}
+.fld select{min-width:0;flex:1}
+.fld.chg input:not([type=checkbox]):not([type=radio]),.fld.chg select{border-color:var(--amber);box-shadow:inset 0 0 0 1px var(--amber)}
+.fld.chg>span:first-child{color:var(--amber)}
+.fld.bad input{border-color:var(--danger);box-shadow:inset 0 0 0 1px var(--danger)}
+.switch.acc:checked{background:var(--acc)}
+.fbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.fbar .msg{margin:0}
+.fbar.sticky{position:sticky;bottom:0;z-index:4;background:var(--panel);margin:14px -14px -14px;padding:10px 14px;border-radius:0 0 10px 10px}
+details.grp{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}
+details.grp summary{cursor:pointer;font-family:var(--cond);font-weight:600;font-size:16.5px}
+details.grp[open] summary{margin-bottom:8px}
+.kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 14px;margin:0}
+.kv dt{color:var(--muted)}.kv dd{margin:0;overflow-wrap:anywhere}
+.acc-sw{display:flex;flex-wrap:wrap;gap:8px}
+.acc-sw label{display:inline-flex;align-items:center;gap:6px;padding:4px 10px 4px 4px;border:1px solid var(--line);border-radius:999px;cursor:pointer;color:var(--text)}
+.acc-sw input{position:absolute;opacity:0;pointer-events:none}
+.acc-sw i{width:22px;height:22px;border-radius:50%;display:block}
+.acc-sw label:has(input:checked){border-color:var(--text);box-shadow:inset 0 0 0 1px var(--text)}
+.acc-sw label:has(input:focus-visible){outline:2px solid var(--acc);outline-offset:2px}
+.nets{display:flex;flex-wrap:wrap;gap:6px}
+.nets button{min-height:30px;padding:3px 10px}
+.live1{background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px;margin:0 0 12px}
+.live1 b{font-family:var(--cond);font-size:18px}
+table.t{border-collapse:collapse;width:100%;font-size:14px}
+table.t th{font-weight:600;color:var(--muted);text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)}
+table.t td{padding:4px 6px;border-bottom:1px solid var(--line)}
+table.t td.n{text-align:right}
+table.t input{width:90px}
+.cal{display:grid;grid-template-columns:auto auto auto;gap:6px 10px;align-items:center;justify-content:start;font-size:13.5px;color:var(--muted)}
+.cal input{width:84px}
+.plist{display:flex;flex-direction:column}
+.prow{display:grid;grid-template-columns:34px minmax(0,1fr) minmax(0,1.5fr) auto;gap:4px 12px;align-items:center;padding:8px 4px;border-bottom:1px solid var(--line)}
+.prow:last-child{border-bottom:0}
+.prow .no{font-family:var(--cond);font-weight:600;font-size:17px;color:var(--muted);text-align:right}
+.prow .pn{font-weight:600;min-width:0;overflow-wrap:anywhere}
+.prow .pn .state{margin-left:6px;font-size:12px;padding:0 7px}
+.prow .pm{color:var(--muted);font-size:13.5px;display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center}
+.prow .pa{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.prow .pa button{min-height:30px;padding:3px 10px}
+.prow.empty .pn{font-weight:400;color:var(--muted)}
+.prow.sel{background:var(--sunk);box-shadow:inset 3px 0 0 var(--acc)}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:600}
+.chip i{width:9px;height:9px;border-radius:50%;background:currentColor;display:block}
+@media (max-width:520px){.form{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}.fld input[type=number]{width:96px}}
+@media (max-width:760px){.prow{grid-template-columns:30px minmax(0,1fr)}.prow .pm,.prow .pa{grid-column:2}.prow .pa{justify-content:flex-start}}
 @media (max-width:1100px){.grid2{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:860px){
  .app{grid-template-columns:minmax(0,1fr);background:none}
@@ -158,9 +218,11 @@ button.x{min-width:32px;padding:3px 8px;min-height:30px;color:var(--muted)}
 <aside id="side" aria-label="Pages">
   <div class="brand"><b>TempCtl Duo</b><small id="fw"></small></div>
   <nav>
-    <a href="/" class="on" aria-current="page"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 4-7 5 9"/><path d="M3 21h18"/></svg>Status</a>
-    <a href="/old"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Programs<small>old page</small></a>
-    <a href="/old"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>Settings &amp; tools<small>old page</small></a>
+    <a href="#/" data-pg="status" class="on" aria-current="page"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 4-7 5 9"/><path d="M3 21h18"/></svg>Status</a>
+    <a href="#/programs" data-pg="programs"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Programs</a>
+    <a href="#/channels" data-pg="channels"><svg viewBox="0 0 24 24"><path d="M10 13.5V5a2 2 0 0 1 4 0v8.5a4 4 0 1 1-4 0z"/><path d="M12 9v6"/></svg>Channels</a>
+    <a href="#/system" data-pg="system"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>System</a>
+    <a href="#/tools" data-pg="tools"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 17.8V21h3.2l6.3-6.3a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg>Tools</a>
   </nav>
   <div class="foot">
     <span class="lk"><i class="dot" id="linkDot"></i><span id="linkTxt">Connecting…</span></span>
@@ -173,10 +235,11 @@ button.x{min-width:32px;padding:3px 8px;min-height:30px;color:var(--muted)}
 <main>
 <div class="top">
   <button id="menu" aria-label="Menu" aria-expanded="false">☰</button>
-  <h1>Status</h1>
-  <span class="jump"><a class="btn" href="#runP">Run</a><a class="btn" href="#chans">Channels</a><a class="btn" href="#edP">Program</a><a class="btn" href="#logP">Log</a></span>
+  <h1 id="title">Status</h1>
+  <span class="jump" id="jump"><a class="btn" href="#runP">Run</a><a class="btn" href="#chans">Channels</a><a class="btn" href="#edP">Program</a><a class="btn" href="#logP">Log</a></span>
 </div>
 
+<div class="pg" id="pg-status">
 <section class="panel" id="runP" aria-label="Run">
   <div class="bar">
     <label class="f" style="min-width:0;max-width:100%">Program <select id="prog" style="min-width:0"></select></label>
@@ -210,6 +273,69 @@ button.x{min-width:32px;padding:3px 8px;min-height:30px;color:var(--muted)}
 </section>
 
 <section class="panel mt" id="logP" aria-label="Event log"><h2>Event log</h2><ul class="log" id="log"></ul></section>
+</div>
+
+<div class="pg" id="pg-programs" hidden>
+<section class="panel" aria-label="Programs">
+  <p class="hint" id="plHint"></p>
+  <div class="plist" id="plist"></div>
+  <div class="msg" id="plMsg"></div>
+</section>
+</div>
+
+<div class="pg" id="pg-channels" hidden>
+<section class="panel" id="cCommon" data-form="common"></section>
+<div class="bar mt" style="margin-bottom:0"><span class="seg" role="group" aria-label="Channel" id="chTabs"></span></div>
+<div id="cChan"><div data-chp="0"><section class="panel mt" id="cf0"></section><div class="cards mt" id="cx0"></div></div>
+<div data-chp="1" hidden><section class="panel mt" id="cf1"></section><div class="cards mt" id="cx1"></div></div></div>
+</div>
+
+<div class="pg" id="pg-system" hidden>
+<div class="cards">
+<section class="panel" aria-label="Device"><h2>Device</h2><dl class="kv" id="devInfo"></dl>
+  <div class="fbar"><button id="bRestart">Restart device</button><span class="msg" id="rsMsg"></span></div></section>
+<section class="panel" aria-label="Wi-Fi"><h2>Wi-Fi</h2>
+  <p class="hint">Leave the network name empty to run as an access point only. If the device cannot join the network within 20 s it also opens its own access point. A new host name takes effect after a restart.</p>
+  <div class="form">
+    <label class="fld wide"><span>Network name</span><span class="in"><input type="text" id="wSsid" maxlength="32" autocomplete="off"><button id="bScan" type="button">Scan</button></span></label>
+    <div class="nets wide" id="nets" hidden></div>
+    <label class="fld"><span>Password</span><span class="in"><input type="password" id="wPass" maxlength="64" autocomplete="new-password"></span><small id="wPassH"></small></label>
+    <label class="fld"><span>Access point password</span><span class="in"><input type="password" id="wAp" maxlength="32" autocomplete="new-password"></span><small>8 or more characters, empty = keep</small></label>
+    <label class="fld"><span>Host name</span><span class="in"><input type="text" id="wHost" maxlength="23"></span><small id="wHostH"></small></label>
+  </div>
+  <div class="fbar"><button class="pri" id="bWifi">Save and connect</button><span class="msg" id="wMsg"></span></div></section>
+<section class="panel" id="sDisp" data-form="disp"></section>
+</div>
+</div>
+
+<div class="pg" id="pg-tools" hidden>
+<section class="panel" aria-label="Modbus tools">
+  <div class="edhead"><h2>Modbus tools</h2><label class="f">Controller <select id="tCh"></select></label></div>
+  <p class="hint" id="tNone" hidden>No channel is set to Modbus (Channels page).</p>
+  <div class="cards" id="tBox">
+    <div class="sub"><h3>Find the setpoint address</h3>
+      <p class="hint">Not needed for the PMA KS 4x-1 (preset). For other controllers: reads every register in the range and lists those whose value equals the controller's effective setpoint. Make sure no ramp is active and the setpoint is an unusual value (e.g. 123.4) so the match is unique, then change the setpoint on the front panel and read the candidate again to confirm.</p>
+      <div class="row"><label class="f">From <input type="number" id="scFrom" min="0" max="65534"></label><label class="f">To <input type="number" id="scTo" min="0" max="65534"></label><button id="bFind">Scan</button></div>
+      <div class="msg" id="scOut"></div></div>
+    <div class="sub"><h3>Read registers</h3>
+      <div class="row"><label class="f">Address <input type="number" id="rdA" min="0" max="65534"></label><label class="f">Count <input type="number" id="rdN" value="1" min="1" max="60"></label>
+        <label class="f">Function <select id="rdFn"><option value="0">default</option><option>3</option><option>4</option></select></label><button id="bRd">Read</button></div>
+      <div class="msg" id="rdOut"></div></div>
+    <div class="sub"><h3>Write one register</h3>
+      <p class="hint">Writes the raw 16-bit value. Wrong addresses can change the controller's configuration.</p>
+      <div class="row"><label class="f">Address <input type="number" id="wrA" min="0" max="65534"></label><label class="f">Raw value <input type="number" id="wrV" min="-32768" max="65535"></label><button id="bWr" class="danger">Write</button></div>
+      <div class="msg" id="wrOut"></div></div>
+  </div>
+</section>
+<section class="panel mt" aria-label="Backup"><h2>Backup</h2>
+  <div class="cards">
+    <div class="sub"><h3>Settings</h3><p class="hint">All settings as one JSON file. Wi-Fi passwords are not included; restoring keeps the stored ones.</p>
+      <div class="row"><button id="bCfgDl">Download settings</button><button id="bCfgUp">Restore settings…</button></div><div class="msg" id="cfgMsg"></div></div>
+    <div class="sub"><h3>Programs</h3><p class="hint">All programs in one file. Restoring replaces the programs in the slots that the file contains; the other slots stay as they are.</p>
+      <div class="row"><button id="bPrDl">Download all programs</button><button id="bPrUp">Restore programs…</button></div><div class="msg" id="prMsg"></div></div>
+  </div>
+</section>
+</div>
 </main>
 </div>
 
@@ -223,6 +349,7 @@ button.x{min-width:32px;padding:3px 8px;min-height:30px;color:var(--muted)}
   <div class="btns"><button id="dSave" class="pri">Save to program</button><button id="dDiscard">Keep the stored program</button></div>
 </dialog>
 <dialog id="chDlg"><p id="chTxt"></p><div class="btns" id="chBtns"></div></dialog>
+<input type="file" id="fileIn" accept=".json,application/json" hidden>
 <dialog id="askDlg"><p id="askTxt"></p><div class="btns"><button id="askOk" class="pri">OK</button><button id="askNo">Cancel</button></div></dialog>
 
 <script>
@@ -236,9 +363,9 @@ const EV={PHASE:1,STEP:2,RAMP_END:3,HOLD_END:4,PAUSE:5,CONT:6,END:7,STOP:8};
 let live=null, progs=null, progsGen=-1, runProg=null, runProgAt=0, chartAt=0, view='prog', showLast=true, edKey='';
 let logSeq=0, logList=[], prevState='idle', askedSave=false;
 
-async function api(path,body){
+async function api(path,body,ms){
   const o=body===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)};
-  const ctl=new AbortController(), to=setTimeout(()=>ctl.abort(),8000); o.signal=ctl.signal;
+  const ctl=new AbortController(), to=setTimeout(()=>ctl.abort(),ms||8000); o.signal=ctl.signal;
   try{const r=await fetch(path,o); return await r.json();} finally{clearTimeout(to);}
 }
 function ask(text,ok){ return new Promise(res=>{ const d=$('askDlg'); $('askTxt').textContent=text; $('askOk').textContent=ok||'OK';
@@ -609,6 +736,8 @@ const clampS=v=>Math.max(0,Math.min(MAXSEC,Math.round(v)));
 const clampT=(ch,v)=>{ const c=live&&live.ch[ch]; return Math.round(Math.max(c?c.spMin:0,Math.min(c?c.spMax:500,v))*10)/10; };
 function newPhase(kind){ return {kind,wait:false,msg:kind==='P',text:'',b:{t:150,r:60,h:60,idle:false},t:{t:200,r:30,h:20}}; }
 function newStep(){ return {kind:'step',t:180,r:30,h:30,msg:false,text:''}; }
+function newDraft(i,type){ UNDO[i]=UNDO[i]||[]; REDO[i]=[]; UNDO[i].push(clone(DRAFT[i]===undefined?null:DRAFT[i]));
+  DRAFT[i]=type==='seq'?{name:`Program ${i+1}`,type:'seq',phases:[newPhase('B')]}:{name:`Program ${i+1}`,type:'tl',B:[newStep()],T:[]}; }
 
 function beginEdit(){ if(running()||!live) return null; const i=live.sel; if(!DRAFT[i]) return null;
   UNDO[i].push(clone(DRAFT[i])); if(UNDO[i].length>200) UNDO[i].shift(); REDO[i]=[]; return DRAFT[i]; }
@@ -735,8 +864,7 @@ $('editor').addEventListener('change',async e=>{
 });
 $('editor').addEventListener('click',e=>{
   const b=e.target.closest('button'); if(!b||!live||running()||b.dataset.act) return; const i=live.sel;
-  if(b.dataset.new){ UNDO[i]=UNDO[i]||[]; UNDO[i].push(null); REDO[i]=[];
-    DRAFT[i]=b.dataset.new==='seq'?{name:`Program ${i+1}`,type:'seq',phases:[newPhase('B')]}:{name:`Program ${i+1}`,type:'tl',B:[newStep()],T:[]}; afterEdit(); return; }
+  if(b.dataset.new){ newDraft(i,b.dataset.new); afterEdit(); return; }
   const q=beginEdit(); if(!q) return;
   if(b.id==='addPh'&&q.phases.length<MAXN) q.phases.push(newPhase('T'));
   else if(b.dataset.add&&q[b.dataset.add].length<MAXN) q[b.dataset.add].push(newStep());
@@ -855,6 +983,386 @@ async function updateLog(){
     return `<li><span title="${w.toLocaleString()}">${l.rt!=null?fmt(l.rt):w.toTimeString().slice(0,5)}</span>${esc(l.msg)}</li>`; }).join('')||'<li><span></span>No events yet.</li>';
 }
 
+/* ---------- pages (hash routes: #/programs, #/channels, #/system, #/tools; anything else = Status) ---------- */
+const PAGES={status:'Status',programs:'Programs',channels:'Channels',system:'System',tools:'Tools'};
+let page='';
+function route(){
+  const h=location.hash, m=h.startsWith('#/')?h.slice(2):'', pg=PAGES[m]?m:'status', changed=pg!==page;
+  page=pg;
+  for(const k in PAGES) $('pg-'+k).hidden=k!==pg;
+  document.querySelectorAll('nav a[data-pg]').forEach(a=>{ const on=a.dataset.pg===pg; a.classList.toggle('on',on); if(on) a.setAttribute('aria-current','page'); else a.removeAttribute('aria-current'); });
+  $('title').textContent=PAGES[pg]; $('jump').hidden=pg!=='status'; document.title=pg==='status'?'TempCtl Duo':PAGES[pg]+' – TempCtl Duo';
+  $('side').classList.remove('open'); $('menu').setAttribute('aria-expanded','false');
+  if(changed){ window.scrollTo(0,0); if(pg==='status'){ lastChart=0; chartAt=0; } pageUpdate(true); }
+}
+window.addEventListener('hashchange',route);
+async function pageUpdate(force){
+  if(!live) return;
+  if((page==='channels'||page==='system'||page==='tools')&&(!CFG||cfgGen!==live.cfgGen)) await loadCfg();
+  if(page==='programs') renderProgs(force);
+  else if(page==='channels') updChanPage();
+  else if(page==='system') updSystem();
+  else if(page==='tools') updTools();
+}
+function download(name,obj){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(obj,null,1)],{type:'application/json'}));
+  a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },500); }
+function pickFile(){ return new Promise(res=>{ const f=$('fileIn'); f.value=''; f.onchange=()=>{ const x=f.files[0]; if(!x) return res(null); x.text().then(t=>res(t),()=>res(null)); }; f.click(); }); }
+function parseJson(t){ try{ return JSON.parse(t); }catch(e){ return null; } }
+const fileName=s=>(s||'program').replace(/[^\w\-. ]+/g,'_').trim().replace(/\s+/g,'-').slice(0,40)||'program';
+function setMsg(id,t,bad){ const m=$(id); m.textContent=t||''; m.className='msg'+(bad?' bad':''); }
+
+/* ---------- settings forms (/api/config, partial POSTs) ---------- */
+let CFG=null, cfgGen=-1;
+const FORMS={};
+const ACCENTS=[['Blue','#2196F3'],['Pink','#D1449B'],['Violet','#6C71C4'],['Orange','#D65D0E'],['Mauve','#8839EF'],['Green','#50A14F']];
+async function loadCfg(){ const g=live?live.cfgGen:-1; let c; try{ c=await api('/api/config'); }catch(e){ return; } if(!c||c.err) return;
+  CFG=c; cfgGen=g; for(const F of Object.values(FORMS)) if(!F.dirty) fillForm(F); else updForm(F); }
+const gp=(o,p)=>p.split('.').reduce((a,k)=>a==null?undefined:a[k],o);
+function sp(o,p,v){ const ks=p.split('.'); let a=o; for(let j=0;j<ks.length-1;j++){ const k=ks[j]; if(a[k]==null) a[k]=/^\d+$/.test(ks[j+1])?[]:{}; a=a[k]; } a[ks[ks.length-1]]=v; }
+// field {k (path), l (label), t num|sel|sw|text|accent, u (unit), min, max, step, o [[value,label]], num / bool (sel value type), def, show(g), h (hint), w (wide)}
+function fldHtml(f){
+  let inp;
+  if(f.t==='sel') inp=`<select data-k="${f.k}">${f.o.map(([v,l])=>`<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select>`;
+  else if(f.t==='sw') inp=`<input type="checkbox" class="switch acc" data-k="${f.k}">`;
+  else if(f.t==='text') inp=`<input type="text" data-k="${f.k}" maxlength="${f.max}" autocomplete="off">`;
+  else if(f.t==='accent'){ const cur=String(gp(CFG,f.k)||'').toUpperCase(), list=ACCENTS.some(a=>a[1]===cur)||!cur?ACCENTS:ACCENTS.concat([['Custom',cur]]);
+    inp=`<span class="acc-sw" data-k="${f.k}" role="radiogroup" aria-label="${esc(f.l)}">${list.map(([n,h])=>`<label><input type="radio" name="r-${f.k}" value="${h}"><i style="background:${h}"></i>${n}</label>`).join('')}</span>`; }
+  else inp=`<input type="number" data-k="${f.k}" min="${f.min}" max="${f.max}" step="${f.step||1}">`;
+  const tag=f.t==='accent'?'div':'label';
+  return `<${tag} class="fld${f.w||f.t==='accent'?' wide':''}" data-fk="${f.k}"><span>${esc(f.l)}</span><span class="in">${inp}${f.u?`<span class="u">${esc(f.u)}</span>`:''}</span>${f.h?`<small>${esc(f.h)}</small>`:''}</${tag}>`;
+}
+// groups [{h, note, fields, show(g), det (collapsible), extra (html)}]; o {title, top (html), save, sticky, confirm(F,body), onUpd(F)}
+function mkForm(id,box,groups,o={}){
+  const F={id,box,groups,fields:groups.flatMap(g=>g.fields),o,dirty:false};
+  FORMS[id]=F; box.dataset.form=id;
+  box.innerHTML=(o.title?`<h2>${esc(o.title)}</h2>`:'')+(o.top||'')+groups.map((g,gi)=>{
+    const body=(g.note?`<p class="hint">${esc(g.note)}</p>`:'')+`<div class="form">${g.fields.map(fldHtml).join('')}</div>`+(g.extra||'');
+    return g.det?`<details class="grp" data-g="${gi}"><summary>${esc(g.h)}</summary>${body}</details>`:`<div data-g="${gi}">${g.h?`<h3>${esc(g.h)}</h3>`:''}${body}</div>`;
+  }).join('')+`<div class="fbar"><button class="pri" data-fsave="${id}">${esc(o.save||'Save')}</button><button data-frev="${id}">Revert</button><span class="msg" data-fmsg></span></div>`;
+  fillForm(F); return F;
+}
+const fEl=(F,f)=>F.box.querySelector(`[data-k="${f.k}"]`);
+function cfgVal(f){ const v=gp(CFG,f.k); return v==null&&f.def!==undefined?f.def:v; }
+function readIn(F,f){ const el=fEl(F,f); if(!el) return undefined;
+  if(f.t==='sw') return el.checked;
+  if(f.t==='accent'){ const r=el.querySelector('input:checked'); return r?r.value:cfgVal(f); }
+  const s=el.value; if(f.t==='sel') return f.num?Number(s):f.bool?s==='true':s;
+  if(f.t==='text') return s.trim();
+  return s.trim()===''?NaN:Number(s); }
+const same=(a,b)=>typeof a==='number'&&typeof b==='number'?Math.abs(a-b)<1e-6:a===b;
+const isBad=(f,v)=>f.t==='num'&&(isNaN(v)||v<f.min||v>f.max);
+const fv=F=>k=>{ const f=F.fields.find(x=>x.k===k); return f?readIn(F,f):gp(CFG,k); };
+function fillForm(F){ if(!CFG) return;
+  for(const f of F.fields){ const el=fEl(F,f); if(!el) continue; const v=cfgVal(f);
+    if(f.t==='sw') el.checked=!!v; else if(f.t==='accent') el.querySelectorAll('input').forEach(r=>r.checked=r.value.toUpperCase()===String(v).toUpperCase());
+    else el.value=v==null?'':String(v); }
+  updForm(F); }
+function changedFields(F){ return F.fields.filter(f=>fEl(F,f)&&!same(readIn(F,f),cfgVal(f))); }
+function updForm(F){ if(!CFG) return;
+  let dirty=false, bad=false; const g=fv(F);
+  for(const f of F.fields){ const el=fEl(F,f); if(!el) continue; const lab=el.closest('.fld'), v=readIn(F,f), ch=!same(v,cfgVal(f)), vis=!f.show||f.show(g), b=vis&&isBad(f,v);
+    lab.hidden=!vis; lab.classList.toggle('chg',ch); lab.classList.toggle('bad',b); dirty=dirty||ch; bad=bad||b; }
+  F.groups.forEach((gr,gi)=>{ if(gr.show){ const e=F.box.querySelector(`[data-g="${gi}"]`); if(e) e.hidden=!gr.show(g); } });
+  F.box.querySelector('[data-fsave]').disabled=!dirty||bad; F.box.querySelector('[data-frev]').disabled=!dirty;
+  if(F.o.sticky) F.box.querySelector('.fbar').classList.toggle('sticky',dirty);
+  F.dirty=dirty; if(F.o.onUpd) F.o.onUpd(F); }
+function fMsg(F,t,bad){ const m=F.box.querySelector('[data-fmsg]'); m.textContent=t||''; m.className='msg'+(bad?' bad':''); }
+async function postCfg(body){ try{ return await api('/api/config',body); }catch(e){ return {err:'Device not reachable.'}; } }
+async function saveForm(F){
+  const ch=changedFields(F).filter(f=>!isBad(f,readIn(F,f))); if(!ch.length) return;
+  const body={}, sent=ch.map(f=>[f,readIn(F,f)]); for(const [f,v] of sent) sp(body,f.k,v);
+  if(F.o.confirm&&!(await F.o.confirm(F,body))) return;
+  fMsg(F,'Saving…'); const r=await postCfg(body);
+  if(r.err){ fMsg(F,r.err,true); return; }
+  CFG=r; for(const G of Object.values(FORMS)) if(G===F||!G.dirty) fillForm(G);
+  const adj=sent.filter(([f,v])=>!same(v,cfgVal(f))).map(([f])=>f.l.replace(/^[…\s]+/,''));
+  fMsg(F,adj.length?'Saved. Adjusted to the allowed range: '+adj.join(', ')+'.':'Saved.'); poll(); }
+document.addEventListener('input',e=>{ const b=e.target.closest('[data-form]'); if(b&&FORMS[b.dataset.form]&&e.target.closest('[data-k]')) updForm(FORMS[b.dataset.form]); });
+document.addEventListener('change',e=>{ const b=e.target.closest('[data-form]'); if(b&&FORMS[b.dataset.form]&&e.target.closest('[data-k]')) updForm(FORMS[b.dataset.form]); });
+document.addEventListener('click',e=>{ const s=e.target.closest('[data-fsave]'); if(s){ saveForm(FORMS[s.dataset.fsave]); return; }
+  const r=e.target.closest('[data-frev]'); if(r){ const F=FORMS[r.dataset.frev]; fillForm(F); fMsg(F,''); } });
+window.addEventListener('beforeunload',e=>{ if(Object.values(FORMS).some(F=>F.dirty)||Object.keys(DRAFT).some(i=>isDirty(+i))){ e.preventDefault(); e.returnValue=''; } });
+
+/* ---------- Programs page ---------- */
+let plKey='', plAll=false;
+const runActive=()=>!!live&&(live.run.state==='running'||live.run.state==='paused');
+function renderProgs(force){
+  if(!progs||!live) return;
+  const act=runActive(), dirty=progs.programs.map((p,i)=>isDirty(i)), key=J([progs,live.sel,act,live.run.prog,dirty,chName(0),chName(1),Object.entries(DRAFT).map(([k,d])=>k+(d?d.name:''))]);
+  if(!force&&key===plKey+plAll) return; plKey=key+plAll;
+  const empty=progs.programs.map((p,i)=>!p.used&&!DRAFT[i]?i:-1).filter(i=>i>=0);
+  $('plHint').textContent=`${progs.max-empty.length} of ${progs.max} slots used · Start on the Status page runs the selected program`;
+  const emptyRow=empty.length&&!plAll?`<div class="prow empty" data-i="${empty[0]}"><span class="no"></span><span class="pn">${empty.length} empty slot${empty.length>1?'s':''}</span>
+    <span class="pm">New programs go to slot ${empty[0]+1}. <button data-pa="all">Show all slots</button></span><span class="pa"><button data-pa="new-seq" ${act?'disabled':''}>New sequence</button><button data-pa="new-tl" ${act?'disabled':''}>New timeline</button><button data-pa="import">Import…</button></span></div>`:'';
+  $('plist').innerHTML=progs.programs.map((p,i)=>{
+    if(!plAll&&empty.includes(i)) return '';
+    const d=DRAFT[i], runI=act&&live.run.prog===i, sel=live.sel===i, newD=!p.used&&d;
+    const badges=(runI?'<span class="state run">Running</span>':sel?'<span class="state fin">Selected</span>':'')+(dirty[i]?`<span class="state pause">${p.used?'Unsaved changes':'Not saved yet'}</span>`:'');
+    if(!p.used&&!d) return `<div class="prow empty" data-i="${i}"><span class="no">${i+1}</span><span class="pn">(empty)</span><span class="pm"></span>
+      <span class="pa"><button data-pa="new-seq" ${act?'disabled':''}>New sequence</button><button data-pa="new-tl" ${act?'disabled':''}>New timeline</button><button data-pa="import">Import…</button></span></div>`;
+    const typ=newD?d.type:p.type, uses=newD?[progUses(d,0),progUses(d,1)]:(p.uses||[true,true]), n=newD?progItems(d):p.steps;
+    const meta=[typ==='tl'?'Timeline':'Sequence', CH.filter(c=>uses[c]).map(c=>`<span class="chip" style="color:${PV[c]}"><i></i>${esc(chName(c))}</span>`).join(' '),
+      `${n} ${typ==='tl'?(n===1?'step':'steps'):(n===1?'phase':'phases')}`, newD?'':fmt(p.total)+(p.waits?' + waits':'')].filter(Boolean).map(x=>`<span>${x}</span>`).join('');
+    return `<div class="prow${sel?' sel':''}" data-i="${i}"><span class="no">${i+1}</span><span class="pn">${esc(newD?d.name:p.name)}${badges}</span><span class="pm">${meta}</span>
+      <span class="pa"><button data-pa="open" ${act&&!runI?'disabled':''}>${runI?'Show':'Open'}</button>${newD?`<button data-pa="discard">Discard</button>`:`<button data-pa="dup">Duplicate</button><button data-pa="export">Export</button><button data-pa="del" class="danger" ${runI?'disabled':''}>Delete</button>`}</span></div>`;
+  }).join('')+emptyRow+(plAll&&empty.length?`<div class="row"><button data-pa="few">Hide the empty slots</button></div>`:'');
+}
+async function openProg(i,type){
+  if(!runActive()&&live.sel!==i){ await api('/api/select',{i}); live.sel=i; showLast=false; }
+  await loadSaved(i); if(type){ newDraft(i,type); }
+  previewDraft(); edKey=''; chartAt=0; fillProgSelect(); location.hash='#/';
+  setTimeout(()=>{ updateEditor(); $('edP').scrollIntoView({block:'start'}); if(type) $('pName').focus(); },60); poll(); }
+async function storedProg(i){ const r=await api('/api/program?i='+i); return r.used?r.program:null; }
+async function afterProgChange(i){ delete DRAFT[i]; delete SAVED[i]; savedGen[i]=-1; UNDO[i]=[]; REDO[i]=[]; await loadPrograms(); plKey=''; renderProgs(true); }
+$('plist').addEventListener('click',async e=>{
+  const b=e.target.closest('button[data-pa]'); if(!b||!live) return; const a=b.dataset.pa;
+  if(a==='all'||a==='few'){ plAll=a==='all'; renderProgs(true); return; }
+  const i=+b.closest('[data-i]').dataset.i, p=progs.programs[i];
+  setMsg('plMsg','');
+  try{
+    if(a==='open') return openProg(i);
+    if(a==='new-seq'||a==='new-tl') return openProg(i,a==='new-seq'?'seq':'tl');
+    if(a==='discard'){ if(await ask(`Discard the unsaved new program in slot ${i+1}?`,'Discard')){ delete DRAFT[i]; UNDO[i]=[]; REDO[i]=[]; renderProgs(true); fillProgSelect(); if(live.sel===i){ edKey=''; previewDraft(); } } return; }
+    if(a==='export'){ const pr=await storedProg(i); if(pr) download(fileName(pr.name)+'.json',pr); if(isDirty(i)) setMsg('plMsg','Exported the stored version (the unsaved changes are not included).'); return; }
+    if(a==='dup'){ const j=progs.programs.findIndex((q,k)=>!q.used&&!DRAFT[k]); if(j<0){ setMsg('plMsg','No empty slot left.',true); return; }
+      const pr=await storedProg(i); if(!pr) return; pr.name=(pr.name+' (copy)').slice(0,31);
+      const r=await api('/api/program',{i:j,program:pr}); if(r.err){ setMsg('plMsg',r.err,true); return; }
+      await afterProgChange(j); setMsg('plMsg',`Copied to slot ${j+1}${isDirty(i)?' (the stored version, without the unsaved changes)':''}.`); return; }
+    if(a==='del'){ if(!await ask(`Delete “${p.name}” (slot ${i+1})? This cannot be undone.`,'Delete')) return;
+      const r=await api('/api/program',{i,delete:true}); if(r.err){ setMsg('plMsg',r.err,true); return; } await afterProgChange(i); setMsg('plMsg',`Slot ${i+1} deleted.`); return; }
+    if(a==='import'){ const t=await pickFile(); if(t==null) return; const o=parseJson(t);
+      if(!o||typeof o!=='object'){ setMsg('plMsg','This file is not JSON.',true); return; }
+      if(Array.isArray(o.programs)){ setMsg('plMsg','This file holds several programs: use Restore programs on the Tools page.',true); return; }
+      if(o.type!=='seq'&&o.type!=='tl'){ setMsg('plMsg','This file is not a TempCtl Duo program.',true); return; }
+      if(p.used&&!await ask(`Replace “${p.name}” (slot ${i+1}) with “${o.name||'?'}” from the file?`,'Replace')) return;
+      const r=await api('/api/program',{i,program:o}); if(r.err){ setMsg('plMsg','Import failed: '+r.err,true); return; }
+      await afterProgChange(i); setMsg('plMsg',`“${r.program.name}” imported into slot ${i+1}.`); return; }
+  }catch(err){ setMsg('plMsg','Device not reachable.',true); }
+});
+
+/* ---------- Channels page ---------- */
+let chSel=0, chBuilt=false, chNamesKey='', xKey=['',''];
+function chTabs(){ if(!CFG) return; const h=CH.map(i=>`<button data-cht="${i}" aria-pressed="${i===chSel}">${esc(CFG.channels[i].name)}</button>`).join('');
+  if($('chTabs').innerHTML!==h) $('chTabs').innerHTML=h; document.querySelectorAll('[data-chp]').forEach(d=>d.hidden=+d.dataset.chp!==chSel); }
+$('chTabs').onclick=e=>{ const b=e.target.closest('button[data-cht]'); if(!b) return; chSel=+b.dataset.cht; chTabs(); updChanPage(); };
+function commonGroups(){ const bn=CFG.channels[0].name;
+  return [{h:'',fields:[
+    {k:'bus.pollMs',l:'Polling interval',t:'num',min:250,max:10000,step:50,u:'ms',h:'How often PV, SP and output are read. With two Modbus controllers each one is polled every 2 × this interval.'},
+    {k:'bus.commLossSec',l:'Pause the run after no answer for',t:'num',min:0,max:3600,u:'s',h:'0 = never pause'},
+    {k:'run.bottomBand',l:`“${bn} reached” band ±`,t:'num',min:0.5,max:50,step:0.5,u:'°C',h:`Used by “Wait for ${bn}” in Sequence phases.`}]},
+   {h:'RS485 bus',show:()=>CFG.limits.rs485,note:'Shared by both Modbus channels.',fields:[
+    {k:'bus.baud',l:'Baud rate',t:'sel',num:true,o:[2400,4800,9600,19200,38400].map(b=>[b,b])},
+    {k:'bus.parity',l:'Parity',t:'sel',num:true,o:[[0,'None'],[1,'Even'],[2,'Odd']]},
+    {k:'bus.stopBits',l:'Stop bits',t:'sel',num:true,o:[[1,'1'],[2,'2']]},
+    {k:'bus.timeoutMs',l:'Response timeout',t:'num',min:50,max:2000,step:10,u:'ms'}]}]; }
+const REGS=[['pv','Process value (read)'],['spEff','Effective setpoint (read)'],['out','Output % (read)'],['status','Status word (read)'],['alarm','Alarm word (read)'],
+  ['sp','Setpoint SP (write, required)'],['spLo','Setpoint lower limit (read)'],['spHi','Setpoint upper limit (read)'],['rampRate','Setpoint gradient r.SP (write)'],
+  ['ctrlOff','Outputs off (write 1)'],['remote','Front panel lock (write 1)']];
+function runawayFields(P,ty){ const R=`${P}${ty}.runaway.`, sh=g=>g(P+'type')===ty, sh2=g=>sh(g)&&g(R+'enable');
+  return [{k:R+'enable',l:'Runaway detection',t:'sw',show:sh},
+    {k:R+'minOut',l:'Heating failed: output at least',t:'num',min:0,max:100,u:'%',show:sh2},
+    {k:R+'heatSec',l:'… for',t:'num',min:10,max:3600,u:'s',show:sh2},
+    {k:R+'minRise',l:'… with a rise below',t:'num',min:0.5,max:100,step:0.5,u:'°C',show:sh2},
+    {k:R+'holdBand',l:'Holding: PV off the setpoint by more than ±',t:'num',min:1,max:200,u:'°C',show:sh2},
+    {k:R+'holdSec',l:'… for longer than',t:'num',min:5,max:3600,u:'s',show:sh2}]; }
+function chanGroups(i){ const P=`channels.${i}.`, ty=t=>g=>g(P+'type')===t;
+  return [
+   {h:'General',fields:[{k:P+'name',l:'Name',t:'text',max:16,h:'Shown on all screens'},
+     {k:P+'type',l:'Type',t:'sel',o:[['off','Off (not used)'],...(CFG.limits.rs485?[['modbus','Modbus controller']]:[]),['local','Local (thermocouple + SSR)']]},
+     {k:P+'endAction',l:'When the program ends or stops',t:'sel',o:[['keep','Keep the last setpoint'],['sp','Go to the end setpoint'],['off','Switch the outputs off']],show:g=>g(P+'type')!=='off'},
+     {k:P+'endSp',l:'End setpoint',t:'num',min:-200,max:1500,step:0.1,u:'°C',show:g=>g(P+'type')!=='off'&&g(P+'endAction')==='sp'},
+     {k:P+'spMin',l:'Lowest setpoint',t:'num',min:-200,max:1500,step:0.1,u:'°C',show:g=>g(P+'type')!=='off'},
+     {k:P+'spMax',l:'Highest setpoint',t:'num',min:-200,max:1500,step:0.1,u:'°C',show:g=>g(P+'type')!=='off',h:'Local: at most the max. temperature − 10 °C'}]},
+   {h:'Modbus controller',show:ty('modbus'),extra:`<div class="row"><button data-defs="${i}">Load register defaults for this controller type</button></div>`,fields:[
+     {k:P+'modbus.addr',l:'Slave address',t:'num',min:1,max:247},
+     {k:P+'modbus.profile',l:'Controller type',t:'sel',o:[['pma','PMA KS 40-1 / 41-1 / 42-1'],['generic','Generic Modbus RTU']],h:'A new type loads its register defaults'},
+     {k:P+'modbus.rampMode',l:'Setpoint ramps',t:'sel',o:[['host','ESP32 writes setpoint steps'],['controller','Controller ramps (r.SP), fewer writes']]},
+     {k:P+'modbus.minStep',l:'Min. step between writes',t:'num',min:0.1,max:100,step:0.1,u:'°C',show:g=>g(P+'modbus.rampMode')==='host'},
+     {k:P+'modbus.minWriteSec',l:'Min. time between writes',t:'num',min:1,max:3600,u:'s',show:g=>g(P+'modbus.rampMode')==='host'},
+     {k:P+'modbus.lockFront',l:'Lock the front panel while running',t:'sw'}]},
+   {h:'Register addresses',det:true,show:ty('modbus'),note:'Decimal protocol addresses (0-based, as sent on the wire); −1 = not available. The PMA KS 4x-1 defaults use the “1dP” column of its interface description (value = register / 10), e.g. SP = 11372.',
+    fields:REGS.map(([k,l])=>({k:P+'modbus.reg.'+k,l,t:'num',min:-1,max:65534})).concat([
+     {k:P+'modbus.reg.scale',l:'Divide values by',t:'num',min:1,max:1000,step:'any'},
+     {k:P+'modbus.reg.readFn',l:'Read function',t:'sel',num:true,o:[[3,'3 (holding)'],[4,'4 (input)']]},
+     {k:P+'modbus.reg.writeFn',l:'Write function',t:'sel',num:true,o:[[6,'6 (single)'],[16,'16 (multiple)']]},
+     {k:P+'modbus.reg.offRaw',l:'“Off” raw value',t:'num',min:-32768,max:32767}])},
+   {h:'Thermocouple',show:ty('local'),extra:calHtml(i),fields:[
+     {k:P+'local.sensor',l:'Converter',t:'sel',o:[['max31855','MAX31855'],['max6675','MAX6675']]},
+     {k:P+'local.calOffset',l:'Calibration offset',t:'num',min:-50,max:50,step:0.01,u:'°C'},
+     {k:P+'local.calGain',l:'Calibration gain',t:'num',min:0.5,max:2,step:0.0001,h:'Calibrated = raw × gain + offset'}]},
+   {h:'PID control',show:ty('local'),fields:[
+     {k:P+'local.kp',l:'Kp',t:'num',min:0,max:1000,step:0.01,u:'% / °C'},
+     {k:P+'local.ki',l:'Ki',t:'num',min:0,max:100,step:0.0001,u:'% / (°C·s)'},
+     {k:P+'local.kd',l:'Kd',t:'num',min:0,max:10000,step:0.1,u:'%·s / °C'},
+     {k:P+'local.windowSec',l:'SSR window',t:'num',min:0.2,max:10,step:0.1,u:'s',h:'The SSR is on for the output share of every window'},
+     {k:P+'local.maxOut',l:'Max. output',t:'num',min:0,max:100,u:'%'},
+     {k:P+'local.maxTemp',l:'Max. temperature (outputs off above)',t:'num',min:50,max:600,u:'°C'}]},
+   {h:'Thermal runaway protection',show:g=>g(P+'type')!=='off',note:'Modbus and local keep their own values; the ones of the selected type are used.',fields:runawayFields(P,'modbus').concat(runawayFields(P,'local'))}];
+}
+function calHtml(i){ return `<h3>Two-point calibration</h3><p class="hint">Measure one or two temperatures with a reference thermometer. “Now” takes the current raw reading (without calibration). With one point only the offset changes.</p>
+  <div class="cal"><span></span><span>Raw reading</span><span>True temperature</span>
+  <span>Point 1</span><span><input type="number" step="0.1" id="cr1_${i}" aria-label="Point 1 raw"> <button data-now="${i}" data-p="1">Now</button></span><span><input type="number" step="0.1" id="ct1_${i}" aria-label="Point 1 true"> °C</span>
+  <span>Point 2</span><span><input type="number" step="0.1" id="cr2_${i}" aria-label="Point 2 raw"> <button data-now="${i}" data-p="2">Now</button></span><span><input type="number" step="0.1" id="ct2_${i}" aria-label="Point 2 true"> °C</span></div>
+  <div class="row"><button data-calc="${i}">Calculate offset and gain</button><span class="msg" id="calMsg${i}"></span></div>`; }
+function rawNow(i){ const c=live&&live.ch[i], l=CFG.channels[i].local; if(!c||c.pv==null) return null; return (c.pv-l.calOffset)/(l.calGain||1); }
+function buildChanPage(){
+  mkForm('common',$('cCommon'),commonGroups(),{title:'Polling and bus'});
+  for(const i of CH) mkForm('ch'+i,$('cf'+i),chanGroups(i),{sticky:true,save:'Save channel settings',top:`<p class="live1" id="chLive${i}"></p>`,
+    confirm:async(F,body)=>{ const c=body.channels&&body.channels[i]; if(c&&c.type&&runActive()) return ask(`Changing the type of ${CFG.channels[i].name} stops the running program. Continue?`,'Change type'); return true; }});
+  chBuilt=true; chNamesKey=CFG.channels[0].name;
+}
+$('pg-channels').addEventListener('click',async e=>{
+  const b=e.target.closest('button'); if(!b||!CFG) return; const d=b.dataset;
+  if(d.defs!=null){ const i=+d.defs, F=FORMS['ch'+i], prof=readIn(F,F.fields.find(f=>f.k===`channels.${i}.modbus.profile`));
+    if(!await ask('Replace all register addresses of this channel with the defaults for the selected controller type? Other unsaved changes of this channel are saved too.','Load defaults')) return;
+    const body={}; for(const f of changedFields(F)) sp(body,f.k,readIn(F,f)); sp(body,`channels.${i}.modbus.profile`,prof); sp(body,`channels.${i}.modbus.loadDefaults`,true);
+    const r=await postCfg(body); if(r.err){ fMsg(F,r.err,true); return; } CFG=r; fillForm(F); fMsg(F,'Register defaults loaded and saved.'); return; }
+  if(d.now!=null){ const i=+d.now, v=rawNow(i); if(v==null){ setMsg('calMsg'+i,'No reading right now.',true); return; } $(`cr${d.p}_${i}`).value=Math.round(v*100)/100; setMsg('calMsg'+i,''); return; }
+  if(d.calc!=null){ const i=+d.calc, F=FORMS['ch'+i], n=id=>parseFloat($(id+'_'+i).value), r1=n('cr1'), t1=n('ct1'), r2=n('cr2'), t2=n('ct2');
+    const fo=F.fields.find(f=>f.k.endsWith('local.calOffset')), fg=F.fields.find(f=>f.k.endsWith('local.calGain'));
+    if(isNaN(r1)||isNaN(t1)){ setMsg('calMsg'+i,'Enter at least point 1 (raw and true).',true); return; }
+    let g=readIn(F,fg); if(isNaN(g)) g=1;
+    if(!isNaN(r2)&&!isNaN(t2)){ if(Math.abs(r2-r1)<5){ setMsg('calMsg'+i,'The two raw readings must be at least 5 °C apart.',true); return; } g=(t2-t1)/(r2-r1); }
+    const o=t1-g*r1;
+    if(g<0.5||g>2||Math.abs(o)>50){ setMsg('calMsg'+i,`Result out of range (gain ${g.toFixed(4)}, offset ${o.toFixed(2)}): check the points.`,true); return; }
+    fEl(F,fg).value=(Math.round(g*10000)/10000).toString(); fEl(F,fo).value=(Math.round(o*100)/100).toString(); updForm(F);
+    setMsg('calMsg'+i,'Offset and gain filled in — save the channel settings to use them.'); return; }
+  if(d.at!=null){ const i=+d.ch, cmd=d.at;
+    if(cmd==='start'){ const sp=parseFloat($('atSp'+i).value); if(isNaN(sp)) return; setMsg('atMsg'+i,'Starting…'); const r=await api('/api/autotune',{ch:i,cmd,sp}); setMsg('atMsg'+i,r.err||(r.ok?'':'Not started: see the message on the Status page.'),!!r.err||!r.ok); }
+    else if(cmd==='stop'||cmd==='discard'){ const r=await api('/api/autotune',{ch:i,cmd}); setMsg('atMsg'+i,r.err||'',!!r.err); }
+    else if(cmd==='accept'){ const r=await api('/api/autotune',{ch:i,cmd}); if(r.err){ setMsg('atMsg'+i,r.err,true); return; } await loadCfg(); setMsg('atMsg'+i,'New PID values saved.'); }
+    poll(); return; }
+  if(d.pread!=null){ readParams(+d.pread); return; }
+});
+function extraHtml(i){ const c=CFG.channels[i];
+  if(c.type==='local') return `<section class="panel"><h2>PID autotune</h2><p class="hint">Relay test around a test temperature (Tyreus–Luyben rule): the heater is switched between more and less power until the oscillation is steady, which takes 10–30 minutes. The proposed values can be accepted or discarded. The test temperature must be at least 10 °C above the current temperature and 15 °C below the max. temperature.</p>
+    <div class="row"><label class="f">Test temperature <input type="number" id="atSp${i}" step="1" value="${Math.min(200,c.local.maxTemp-15)}"> °C</label><button class="pri" data-at="start" data-ch="${i}" id="atGo${i}">Start autotune</button><button data-at="stop" data-ch="${i}" id="atStop${i}">Stop</button></div>
+    <div class="msg" id="atMsg${i}"></div><div id="atRes${i}"></div></section>`;
+  if(c.type==='modbus') return `<section class="panel"><h2>Controller parameters</h2>${c.modbus.profile==='pma'?`<p class="hint">Reads the PID and alarm parameters of the PMA KS 4x-1. Values are written one at a time; the controller rejects values outside its limits.</p>
+    <div class="row"><button data-pread="${i}">Read from controller</button></div><div class="ed-wrap" id="pTbl${i}"></div><h3>Actions</h3><div class="row" id="pAct${i}"><span class="hint" style="margin:0">Read the parameters first.</span></div><div class="msg" id="pMsg${i}"></div>`
+    :'<p class="hint">Parameter access is built in only for the PMA KS 4x-1. For other controllers use the Modbus tools (Tools page) with the addresses from their manual.</p>'}</section>`;
+  return ''; }
+async function readParams(i){ const tb=$('pTbl'+i); tb.textContent='Reading… (up to a few seconds per parameter)';
+  let r; try{ r=await api('/api/params?ch='+i,undefined,90000); }catch(e){ tb.textContent='Device not reachable.'; return; }
+  tb.innerHTML=`<table class="t"><thead><tr><th>Name</th><th>Meaning</th><th>Value</th><th></th></tr></thead><tbody>${r.params.map((p,k)=>{ const ro=p.name==='Sw.Op';
+    return `<tr><td>${esc(p.name)}</td><td>${esc(p.desc)}</td><td>${p.err?`<span class="msg bad">${esc(p.err)}</span>`:`<input type="text" value="${esc(p.value)}" ${ro?'disabled':''} id="pv${i}_${k}" aria-label="${esc(p.name)}">`}</td><td>${ro||p.err?'':`<button data-pw="${k}">Write</button>`}</td></tr>`; }).join('')}</tbody></table>`;
+  tb.querySelectorAll('button[data-pw]').forEach(b=>b.onclick=async()=>{ const p=r.params[+b.dataset.pw], v=$(`pv${i}_${b.dataset.pw}`).value.trim();
+    if(v!=='off'&&isNaN(parseFloat(v))){ b.textContent='Number or off'; return; }
+    const w=await api('/api/params',{ch:i,addr:p.addr,scaled:p.scaled,value:v==='off'?'off':+v}); b.textContent=w.ok?'Written':'Failed'; b.title=w.err||''; });
+  const ac=$('pAct'+i); ac.innerHTML=r.actions.map((l,k)=>`<button data-pact="${k}">${esc(l)}</button>`).join('')||'<span class="hint">No actions.</span>';
+  ac.querySelectorAll('button').forEach(b=>b.onclick=async()=>{ const l=r.actions[+b.dataset.pact]; if(!await ask(l+'?',l)) return;
+    const w=await api('/api/action',{ch:i,i:+b.dataset.pact}); setMsg('pMsg'+i,w.ok?l+': done.':w.err||'Failed',!w.ok); }); }
+function updChanPage(){
+  if(!CFG||!live) return;
+  if(!chBuilt) buildChanPage();
+  else if(chNamesKey!==CFG.channels[0].name&&!FORMS.common.dirty){ mkForm('common',$('cCommon'),commonGroups(),{title:'Polling and bus'}); chNamesKey=CFG.channels[0].name; }
+  chTabs();
+  for(const i of CH){ const c=live.ch[i], cc=CFG.channels[i];
+    const k=cc.type+cc.modbus.profile; if(xKey[i]!==k){ xKey[i]=k; $('cx'+i).innerHTML=extraHtml(i); }
+    const L=$('chLive'+i);
+    if(L) L.innerHTML=cc.type==='off'?'Channel off: not polled.':`${c.ok?'':'<span class="msg bad" style="margin:0">'+esc('No answer'+(c.err?': '+c.err:''))+'</span> · '}PV <b>${c.pv!=null?f1(c.pv)+' °C':'–'}</b>${cc.type==='local'&&c.pv!=null?` (raw ${f1(rawNow(i))} °C)`:''} · SP ${c.sp!=null?f1(c.sp)+' °C':'–'} · output ${c.out!=null?Math.round(c.out)+' %':'–'}${c.cold!=null?` · cold junction ${f1(c.cold)} °C`:''}${c.mode?' · '+esc(c.mode):''}${c.fault?` · <span class="msg bad" style="margin:0">Fault: ${esc(c.fault)}</span>`:''}`;
+    if(cc.type==='local'&&$('atRes'+i)){ const a=c.autotune, busy=a&&a.state==='running', blocked=runActive()&&c.inProgram;
+      $('atGo'+i).disabled=busy||blocked||!!c.fault; $('atStop'+i).disabled=!busy;
+      let h='';
+      if(blocked&&!busy) h='<p class="hint">Not available while the program uses this channel.</p>';
+      if(a){ if(a.state==='running') h=`<p>Running at ${f1(a.sp)} °C: cycle ${a.cycle}, ${fmt(a.elapsed)} — ${esc(a.msg)}</p>`;
+        else if(a.state==='done'){ const l=cc.local; h=`<p>${esc(a.msg)} (Ku ${(+a.ku).toFixed(2)}, Pu ${Math.round(a.pu)} s)</p><table class="t"><thead><tr><th></th><th>Kp</th><th>Ki</th><th>Kd</th></tr></thead><tbody>
+          <tr><td>Proposed</td><td class="n">${(+a.kp).toFixed(3)}</td><td class="n">${(+a.ki).toFixed(5)}</td><td class="n">${(+a.kd).toFixed(2)}</td></tr><tr><td>Current</td><td class="n">${(+l.kp).toFixed(3)}</td><td class="n">${(+l.ki).toFixed(5)}</td><td class="n">${(+l.kd).toFixed(2)}</td></tr></tbody></table>
+          <div class="row"><button class="pri" data-at="accept" data-ch="${i}">Accept</button><button data-at="discard" data-ch="${i}">Discard</button></div>`; }
+        else if(a.state==='failed') h=`<p class="msg bad">Autotune failed: ${esc(a.msg)}</p><div class="row"><button data-at="discard" data-ch="${i}">Clear</button></div>`; }
+      if($('atRes'+i).dataset.h!==h){ $('atRes'+i).innerHTML=h; $('atRes'+i).dataset.h=h; } }
+  }
+}
+
+/* ---------- System page ---------- */
+let sysBuilt=false, wDirty=false;
+const upTxt=s=>{ const d=Math.floor(s/86400); return (d?d+' d ':'')+fmt(s%86400); };
+function updSystem(){
+  if(!CFG||!live) return;
+  if(!sysBuilt){ sysBuilt=true;
+    mkForm('disp',$('sDisp'),[{h:'',fields:[
+      {k:'display.accent',l:'Accent colour',t:'accent',h:'Used on the touch screen and on this page; the channel colours follow from it.'},
+      {k:'display.themeDark',l:'Touch screen theme',t:'sel',bool:true,def:true,o:[['true','Dark'],['false','Light']]},
+      {k:'display.brightness',l:'Brightness',t:'num',min:10,max:255,h:'10 – 255'},
+      {k:'display.rotate180',l:'Rotate the screen by 180°',t:'sw'}]}],{title:'Display',save:'Save display settings'}); }
+  const host=CFG.wifi.hostname;
+  const kv=[['Firmware','TempCtl Duo '+live.fw],['Board',live.board+(live.variant?' · '+live.variant:'')],['Network',live.net],['Host name',`<a href="http://${esc(host)}.local/">${esc(host)}.local</a>`],['Uptime',upTxt(live.up)]]
+    .map(([k,v])=>`<dt>${k}</dt><dd>${k==='Host name'?v:esc(v)}</dd>`).join('');
+  if($('devInfo').innerHTML!==kv) $('devInfo').innerHTML=kv;
+  if(!wDirty){ $('wSsid').value=CFG.wifi.ssid; $('wHost').value=host; }
+  $('wPassH').textContent=CFG.wifi.passSet?'Set — leave empty to keep it':'Not set';
+  $('wHostH').textContent=`http://${$('wHost').value||host}.local`;
+}
+['wSsid','wPass','wAp','wHost'].forEach(id=>$(id).addEventListener('input',()=>{ wDirty=true; if(id==='wHost') $('wHostH').textContent=`http://${$('wHost').value}.local`; }));
+$('bScan').onclick=async()=>{ const n=$('nets'); n.hidden=false; n.textContent='Scanning…'; $('bScan').disabled=true;
+  try{ let r=await api('/api/wifiscan?start=1');
+    for(let k=0;k<25&&r.busy;k++){ await new Promise(z=>setTimeout(z,1000)); r=await api('/api/wifiscan'); }
+    if(r.busy){ n.textContent='The scan takes too long — try again.'; return; }
+    n.innerHTML=(r.networks||[]).length?r.networks.map(x=>`<button type="button" data-net="${esc(x)}">${esc(x)}</button>`).join(''):esc(r.err||'No networks found.');
+  }catch(e){ n.textContent='No answer during the scan (in access point mode the page may lose the connection for a moment) — try again.'; }
+  finally{ $('bScan').disabled=false; } };
+$('nets').onclick=e=>{ const b=e.target.closest('button[data-net]'); if(!b) return; $('wSsid').value=b.dataset.net; wDirty=true; $('nets').hidden=true; $('wPass').focus(); };
+$('bWifi').onclick=async()=>{ if(!CFG) return; const o={ssid:$('wSsid').value.trim()}, p=$('wPass').value, ap=$('wAp').value, host=$('wHost').value.trim();
+  if(p||!o.ssid) o.pass=p;
+  if(ap){ if(ap.length<8){ setMsg('wMsg','The access point password needs 8 or more characters.',true); return; } o.apPass=ap; }
+  if(!/^[A-Za-z0-9-]{1,23}$/.test(host)){ setMsg('wMsg','Host name: letters, digits and “-” only.',true); return; }
+  if(!await ask(o.ssid?`Join “${o.ssid}” now? If the address changes, reopen the page at the new address or http://${host}.local.`:'Run as access point only?','Save and connect')) return;
+  try{ if(host!==CFG.wifi.hostname){ const r=await postCfg({wifi:{hostname:host}}); if(r.err){ setMsg('wMsg',r.err,true); return; } CFG=r; }
+    const r=await api('/api/wifi',o); setMsg('wMsg',r.msg||r.err,!!r.err); if(!r.err){ wDirty=false; $('wPass').value=''; $('wAp').value=''; } }
+  catch(e){ setMsg('wMsg','Saved; the device is changing its network connection.'); wDirty=false; } };
+$('bRestart').onclick=async()=>{ if(!await ask('Restart the device now? Outputs are switched off during the restart.','Restart')) return;
+  try{ const r=await api('/api/restart',{}); setMsg('rsMsg',r.err||'Restarting… the page reconnects by itself.',!!r.err); }catch(e){ setMsg('rsMsg','Restarting…'); } };
+
+/* ---------- Tools page ---------- */
+function updTools(){
+  if(!CFG) return; const mb=CH.filter(i=>CFG.channels[i].type==='modbus');
+  const h=mb.map(i=>`<option value="${i}">${esc(CFG.channels[i].name)} (address ${CFG.channels[i].modbus.addr})</option>`).join(''), s=$('tCh');
+  if(s.dataset.h!==h){ const v=s.value; s.innerHTML=h; s.dataset.h=h; if(mb.includes(+v)) s.value=v; }
+  $('tNone').hidden=mb.length>0; $('tBox').hidden=!mb.length; s.disabled=!mb.length;
+  if(document.activeElement!==$('scFrom')&&!$('scFrom').value) $('scFrom').value=CFG.tools.scanFrom;
+  if(document.activeElement!==$('scTo')&&!$('scTo').value) $('scTo').value=CFG.tools.scanTo;
+}
+const tch=()=>+$('tCh').value;
+$('bFind').onclick=async()=>{ const from=+$('scFrom').value, to=+$('scTo').value, ch=tch();
+  if(!(to>=from)||to-from>2000){ setMsg('scOut','Range: “To” ≥ “From”, at most 2000 registers.',true); return; }
+  setMsg('scOut','Scanning, this takes a few seconds…'); $('bFind').disabled=true;
+  try{ await postCfg({tools:{scanFrom:from,scanTo:to}}); const r=await api('/api/mb/findsp',{ch,from,to},90000);
+    if(!r.ok){ setMsg('scOut',r.err||'Failed',true); return; }
+    if(!r.candidates.length){ setMsg('scOut',`No register in this range holds ${f1(r.reference)}. Try another range.`); return; }
+    $('scOut').className='msg'; $('scOut').innerHTML=`Registers holding ${f1(r.reference)}:<div class="row">${r.candidates.map(a=>`<button data-usesp="${a}">Use ${a} as setpoint address</button>`).join('')}</div>`;
+  }catch(e){ setMsg('scOut','Device not reachable.',true); } finally{ $('bFind').disabled=false; } };
+$('scOut').onclick=async e=>{ const b=e.target.closest('button[data-usesp]'); if(!b) return; const ch=tch(), a=+b.dataset.usesp;
+  const body={}; sp(body,`channels.${ch}.modbus.reg.sp`,a); const r=await postCfg(body); if(r.err){ setMsg('scOut',r.err,true); return; } CFG=r;
+  setMsg('scOut',`Setpoint address of ${CFG.channels[ch].name} set to ${a}. Confirm it by changing the setpoint on the controller and reading the register here.`); };
+$('bRd').onclick=async()=>{ const a=+$('rdA').value, n=Math.max(1,Math.min(60,+$('rdN').value||1)), ch=tch();
+  try{ const r=await api(`/api/mb/read?ch=${ch}&addr=${a}&n=${n}&fn=${$('rdFn').value}`,undefined,20000);
+    if(!r.ok){ setMsg('rdOut',r.err||'Failed',true); return; }
+    $('rdOut').className='msg'; $('rdOut').innerHTML=`<div class="ed-wrap"><table class="t"><thead><tr><th>Address</th><th>Raw</th><th>÷ 10</th><th>Hex</th></tr></thead><tbody>${r.values.map((v,k)=>
+      `<tr><td class="n">${a+k}</td><td class="n">${v}</td><td class="n">${(v/10).toFixed(1)}</td><td class="n">0x${(v&0xffff).toString(16).padStart(4,'0')}</td></tr>`).join('')}</tbody></table></div>`;
+  }catch(e){ setMsg('rdOut','Device not reachable.',true); } };
+$('bWr').onclick=async()=>{ const a=+$('wrA').value, v=+$('wrV').value, ch=tch(); if($('wrA').value===''||$('wrV').value==='') return;
+  if(!await ask(`Write raw value ${v} to register ${a} of ${CFG.channels[ch].name}?`,'Write')) return;
+  try{ const r=await api('/api/mb/write',{ch,addr:a,value:v},20000); setMsg('wrOut',r.ok?'Written.':r.err||'Failed',!r.ok); }catch(e){ setMsg('wrOut','Device not reachable.',true); } };
+$('bCfgDl').onclick=async()=>{ try{ const c=await api('/api/config'); delete c.limits; if(c.wifi){ delete c.wifi.passSet; delete c.wifi.apPassSet; }
+  download(`tempctl-duo-settings-${(c.wifi&&c.wifi.hostname)||'device'}.json`,c); setMsg('cfgMsg',''); }catch(e){ setMsg('cfgMsg','Device not reachable.',true); } };
+$('bCfgUp').onclick=async()=>{ const t=await pickFile(); if(t==null) return; const o=parseJson(t);
+  if(!o||typeof o!=='object'||!Array.isArray(o.channels)||!o.bus){ setMsg('cfgMsg','This is not a TempCtl Duo settings file.',true); return; }
+  if(!await ask('Replace the settings with the ones from the file? Channel types, names and all other settings change; a running program may be stopped.','Restore')) return;
+  delete o.limits; const r=await postCfg(o); if(r.err){ setMsg('cfgMsg','Restore failed: '+r.err,true); return; } CFG=r;
+  for(const F of Object.values(FORMS)) fillForm(F); setMsg('cfgMsg','Settings restored.'); poll(); };
+$('bPrDl').onclick=async()=>{ try{ if(!progs) await loadPrograms(); const out=[];
+  for(let i=0;i<progs.programs.length;i++) if(progs.programs[i].used){ const p=await storedProg(i); if(p) out.push({i,program:p}); }
+  download('tempctl-duo-programs.json',{fmt:1,kind:'tempctl-duo-programs',programs:out}); setMsg('prMsg',`${out.length} programs saved to the file.`); }catch(e){ setMsg('prMsg','Device not reachable.',true); } };
+$('bPrUp').onclick=async()=>{ const t=await pickFile(); if(t==null) return; const o=parseJson(t);
+  if(!o||!Array.isArray(o.programs)){ setMsg('prMsg',o&&o.type?'This is a single program: import it on the Programs page.':'This is not a TempCtl Duo programs file.',true); return; }
+  const list=o.programs.filter(x=>x&&Number.isInteger(x.i)&&x.i>=0&&x.i<20&&x.program);
+  if(!list.length){ setMsg('prMsg','The file holds no programs.',true); return; }
+  if(!await ask(`Restore ${list.length} program(s) into slot(s) ${list.map(x=>x.i+1).join(', ')}? The programs in these slots are replaced.`,'Restore')) return;
+  const bad=[]; let n=0;
+  for(const x of list){ if(runActive()&&live.run.prog===x.i){ bad.push(`slot ${x.i+1}: running`); continue; }
+    try{ const r=await api('/api/program',{i:x.i,program:x.program}); if(r.err) bad.push(`slot ${x.i+1}: ${r.err}`); else { n++; delete DRAFT[x.i]; delete SAVED[x.i]; savedGen[x.i]=-1; } }catch(e){ bad.push(`slot ${x.i+1}: no answer`); } }
+  await loadPrograms(); setMsg('prMsg',`${n} program(s) restored.${bad.length?' Not restored: '+bad.join('; '):''}`,bad.length>0); };
+
 /* ---------- polling ---------- */
 let polling=false, pollTimer=0;
 async function poll(){
@@ -868,13 +1376,14 @@ async function poll(){
     await loadSaved(live.sel); if(running()) await ensureRunProg(true);
     updateRun(); updateChans(); updateEditor();
     const active=live.run.state==='running'||live.run.state==='paused', now=Date.now();
-    if(!M||now-chartAt>(active||view==='live'?2000:5000)){ chartAt=now; await refreshChart(); }
+    if(page==='status'&&(!M||now-chartAt>(active||view==='live'?2000:5000))){ chartAt=now; await refreshChart(); }
     await updateLog();
+    await pageUpdate();
   }catch(e){ $('linkDot').className='dot'; $('linkTxt').textContent='Device not reachable'; }
   finally{ polling=false; pollTimer=setTimeout(poll,1000); }
 }
-function frame(){ if(lastChart===0&&!drag){ renderChart(); lastChart=1; } $('clk').textContent=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); requestAnimationFrame(frame); }
-applyPalette(true); renderChart(); poll(); requestAnimationFrame(frame);
+function frame(){ if(lastChart===0&&!drag&&page==='status'){ renderChart(); lastChart=1; } $('clk').textContent=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); requestAnimationFrame(frame); }
+applyPalette(true); route(); renderChart(); poll(); requestAnimationFrame(frame);
 </script>
 </body>
 </html>

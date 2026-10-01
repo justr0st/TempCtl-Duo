@@ -1,15 +1,15 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
 
-> **Work in progress (version 1.0.7).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
+> **Work in progress (version 1.0.8).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
 > of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
 > (the ESP32-S3 board, env `s3`, and the CYD, envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`,
 > build from the same sources), two channels (Modbus / local / off), local thermocouple + SSR channels,
 > PID + autotune, and the two program types (Sequence, Timeline) with one run engine for both channels.
-> Step 7 (new web page) is under way: the **new Status page** is at `/` (both channels, run control,
-> chart with forecast, program editor with chart handles, event log); the TempCtl 1.2 page stays at **`/old`** for programs, settings and
-> tools until the new pages replace it. The touch screens (TempCtl 1.2, step 6 comes later) show the
-> **bottom channel**; programs are **read-only** there and on `/old` (written through the web API, section 5). On the S3's 480×320 screen the 320×240 TempCtl
-> screens run in the top left corner, next to a bring-up panel.
+> Step 7 (new web page, section 5a): Status (both channels, run control, chart with forecast, program
+> editor with chart handles, event log), Programs, Channels, System and Tools pages; the TempCtl 1.2 page
+> is gone. Still to come in step 7: "Run interrupted by a reset". The touch screens (TempCtl 1.2, step 6
+> comes later) show the **bottom channel**; programs are **read-only** there. On the S3's 480×320 screen
+> the 320×240 TempCtl screens run in the top left corner, next to a bring-up panel.
 
 Firmware for the ESP32-2432S028R ("Cheap Yellow Display") that drives a **PMA KS 40-1 / 41-1 / 42-1**
 (or another Modbus RTU temperature controller) over RS485. It stores **up to 20 named programs** for both
@@ -28,9 +28,9 @@ start three example programs are created (Lead-free BGA, Leaded BGA, Lead-free B
   - **Setup → System**: rotate the screen by 180°, brightness, colour theme and dark mode, Wi-Fi (scan,
     password, AP password)
   - **Setup → Controller**: controller type, serial link, ramp mode, "bottom reached" band, front-panel lock, end action
-- Web interface (section 5a): new Status page at `/` (both channels); the TempCtl 1.2 page at `/old` with
-  controller parameters (PID, limits, self-tuning), full register map, register read/write tools, a
-  setpoint-address finder and CSV log download
+- Web interface (section 5a): Status, Programs, Channels (incl. controller parameters, full register
+  map, calibration, PID autotune), System (Wi-Fi, display, restart) and Tools (register read/write, a
+  setpoint-address finder, backup) pages; CSV log download
 - The controller keeps doing the PID control; the ESP32 only feeds it setpoints
 
 ## 1. What the PMA interface description tells us
@@ -235,15 +235,16 @@ PMA-specific extras (status word, self-tuning, outputs off, parameter page) won'
    Either set Wi-Fi on the display (*Setup → System*: scan, pick the network, enter the password, *Save +
    connect*) or browse to `http://192.168.4.1` and use the *System* page. Afterwards: `http://tempctl-duo.local`
    or the IP shown on *Setup → System*.
-4. On *Controller*, check slave address, baud rate and parity match the controller (`ConF/othr`), then
-   check that *Main* shows the process value.
+4. On the web page's *Channels* page set each channel's type; for a Modbus controller check slave
+   address, baud rate and parity match the controller (`ConF/othr`), then check that the channel shows
+   its process value (*Status* page or the reading at the top of the channel's settings).
 
 TempCtl Duo keeps its settings in `/duo/settings.json` and doesn't read TempCtl's: Wi-Fi, controller and
 touch settings start from defaults. Defaults: bottom = Modbus (address 1), top = Off (`cyd-2xlocal`: both
-local); change the channels with `POST /api/config` until the new UIs have a Channels page. After switching from the TempCtl build delete the `.pio` folder once.
+local); change them on the web page's *Channels* page. After switching from the TempCtl build delete the `.pio` folder once.
 
-Touch calibration defaults (200…3700 / 240…3800) suit most CYDs. If touches land off, adjust `tsMinX…tsMaxY`
-through `POST /api/settings` and restart.
+Touch calibration defaults (200…3700 / 240…3800) suit most CYDs. If touches land off, adjust them with
+`POST /api/config {"display":{"touchCal":[minX,maxX,minY,maxY]}}` and restart.
 
 ## 4a. Editing the touch UI with LVGL Pro Editor
 
@@ -324,7 +325,7 @@ Rules so the firmware keeps working:
   `web/fonts/OFL.txt`). The page works without internet (AP mode): everything comes from the device.
 - `tools/web_embed.py` gzips the page and writes `src/web_assets.h` (generated, not in git). PlatformIO
   runs it before every build (`extra_scripts` in `platformio.ini`); by hand: `python tools/web_embed.py`.
-  The page is served gzipped (≈ 17 kB), the fonts (≈ 90 kB) with a one-year browser cache.
+  The page is served gzipped (≈ 40 kB), the fonts (≈ 90 kB) with a one-year browser cache.
 - Status page: run panel (program, Start / Pause / Continue / Stop / Next phase, state, run time,
   remaining time), chart (both channels: temperatures, setpoints, state lanes, phase lines with times,
   pauses, the forecast of the rest of the run dashed; zoom − / + / Fit, Ctrl + wheel, drag, pinch;
@@ -341,14 +342,26 @@ Rules so the firmware keeps working:
   Start with unsaved changes asks: Save and start / Start without saving / Cancel. During a run the same
   tables and handles edit the running copy (targets, later ramps, holds; finished phases and the running
   ramp are locked) and the changes are sent to the device at once.
-- Next sub-steps: Programs / Channels / System / Tools pages (7c), then `/old` goes away.
+- Pages (sidebar; addresses `#/programs`, `#/channels`, `#/system`, `#/tools`, so a page can be
+  bookmarked; all on the one page file, the drafts stay while switching pages):
+  - **Programs**: the 20 slots with type, channels, phases / steps and time; Open (in the Status page
+    editor), Duplicate (into the first empty slot), Export (the program's JSON file), Delete; empty
+    slots: New sequence / New timeline / Import (a program JSON file).
+  - **Channels**: polling interval, link-loss pause, "bottom reached" band, RS485 bus; per channel (tabs):
+    name, type, end action, setpoint limits; Modbus: address, controller type (+ load register defaults),
+    setpoint ramps, front lock, register map, PMA parameters and actions; local: converter, calibration
+    (with a two-point helper), PID, SSR window, max. output / temperature, PID autotune; runaway limits
+    of the selected type. Changed fields are marked; Save sends only the changed values
+    (`POST /api/config`) and lists values the device had to adjust to the allowed range.
+  - **System**: device info, restart, Wi-Fi (with network scan), touch display (accent colour, theme,
+    brightness, rotation).
+  - **Tools**: Modbus tools for a Modbus channel (find the setpoint address, read registers, write one
+    register); backup / restore of the settings and of all programs as JSON files.
 
 ## 5. Web API
 
-TempCtl Duo: two channels. The old page (`/old`), its chart and the TempCtl 1.2 endpoints show the
-**bottom channel**; the run engine drives both channels. `channels` and `run` in
-`/api/status`, `/api/run`, `/api/program`, `ch` in `/api/manual` and the bus tools, and `/api/config`
-cover both.
+TempCtl Duo: two channels. The flat fields of `/api/status` and `/api/history` (TempCtl 1.2) show the
+**bottom channel**; everything else covers both (`ch` = 0 bottom, 1 top).
 
 **Local channels** (type `local`, step 3): thermocouple converter MAX31855 or MAX6675 (`local.sensor`) read
 every 250 ms, calibration `true = raw * calGain + calOffset`, PID (`kp`, `ki`, `kd`, or from the autotune: relay test around a
@@ -360,16 +373,16 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 
 | Method | Path | Body / query |
 |---|---|---|
-| GET | `/api/live` | new page, polled every second: both channels (pv, sp, out, state, target, kept, canExtend, manual, fault, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg), `sel`, `accent`, `progGen`, `logSeq` |
+| GET | `/api/live` | web page, polled every second: both channels (pv, sp, out, state, target, kept, canExtend, manual, fault, autotune, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg), `sel`, `accent`, `progGen`, `cfgGen` (changes with every settings save), `logSeq` |
 | GET | `/api/chart?v=run` | current / last run: 300 bins of `pv`, `sp` and state lanes `st` per channel, past events `ev` [t, type, ch, idx], forecast `fc` (`seg` [t0, t1, v0, v1, src, flags] per channel, `ev`; times from now) |
 | GET | `/api/chart?v=live` | last 5 minutes of `pv` / `sp` per channel |
 | GET | `/api/log?since=n` | event log entries after n: [seq, uptime s, run time s or null, text] |
 | GET | `/api/status` | live values (bottom), manual setpoint, selected program; `channels`: both channels (name, type, ok, err, pv, sp, out, mode, manual); `run`: state, `type` (`seq`/`tl`), `seq` (phase `idx`, `stage`, `el`, `dur`), `waiting`, `progPause`, `actionRequired`, `pauseText`, `elapsed`, `remaining`, `edited`, `channels[]` (inProgram, idle, sp, target, moving, Timeline `lane`) |
-| GET/POST | `/api/config` | the whole settings document (= `/duo/settings.json` without passwords). POST changes only the keys given, e.g. `{"channels":[null,{"type":"modbus","modbus":{"addr":2}}]}`; errors come back as `{"ok":false,"err":"channels[1].type: one of …"}` |
+| GET/POST | `/api/config` | the whole settings document (= `/duo/settings.json` without passwords) + `limits` (`rs485`, `localMax` of this board variant). POST changes only the keys given, e.g. `{"channels":[null,{"type":"modbus","modbus":{"addr":2}}]}`; `"modbus":{"loadDefaults":true}` loads the register map of the channel's controller type; errors come back as `{"ok":false,"err":"channels[1].type: one of …"}` |
 | GET | `/api/history` | chart data (300 points): `pv`, `sp`, `plan` (bottom), with `?both=1` also `pvT`, `spT`, `planT` (top); `mode` = `live`/`run`, `planActive`, `spActive` |
 | GET | `/api/log.csv` | last program run (or the live window) as CSV, both channels |
 | GET | `/api/programs` | all 20 slots: `used`, `name`, `type`, `steps` (phases / steps), `total` (s), `uses` [bottom, top], `waits`; `sel` |
-| GET | `/api/program?i=0` | `program`: the program JSON (spec 9.3.5); `steps`: read-only bottom view for the old page |
+| GET | `/api/program?i=0` | `used`, `program`: the program JSON (spec 9.3.5) |
 | POST | `/api/program` | `{"i":0,"program":{…}}` save (validated, setpoint limits checked) or `{"i":0,"delete":true}` |
 | GET | `/api/run` | `run` (as in `/api/status`) + `program`: the running copy with its run edits |
 | POST | `/api/run` | `{"cmd":"start","i":0,"program":{…}}` (start slot 0 with this unsaved content), `{"cmd":"extend","ch":0,"sec":30}`, `{"cmd":"hold","ch":1,"idx":4,"sec":45}`, `{"cmd":"ramp","ch":1,"idx":5,"sec":40}`, `{"cmd":"target","ch":0,"idx":-1,"t":170}` (`idx` = phase / step, -1 = current / kept), `{"cmd":"save"}`, `"next"`, `"continue"`; the result shows in `run.msg` |
@@ -378,12 +391,13 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 | POST | `/api/autotune` | local channels: `{"ch":1,"cmd":"start","sp":200}`, `"stop"`, `"accept"` (proposed kp/ki/kd → settings), `"discard"`; progress and result in `/api/status` → `channels[].autotune` |
 | POST | `/api/ack` | `{"ch":0}` acknowledge a channel fault (runaway, sensor, over temperature); refused while the cause is still there. The outputs stay off until switched on again |
 | POST | `/api/cmd` | `{"cmd":"start"|"pause"|"resume"|"stop"|"next"|"continue", "prog":index}` (`skip` = `next`) |
-| GET/POST | `/api/settings` | TempCtl 1.2 form (bottom channel + common); partial updates allowed; `{"profile":0,"loadDefaults":true}`, `{"rotate180":true}` |
 | POST | `/api/wifi` | `{"ssid","pass","apPass"}`, reconnects without restart |
+| GET | `/api/wifiscan` | `?start=1` starts a network scan; then `{"busy":true}` until `{"networks":[…]}` (strongest first) |
+| POST | `/api/restart` | restarts the device (refused while a program runs) |
 | GET | `/api/mb/read?addr=&n=&fn=&ch=` | raw registers (`ch`: channel whose controller address is used, default 0; also in the POST tools below) |
 | POST | `/api/mb/write` | `{"addr","value"}` raw |
 | POST | `/api/mb/findsp` | `{"from","to"}` |
-| GET/POST | `/api/params` | PMA parameters |
+| GET/POST | `/api/params` | PMA parameters (`?ch=` / `"ch"`) |
 | POST | `/api/action` | `{"i":index}` PMA actions (self-tuning, outputs off, …) |
 
 The web UI has no login. Keep it on a trusted network.
@@ -417,8 +431,7 @@ src/app_state.*           control task: polling both channels, run engine, manua
 src/ui.*                  touch UI behaviour: event callbacks, dialogs, bring-up panel
 src/ui_gen.*              bridge to the exported UI code (create functions, constants, font fallbacks)
 src/web.*                 HTTP server, JSON API
-web/, tools/web_embed.py  new web page + fonts → src/web_assets.h (generated before each build)
-src/web_page.h            TempCtl 1.2 page (at /old until the new pages replace it)
+web/, tools/web_embed.py  web page + fonts → src/web_assets.h (generated before each build)
 test/host_test.cpp        g++ -std=c++17 -Isrc -I<ArduinoJson>/src test/host_test.cpp src/program.cpp src/duo_program.cpp src/run_engine.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp && ./a.out
 ```
 

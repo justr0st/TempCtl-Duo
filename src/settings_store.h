@@ -8,4 +8,5 @@ BoardLimits boardLimits();
 // missing or unreadable (then `s` holds the defaults).
 bool settingsLoad(Settings& s);
 bool settingsSave(const Settings& s);
+uint32_t settingsGen();  // changes with every save (web: reload the settings forms)
 uint32_t serialConfigFor(const Settings& s);

@@ -34,7 +34,11 @@ bool settingsLoad(Settings& s) {
   return true;
 }
 
+static volatile uint32_t gen = 1;
+uint32_t settingsGen() { return gen; }
+
 bool settingsSave(const Settings& s) {
+  ++gen;
   if (!storageBegin()) return false;
   JsonDocument d;
   settingsToJson(s, d.to<JsonObject>(), false);

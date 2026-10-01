@@ -1271,6 +1271,44 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
 - Status LED: fault breathing magenta was tried and taken back (1.0.6): red blinking again.
 - 1.0.7: build fix for ArduinoJson 7.4 (its `MemberProxy` cannot be copied: helpers that write into
   `doc["x"]` take it by reference and use `.set()`). Checked with ArduinoJson 7.2.1 and 7.4.3.
+
+#### 9.10.8 State of step 7c (2026-10-01, version 1.0.8)
+- **The TempCtl 1.2 page (`/old`, `src/web_page.h`) and `/api/settings` are removed** (flash −44 kB in all on
+  the S3); `/api/program` no longer sends the legacy `steps` view. `/api/status` and `/api/history` stay
+  for scripts.
+- The other pages are in the same page file, chosen by the address (`#/programs`, `#/channels`,
+  `#/system`, `#/tools`, anything else = Status; my choice: one file keeps the drafts while switching
+  pages and needs no extra request). Polling continues on every page (sidebar link, "Action required"
+  overlay); the chart is only fetched / drawn on the Status page.
+- **Programs**: list of the slots (type, channels in their colours, phases / steps, time, Selected /
+  Running / unsaved badges); Open (selects the slot, opens the Status editor), Duplicate (stored version
+  into the first empty slot, name + " (copy)"), Export (the program JSON = file format 9.3.5), Delete;
+  empty slots collapsed into one row ("Show all slots") with New sequence / New timeline / Import into the
+  first empty slot. During a run only the running program can be opened and nothing new created.
+- **Channels**: card "Polling and bus" (`bus.pollMs` — 9.5 — with the 2 × hint, link-loss pause,
+  "bottom reached" band, RS485 when the board has it); per channel (tabs with the channel names) one form:
+  name, type, end action / end SP, SP limits; Modbus: address, controller type, "Load register defaults"
+  (`"modbus":{"loadDefaults":true}` in `POST /api/config`), ramp mode (min step / min write time only for
+  ESP32 steps), front lock, register map (collapsible); local: converter, calibration offset / gain with a
+  **two-point helper** ("Now" takes the raw reading = (PV − offset) / gain; one point = offset only;
+  points ≥ 5 °C apart), PID, SSR window, max. output, max. temperature; runaway limits of the selected type.
+  Below: PID autotune (local; start / stop, progress, proposed vs current values, Accept / Discard) or
+  the PMA parameter table + actions (Modbus). Changing the type during a run asks first.
+- **Settings forms**: fields bound to `/api/config` paths; changed fields marked, out-of-range numbers
+  block Save; Save posts only the changed keys and reports values the device adjusted; Revert; the save
+  bar sticks to the bottom of the window while a channel form has changes. `cfgGen` in `/api/live`
+  reloads the forms (unchanged ones) when the settings change elsewhere (touch, another browser).
+- **System**: device info, Restart (`POST /api/restart`, refused during a run), Wi-Fi (network scan via
+  `GET /api/wifiscan`, password "empty = keep", AP password, host name), display (accent presets, touch
+  theme, brightness, rotation). The web theme stays the browser's own (sidebar).
+- **Tools**: Modbus tools for a Modbus channel (find the SP address → "Use … as setpoint address", read,
+  write); backup: settings download / restore (without passwords and `limits`), all programs as one file
+  (`{"kind":"tempctl-duo-programs","programs":[{"i","program"}]}`) / restore into the same slots.
+- `/api/config` GET has `limits` {rs485, localMax}; `/api/live` channels carry the full `autotune` object.
+- Tested with the host mock (Playwright): every action posts what it should (partial config bodies,
+  load defaults, params / actions with `ch`, Wi-Fi, restore), calibration maths, deep links, phone width.
+  Page gzip ≈ 40 kB (was ≈ 24 kB); flash S3 29.6 %, CYD ≈ 63 % of the app partition. Not on hardware yet.
+- Next: 7d "Run interrupted by a reset", then step 6 (touch UI, incl. the polling interval in Setup).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
   add phase, save (POST body checked), start without saving, new Timeline in an empty slot with a pause
   text, phone width (no sideways scrolling).
