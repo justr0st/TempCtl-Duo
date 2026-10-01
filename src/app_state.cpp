@@ -132,14 +132,192 @@ static void fillNan(T* a, int n) {
 
 static void histResetLive() {
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
-    fillNan(gHist->livePv[ch], CHART_N);
-    fillNan(gHist->liveSp[ch], CHART_N);
-    fillNan(gHist->liveLo[ch], CHART_N);
-    fillNan(gHist->liveHi[ch], CHART_N);
     fillNan(gHist->plan[ch], CHART_N);
     fillNan(gHist->runPlan[ch], CHART_N);
   }
   gHist->runValid = false;
+}
+
+// ---- live history ring
+// A slot is 3 words (32-bit access only: the ring may be in IRAM):
+//   w0 = PV bottom | PV top << 16, w1 = SP bottom | SP top << 16  (int16 0.1 degC, INT16_MIN = none)
+//   w2 = one byte each: how far the lowest / highest reading lay below / above PV, bottom then top
+//        (0.1 degC up to 19.9 degC, then 2 degC steps up to 130 degC, rounded outwards)
+static constexpr int SLOT_W = 3;
+static_assert(NUM_CHANNELS == 2, "the live history packs two channels per word");
+
+static int16_t t16(float v) {
+  Tenth16 t;
+  t = v;
+  return t.v;
+}
+static uint8_t dEnc(int32_t d) {
+  if (d <= 0) return 0;
+  if (d < 200) return (uint8_t)d;
+  const int32_t c = 200 + (d - 200 + 19) / 20;
+  return c > 255 ? 255 : (uint8_t)c;
+}
+static int32_t dDec(uint8_t c) { return c < 200 ? c : 200 + (c - 200) * 20; }
+
+struct LiveSlot {
+  int16_t pv[NUM_CHANNELS], sp[NUM_CHANNELS];
+  int32_t lo[NUM_CHANNELS], hi[NUM_CHANNELS];  // tenths; INT32_MIN with pv
+};
+
+static void livePut(const float* pv, const bool* ok, const float* sp, const float* lo, const float* hi) {
+  if (!gHist->liveRing) return;
+  int16_t p[NUM_CHANNELS], q[NUM_CHANNELS];
+  uint32_t d = 0;
+  for (int c = 0; c < NUM_CHANNELS; ++c) {
+    p[c] = ok[c] ? t16(pv[c]) : (int16_t)INT16_MIN;
+    q[c] = t16(sp[c]);
+    if (p[c] != INT16_MIN) {
+      const int32_t l = isnan(lo[c]) ? p[c] : (int32_t)floorf(lo[c] * 10.0f);
+      const int32_t h = isnan(hi[c]) ? p[c] : (int32_t)ceilf(hi[c] * 10.0f);
+      d |= (uint32_t)dEnc(p[c] - l) << (16 * c);
+      d |= (uint32_t)dEnc(h - p[c]) << (16 * c + 8);
+    }
+  }
+  uint32_t* w = gHist->liveRing + (gHist->liveTotal % gHist->liveCap) * SLOT_W;
+  w[0] = (uint16_t)p[0] | (uint32_t)(uint16_t)p[1] << 16;
+  w[1] = (uint16_t)q[0] | (uint32_t)(uint16_t)q[1] << 16;
+  w[2] = d;
+  ++gHist->liveTotal;
+}
+
+static void liveGet(uint32_t s, LiveSlot& o) {
+  const uint32_t* w = gHist->liveRing + (s % gHist->liveCap) * SLOT_W;
+  const uint32_t a = w[0], b = w[1], d = w[2];
+  for (int c = 0; c < NUM_CHANNELS; ++c) {
+    const int16_t p = (int16_t)(a >> (16 * c)), q = (int16_t)(b >> (16 * c));
+    o.pv[c] = p;
+    o.sp[c] = q;
+    if (p == INT16_MIN) {
+      o.lo[c] = o.hi[c] = INT32_MIN;
+      continue;
+    }
+    o.lo[c] = p - dDec((uint8_t)(d >> (16 * c)));
+    o.hi[c] = p + dDec((uint8_t)(d >> (16 * c + 8)));
+  }
+}
+
+static uint32_t liveOldest() { return gHist->liveTotal > gHist->liveCap ? gHist->liveTotal - gHist->liveCap : 0; }
+
+uint32_t liveHistSec() { return gHist ? gHist->liveCap * LIVE_SAMPLE_SEC : 0; }
+
+// Slots per bin of the live view: the chosen period (display.liveMin), at most what the ring holds,
+// a multiple of CHART_N slots
+static uint32_t liveK() {
+  uint32_t v = (uint32_t)gSettings.liveMin * 60 / LIVE_SAMPLE_SEC;
+  if (v > gHist->liveCap) v = gHist->liveCap;
+  const uint32_t k = v / CHART_N;
+  return k ? k : 1;
+}
+
+// The live view: CHART_N bins of k slots, aligned to the slot count so that a bin doesn't change
+// once it is complete (the newest is partial). fn(j, pv, sp, lo, hi) per bin, 0.1 degC (INT32_MIN =
+// none): PV and SP of the newest reading, lowest and highest reading. Under gLock.
+template <typename F>
+static void liveBins(uint32_t k, F fn) {
+  const uint32_t tot = gHist->liveTotal, oldest = liveOldest();
+  const int64_t last = tot ? (int64_t)(tot - 1) / k : 0;  // newest bin
+  for (int j = 0; j < CHART_N; ++j) {
+    int32_t pv[NUM_CHANNELS], sp[NUM_CHANNELS], lo[NUM_CHANNELS], hi[NUM_CHANNELS];
+    for (int c = 0; c < NUM_CHANNELS; ++c) pv[c] = sp[c] = lo[c] = hi[c] = INT32_MIN;
+    const int64_t b = last - (CHART_N - 1 - j);
+    if (tot && b >= 0) {
+      int64_t s0 = b * k, s1 = s0 + k;
+      if (s1 > tot) s1 = tot;
+      if (s0 < oldest) s0 = oldest;
+      LiveSlot x;
+      for (int64_t sl = s0; sl < s1; ++sl) {
+        liveGet((uint32_t)sl, x);
+        for (int c = 0; c < NUM_CHANNELS; ++c) {
+          if (x.sp[c] != INT16_MIN) sp[c] = x.sp[c];
+          if (x.pv[c] == INT16_MIN) continue;
+          pv[c] = x.pv[c];
+          if (lo[c] == INT32_MIN || x.lo[c] < lo[c]) lo[c] = x.lo[c];
+          if (hi[c] == INT32_MIN || x.hi[c] > hi[c]) hi[c] = x.hi[c];
+        }
+      }
+    }
+    fn(j, pv, sp, lo, hi);
+  }
+}
+
+// Seconds by which the bins before the newest end later than whole bins before now (0 .. bin)
+static uint32_t liveShift(uint32_t k) {
+  const uint32_t tot = gHist->liveTotal;
+  if (!tot) return 0;
+  const uint32_t last = (tot - 1) / k;
+  return (k - (tot - last * k)) * LIVE_SAMPLE_SEC;
+}
+
+enum LiveField { LV_PV, LV_SP, LV_LO, LV_HI };
+// One row of the live view (field f of channel c) into out[CHART_N]. With PSRAM the whole view is
+// kept (rebuilt once per slot: a 24 h view reads 86400 slots); without, each row is computed.
+static void liveRow(uint32_t k, LiveField f, int c, int32_t* out) {
+#ifdef BOARD_HAS_PSRAM
+  static uint32_t vTotal = UINT32_MAX, vK = 0;
+  if (gHist->liveTotal != vTotal || k != vK) {
+    vTotal = gHist->liveTotal;
+    vK = k;
+    liveBins(k, [](int j, const int32_t* pv, const int32_t* sp, const int32_t* lo, const int32_t* hi) {
+      for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+        gHist->livePv[ch][j].v = pv[ch];
+        gHist->liveSp[ch][j].v = sp[ch];
+        gHist->liveLo[ch][j].v = lo[ch];
+        gHist->liveHi[ch][j].v = hi[ch];
+      }
+    });
+  }
+  const TenthRow* r = f == LV_PV ? gHist->livePv : f == LV_SP ? gHist->liveSp : f == LV_LO ? gHist->liveLo : gHist->liveHi;
+  for (int j = 0; j < CHART_N; ++j) out[j] = r[c][j].v;
+#else
+  liveBins(k, [&](int j, const int32_t* pv, const int32_t* sp, const int32_t* lo, const int32_t* hi) {
+    out[j] = (f == LV_PV ? pv : f == LV_SP ? sp : f == LV_LO ? lo : hi)[c];
+  });
+#endif
+}
+
+size_t liveCsv(uint32_t& from, char* buf, size_t n) {
+  size_t len = 0;
+  Guard g;
+  if (!gHist->liveRing) return 0;
+  const uint32_t tot = gHist->liveTotal;
+  if (from < liveOldest()) from = liveOldest();
+  auto num = [](char* b, size_t m, int32_t t) {
+    if (t == INT32_MIN || t == INT16_MIN) b[0] = 0;
+    else snprintf(b, m, "%s%ld.%ld", t < 0 ? "-" : "", (long)(labs(t) / 10), (long)(labs(t) % 10));
+  };
+  const uint32_t nowSec = millis() / 1000;
+  while (from < tot) {
+    LiveSlot x;
+    liveGet(from, x);
+    char f[8][14];
+    for (int c = 0; c < NUM_CHANNELS; ++c) {
+      num(f[c * 4], sizeof(f[0]), x.pv[c]);
+      num(f[c * 4 + 1], sizeof(f[0]), x.lo[c]);
+      num(f[c * 4 + 2], sizeof(f[0]), x.hi[c]);
+      num(f[c * 4 + 3], sizeof(f[0]), x.sp[c]);
+    }
+    // time: seconds before the newest slot, and uptime (as in the event log)
+    const long age = (long)(tot - 1 - from) * LIVE_SAMPLE_SEC;
+    char line[112];
+    const int w = snprintf(line, sizeof(line), "%ld,%ld,%s,%s,%s,%s,%s,%s,%s,%s\n", -age, (long)nowSec - age, f[0], f[1],
+                           f[2], f[3], f[4], f[5], f[6], f[7]);
+    if (w <= 0 || len + (size_t)w > n) break;
+    memcpy(buf + len, line, w);
+    len += w;
+    ++from;
+  }
+  return len;
+}
+
+uint32_t iramPureFree() {
+  // MALLOC_CAP_EXEC also counts the D/IRAM regions, which are DRAM as well (they have MALLOC_CAP_8BIT)
+  const size_t all = heap_caps_get_free_size(MALLOC_CAP_EXEC), both = heap_caps_get_free_size(MALLOC_CAP_EXEC | MALLOC_CAP_8BIT);
+  return all > both ? all - both : 0;
 }
 
 static void histStartRun(float total) {
@@ -377,15 +555,24 @@ void chartSnapshot(ChartData& d) {
   d.planSpan = gHist->planSpan;
   d.planTotal = gHist->planTotal;
   strlcpy(d.progName, gHist->planName, sizeof(d.progName));
-  d.binSec = LIVE_SAMPLE_SEC;
-  d.span = CHART_N * LIVE_SAMPLE_SEC;
+  const uint32_t k = liveK();
+  d.binSec = k * LIVE_SAMPLE_SEC;
+  d.span = CHART_N * k * LIVE_SAMPLE_SEC;
   d.elapsed = 0;
+  int32_t row[CHART_N];
+  auto put = [&](Tenth16* dst) {
+    for (int i = 0; i < CHART_N; ++i) dst[i].v = row[i] == INT32_MIN ? (int16_t)INT16_MIN : (int16_t)row[i];
+  };
+  liveRow(k, LV_PV, B, row);
+  put(d.pv);
+  liveRow(k, LV_SP, B, row);
+  put(d.sp);
+  liveRow(k, LV_PV, T, row);
+  put(d.pvT);
+  liveRow(k, LV_SP, T, row);
+  put(d.spT);
   for (int i = 0; i < CHART_N; ++i) {
-    d.pv[i] = gHist->livePv[B][i];
-    d.sp[i] = gHist->liveSp[B][i];
     d.plan[i] = gHist->plan[B][i];
-    d.pvT[i] = gHist->livePv[T][i];
-    d.spT[i] = gHist->liveSp[T][i];
     d.planT[i] = gHist->plan[T][i];
   }
 }
@@ -508,24 +695,57 @@ void chartJson(String& o, bool run) {
   o.reserve(run ? 11000 : 8500);
   if (!run) {
     Guard g;
+    const uint32_t k = liveK(), sh = liveShift(k);
+    const uint32_t have = (gHist->liveTotal - liveOldest()) * LIVE_SAMPLE_SEC;
+    // bin: seconds per point; the newest point is now, the others end `sh` s later than a whole
+    // number of bins before it; have / cap: seconds recorded / the history's size
     o = "{\"mode\":\"live\",\"bin\":";
-    o += String(LIVE_SAMPLE_SEC);
+    o += String(k * LIVE_SAMPLE_SEC);
     o += ",\"span\":";
-    o += String(CHART_N * LIVE_SAMPLE_SEC);
+    o += String(CHART_N * k * LIVE_SAMPLE_SEC);
+    o += ",\"sh\":";
+    o += String(sh);
+    o += ",\"have\":";
+    o += String(have);
+    o += ",\"cap\":";
+    o += String(liveHistSec());
+    int32_t pv[CHART_N], x[CHART_N];  // 2.4 kB of stack
+    auto arr = [&](const int32_t* a, const int32_t* ref, bool below) {
+      o += '[';
+      for (int i = 0; i < CHART_N; ++i) {
+        if (i) o += ',';
+        if (!ref) {
+          jNum(o, a[i] == INT32_MIN ? NAN : a[i] * 0.1f);
+          continue;
+        }
+        int32_t d = (a[i] == INT32_MIN || ref[i] == INT32_MIN) ? 0 : below ? ref[i] - a[i] : a[i] - ref[i];
+        o += String((long)(d < 0 ? 0 : d));
+      }
+      o += ']';
+    };
     o += ",\"pv\":[";
     for (int c = 0; c < NUM_CHANNELS; ++c) {
       if (c) o += ',';
-      jArr(o, gHist->livePv[c], CHART_N);
+      liveRow(k, LV_PV, c, pv);
+      arr(pv, nullptr, false);
     }
     o += "],\"sp\":[";
     for (int c = 0; c < NUM_CHANNELS; ++c) {
       if (c) o += ',';
-      jArr(o, gHist->liveSp[c], CHART_N);
+      liveRow(k, LV_SP, c, x);
+      arr(x, nullptr, false);
     }
-    o += ']';
-    jDeltas(o, "dlo", gHist->livePv, gHist->liveLo, true);
-    jDeltas(o, "dhi", gHist->livePv, gHist->liveHi, false);
-    o += '}';
+    // "dlo" / "dhi" as for the run (see jDeltas)
+    for (int f = 0; f < 2; ++f) {
+      o += f ? "],\"dhi\":[" : "],\"dlo\":[";
+      for (int c = 0; c < NUM_CHANNELS; ++c) {
+        if (c) o += ',';
+        liveRow(k, LV_PV, c, pv);
+        liveRow(k, f ? LV_HI : LV_LO, c, x);
+        arr(x, pv, f == 0);
+      }
+    }
+    o += "]}";
     return;
   }
   static FcSink sink;  // web task only
@@ -1293,30 +1513,20 @@ static void cycle(float dt) {
     }
     gHist->runStLast = (int16_t)idx;
   }
-  // rolling window: one slot per LIVE_SAMPLE_SEC even if polling is slower
+  // live history: one slot per LIVE_SAMPLE_SEC even if polling is slower (the same reading fills
+  // the slots in between; after a longer stall they stay empty)
   const uint32_t slotMs = LIVE_SAMPLE_SEC * 1000UL;
   uint32_t n = (millis() - lastLive) / slotMs;
   if (n) {
-    lastLive = (n > CHART_N) ? millis() : lastLive + n * slotMs;
-    if (n > CHART_N) n = CHART_N;
-    for (int c = 0; c < NUM_CHANNELS; ++c) {
-      // word by word (no memmove: the arrays may be in IRAM, 32-bit access only)
-      for (int i = 0; i + n < CHART_N; ++i) {
-        gHist->livePv[c][i] = gHist->livePv[c][i + n];
-        gHist->liveSp[c][i] = gHist->liveSp[c][i + n];
-      }
-      for (int i = 0; i + n < CHART_N; ++i) {
-        gHist->liveLo[c][i] = gHist->liveLo[c][i + n];
-        gHist->liveHi[c][i] = gHist->liveHi[c][i + n];
-      }
-      for (uint32_t i = CHART_N - n; i < CHART_N; ++i) {
-        gHist->livePv[c][i] = pvOk[c] ? pv[c] : NAN;
-        gHist->liveSp[c][i] = spNow[c];
-        gHist->liveLo[c][i] = pvOk[c] ? accLo[c] : NAN;
-        gHist->liveHi[c][i] = pvOk[c] ? accHi[c] : NAN;
-      }
-      accLo[c] = accHi[c] = NAN;
+    lastLive = (n > 60) ? millis() : lastLive + n * slotMs;
+    if (n > 60) {
+      const bool none[NUM_CHANNELS] = {};
+      const float nan2[NUM_CHANNELS] = {NAN, NAN};
+      for (uint32_t i = 0; i + 1 < n && i < gHist->liveCap; ++i) livePut(nan2, none, nan2, nan2, nan2);
+      n = 1;
     }
+    for (uint32_t i = 0; i < n; ++i) livePut(pv, pvOk, spNow, accLo, accHi);
+    for (int c = 0; c < NUM_CHANNELS; ++c) accLo[c] = accHi[c] = NAN;
   }
   // run
   gLive.state = st;
@@ -1445,9 +1655,15 @@ void appInit() {
   // large buffers on the heap (the static DRAM segment is almost full)
   gHist = (History*)calloc(1, sizeof(History));
   runProg = (DuoProgram*)calloc(1, sizeof(DuoProgram));
-  // chart values: 10 x 2 x CHART_N words. No PSRAM (CYD): in the IRAM heap, which the rest of the
+  // chart values: 6 x 2 x CHART_N words. No PSRAM (CYD): in the IRAM heap, which the rest of the
   // firmware can't use (32-bit access only); DRAM is what runs short there (Wi-Fi, LVGL, web)
-  const size_t hvBytes = sizeof(TenthRow) * NUM_CHANNELS * 10;
+  // (with PSRAM 4 more for the live view, see liveRow())
+#ifdef BOARD_HAS_PSRAM
+  constexpr int HV_ROWS = 10;
+#else
+  constexpr int HV_ROWS = 6;
+#endif
+  const size_t hvBytes = sizeof(TenthRow) * NUM_CHANNELS * HV_ROWS;
 #ifdef BOARD_HAS_PSRAM
   TenthRow* hv = (TenthRow*)malloc(hvBytes);
 #else
@@ -1455,20 +1671,47 @@ void appInit() {
   if (!hv) hv = (TenthRow*)malloc(hvBytes);
 #endif
   if (gHist && hv) {
-    gHist->livePv = hv;
-    gHist->liveSp = hv + NUM_CHANNELS;
-    gHist->runPv = hv + 2 * NUM_CHANNELS;
-    gHist->runSp = hv + 3 * NUM_CHANNELS;
-    gHist->runPlan = hv + 4 * NUM_CHANNELS;
-    gHist->plan = hv + 5 * NUM_CHANNELS;
-    gHist->liveLo = hv + 6 * NUM_CHANNELS;
-    gHist->liveHi = hv + 7 * NUM_CHANNELS;
-    gHist->runLo = hv + 8 * NUM_CHANNELS;
-    gHist->runHi = hv + 9 * NUM_CHANNELS;
-    for (int r = 0; r < 10 * NUM_CHANNELS; ++r)
+    gHist->runPv = hv;
+    gHist->runSp = hv + NUM_CHANNELS;
+    gHist->runPlan = hv + 2 * NUM_CHANNELS;
+    gHist->plan = hv + 3 * NUM_CHANNELS;
+    gHist->runLo = hv + 4 * NUM_CHANNELS;
+    gHist->runHi = hv + 5 * NUM_CHANNELS;
+#ifdef BOARD_HAS_PSRAM
+    gHist->livePv = hv + 6 * NUM_CHANNELS;
+    gHist->liveSp = hv + 7 * NUM_CHANNELS;
+    gHist->liveLo = hv + 8 * NUM_CHANNELS;
+    gHist->liveHi = hv + 9 * NUM_CHANNELS;
+#endif
+    for (int r = 0; r < HV_ROWS * NUM_CHANNELS; ++r)
       for (int i = 0; i < CHART_N; ++i) hv[r][i] = NAN;
   }
-  if (!gHist || !hv || !runProg) {
+  // live history ring (see config.h)
+  if (gHist) {
+    uint32_t cap = LIVE_HIST_MIN * 60 / LIVE_SAMPLE_SEC;
+    const char* where = "PSRAM";
+#ifdef BOARD_HAS_PSRAM
+    gHist->liveRing = (uint32_t*)heap_caps_malloc(cap * SLOT_W * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_32BIT);
+#else
+    // only the IRAM-only heap (no DRAM), leaving some of it free; 5 min steps
+    where = "IRAM";
+    const uint32_t step = 300 / LIVE_SAMPLE_SEC, reserve = 8 * 1024;
+    const uint32_t pure = iramPureFree();
+    while (cap > step && (size_t)cap * SLOT_W * 4 + reserve > pure) cap -= step;
+    gHist->liveRing = (uint32_t*)heap_caps_malloc(cap * SLOT_W * 4, MALLOC_CAP_EXEC | MALLOC_CAP_32BIT | MALLOC_CAP_INTERNAL);
+    if (gHist->liveRing && (uintptr_t)gHist->liveRing >= 0x400A0000) where = "D/IRAM (DRAM)";
+#endif
+    if (!gHist->liveRing) {
+      cap = 300 / LIVE_SAMPLE_SEC;
+      where = "DRAM";
+      gHist->liveRing = (uint32_t*)malloc(cap * SLOT_W * 4);
+    }
+    gHist->liveCap = cap;
+    gHist->liveTotal = 0;
+    Serial.printf("[hist] live history %lu min (%lu bytes, %s)\n", (unsigned long)(cap * LIVE_SAMPLE_SEC / 60),
+                  (unsigned long)(cap * SLOT_W * 4), where);
+  }
+  if (!gHist || !hv || !runProg || !gHist->liveRing) {
     Serial.println("Out of memory");
     abort();
   }

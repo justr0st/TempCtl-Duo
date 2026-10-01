@@ -113,10 +113,14 @@ typedef Tenth TenthRow[CHART_N];
 
 // Chart history, both channels.
 struct History {
-  // Rolling live window: one sample per LIVE_SAMPLE_SEC, newest at the end.
+  // Live history: a ring of liveCap slots (one per LIVE_SAMPLE_SEC, 3 words each, see
+  // app_state.cpp); slot s (counted since boot) is at s % liveCap.
+  uint32_t* liveRing;
+  uint32_t liveCap, liveTotal;
+  // The live view: CHART_N bins of the ring (rebuilt on demand, liveView()), newest at the end.
   // (the value arrays are pointers into one block, see appInit(): IRAM on the CYD)
-  TenthRow *livePv, *liveSp;  // [NUM_CHANNELS]; PV = the last reading of the slot
-  TenthRow *liveLo, *liveHi;  // lowest / highest PV reading within each slot (every poll counts)
+  TenthRow *livePv, *liveSp;  // [NUM_CHANNELS]; PV = the last reading of the bin
+  TenthRow *liveLo, *liveHi;  // lowest / highest PV reading within each bin (every poll counts)
   // Current / last program run: run time 0..runSpan in CHART_N bins (the
   // span doubles when the run gets longer than planned).
   bool runValid;
@@ -241,5 +245,10 @@ void selectProgram(int idx);     // select + persist
 void setManualSp(float v, int ch = ENGINE_CH);  // clamp, persist and send to the control task
 float runSpanFor(float total);   // x axis length for a program: total + spare
 void chartSnapshot(ChartData& d);
+// Live history as CSV: rows from slot `from` (counted since boot; the oldest kept slot if older) on,
+// as many as fit into buf. Returns the length (0 = done) and the next slot in `from`.
+size_t liveCsv(uint32_t& from, char* buf, size_t n);
+uint32_t liveHistSec();          // seconds the live history can hold
+uint32_t iramPureFree();         // free IRAM-only heap (32-bit access only, not usable as DRAM)
 // /api/chart: v = "run" (current / last run with its forecast) or "live" (rolling window)
 void chartJson(String& out, bool run);

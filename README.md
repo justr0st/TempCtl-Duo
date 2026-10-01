@@ -1,6 +1,6 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
 
-> **Work in progress (version 1.0.16).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
+> **Work in progress (version 1.0.17).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
 > of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
 > (the ESP32-S3 board, env `s3`, and the CYD, envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`,
 > build from the same sources), two channels (Modbus / local / off), local thermocouple + SSR channels,
@@ -21,7 +21,7 @@ start three example programs are created (Lead-free BGA, Leaded BGA, Lead-free B
   - **Main**: live values, manual setpoint (numeric entry + on/off), program selection and Start / Pause / Stop /
     Next phase (= Continue in a program pause)
   - **Program**: read-only view of a program (the bottom channel as steps) until the new touch UI
-  - **Chart**: updated every second. Idle: rolling 5-minute window (PV scrolls from right to left) plus a
+  - **Chart**: updated every second. Idle: the live history over the chosen period (5 min default, PV scrolls from right to left) plus a
     preview of the selected program on its own time scale. Running: fixed time axis covering the whole program
     plus spare time; the program curve and the PV trace grow from the left. Program and setpoint lines are
     solid while active and dashed while not active.
@@ -333,7 +333,7 @@ Rules so the firmware keeps working:
 - Status page: run panel (program, Start / Pause / Continue / Stop / Next phase, state, run time,
   remaining time), chart (both channels: temperatures, setpoints, state lanes, phase lines with times,
   pauses, the forecast of the rest of the run dashed; zoom − / + / Fit, Ctrl + wheel, drag, pinch;
-  "Live" shows the last 5 minutes), channel cards (PV, SP, output, what the channel does, target
+  "Live" shows the live history over a chosen period, see below), channel cards (PV, SP, output, what the channel does, target
   −5 / −1 / +1 / +5 / Set and Extend hold during a run, manual switch + setpoint otherwise, fault +
   Acknowledge), the "Action required" overlay, "Save the run's changes?" after a run with run edits, and
   the event log. Channel colours come from the device's accent colour (spec 6); dark mode switch in the
@@ -346,8 +346,14 @@ Rules so the firmware keeps working:
   Start with unsaved changes asks: Save and start / Start without saving / Cancel. During a run the same
   tables and handles edit the running copy (targets, later ramps, holds; finished phases and the running
   ramp are locked) and the changes are sent to the device at once.
-- Chart PV lines show every reading: each chart slot (1 s live, run span / 300 in a run) keeps its lowest
-  and highest reading, and the line passes through both, so short peaks and dips stay visible.
+- Chart PV lines show every reading: each chart point (live: period / 300, run: run span / 300) keeps its
+  lowest and highest reading, and the line passes through both, so short peaks and dips stay visible.
+- Live history: the device keeps every second of both channels in RAM (last, lowest and highest reading
+  and setpoint; lost on restart): 24 h on the S3 (1 MB of PSRAM), on the CYD what fits into the IRAM-only
+  heap (about 30 min; the boot log says `[hist] live history N min`). The Live chart's Period (5 min …
+  the whole history; saved as `display.liveMin`, also used by the touch screen) picks how much of it is
+  shown; its vertical axis always runs from 0 °C to the highest value in view. Export CSV (or "Download
+  live history" in the sidebar) downloads all of it, one row per second.
 - Refresh: the page asks for new values every polling interval (Channels page; 250 ms … 1 s) and draws
   the newest temperature at the end of the chart; the chart history comes every 2 s.
 - Pages (sidebar; addresses `#/programs`, `#/channels`, `#/system`, `#/tools`, so a page can be
@@ -385,11 +391,12 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 |---|---|---|
 | GET | `/api/live` | web page, polled every second: both channels (pv, sp, out, state, target, kept, canExtend, manual, fault, autotune, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg), `sel`, `accent`, `progGen`, `cfgGen` (changes with every settings save), `logSeq` |
 | GET | `/api/chart?v=run` | current / last run: 300 bins of `pv`, `sp` and state lanes `st` per channel, past events `ev` [t, type, ch, idx], forecast `fc` (`seg` [t0, t1, v0, v1, src, flags] per channel, `ev`; times from now) |
-| GET | `/api/chart?v=live` | last 5 minutes of `pv` / `sp` per channel |
+| GET | `/api/chart?v=live` | the live period (`display.liveMin`) in 300 points of `pv` / `sp` / `dlo` / `dhi` per channel; `bin` s per point, `span`, `sh` (the points before the newest end `sh` s later than whole bins before now), `have` / `cap` (s recorded / s the history holds) |
 | GET | `/api/log?since=n` | event log entries after n: [seq, uptime s, run time s or null, text] |
 | GET | `/api/status` | live values (bottom), manual setpoint, selected program; `channels`: both channels (name, type, ok, err, pv, sp, out, mode, manual); `run`: state, `type` (`seq`/`tl`), `seq` (phase `idx`, `stage`, `el`, `dur`), `waiting`, `progPause`, `actionRequired`, `pauseText`, `elapsed`, `remaining`, `edited`, `channels[]` (inProgram, idle, sp, target, moving, Timeline `lane`) |
 | GET/POST | `/api/config` | the whole settings document (= `/duo/settings.json` without passwords) + `limits` (`rs485`, `localMax` of this board variant). POST changes only the keys given, e.g. `{"channels":[null,{"type":"modbus","modbus":{"addr":2}}]}`; `"modbus":{"loadDefaults":true}` loads the register map of the channel's controller type; errors come back as `{"ok":false,"err":"channels[1].type: one of …"}` |
-| GET | `/api/log.csv` | last program run (or the live window) as CSV, both channels |
+| GET | `/api/log.csv` | last program run (or, without one, the live history) as CSV, both channels |
+| GET | `/api/history.csv` | the whole live history, streamed: time_s (before now), uptime_s, then per channel pv, min, max, sp |
 | GET | `/api/programs` | all 20 slots: `used`, `name`, `type`, `steps` (phases / steps), `total` (s), `uses` [bottom, top], `waits`; `sel` |
 | GET | `/api/program?i=0` | `used`, `program`: the program JSON (spec 9.3.5) |
 | POST | `/api/program` | `{"i":0,"program":{…}}` save (validated, setpoint limits checked) or `{"i":0,"delete":true}` |

@@ -22,14 +22,14 @@ SET_LOOP_TASK_STACK_SIZE(24 * 1024);
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);  // CYD: ~7.5 kB used (measured, incl. Wi-Fi scan list); DRAM is short
 #endif
 
-// Internal byte-addressable RAM (DRAM): free, largest block, lowest so far; plus the IRAM heap, which
-// only takes 32-bit data (chart history on the CYD). ESP.getFreeHeap() counts both, so it looked
+// Internal byte-addressable RAM (DRAM): free, largest block, lowest so far; plus the IRAM-only heap,
+// which only takes 32-bit data (chart and live history on the CYD). ESP.getFreeHeap() counts both, so it looked
 // better than it was on the CYD (no PSRAM).
 static void memLog(const char* where) {
   const uint32_t caps = MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL;
-  Serial.printf("[mem] %s: DRAM free %u, largest %u, min %u; IRAM free %u\n", where,
+  Serial.printf("[mem] %s: DRAM free %u, largest %u, min %u; IRAM-only free %u\n", where,
                 (unsigned)heap_caps_get_free_size(caps), (unsigned)heap_caps_get_largest_free_block(caps),
-                (unsigned)heap_caps_get_minimum_free_size(caps), (unsigned)heap_caps_get_free_size(MALLOC_CAP_EXEC));
+                (unsigned)heap_caps_get_minimum_free_size(caps), (unsigned)iramPureFree());
 }
 
 void setup() {

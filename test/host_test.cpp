@@ -497,12 +497,13 @@ static void testSettingsJson() {
   a.ch[0].mb.reg.alarm = REG_UNSET;
   a.accentColor = 0xD65D0E;
   a.themeDark = 0;
+  a.liveMin = 120;
   roundTrip(a, b, false);
   CHECK(!strcmp(b.ssid, "Workshop") && !strcmp(b.pass, "secret-pw"));
   CHECK(b.ch[1].type == CH_LOCAL && !strcmp(b.ch[1].name, "IR head"));
   CHECK(b.ch[1].loc.sensor == SENSOR_MAX6675 && near(b.ch[1].loc.kp, 7.5f));
   CHECK(b.ch[0].mb.reg.alarm == REG_UNSET && b.ch[0].mb.reg.pv == 13294);
-  CHECK(b.accentColor == 0xD65D0E && b.themeDark == 0);
+  CHECK(b.accentColor == 0xD65D0E && b.themeDark == 0 && b.liveMin == 120);
   CHECK(memcmp(&a.ch[0], &b.ch[0], sizeof(ChannelSettings)) == 0);
   // API form: no passwords
   JsonDocument d;

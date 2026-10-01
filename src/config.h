@@ -11,8 +11,16 @@
 #error "No board selected: build with -D BOARD_S3 or -D BOARD_CYD (platformio.ini envs s3, cyd-1xlocal-1x485, cyd-2xlocal, cyd-2xlocal-2x485)"
 #endif
 
-// Chart resolution (points). Idle: one sample per second -> 300 s = 5 min
-// rolling window. Running: the program timeline (plus some spare time) is
-// divided into CHART_N bins.
+// Chart resolution (points). Live: the chosen period (display.liveMin) in CHART_N
+// bins of the live history. Running: the program timeline (plus some spare time)
+// is divided into CHART_N bins.
 #define CHART_N 300
 #define LIVE_SAMPLE_SEC 1
+// Live history in RAM (lost on restart): one slot per LIVE_SAMPLE_SEC with the last,
+// lowest and highest reading and the setpoint of both channels, 12 bytes.
+// PSRAM: 24 h = 1 MB. CYD: the IRAM heap, as much as fits up to 1 h (see appInit).
+#ifdef BOARD_HAS_PSRAM
+#define LIVE_HIST_MIN 1440
+#else
+#define LIVE_HIST_MIN 60
+#endif

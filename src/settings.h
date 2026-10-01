@@ -111,6 +111,7 @@ struct Settings {
   uint8_t themeDark;     // 1 dark, 0 light, THEME_DARK_DEFAULT = theme_dark in ui/globals.xml
   uint8_t themePalette;  // TempCtl 1.2 palettes (replaced by accentColor with the new UI, step 6)
   uint32_t accentColor;  // RGB 0xRRGGBB
+  uint16_t liveMin;      // live chart period, minutes (at most what the live history holds)
 
   // Tools: setpoint-address finder range
   uint16_t scanFrom, scanTo;

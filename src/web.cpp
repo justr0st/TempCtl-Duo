@@ -72,6 +72,32 @@ static void sendBody(int code, const char* type, const uint8_t* data, size_t len
   if (!ok) c.stop();
 }
 
+// A body of unknown length (ended by closing the connection), produced piece by piece by `next`
+// (returns 0 when done) into a buffer on the stack
+template <typename F>
+static void sendStream(const char* type, const char* what, F next) {
+  WiFiClient c = server.client();
+  const int fd = c.fd();
+  String head = "HTTP/1.1 200 OK\r\nContent-Type: ";
+  head += type;
+  head += "\r\nConnection: close\r\n";
+  head += extraHeaders;
+  head += "\r\n";
+  extraHeaders = "";
+  size_t sent = 0;
+  uint32_t last = millis();
+  bool ok = fd >= 0 && sendRaw(fd, (const uint8_t*)head.c_str(), head.length(), sent, last);
+  head = String();
+  char buf[1436];
+  while (ok) {
+    const size_t n = next(buf, sizeof(buf));
+    if (!n) break;
+    ok = sendRaw(fd, (const uint8_t*)buf, n, sent, last);
+  }
+  if (!ok && fd >= 0) Serial.printf("[web] %s: dropped after %u bytes\n", what, (unsigned)sent);
+  c.stop();
+}
+
 static void sendText(int code, const char* type, const String& body) {
   sendBody(code, type, (const uint8_t*)body.c_str(), body.length(), server.uri().c_str());
 }
@@ -252,36 +278,53 @@ static void handleStatus() {
   sendJson(d);
 }
 
-// Log of the last program run (if there was one since boot), else the live window. Both channels.
+// The whole live history (both channels, one row per slot), streamed
+static void handleHistCsv() {
+  extraHeaders = "Content-Disposition: attachment; filename=tempctl-duo-history.csv\r\nCache-Control: no-store\r\n";
+  uint32_t from = 0;
+  bool head = true;
+  sendStream("text/csv", "history.csv", [&](char* b, size_t n) -> size_t {
+    if (head) {
+      head = false;
+      return snprintf(b, n, "time_s,uptime_s,bottom_pv,bottom_min,bottom_max,bottom_sp,top_pv,top_min,top_max,top_sp\n");
+    }
+    return liveCsv(from, b, n);
+  });
+}
+
+// Log of the last program run (if there was one since boot), else the live history. Both channels.
 static void handleCsv() {
+  bool run;
+  {
+    Guard g;
+    run = gHist->runValid;
+  }
+  if (!run) return handleHistCsv();
   String out = "time_s,bottom_pv,bottom_sp,bottom_plan,top_pv,top_sp,top_plan\n";
   out.reserve(CHART_N * 48 + 80);
   char line[112];
-  bool run;
   auto num = [](char* b, size_t n, float v) {
     if (isnan(v)) b[0] = 0;
     else snprintf(b, n, "%.1f", v);
   };
   {
     Guard g;  // build the text under the lock, send it afterwards
-    run = gHist->runValid;
     for (int i = 0; i < CHART_N; ++i) {
       float v[6];
       for (int c = 0; c < NUM_CHANNELS; ++c) {
-        v[c * 3] = run ? gHist->runPv[c][i] : gHist->livePv[c][i];
-        v[c * 3 + 1] = run ? gHist->runSp[c][i] : gHist->liveSp[c][i];
-        v[c * 3 + 2] = run ? gHist->runPlan[c][i] : NAN;
+        v[c * 3] = gHist->runPv[c][i];
+        v[c * 3 + 1] = gHist->runSp[c][i];
+        v[c * 3 + 2] = gHist->runPlan[c][i];
       }
       if (isnan(v[0]) && isnan(v[1]) && isnan(v[3]) && isnan(v[4])) continue;
-      const float t = run ? i * gHist->runBin : -(float)(CHART_N - 1 - i) * LIVE_SAMPLE_SEC;
+      const float t = i * gHist->runBin;
       char f[6][12];
       for (int k = 0; k < 6; ++k) num(f[k], sizeof(f[k]), v[k]);
       snprintf(line, sizeof(line), "%.0f,%s,%s,%s,%s,%s,%s\n", t, f[0], f[1], f[2], f[3], f[4], f[5]);
       out += line;
     }
   }
-  extraHeaders = String("Content-Disposition: ") + (run ? "attachment; filename=tempctl-duo-run.csv"
-                                               : "attachment; filename=tempctl-duo-live.csv") + "\r\n";
+  extraHeaders = "Content-Disposition: attachment; filename=tempctl-duo-run.csv\r\n";
   sendText(200, "text/csv", out);
 }
 
@@ -988,6 +1031,7 @@ void webBegin() {
   server.on("/api/log", HTTP_GET, handleLog);
   server.on("/api/status", HTTP_GET, handleStatus);
   server.on("/api/log.csv", HTTP_GET, handleCsv);
+  server.on("/api/history.csv", HTTP_GET, handleHistCsv);
   server.on("/api/programs", HTTP_GET, handleGetPrograms);
   server.on("/api/program", HTTP_GET, handleGetProgram);
   server.on("/api/program", HTTP_POST, handlePostProgram);
