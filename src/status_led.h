@@ -1,6 +1,7 @@
 // Status LED: on-board WS2812 (S3 board) or RGB LED (CYD, PWM), same colours:
 //   green = idle, blue = running, amber blinking = waiting / paused / action
-//   required, red blinking = fault, purple = access point mode.
+//   required, fault = slowly breathing magenta (for now, Rost 2026-10-01; was red
+//   blinking - the status indication gets reworked later), purple = access point mode.
 // (STATUS_LED_SINGLE: one LED - on = running, slow blink = waiting, fast
 // blink = fault, off = idle.)
 // Priority when several apply: fault > waiting > AP > running > idle.

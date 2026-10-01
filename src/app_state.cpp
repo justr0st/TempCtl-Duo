@@ -555,7 +555,20 @@ static bool tuning(int ch) {
   return st.tuning;
 }
 
-static void startProgram(int idx) {
+static DuoProgram* startBuf = nullptr;  // "Start without saving": the web page's draft (under gLock)
+
+bool startDraft(int idx, const DuoProgram& p) {
+  if (idx < 0 || idx >= PROG_MAX) return false;
+  {
+    Guard g;
+    if (!startBuf) startBuf = (DuoProgram*)malloc(sizeof(DuoProgram));
+    if (!startBuf) return false;
+    *startBuf = p;
+  }
+  return sendCmd(CMD_START, idx, 0, -1, 1);
+}
+
+static void startProgram(int idx, bool draft) {
   if (eng.active()) return;
   if (anyFault()) {
     setMsg("Cannot start: acknowledge the channel fault first");
@@ -570,7 +583,13 @@ static void startProgram(int idx) {
   bool loaded;
   {
     Guard g;  // the web reads the running copy under the lock
-    loaded = programLoad(idx, p, err, sizeof(err));
+    if (draft) {
+      loaded = startBuf != nullptr;
+      if (loaded) p = *startBuf;
+      else strlcpy(err, "no draft to start", sizeof(err));
+    } else {
+      loaded = programLoad(idx, p, err, sizeof(err));
+    }
   }
   if (!loaded) {
     say("Cannot start: %s", err);
@@ -662,7 +681,7 @@ static void startProgram(int idx) {
     histStartRun(eng.forecast(nullptr, nullptr, pv));
   }
   updatePlan(pv, rem);
-  say("Program \"%s\" started", p.name);
+  say("Program \"%s\" started%s", p.name, draft ? " (unsaved changes)" : "");
 }
 
 static void manualSwitch(int ch, bool on) {
@@ -792,7 +811,7 @@ static void saveRun() {
 
 static void handleCmd(const Cmd& c) {
   switch (c.type) {
-    case CMD_START: startProgram(c.arg); break;
+    case CMD_START: startProgram(c.arg, c.sub == 1); break;
     case CMD_PAUSE:
       if (eng.state() == RunState::Running) { eng.pause(); setMsg("Paused"); }
       break;

@@ -125,7 +125,7 @@ struct ChartData {
 };
 
 enum CmdType : uint8_t {
-  CMD_START,        // arg = program slot (-1 = selected program)
+  CMD_START,        // arg = program slot (-1 = selected program), sub 1 = the draft from startDraft()
   CMD_PAUSE,
   CMD_RESUME,
   CMD_STOP,
@@ -195,6 +195,8 @@ void saveSettingsQuiet();        // persist gSettings only (display, selection, 
 DuoProgram& scratchProgram();
 // The bottom channel's plan of stored program idx as TempCtl steps (old UIs)
 bool loadLegacyView(int idx, Program& out);
+// "Start without saving" (web): starts program slot idx with this content instead of the stored one
+bool startDraft(int idx, const DuoProgram& p);
 // Running copy of the program as JSON (under gLock); false if there was no run
 bool runProgramJson(JsonObject o);
 void selectProgram(int idx);     // select + persist

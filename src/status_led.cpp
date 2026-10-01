@@ -1,5 +1,6 @@
 #include "status_led.h"
 #include <Arduino.h>
+#include <math.h>
 #include "config.h"
 
 static volatile LedStatus status = LedStatus::Off;
@@ -16,6 +17,12 @@ LedStatus statusLedPick(bool fault, bool wait, bool ap, bool running) {
 void statusLedSet(LedStatus s) { status = s; }
 
 static bool blink(uint32_t periodMs) { return (millis() % periodMs) < periodMs / 2; }
+
+// 0..1..0 over periodMs (cosine), for a slow "breathing" LED
+static float breathe(uint32_t periodMs) {
+  const float ph = (float)(millis() % periodMs) / (float)periodMs;
+  return 0.5f - 0.5f * cosf(6.2831853f * ph);
+}
 
 #if defined(STATUS_LED_WS2812) || defined(STATUS_LED_RGB_PWM)
 #if defined(STATUS_LED_WS2812)
@@ -63,7 +70,11 @@ static void ledLoop() {
     case LedStatus::Running: write(scale(0, 0, 255)); break;
     case LedStatus::Ap: write(scale(160, 0, 255)); break;
     case LedStatus::Wait: write(blink(1000) ? scale(255, 120, 0) : 0); break;
-    case LedStatus::Fault: write(blink(400) ? scale(255, 0, 0) : 0); break;
+    case LedStatus::Fault: {  // for now (Rost, 2026-10-01): slowly breathing magenta instead of red blinking
+      const uint8_t v = (uint8_t)(20 + 235 * breathe(3000));
+      write(scale(v, 0, v));
+      break;
+    }
   }
 }
 

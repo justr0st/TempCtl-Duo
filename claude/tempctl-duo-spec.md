@@ -144,7 +144,8 @@ Unusable / kept free:
 | Spare | 4, 5, 6 | J1 | e.g. buzzer, door / E-stop input |
 
 **Status LED (decided)**: green = idle · blue = running · amber blinking = waiting for bottom / program
-pause / action required · red blinking = fault · purple = AP mode. Priority when several apply: fault >
+pause / action required · red blinking = fault (**for now: slowly breathing magenta**, Rost 2026-10-01, until the
+status indication is reworked) · purple = AP mode. Priority when several apply: fault >
 amber > purple > blue > green. Low brightness (≈ 20 %). **CYD: the on-board RGB LED (external WS2812 on IO17 in `cyd-2xlocal-2x485`) with the same
 colours** (Rost, 2026-09-29; replaces "blue LED only"): PWM on LEDC channels 1–3, active low.
 
@@ -921,6 +922,12 @@ sequences with 'wait for previous phases' barriers"). Chosen after comparing the
   setpoint limits; Modbus: address + register map (PMA preset or custom) + ramp options; local: sensor
   type, calibration, PID, SSR window, max output, max temperature (cut-off); runaway enable + limits
   stored per channel type).
+- **Polling interval (Rost, 2026-10-01)**: the polling interval (`bus.pollMs`, 250–10000 ms, default
+  1000 ms) is a normal device setting, **editable on the touch UI and on the web GUI** (not only through
+  `/api/config`). It sets how often the control task polls the channels (Modbus round robin; local
+  channels every cycle) and so how often PV / SP / output are refreshed for the displays. Touch: Setup
+  (step 6); web: settings page (step 7c). Show a hint that with two Modbus controllers each one is
+  polled every 2 × the interval.
 - **Channel names (decided)**: a free name per channel, **shown on all screens instead of
   "Bottom" / "Top"** (touch, web, serial output, program editor headings); defaults "Bottom" and "Top",
   up to 16 characters. The roles stay fixed: channel 1 is the lower heater that "wait for bottom" and
@@ -1247,6 +1254,25 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   **median of the last 3 readings** in the local task (≤ 250 ms delay); hardware hint: 10 nF across
   T+/T− at the converter, twisted thermocouple leads away from mains wiring. Event log: boot entry with
   the reset reason, channel link changes and autotune results go to the log too.
+
+#### 9.10.7 State of step 7b (2026-10-01, version 1.0.5)
+- Program editor on the Status page (from the simulator): Sequence table (wide) / cards (< 720 px) with
+  type, targets, ramps, holds, bottom Idle, "Wait for <bottom name>", pause "Action required" + text;
+  Timeline two tables (step / idle / pause); name field; Add / ✕; empty slot → New sequence / New
+  timeline. Chart handles (target square, ramp-end diamond, hold-end circle; lifted with a leader line
+  where they overlap; ghost + value while dragging, applied on release).
+- Drafts per slot in the browser (normalised form, compared as device JSON), Save (`POST /api/program`,
+  device validates incl. setpoint limits) / Discard / Undo / Redo (+ Ctrl+Z / Y), "– unsaved" in the
+  program list. **Drafts live only in the page** (lost on reload) — enough for now.
+- Start with unsaved changes: Save and start / **Start without saving** (`POST /api/run {"cmd":"start",
+  "i":n,"program":…}` → control task `CMD_START` sub 1 starts that content; the slot stays as stored, run
+  edits can be saved into it after the run) / Cancel.
+- During a run the tables and handles edit the running copy through `/api/run` (target / ramp / hold);
+  type, wait, pause options, add / delete are locked during a run (the engine has no structural edits).
+- Status LED: fault = slowly breathing magenta for now (Rost; replaced by the status rework later).
+- Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
+  add phase, save (POST body checked), start without saving, new Timeline in an empty slot with a pause
+  text, phone width (no sideways scrolling).
 
 Keep the TempCtl conventions (full web/touch parity, colours via named styles, texts in
 `translations.xml`, widgets bound by name, exported UI code committed) unless Rost decides otherwise.

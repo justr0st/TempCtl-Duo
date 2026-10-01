@@ -44,7 +44,7 @@ main{min-width:0;padding:0 16px 40px}
 .bar .sep{width:1px;align-self:stretch;background:var(--line);margin:0 4px}
 label.f{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:14px}
 select{max-width:100%}
-select,input[type=number]{font:inherit;color:var(--text);background:var(--sunk);border:1px solid var(--line);border-radius:6px;padding:5px 7px;min-height:34px}
+select,input[type=number],input[type=text]{font:inherit;color:var(--text);background:var(--sunk);border:1px solid var(--line);border-radius:6px;padding:5px 7px;min-height:34px}
 input[type=number]{width:76px;text-align:right}
 button,.btn{font:inherit;font-weight:500;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 12px;min-height:34px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
 button:hover:not(:disabled){border-color:var(--acc)}
@@ -105,6 +105,40 @@ button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
 dialog{border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);max-width:440px;width:calc(100% - 32px)}
 dialog::backdrop{background:rgba(0,0,0,.45)}
 dialog p{margin:0}
+.edhead{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:10px}.edhead h2{margin:0}
+.unsaved{color:var(--amber);font-size:13.5px;font-weight:600}
+.tools{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+.edhint{color:var(--muted);font-size:13.5px;margin:-4px 0 10px}
+.edbar{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center}
+.ed-wrap{overflow-x:auto}
+table.ed{border-collapse:collapse;width:100%;font-size:14px}
+table.ed th{font-weight:600;color:var(--muted);text-align:left;padding:4px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.ed th.gB{color:var(--pvB)}table.ed th.gT{color:var(--pvT)}
+table.ed td{padding:3px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.ed input[type=number]{width:66px;min-height:30px;padding:3px 6px}
+table.ed input[type=text],.pc input[type=text]{width:170px;min-height:30px;padding:3px 6px}
+table.ed select{min-height:30px;padding:2px 6px}
+table.ed tr.done td{opacity:.5}
+table.ed tr.cur td{background:var(--amber-bg)}
+table.ed tr.cur td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
+table.ed td.bl,table.ed th.bl{border-left:1px solid var(--line)}
+.na{color:var(--muted);text-align:center}
+button.x{min-width:32px;padding:3px 8px;min-height:30px;color:var(--muted)}
+.cbl{display:inline-flex;align-items:center;gap:5px;font-size:13.5px;color:var(--text);white-space:nowrap}
+.pcs{display:flex;flex-direction:column;gap:8px}
+.pc{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--sunk)}
+.pc.cur{border-color:var(--amber);box-shadow:inset 3px 0 0 var(--amber)}.pc.done{opacity:.55}
+.pch{display:flex;align-items:center;gap:8px}.pch b{font-family:var(--cond);font-size:17px;min-width:18px}.pch .grow{flex:1}
+.pcr{display:flex;flex-wrap:wrap;align-items:flex-end;gap:6px 8px;margin-top:8px}
+.pl{font-weight:600;font-size:13.5px;min-width:52px;align-self:center}.pl.gB{color:var(--pvB)}.pl.gT{color:var(--pvT)}
+.fl{display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:2px}
+.fl input[type=number]{width:64px}
+.pcr .na{align-self:center}
+.tl2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0}
+.tl2>div{padding:0 12px}.tl2>div:first-child{padding-left:0;border-right:3px double var(--line)}.tl2>div:last-child{padding-right:0}
+.tl2 h3{font-family:var(--cond);font-size:17px;margin:0 0 6px}
+@media (max-width:760px){.tl2{grid-template-columns:minmax(0,1fr)}.tl2>div{padding:0}.tl2>div:first-child{border-right:0;border-bottom:3px double var(--line);padding-bottom:12px;margin-bottom:12px}}
+.chartbox [data-h]{touch-action:none}
 @media (max-width:1100px){.grid2{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:860px){
  .app{grid-template-columns:minmax(0,1fr);background:none}
@@ -113,7 +147,9 @@ dialog p{margin:0}
  #menu{display:inline-flex}
  main{padding:0 12px 32px}
  .clock{margin-left:0;width:100%}
+ .top .jump a{padding:6px 8px}
 }
+@media (max-width:520px){.top .jump a[href="#runP"]{display:none}.top h1{font-size:20px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -138,7 +174,7 @@ dialog p{margin:0}
 <div class="top">
   <button id="menu" aria-label="Menu" aria-expanded="false">☰</button>
   <h1>Status</h1>
-  <span class="jump"><a class="btn" href="#runP">Run</a><a class="btn" href="#chans">Channels</a><a class="btn" href="#logP">Log</a></span>
+  <span class="jump"><a class="btn" href="#runP">Run</a><a class="btn" href="#chans">Channels</a><a class="btn" href="#edP">Program</a><a class="btn" href="#logP">Log</a></span>
 </div>
 
 <section class="panel" id="runP" aria-label="Run">
@@ -164,6 +200,15 @@ dialog p{margin:0}
 
 <div class="grid2" id="chans"></div>
 
+<section class="panel mt" id="edP" aria-label="Program editor">
+  <div class="edhead"><h2 id="edTitle">Program</h2><span class="unsaved" id="unsaved"></span>
+    <span class="tools"><button data-act="undo" title="Ctrl+Z">Undo</button><button data-act="redo" title="Ctrl+Y">Redo</button><button data-act="save" class="pri">Save program</button><button data-act="discard">Discard changes</button></span></div>
+  <div class="bar"><label class="f">Name <input type="text" id="pName" maxlength="31" style="width:260px"></label></div>
+  <p class="edhint" id="edHint"></p>
+  <div id="editor"></div>
+  <div class="msg" id="edMsg"></div>
+</section>
+
 <section class="panel mt" id="logP" aria-label="Event log"><h2>Event log</h2><ul class="log" id="log"></ul></section>
 </main>
 </div>
@@ -177,6 +222,7 @@ dialog p{margin:0}
   <p>This run changed the program (targets, ramps or holds). Save them into the stored program, or keep the program as it was.</p>
   <div class="btns"><button id="dSave" class="pri">Save to program</button><button id="dDiscard">Keep the stored program</button></div>
 </dialog>
+<dialog id="chDlg"><p id="chTxt"></p><div class="btns" id="chBtns"></div></dialog>
 <dialog id="askDlg"><p id="askTxt"></p><div class="btns"><button id="askOk" class="pri">OK</button><button id="askNo">Cancel</button></div></dialog>
 
 <script>
@@ -187,8 +233,7 @@ const fmt=t=>{t=Math.max(0,Math.round(t));const h=Math.floor(t/3600),m=Math.floo
 const f1=v=>v==null?'–':(+v).toFixed(1);
 const CH=[0,1], KEY=['B','T'], PV=['var(--pvB)','var(--pvT)'], SP=['var(--spB)','var(--spT)'];
 const EV={PHASE:1,STEP:2,RAMP_END:3,HOLD_END:4,PAUSE:5,CONT:6,END:7,STOP:8};
-let live=null, progs=null, progsGen=-1, runProg=null, runProgAt=0, chartData=null, chartAt=0, view='prog', showLast=true;
-const progCache={};
+let live=null, progs=null, progsGen=-1, runProg=null, runProgAt=0, chartAt=0, view='prog', showLast=true, edKey='';
 let logSeq=0, logList=[], prevState='idle', askedSave=false;
 
 async function api(path,body){
@@ -230,19 +275,43 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>applyPa
 $('menu').onclick=()=>{const o=$('side').classList.toggle('open');$('menu').setAttribute('aria-expanded',o);};
 document.addEventListener('click',e=>{ if($('side').classList.contains('open')&&!e.target.closest('#side,#menu')){$('side').classList.remove('open');$('menu').setAttribute('aria-expanded','false');} });
 
-/* ---------- programs ---------- */
+/* ---------- programs: stored (SAVED), drafts (DRAFT), undo / redo (spec 9.3.3) ---------- */
 function chName(i){ return live&&live.ch[i]?live.ch[i].name:(i?'Top':'Bottom'); }
+const MAXN=100, MAXSEC=599940, J=o=>JSON.stringify(o), clone=o=>o==null?null:JSON.parse(J(o));
+// editable form: every phase has b {t,r,h,idle} and t {t,r,h}; Timeline steps {kind,t,r,h,msg,text}
+function normProg(d){ if(!d) return null;
+  if(d.type==='tl'){ const st=x=>x.pause?{kind:'pause',t:0,r:0,h:0,msg:!!x.msg,text:x.text||''}:x.idle?{kind:'idle',t:0,r:0,h:x.h||0,msg:false,text:''}:{kind:'step',t:x.t,r:x.r||0,h:x.h||0,msg:false,text:''};
+    return {name:d.name||'',type:'tl',B:(d.B||[]).map(st),T:(d.T||[]).map(st)}; }
+  return {name:d.name||'',type:'seq',phases:(d.phases||[]).map(x=>({kind:x.kind,wait:!!x.wait,msg:!!x.msg,text:x.text||'',
+    b:{t:x.b&&x.b.t!=null?x.b.t:150,r:x.b&&x.b.r||0,h:x.b&&x.b.h||0,idle:!!(x.b&&x.b.idle)},t:{t:x.t&&x.t.t!=null?x.t.t:180,r:x.t&&x.t.r||0,h:x.t&&x.t.h||0}}))}; }
+// device JSON (spec 9.3.5)
+function denormProg(p){ if(!p) return null;
+  if(p.type==='tl'){ const st=x=>x.kind==='pause'?Object.assign({pause:true},x.msg?{msg:true}:{},x.text?{text:x.text}:{}):x.kind==='idle'?{idle:true,h:x.h}:{t:x.t,r:x.r,h:x.h};
+    return {fmt:1,name:p.name,type:'tl',B:p.B.map(st),T:p.T.map(st)}; }
+  return {fmt:1,name:p.name,type:'seq',phases:p.phases.map(x=>{ const o={kind:x.kind};
+    if(x.kind==='P'){ if(x.msg) o.msg=true; if(x.text) o.text=x.text; return o; }
+    if((x.kind==='B'||(x.kind==='BT'&&!x.b.idle))&&x.wait) o.wait=true;
+    if(x.kind==='B') o.b={t:x.b.t,r:x.b.r,h:x.b.h};
+    if(x.kind==='BT') o.b=x.b.idle?{idle:true}:{t:x.b.t};
+    if(x.kind!=='B') o.t={t:x.t.t,r:x.t.r,h:x.t.h};
+    return o; })}; }
 function progUses(p,i){ if(!p) return false; if(p.type==='tl') return (p[KEY[i]]||[]).length>0; return (p.phases||[]).some(x=>x.kind==='BT'||x.kind===KEY[i]); }
-function hasWaits(p){ return p&&p.type==='seq'&&(p.phases||[]).some(x=>x.wait); }
+function progItems(p){ return !p?0:p.type==='tl'?p.B.length+p.T.length:p.phases.length; }
+function hasWaits(p){ return p&&p.type==='seq'&&(p.phases||[]).some(x=>x.wait&&(x.kind==='B'||(x.kind==='BT'&&!x.b.idle))); }
+const SAVED={}, DRAFT={}, UNDO={}, REDO={}, savedGen={};
+const isDirty=i=>i in DRAFT&&J(denormProg(DRAFT[i]))!==J(denormProg(SAVED[i]));
+async function loadSaved(i,force){ const g=live?live.progGen:0; if(!force&&savedGen[i]===g) return;
+  const r=await api('/api/program?i='+i), was=isDirty(i);
+  SAVED[i]=r.used?normProg(r.program):null; savedGen[i]=g; if(!was) DRAFT[i]=clone(SAVED[i]); if(!UNDO[i]){ UNDO[i]=[]; REDO[i]=[]; } }
 async function loadPrograms(){ progs=await api('/api/programs'); progsGen=live?live.progGen:-1; fillProgSelect(); }
 function fillProgSelect(){ if(!progs) return; const s=$('prog'), cur=live?live.sel:progs.sel; if(document.activeElement===s) return;
-  const h=progs.programs.map((p,i)=>`<option value="${i}">${i+1} ${p.used?esc(p.name)+' ('+(p.type==='tl'?'timeline':'sequence')+', '+fmt(p.total)+')':'(empty)'}</option>`).join('');
+  const h=progs.programs.map((p,i)=>{ const d=DRAFT[i], dirty=isDirty(i);
+    const lab=d?`${esc(d.name)} (${d.type==='tl'?'timeline':'sequence'}${!dirty&&p.used?', '+fmt(p.total):''})`:'(empty)';
+    return `<option value="${i}">${i+1} ${lab}${dirty?' – unsaved':''}</option>`; }).join('');
   if(s.dataset.h!==h){ s.innerHTML=h; s.dataset.h=h; } s.value=String(cur); }
-async function progOf(i){ const g=live?live.progGen:0, c=progCache[i]; if(c&&c.gen===g) return c.p;
-  const r=await api('/api/program?i='+i); progCache[i]={gen:g,p:r.used?r.program:null}; return progCache[i].p; }
-$('prog').onchange=async e=>{ const i=+e.target.value; showLast=false; await api('/api/select',{i}); if(live) live.sel=i; chartData=null; lastChart=0; poll(); };
+$('prog').onchange=async e=>{ const i=+e.target.value; showLast=false; await api('/api/select',{i}); if(live) live.sel=i; await loadSaved(i); chartAt=0; edKey=''; poll(); };
 
-// Plan of a stored program from its start (as the device's preview: programmed times, waits met at once, pauses 0 s)
+// Plan of a program from its start (as the device's preview: programmed times, waits met at once, pauses 0 s)
 function planProgram(p,pv){
   const segs=[[],[]], ev=[], uses=[progUses(p,0),progUses(p,1)];
   const g=[{idle:true,v:null,src:-1},{idle:true,v:null,src:-1}];
@@ -251,7 +320,7 @@ function planProgram(p,pv){
   const ramp=(i,t0,tgt,r,src)=>{ const c=g[i], from=c.idle?(pv[i]!=null?pv[i]:25):c.v; r=r||0; if(r>0) push(i,t0,t0+r,from,tgt,src,2); c.idle=false; c.v=tgt; c.src=src; return t0+r; };
   let t=0;
   if(p.type==='seq'){
-    (p.phases||[]).forEach((x,k)=>{ ev.push({t,type:EV.PHASE,ch:-1,idx:k});
+    p.phases.forEach((x,k)=>{ ev.push({t,type:EV.PHASE,ch:-1,idx:k});
       if(x.kind==='P'){ ev.push({t,type:EV.PAUSE,ch:-1,idx:k}); ev.push({t,type:EV.CONT,ch:-1,idx:k}); return; }
       const c=x.kind==='B'?0:1, sg=x.kind==='B'?x.b:x.t;
       if(x.kind==='BT'){ if(x.b.idle){ g[0].idle=true; g[0].src=-1; } else { g[0].idle=false; g[0].v=x.b.t; g[0].src=k; } }
@@ -260,9 +329,9 @@ function planProgram(p,pv){
     });
   } else {
     const ends=[0,0];
-    for(const i of CH){ let tt=0; (p[KEY[i]]||[]).forEach((x,k)=>{ ev.push({t:tt,type:EV.STEP,ch:i,idx:k});
-      if(x.pause){ ev.push({t:tt,type:EV.PAUSE,ch:i,idx:k}); ev.push({t:tt,type:EV.CONT,ch:i,idx:k}); return; }
-      if(x.idle){ g[i].idle=true; g[i].src=-1; push(i,tt,tt+(x.h||0),null,null,-1,1); tt+=x.h||0; ev.push({t:tt,type:EV.HOLD_END,ch:i,idx:k}); return; }
+    for(const i of CH){ let tt=0; p[KEY[i]].forEach((x,k)=>{ ev.push({t:tt,type:EV.STEP,ch:i,idx:k});
+      if(x.kind==='pause'){ ev.push({t:tt,type:EV.PAUSE,ch:i,idx:k}); ev.push({t:tt,type:EV.CONT,ch:i,idx:k}); return; }
+      if(x.kind==='idle'){ g[i].idle=true; g[i].src=-1; push(i,tt,tt+(x.h||0),null,null,-1,1); tt+=x.h||0; ev.push({t:tt,type:EV.HOLD_END,ch:i,idx:k}); return; }
       const t1=ramp(i,tt,x.t,x.r,k); ev.push({t:t1,type:EV.RAMP_END,ch:i,idx:k}); flat(i,t1,t1+(x.h||0)); tt=t1+(x.h||0); ev.push({t:tt,type:EV.HOLD_END,ch:i,idx:k}); });
       ends[i]=tt; }
     t=Math.max(ends[0],ends[1]); for(const i of CH) if(ends[i]<t) flat(i,ends[i],t);
@@ -313,10 +382,11 @@ async function refreshChart(){
     const d=await api('/api/chart?v=run');
     if(d.mode==='run'||d.mode==='last'){ await ensureRunProg(d.mode==='run'); M=modelFromRun(d); lastChart=0; return; }
   }
-  const p=live?await progOf(live.sel):null;
-  M=p?modelPreview(p):null; lastChart=0;
+  if(live) await loadSaved(live.sel);
+  previewDraft();
 }
-async function ensureRunProg(running){ const now=Date.now(); if(!runProg||(running&&now-runProgAt>5000)){ const r=await api('/api/run'); runProg=r.program||null; runProgAt=now; } }
+function previewDraft(){ const p=live?DRAFT[live.sel]:null; M=p&&progItems(p)?modelPreview(p):null; lastChart=0; }
+async function ensureRunProg(running){ const now=Date.now(); if(!runProg||(running&&now-runProgAt>5000)){ const r=await api('/api/run'); runProg=normProg(r.program); runProgAt=now; } }
 
 /* ---------- chart drawing (from the 9.3 simulator) ---------- */
 let CW=1000,CHh=452,CL=58,CR=18,PT=86,PB=410,YMAX=250,YMIN=0; const LANE=[22,46],LH=18;
@@ -380,7 +450,7 @@ function renderChart(){
     if(endT!=null&&endT>0) s+=`<line x1="${X(endT)}" x2="${X(endT)}" y1="${LANE[0]-4}" y2="${PB}" style="stroke:var(--text);stroke-dasharray:4 3;opacity:.7"/><text x="${X(endT)+3}" y="${PT-8}" style="fill:var(--muted);font-size:12px;font-weight:600">${endE&&endE.type===EV.STOP?'Stop':'End'}</text><text x="${X(endT)+3}" y="${PT+8}" style="fill:var(--text);font-size:11.5px">${fmt(endT)}</text>`;
     if(M.prog&&M.prog.type==='tl'){ const done=new Set();
       for(const e of evs){ if(e.type!==EV.HOLD_END) continue; const k=e.ch+':'+e.idx; if(done.has(k)) continue; done.add(k);
-        const x=(M.prog[KEY[e.ch]]||[])[e.idx]; if(!x||x.pause) continue; const v=x.idle?YMIN+5:x.t;
+        const x=(M.prog[KEY[e.ch]]||[])[e.idx]; if(!x||x.kind==='pause') continue; const v=x.kind==='idle'?YMIN+5:x.t;
         s+=`<text x="${X(e.t)+6}" y="${Y(v)-11}" style="fill:var(--text);font-size:11.5px;paint-order:stroke;stroke:var(--panel);stroke-width:3px">${fmt(e.t)}</text>`; } }
   }
   for(const i of CH){
@@ -389,7 +459,8 @@ function renderChart(){
     s+=`<path d="${segPath(M.segs[i])}" style="fill:none;stroke:${SP[i]};stroke-width:2;stroke-dasharray:6 4;opacity:.95"/>`;
   }
   if(M.now!=null&&M.kind==='run') s+=`<line x1="${X(M.now)}" x2="${X(M.now)}" y1="${LANE[0]-4}" y2="${PB}" style="stroke:var(--text);stroke-width:1.5"/>`;
-  s+=`</g></svg>`;
+  handles=buildHandles(); if(handles.length) s+=drawHandles(handles);
+  s+=`</g><g id="ghost"></g></svg>`;
   box.innerHTML=s;
   const zs=$('zscroll'); $('zbar').hidden=!prog; zs.hidden=zv.fit; $('zfit').disabled=zv.fit;
   if(!zv.fit){ zs.max=Math.max(0,xfull-zv.span); zs.step=1; if(document.activeElement!==zs) zs.value=zv.v0; }
@@ -401,19 +472,24 @@ function legend(){ const n=[chName(0),chName(1)];
   `<span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="var(--muted)" stroke-width="2" stroke-dasharray="6 4"/></svg>Forecast / plan</span>
   <span><i class="sw" style="background:var(--amber)"></i>Waiting for ${esc(n[0])}</span>
   <span><svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="7" style="fill:var(--amber)"/><rect x="4.5" y="4.5" width="2.5" height="7" style="fill:var(--panel)"/><rect x="9" y="4.5" width="2.5" height="7" style="fill:var(--panel)"/></svg>Program pause</span>
-  <span><i class="sw" style="background:var(--muted);opacity:.35"></i>Keeps previous target</span>`; }
+  <span><i class="sw" style="background:var(--muted);opacity:.35"></i>Keeps previous target</span>
+  <span><svg width="16" height="16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="2" style="fill:var(--muted)"/></svg>Target: drag up / down</span>
+  <span><svg width="16" height="16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" transform="rotate(45 8 8)" style="fill:none;stroke:var(--muted);stroke-width:2"/></svg>Ramp end</span>
+  <span><svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="5" style="fill:none;stroke:var(--muted);stroke-width:2"/></svg>Hold end: drag left / right</span>`; }
 function svgPt(ev){ const svg=$('chartbox').querySelector('svg'); const pt=svg.createSVGPoint(); pt.x=ev.clientX; pt.y=ev.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); }
 const ptrs=new Map(); let pz=null;
 $('chartbox').addEventListener('pointerdown',ev=>{ if(!M||M.kind==='live'||!$('chartbox').querySelector('svg')) return; if(ev.pointerType==='mouse'&&ev.button!==0) return;
+  const hc=ev.target.closest('[data-h]'); if(hc){ const h=handles[+hc.dataset.h]; if(!h) return; const p=svgPt(ev); drag={h,px:p.x,py:p.y,t:h.t,v:h.v};
+    try{$('chartbox').setPointerCapture(ev.pointerId);}catch(e){} ev.preventDefault(); return; }
   const p=svgPt(ev); ptrs.set(ev.pointerId,p.x); try{$('chartbox').setPointerCapture(ev.pointerId);}catch(e){}
   pz={v0:zv.fit?0:zv.v0,span:zv.fit?xfull:zv.span,pts:new Map(ptrs)}; });
-$('chartbox').addEventListener('pointermove',ev=>{ if(!ptrs.has(ev.pointerId)||!pz) return; const p=svgPt(ev); ptrs.set(ev.pointerId,p.x); const ids=[...pz.pts.keys()];
+$('chartbox').addEventListener('pointermove',ev=>{ if(drag){ dragMove(ev); return; } if(!ptrs.has(ev.pointerId)||!pz) return; const p=svgPt(ev); ptrs.set(ev.pointerId,p.x); const ids=[...pz.pts.keys()];
   if(ptrs.size>=2&&ids.length>=2){ const a0=pz.pts.get(ids[0]),b0=pz.pts.get(ids[1]),a1=ptrs.get(ids[0]),b1=ptrs.get(ids[1]); if(a1==null||b1==null) return;
     const d0=Math.max(10,Math.abs(b0-a0)),d1=Math.max(10,Math.abs(b1-a1)),m0=(a0+b0)/2,m1=(a1+b1)/2, span=Math.max(20,Math.min(xfull,pz.span*d0/d1)), tm=pz.v0+(m0-CL)/plotW()*pz.span;
     zv.fit=span>=xfull; zv.span=span; zv.v0=tm-(m1-CL)/plotW()*span; afterView(); }
   else if(ptrs.size===1&&!zv.fit){ const x0=pz.pts.get(ev.pointerId); if(x0==null) return; zv.v0=pz.v0-(p.x-x0)/plotW()*pz.span; afterView(); } });
 const panUp=ev=>{ ptrs.delete(ev.pointerId); if(pz) pz={v0:zv.fit?0:zv.v0,span:zv.fit?xfull:zv.span,pts:new Map(ptrs)}; if(!ptrs.size) pz=null; };
-$('chartbox').addEventListener('pointerup',panUp); $('chartbox').addEventListener('pointercancel',panUp);
+$('chartbox').addEventListener('pointerup',ev=>{ panUp(ev); if(drag) dragEnd(); }); $('chartbox').addEventListener('pointercancel',ev=>{ panUp(ev); drag=null; lastChart=0; });
 $('chartbox').addEventListener('wheel',ev=>{ if(!M||M.kind==='live') return;
   if(ev.ctrlKey||ev.metaKey){ ev.preventDefault(); zoomAt(tAtX(svgPt(ev).x),ev.deltaY>0?1.25:.8); }
   else if(!zv.fit&&(ev.shiftKey||Math.abs(ev.deltaX)>Math.abs(ev.deltaY))){ ev.preventDefault(); zv.v0+=(ev.shiftKey?ev.deltaY:ev.deltaX)/plotW()*zv.span; afterView(); } },{passive:false});
@@ -519,6 +595,208 @@ function updateChans(){
   }
 }
 
+/* ---------- program editor (tables + chart handles; spec 9.3.3 / 9.3.4) ---------- */
+const running=()=>!!live&&(live.run.state==='running'||live.run.state==='paused');
+function editProg(){ return running()?runProg:(live?DRAFT[live.sel]:null); }
+function curIdx(ch){ if(!running()) return -1; const r=live.run; if(r.type==='seq') return r.seq?r.seq.idx:-1; const L=live.ch[ch].lane; return L?(L.stage==='done'?1e9:L.idx):-1; }
+function refTarget(p,ch,idx){ if(!p) return null; if(p.type==='seq'){ const x=p.phases[idx]; if(!x) return null;
+  if(ch===0) return x.kind==='B'||(x.kind==='BT'&&!x.b.idle)?x.b.t:null; return x.kind==='T'||x.kind==='BT'?x.t.t:null; }
+  const x=p[KEY[ch]][idx]; return x&&x.kind==='step'?x.t:null; }
+function rampLocked(ch,idx){ if(!running()) return false; const r=live.run;
+  if(r.type==='seq'){ const c=r.seq?r.seq.idx:-1; if(idx>c) return false; return !(idx===c&&ch===1&&r.seq.stage==='wait'); }
+  return idx<=curIdx(ch); }
+const clampS=v=>Math.max(0,Math.min(MAXSEC,Math.round(v)));
+const clampT=(ch,v)=>{ const c=live&&live.ch[ch]; return Math.round(Math.max(c?c.spMin:0,Math.min(c?c.spMax:500,v))*10)/10; };
+function newPhase(kind){ return {kind,wait:false,msg:kind==='P',text:'',b:{t:150,r:60,h:60,idle:false},t:{t:200,r:30,h:20}}; }
+function newStep(){ return {kind:'step',t:180,r:30,h:30,msg:false,text:''}; }
+
+function beginEdit(){ if(running()||!live) return null; const i=live.sel; if(!DRAFT[i]) return null;
+  UNDO[i].push(clone(DRAFT[i])); if(UNDO[i].length>200) UNDO[i].shift(); REDO[i]=[]; return DRAFT[i]; }
+function blurEditor(){ const a=document.activeElement; if(a&&$('edP').contains(a)&&a.matches('input')) a.blur(); }
+function afterEdit(){ const i=live.sel, u=UNDO[i]; if(u.length&&J(u[u.length-1])===J(DRAFT[i])) u.pop();
+  showLast=false; previewDraft(); edKey=''; fillProgSelect(); updateEditor(); }
+async function saveDraft(i){ const r=await api('/api/program',{i,program:denormProg(DRAFT[i])});
+  if(r.err){ edNote(r.err,true); return false; }
+  SAVED[i]=normProg(r.program); DRAFT[i]=clone(SAVED[i]); savedGen[i]=-1; edNote('Saved.'); await loadPrograms(); edKey=''; updateEditor(); return true; }
+function edNote(t,bad){ const m=$('edMsg'); m.textContent=t||''; m.className='msg'+(bad?' bad':''); }
+function toolAct(a){ if(running()||!live) return; const i=live.sel; if(!UNDO[i]) return;
+  if(a==='undo'&&UNDO[i].length){ REDO[i].push(clone(DRAFT[i])); DRAFT[i]=UNDO[i].pop(); }
+  else if(a==='redo'&&REDO[i].length){ UNDO[i].push(clone(DRAFT[i])); DRAFT[i]=REDO[i].pop(); }
+  else if(a==='save'){ saveDraft(i); return; }
+  else if(a==='discard'&&isDirty(i)){ UNDO[i].push(clone(DRAFT[i])); REDO[i]=[]; DRAFT[i]=clone(SAVED[i]); }
+  else return;
+  blurEditor(); edNote(''); showLast=false; previewDraft(); edKey=''; fillProgSelect(); updateEditor(); }
+document.addEventListener('click',e=>{ const b=e.target.closest('button[data-act]'); if(b) toolAct(b.dataset.act); });
+document.addEventListener('keydown',e=>{ if(!(e.ctrlKey||e.metaKey)||e.target.matches('input,select,textarea')) return;
+  const k=e.key.toLowerCase(); if(k==='z'&&!e.shiftKey){ toolAct('undo'); e.preventDefault(); } else if(k==='y'||(k==='z'&&e.shiftKey)){ toolAct('redo'); e.preventDefault(); } });
+
+function numIn(f,v,en,lab,extra){ return `<input type="number" data-f="${f}" value="${v}" step="1" min="0" ${en?'':'disabled'} aria-label="${esc(lab)}" ${extra||''}>`; }
+function buildEditor(){
+  const p=editProg(), run=running(), i=live?live.sel:0, box=$('editor');
+  $('pName').disabled=run||!p; if(document.activeElement!==$('pName')) $('pName').value=p?p.name:'';
+  if(!p){ $('edTitle').textContent=`Program ${i+1}`; $('edHint').textContent='This slot is empty.';
+    box.innerHTML=`<div class="edbar"><button data-new="seq" ${run?'disabled':''}>New sequence</button><button data-new="tl" ${run?'disabled':''}>New timeline</button></div>`; return; }
+  const n=[chName(0),chName(1)];
+  $('edTitle').textContent=`${p.name} — ${p.type==='seq'?'sequence':'timeline'}${run?' (running copy)':''}`;
+  const ph=p.type==='seq'?'phases':'steps';
+  $('edHint').textContent=run?`Editing the running copy: finished ${ph} are locked (a target the channel still keeps can change); in the current one the targets and the hold. Changes go to the device at once; after the run you can save them into the program.`
+    :'Times in seconds; a ramp of 0 is a jump. On the chart: drag squares up / down (target), diamonds (ramp end) and circles (hold end) left / right.';
+  const kept=[live&&live.ch[0].kept,live&&live.ch[1].kept];
+  if(p.type==='seq'){
+    const cur=run?curIdx(0):-1, narrow=box.clientWidth<720;
+    const na=t=>`<span class="na">${t}</span>`, del=k=>`<button class="x" data-del="${k}" ${run?'disabled':''} aria-label="Delete phase ${k+1}" title="Delete phase">✕</button>`;
+    const rows=p.phases.map((x,k)=>{
+      const done=run&&k<cur, isCur=run&&k===cur, hasB=x.kind==='B'||x.kind==='BT', hasT=x.kind==='T'||x.kind==='BT', bIdle=x.kind==='BT'&&x.b.idle, isP=x.kind==='P';
+      const en=f=>{ if(!run) return true; if(done||(isCur&&isP)) return (f==='b.t'&&k===kept[0])||(f==='t.t'&&k===kept[1]);
+        if(isCur){ if(f==='b.t') return hasB&&!bIdle; if(f==='t.t') return hasT; if(f==='b.h') return x.kind==='B'; if(f==='t.h') return hasT; if(f==='t.r') return !rampLocked(1,k); return false; }
+        return ['b.t','t.t','b.r','t.r','b.h','t.h'].includes(f); };
+      const opt=(v,t)=>`<option value="${v}"${x.kind===v?' selected':''}>${t}</option>`;
+      const sel=`<select data-f="kind" ${run?'disabled':''} aria-label="Phase ${k+1} type">${opt('B',esc(n[0]))}${opt('T',esc(n[1]))}${opt('BT','Both')}${opt('P','Pause')}</select>`;
+      const cb=(f,on,lab,dis)=>`<label class="cbl"><input type="checkbox" data-f="${f}" ${on?'checked':''} ${dis?'disabled':''}> ${lab}</label>`;
+      const c={
+        bt: hasB&&!bIdle?numIn('b.t',x.b.t,en('b.t'),`${n[0]} °C, phase ${k+1}`):na(bIdle?'off':'keeps'),
+        br: x.kind==='B'?numIn('b.r',x.b.r,en('b.r'),`${n[0]} ramp s, phase ${k+1}`):na(x.kind==='BT'&&!bIdle?'jump':'—'),
+        bh: x.kind==='B'?numIn('b.h',x.b.h,en('b.h'),`${n[0]} hold s, phase ${k+1}`):na('—'),
+        bi: x.kind==='BT'?cb('b.idle',x.b.idle,'Idle',run):'',
+        tt: hasT?numIn('t.t',x.t.t,en('t.t'),`${n[1]} °C, phase ${k+1}`):na('keeps'),
+        tr: hasT?numIn('t.r',x.t.r,en('t.r'),`${n[1]} ramp s, phase ${k+1}`):na('—'),
+        th: hasT?numIn('t.h',x.t.h,en('t.h'),`${n[1]} hold s, phase ${k+1}`):na('—'),
+        opt: isP?cb('msg',x.msg,'"Action required"',run)+` <input type="text" data-f="text" maxlength="40" value="${esc(x.text)}" placeholder="text (optional)" ${run?'disabled':''} aria-label="Pause text, phase ${k+1}">`
+          :(x.kind!=='T'?cb('wait',x.wait,`Wait for ${esc(n[0])}`,run||bIdle):na('—'))
+      };
+      const cls=`${done?'done':''}${isCur?' cur':''}`;
+      if(narrow) return `<div class="pc ${cls}" data-i="${k}"><div class="pch"><b>${k+1}</b>${sel}<span class="grow"></span>${del(k)}</div>`+
+        (isP?`<div class="pcr"><span class="na">Both channels keep their setpoints.</span></div><div class="pcr">${c.opt}</div>`:
+        `<div class="pcr"><span class="pl gB">${esc(n[0])}</span>${!hasB?na('keeps its setpoint'):bIdle?na('off')+c.bi:x.kind==='BT'?`<label class="fl"><span>°C</span>${c.bt}</label>${na('jump')}${c.bi}`:`<label class="fl"><span>°C</span>${c.bt}</label><label class="fl"><span>Ramp s</span>${c.br}</label><label class="fl"><span>Hold s</span>${c.bh}</label>`}</div>
+         <div class="pcr"><span class="pl gT">${esc(n[1])}</span>${!hasT?na('keeps its setpoint'):`<label class="fl"><span>°C</span>${c.tt}</label><label class="fl"><span>Ramp s</span>${c.tr}</label><label class="fl"><span>Hold s</span>${c.th}</label>`}</div>
+         ${x.kind!=='T'?`<div class="pcr">${c.opt}</div>`:''}`)+`</div>`;
+      return `<tr class="${cls}" data-i="${k}"><td>${k+1}</td><td>${sel}</td>`+
+        (isP?`<td class="bl" colspan="4">${na('keeps its setpoint')}</td><td class="bl" colspan="3">${na('keeps its setpoint')}</td>`:
+        `<td class="bl">${c.bt}</td><td>${c.br}</td><td>${c.bh}</td><td>${c.bi}</td><td class="bl">${c.tt}</td><td>${c.tr}</td><td>${c.th}</td>`)+
+        `<td class="bl">${c.opt}</td><td>${del(k)}</td></tr>`;
+    });
+    let h=narrow?`<div class="pcs">${rows.join('')}</div>`:
+      `<div class="ed-wrap"><table class="ed"><thead><tr><th rowspan="2">#</th><th rowspan="2">Type</th><th colspan="4" class="gB bl">${esc(n[0])}</th><th colspan="3" class="gT bl">${esc(n[1])}</th><th rowspan="2" class="bl">Option</th><th rowspan="2"></th></tr>
+      <tr><th class="bl">°C</th><th>Ramp s</th><th>Hold s</th><th></th><th class="bl">°C</th><th>Ramp s</th><th>Hold s</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+    h+=`<div class="edbar"><button id="addPh" ${run||p.phases.length>=MAXN?'disabled':''}>Add phase</button><span class="zr">${p.phases.length} / ${MAXN} phases</span></div>`;
+    box.innerHTML=h;
+  } else {
+    const side=ch=>{ const k=KEY[ch], L=p[k], q=run?live.ch[ch].lane:null, keptI=run?kept[ch]:-1;
+      let h=`<h3 style="color:${PV[ch]}">${esc(n[ch])}</h3><div class="ed-wrap"><table class="ed"><thead><tr><th>#</th><th>Step</th><th>°C</th><th>Ramp s</th><th>Hold s</th><th></th></tr></thead><tbody>`;
+      L.forEach((x,j)=>{
+        const done=run&&q&&(q.stage==='done'||j<q.idx), isCur=run&&q&&q.stage!=='done'&&j===q.idx;
+        const en=f=>{ if(done) return f==='t'&&j===keptI; if(!run) return true; if(isCur) return x.kind!=='pause'&&(f==='h'||(f==='t'&&x.kind==='step')); return x.kind!=='pause'&&f!=='kind'; };
+        const opt=(v,t)=>`<option value="${v}"${x.kind===v?' selected':''}>${t}</option>`, nm=`${n[ch]} step ${j+1}`;
+        h+=`<tr class="${done?'done':''}${isCur?' cur':''}" data-k="${k}" data-i="${j}"><td>${j+1}</td>
+          <td><select data-f="kind" ${run?'disabled':''} aria-label="${esc(nm)} kind">${opt('step','Step')}${opt('idle','Idle')}${opt('pause','Pause')}</select></td>`;
+        if(x.kind==='pause') h+=`<td colspan="3"><label class="cbl"><input type="checkbox" data-f="msg" ${x.msg?'checked':''} ${run?'disabled':''}> "Action required"</label>
+          <input type="text" data-f="text" maxlength="40" value="${esc(x.text)}" placeholder="text (optional)" ${run?'disabled':''} aria-label="${esc(nm)} pause text"></td>`;
+        else h+=`<td>${x.kind==='idle'?'<span class="na">off</span>':numIn('t',x.t,en('t'),nm+' °C')}</td>
+          <td>${x.kind==='idle'?'<span class="na">—</span>':numIn('r',x.r,en('r')&&!rampLocked(ch,j),nm+' ramp s')}</td>
+          <td>${numIn('h',x.h,en('h'),nm+(x.kind==='idle'?' idle s':' hold s'))}</td>`;
+        h+=`<td><button class="x" data-del="${j}" ${run?'disabled':''} aria-label="Delete ${esc(nm)}" title="Delete step">✕</button></td></tr>`; });
+      h+=`</tbody></table></div><div class="edbar"><button data-add="${k}" ${run||L.length>=MAXN?'disabled':''}>Add step</button><span class="zr">${L.length} / ${MAXN}</span></div>`; return h; };
+    box.innerHTML=`<div class="tl2"><div>${side(0)}</div><div>${side(1)}</div></div>`;
+  }
+}
+function updateEditor(){
+  if(!live) return;
+  const p=editProg(), run=running(), i=live.sel, r=live.run;
+  const pos=run?J([r.seq&&[r.seq.idx,r.seq.stage],live.ch.map(c=>[c.lane&&c.lane.idx,c.lane&&c.lane.stage,c.kept])]):'';
+  const key=($('editor').clientWidth<720?'n':'w')+J(p)+run+pos+i+chName(0)+chName(1);
+  const ae=document.activeElement, typing=ae&&$('edP').contains(ae)&&ae.matches('input[type=number],input[type=text]');
+  if(key!==edKey&&!typing){ edKey=key; buildEditor(); }
+  const d=!run&&isDirty(i);
+  document.querySelectorAll('button[data-act]').forEach(b=>{ const a=b.dataset.act;
+    b.disabled=run||!UNDO[i]||(a==='undo'&&!UNDO[i].length)||(a==='redo'&&!REDO[i].length)||((a==='save'||a==='discard')&&!d); });
+  $('unsaved').textContent=d?'Unsaved changes':'';
+}
+$('pName').onchange=e=>{ const v=e.target.value.trim().slice(0,31); if(!v){ e.target.value=DRAFT[live.sel]?DRAFT[live.sel].name:''; return; }
+  const q=beginEdit(); if(!q) return; q.name=v; afterEdit(); };
+$('editor').addEventListener('change',async e=>{
+  const el=e.target, f=el.dataset.f; if(!f||!live) return;
+  const row=el.closest('[data-i]'), i=+row.dataset.i, k=row.dataset.k;
+  let v=el.type==='checkbox'?el.checked:(f==='kind'||f==='text')?el.value:parseFloat(el.value);
+  if(typeof v==='number'&&isNaN(v)){ edKey=''; updateEditor(); return; }
+  const p=editProg(); if(!p) return; const seq=p.type==='seq';
+  if(running()){
+    let body=null;
+    if(seq){ if(f==='b.t'||f==='t.t') body={cmd:'target',ch:f==='b.t'?0:1,idx:i,t:v}; else if(f==='b.r'||f==='t.r') body={cmd:'ramp',ch:f==='b.r'?0:1,idx:i,sec:clampS(v)};
+      else if(f==='b.h'||f==='t.h') body={cmd:'hold',ch:f==='b.h'?0:1,idx:i,sec:clampS(v)}; }
+    else { const ch=k==='B'?0:1; if(f==='t') body={cmd:'target',ch,idx:i,t:v}; else if(f==='r') body={cmd:'ramp',ch,idx:i,sec:clampS(v)}; else if(f==='h') body={cmd:'hold',ch,idx:i,sec:clampS(v)}; }
+    if(body) await runCmd(body); edKey=''; poll(); return;
+  }
+  const q=beginEdit(); if(!q) return;
+  if(seq){ const x=q.phases[i];
+    if(f==='kind'){ x.kind=v; if(v==='P') x.msg=true; } else if(f==='wait'||f==='msg') x[f]=v; else if(f==='b.idle') x.b.idle=v; else if(f==='text') x.text=v.slice(0,40);
+    else { const [a,b]=f.split('.'); x[a][b]=b==='t'?clampT(a==='b'?0:1,v):clampS(v); } }
+  else { const x=q[k][i]; if(f==='kind'){ x.kind=v; if(v==='pause') x.msg=true; } else if(f==='msg') x.msg=v; else if(f==='text') x.text=v.slice(0,40); else x[f]=f==='t'?clampT(k==='B'?0:1,v):clampS(v); }
+  afterEdit();
+});
+$('editor').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b||!live||running()||b.dataset.act) return; const i=live.sel;
+  if(b.dataset.new){ UNDO[i]=UNDO[i]||[]; UNDO[i].push(null); REDO[i]=[];
+    DRAFT[i]=b.dataset.new==='seq'?{name:`Program ${i+1}`,type:'seq',phases:[newPhase('B')]}:{name:`Program ${i+1}`,type:'tl',B:[newStep()],T:[]}; afterEdit(); return; }
+  const q=beginEdit(); if(!q) return;
+  if(b.id==='addPh'&&q.phases.length<MAXN) q.phases.push(newPhase('T'));
+  else if(b.dataset.add&&q[b.dataset.add].length<MAXN) q[b.dataset.add].push(newStep());
+  else if(b.dataset.del!=null){ const tr=b.closest('[data-i]'); if(q.type==='seq') q.phases.splice(+b.dataset.del,1); else q[tr.dataset.k].splice(+b.dataset.del,1); }
+  afterEdit();
+});
+
+// chart handles: target (square, drag up / down), ramp end (diamond) and hold end (circle, drag left / right)
+let handles=[], drag=null;
+function buildHandles(){
+  const H=[]; if(!M||(M.kind!=='preview'&&M.kind!=='run')||!M.prog) return H;
+  const p=M.prog, seq=p.type==='seq', now=M.kind==='run'?M.now-.01:-1;
+  for(const e of M.ev){ if(e.past||e.t<now) continue;
+    if(e.type===EV.HOLD_END){ let v; if(seq) v=refTarget(p,e.ch,e.idx); else { const x=p[KEY[e.ch]][e.idx]; if(!x||x.kind==='pause') continue; v=x.kind==='idle'?null:x.t; }
+      H.push({type:'hold',dir:'h',ch:e.ch,idx:e.idx,t:e.t,v:v==null?YMIN+8:v}); }
+    else if(e.type===EV.RAMP_END){ if(rampLocked(e.ch,e.idx)) continue; const v=refTarget(p,e.ch,e.idx); if(v==null) continue;
+      if(seq&&e.ch===0&&p.phases[e.idx].kind==='BT') continue; H.push({type:'ramp',dir:'h',ch:e.ch,idx:e.idx,t:e.t,v}); } }
+  for(const i of CH){ const groups=[]; let g=null;
+    for(const s of M.segs[i]){ if(s.t1<=now) continue; const ok=s.fl===0&&s.src>=0;
+      if(ok&&g&&g.src===s.src&&Math.abs(g.t1-s.t0)<.01){ g.t1=s.t1; } else { if(g) groups.push(g); g=ok?{src:s.src,t0:Math.max(s.t0,now),t1:s.t1}:null; } }
+    if(g) groups.push(g);
+    const seen=new Set();
+    for(const q of groups){ if(seen.has(q.src)) continue; seen.add(q.src); const v=refTarget(p,i,q.src); if(v==null) continue;
+      H.push({type:'target',dir:'v',ch:i,idx:q.src,t:(q.t0+q.t1)/2,v,w:X(q.t1)-X(q.t0)}); }
+    for(const h of H.filter(h=>h.type==='ramp'&&h.ch===i)){ if(seen.has(h.idx)) continue; seen.add(h.idx); H.push({type:'target',dir:'v',ch:i,idx:h.idx,t:h.t,v:h.v,lift:-22}); } }
+  for(const h of H) if(h.type==='target'&&!h.lift&&h.w<16) h.lift=-22;
+  for(const h of H.filter(h=>h.type==='hold')) if(H.some(o=>o!==h&&o.type!=='hold'&&o.ch===h.ch&&Math.abs(X(o.t)-X(h.t))<14&&Math.abs(Y(o.v)-Y(h.v))<14)) h.lift=22;
+  return H.filter(h=>h.t>=V0-1&&h.t<=V1+1);
+}
+function drawHandles(H){ let s=''; const seq=M.prog.type==='seq';
+  H.forEach((h,k)=>{ const col=PV[h.ch], x=X(h.t), y0=Y(h.v), y=y0+(h.lift||0), where=seq?`phase ${h.idx+1}`:`${chName(h.ch)} step ${h.idx+1}`;
+    if(h.lift) s+=`<line x1="${x}" y1="${y0}" x2="${x}" y2="${y}" style="stroke:${col};stroke-width:1.5"/>`;
+    if(h.type==='hold') s+=`<circle data-h="${k}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7" style="fill:var(--panel);stroke:${col};stroke-width:2.5;cursor:ew-resize"><title>Drag left or right: hold time of ${where}</title></circle>`;
+    else if(h.type==='ramp') s+=`<rect data-h="${k}" x="${(x-6).toFixed(1)}" y="${(y-6).toFixed(1)}" width="12" height="12" transform="rotate(45 ${x.toFixed(1)} ${y.toFixed(1)})" style="fill:var(--panel);stroke:${col};stroke-width:2.5;cursor:ew-resize"><title>Drag left or right: ramp time of ${where}</title></rect>`;
+    else s+=`<rect data-h="${k}" x="${(x-7).toFixed(1)}" y="${(y-7).toFixed(1)}" width="14" height="14" rx="3" style="fill:${col};stroke:var(--panel);stroke-width:2;cursor:ns-resize"><title>Drag up or down: ${esc(chName(h.ch))} target of ${where}</title></rect>`; });
+  return s; }
+function dragMove(ev){ const p=svgPt(ev), h=drag.h, g=$('chartbox').querySelector('#ghost'); if(!g) return;
+  if(h.dir==='h'){ let t=h.t+(p.x-drag.px)/plotW()*(V1-V0); t=Math.max(M.kind==='run'?M.now:0,Math.round(t)); drag.t=t; const d=Math.round(t-h.t), y=Y(h.v)+(h.lift||0);
+    g.innerHTML=`<line x1="${X(t)}" x2="${X(t)}" y1="${PT}" y2="${PB}" style="stroke:var(--acc);stroke-width:2"/><circle cx="${X(t)}" cy="${y}" r="6" style="fill:var(--acc)"/><text x="${X(t)+10}" y="${y-12}" style="fill:var(--text);font-size:13px;font-weight:600;paint-order:stroke;stroke:var(--panel);stroke-width:3px">${h.type==='ramp'?'ramp':'hold'} ${d>=0?'+':''}${d} s</text>`; }
+  else { const c=live.ch[h.ch]; let v=h.v-(p.y-drag.py)/(PB-PT)*(YMAX-YMIN); v=Math.max(c.spMin,Math.min(c.spMax,Math.round(v))); drag.v=v; const x=X(h.t);
+    g.innerHTML=`<line x1="${CL}" x2="${CW-CR}" y1="${Y(v)}" y2="${Y(v)}" style="stroke:var(--acc);stroke-width:2"/><rect x="${x-6}" y="${Y(v)-6}" width="12" height="12" rx="3" style="fill:var(--acc)"/><text x="${x+12}" y="${Y(v)-10}" style="fill:var(--text);font-size:13px;font-weight:600;paint-order:stroke;stroke:var(--panel);stroke-width:3px">${v} °C</text>`; } }
+async function dragEnd(){ const h=drag.h, D=Math.round(drag.t-h.t), V=drag.v; drag=null; lastChart=0;
+  if(h.type==='target'?V===h.v:D===0) return;
+  const p=M.prog, seq=p.type==='seq';
+  if(M.kind==='run'){
+    if(h.type==='target') await runCmd({cmd:'target',ch:h.ch,idx:h.idx,t:V});
+    else if(h.type==='hold'){ const x=seq?p.phases[h.idx]:p[KEY[h.ch]][h.idx], old=seq?(x.kind==='B'?x.b.h:x.t.h):x.h; await runCmd({cmd:'hold',ch:h.ch,idx:h.idx,sec:Math.max(0,old+D)}); }
+    else { const x=seq?p.phases[h.idx]:p[KEY[h.ch]][h.idx], old=seq?(h.ch===0?x.b.r:x.t.r):x.r; await runCmd({cmd:'ramp',ch:h.ch,idx:h.idx,sec:Math.max(0,old+D)}); }
+    poll(); return; }
+  const q=beginEdit(); if(!q) return;
+  if(seq){ const x=q.phases[h.idx], part=h.type==='target'?(h.ch===0?x.b:x.t):h.type==='hold'?(x.kind==='B'?x.b:x.t):(h.ch===0?x.b:x.t);
+    if(h.type==='target') part.t=V; else if(h.type==='hold') part.h=clampS(part.h+D); else part.r=clampS(part.r+D); }
+  else { const x=q[KEY[h.ch]][h.idx]; if(h.type==='target') x.t=V; else if(h.type==='hold') x.h=clampS(x.h+D); else x.r=clampS(x.r+D); }
+  blurEditor(); afterEdit(); }
+
+/* ---------- start with unsaved changes ---------- */
+function choose(text,btns){ return new Promise(res=>{ const d=$('chDlg'); $('chTxt').textContent=text;
+  $('chBtns').innerHTML=btns.map(([v,l,pri])=>`<button data-v="${v}" class="${pri?'pri':''}">${esc(l)}</button>`).join('');
+  $('chBtns').onclick=e=>{ const b=e.target.closest('button'); if(!b) return; d.close(); res(b.dataset.v); }; d.onclose=()=>res('cancel'); d.showModal(); }); }
+
 /* ---------- run bar, overlays ---------- */
 function updateRun(){
   if(!live) return;
@@ -530,11 +808,11 @@ function updateRun(){
   else if(r.state==='stopped'){ b.textContent='Stopped'; b.className='state stop'; }
   else if(live.ch.some(c=>c.manual.on)){ b.textContent='Manual'; b.className='state man'; }
   else { b.textContent='Ready'; b.className='state'; }
-  const p=progs&&progs.programs[live.sel];
+  const dr=DRAFT[live.sel];
   $('clock').textContent=r.prog>=0&&r.state!=='idle'?fmt(r.el):'0:00';
-  const w=(active?hasWaits(runProg):(p&&p.waits))?' + waits':'';
-  $('remain').textContent=active?`${fmt(r.rem)}${w} left${r.name?' · '+r.name:''}`:(p&&p.used?`${fmt(p.total)}${w} total`:'');
-  $('bStart').disabled=r.state==='running'||(!active&&!(p&&p.used)); $('bStart').textContent=r.state==='paused'?'Resume':'Start';
+  const w=(active?hasWaits(runProg):hasWaits(dr))?' + waits':'';
+  $('remain').textContent=active?`${fmt(r.rem)}${w} left${r.name?' · '+r.name:''}`:(M&&M.kind==='preview'?`${fmt(M.end)}${w} total`:'');
+  $('bStart').disabled=r.state==='running'||(!active&&!(dr&&progItems(dr))); $('bStart').textContent=r.state==='paused'?'Resume':'Start';
   $('bPause').disabled=!(r.state==='running'||(active&&r.progPause)); $('bPause').textContent=active&&r.progPause?'Continue':'Pause';
   $('bStop').disabled=!active;
   $('bNext').disabled=!active||r.type!=='seq'||r.progPause||r.state==='paused';
@@ -551,13 +829,19 @@ function updateRun(){
   prevState=r.state;
 }
 const cmd=c=>api('/api/cmd',{cmd:c,prog:live?live.sel:-1}).then(()=>{chartAt=0;poll();});
-$('bStart').onclick=()=>{ if(live&&live.run.state==='paused') cmd('resume'); else { showLast=true; cmd('start'); } };
+$('bStart').onclick=async()=>{ if(!live) return; if(live.run.state==='paused'){ cmd('resume'); return; }
+  const i=live.sel; showLast=true;
+  if(isDirty(i)){ const a=await choose(`“${DRAFT[i].name}” has unsaved changes.`,[['save','Save and start',true],['draft','Start without saving'],['cancel','Cancel']]);
+    if(a==='save'){ if(await saveDraft(i)) cmd('start'); }
+    else if(a==='draft'){ const r=await api('/api/run',{cmd:'start',i,program:denormProg(DRAFT[i])}); if(r.err) note(r.err,true); chartAt=0; poll(); }
+    return; }
+  cmd('start'); };
 $('bPause').onclick=()=>{ if(live&&live.run.progPause) cmd('continue'); else cmd('pause'); };
 $('bStop').onclick=async()=>{ if(await ask('Stop the program? Each channel applies its end action.','Stop')) cmd('stop'); };
 $('bNext').onclick=()=>cmd('next');
 $('hCont').onclick=()=>cmd('continue');
 $('hStop').onclick=async()=>{ if(await ask('Stop the program? Each channel applies its end action.','Stop')) cmd('stop'); };
-$('dSave').onclick=async()=>{ $('saveDlg').close(); await api('/api/run',{cmd:'save'}); poll(); };
+$('dSave').onclick=async()=>{ $('saveDlg').close(); await api('/api/run',{cmd:'save'}); if(live){ savedGen[live.run.prog]=-1; delete DRAFT[live.run.prog]; } poll(); };
 $('dDiscard').onclick=()=>$('saveDlg').close();
 
 /* ---------- event log ---------- */
@@ -581,14 +865,15 @@ async function poll(){
     $('net').textContent=live.net; $('fw').textContent=`v${live.fw} · ${live.board}${live.variant?' '+live.variant:''}`;
     applyPalette();
     if(!progs||progsGen!==live.progGen) await loadPrograms(); else fillProgSelect();
-    updateRun(); updateChans();
+    await loadSaved(live.sel); if(running()) await ensureRunProg(true);
+    updateRun(); updateChans(); updateEditor();
     const active=live.run.state==='running'||live.run.state==='paused', now=Date.now();
     if(!M||now-chartAt>(active||view==='live'?2000:5000)){ chartAt=now; await refreshChart(); }
     await updateLog();
   }catch(e){ $('linkDot').className='dot'; $('linkTxt').textContent='Device not reachable'; }
   finally{ polling=false; pollTimer=setTimeout(poll,1000); }
 }
-function frame(){ if(lastChart===0){ renderChart(); lastChart=1; } $('clk').textContent=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); requestAnimationFrame(frame); }
+function frame(){ if(lastChart===0&&!drag){ renderChart(); lastChart=1; } $('clk').textContent=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); requestAnimationFrame(frame); }
 applyPalette(true); renderChart(); poll(); requestAnimationFrame(frame);
 </script>
 </body>

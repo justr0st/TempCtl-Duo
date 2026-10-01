@@ -418,6 +418,7 @@ static void handleGetRun() {
 //   {"cmd":"target","ch":0,"idx":-1,"t":170}    current / kept target (or a later one)
 //   {"cmd":"save"}                              store the run edits into the program
 //   {"cmd":"next"} / {"cmd":"continue"}
+//   {"cmd":"start","i":0,"program":{...}}      start slot 0 with this (unsaved) content
 static void handlePostRun() {
   JsonDocument d;
   if (!parseBody(d)) return sendError("Invalid JSON");
@@ -432,9 +433,30 @@ static void handlePostRun() {
     if (!d["t"].is<float>()) return sendError("t (target) missing");
     ok = sendCmd(CMD_RUN_EDIT, ch, d["t"].as<float>(), idx, EDIT_TARGET);
   } else if (!strcmp(c, "save")) ok = sendCmd(CMD_SAVE_RUN);
+  else if (!strcmp(c, "start")) {  // "Start without saving": {"cmd":"start","i":n,"program":{...}}
+    const int i = d["i"] | -1;
+    if (i < 0 || i >= PROG_MAX) return sendError("Program index out of range");
+    DuoProgram& p = scratchProgram();
+    char err[128];
+    const char* names[NUM_CHANNELS];
+    float lo[NUM_CHANNELS], hi[NUM_CHANNELS];
+    static char nameBuf[NUM_CHANNELS][CH_NAME_LEN];
+    {
+      Guard g;
+      for (int c = 0; c < NUM_CHANNELS; ++c) {
+        strlcpy(nameBuf[c], gSettings.ch[c].name, sizeof(nameBuf[c]));
+        names[c] = nameBuf[c];
+        lo[c] = gSettings.ch[c].spMin;
+        hi[c] = gSettings.ch[c].spMax;
+      }
+    }
+    if (!progFromJson(d["program"].as<JsonObjectConst>(), p, err, sizeof(err), names)) return sendError(err);
+    if (!progCheckLimits(p, lo, hi, err, sizeof(err), names)) return sendError(err);
+    ok = startDraft(i, p);
+  }
   else if (!strcmp(c, "next")) ok = sendCmd(CMD_NEXT);
   else if (!strcmp(c, "continue")) ok = sendCmd(CMD_CONTINUE);
-  else return sendError("cmd must be extend, hold, ramp, target, save, next or continue");
+  else return sendError("cmd must be extend, hold, ramp, target, save, start, next or continue");
   JsonDocument r;
   r["ok"] = ok;
   sendJson(r);

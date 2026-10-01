@@ -1,12 +1,12 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
 
-> **Work in progress (version 1.0.4).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
+> **Work in progress (version 1.0.5).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
 > of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
 > (the ESP32-S3 board, env `s3`, and the CYD, envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`,
 > build from the same sources), two channels (Modbus / local / off), local thermocouple + SSR channels,
 > PID + autotune, and the two program types (Sequence, Timeline) with one run engine for both channels.
-> Step 7 (new web page) has started: the **new Status page** is at `/` (both channels, run control,
-> chart with forecast, event log); the TempCtl 1.2 page stays at **`/old`** for programs, settings and
+> Step 7 (new web page) is under way: the **new Status page** is at `/` (both channels, run control,
+> chart with forecast, program editor with chart handles, event log); the TempCtl 1.2 page stays at **`/old`** for programs, settings and
 > tools until the new pages replace it. The touch screens (TempCtl 1.2, step 6 comes later) show the
 > **bottom channel**; programs are **read-only** there and on `/old` (written through the web API, section 5). On the S3's 480×320 screen the 320×240 TempCtl
 > screens run in the top left corner, next to a bring-up panel.
@@ -151,8 +151,8 @@ Wiring picture: `claude/wiring/s3-wiring.png` (display on J1, RS485 / thermocoup
 Flash and watch the log through the USB port labelled **"UART"**. The native "USB" port is kept for the
 serial console / Web Serial page (later steps).
 
-Status LED (WS2812): green = idle, blue = running, amber blinking = paused / waiting, red blinking = fault
-(no answer from the controller), purple = access point mode.
+Status LED (WS2812): green = idle, blue = running, amber blinking = paused / waiting, fault = slowly breathing magenta
+for now (no answer from a channel, latched fault), purple = access point mode.
 
 Bring-up checks: if the colours look inverted set `LCD_INVERT 1`; if touches land in the wrong place change
 `TOUCH_SWAP_XY` / `TOUCH_INVERT_X` / `TOUCH_INVERT_Y` in `board_s3.h` (the bring-up panel shows the raw
@@ -203,7 +203,7 @@ set `PIN_RS485_DE` to `-1` in `src/board_cyd.h` / `src/board_s3.h`.
   Many cheap modules have a 120 Ω resistor fitted; remove it if communication is flaky on a short line, and make
   sure the module has fail-safe bias resistors.
 - CYD status LED: the on-board RGB LED (external WS2812 in `cyd-2xlocal-2x485`) with the same colours as the S3 (green = idle, blue = running,
-  amber blinking = paused / waiting, red blinking = fault, purple = access point mode).
+  amber blinking = paused / waiting, fault = breathing magenta for now, purple = access point mode).
 - Free CYD pins: only IO22 (P3-2 and CN1-3), IO27 (CN1-2, 10 k pull-up) and IO35 (P3-3, input only) are
   on connectors. The SD slot pins (IO5, IO18, IO19, IO23) are reached with a micro-SD breakout adapter
   (no SD card in the slot). IO6–IO11 are the module's flash and not usable.
@@ -333,8 +333,15 @@ Rules so the firmware keeps working:
   Acknowledge), the "Action required" overlay, "Save the run's changes?" after a run with run edits, and
   the event log. Channel colours come from the device's accent colour (spec 6); theme Auto / Dark / Light
   (remembered by the browser).
-- Next sub-steps: program editor with tables and chart handles (7b), Programs / Channels / System / Tools
-  pages (7c), then `/old` goes away.
+- Program editor (under the channel cards): the selected program as tables (Sequence: one row per
+  phase, cards on narrow screens; Timeline: two tables side by side) and on the chart (drag squares up /
+  down = target, diamonds = ramp end, circles = hold end; whole seconds and °C). Outside a run edits go
+  to a draft in the browser (Save / Discard / Undo / Redo, Ctrl+Z / Ctrl+Y; the program list marks
+  unsaved programs; drafts are lost when the page is reloaded). Empty slot: New sequence / New timeline.
+  Start with unsaved changes asks: Save and start / Start without saving / Cancel. During a run the same
+  tables and handles edit the running copy (targets, later ramps, holds; finished phases and the running
+  ramp are locked) and the changes are sent to the device at once.
+- Next sub-steps: Programs / Channels / System / Tools pages (7c), then `/old` goes away.
 
 ## 5. Web API
 
@@ -365,7 +372,7 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 | GET | `/api/program?i=0` | `program`: the program JSON (spec 9.3.5); `steps`: read-only bottom view for the old page |
 | POST | `/api/program` | `{"i":0,"program":{…}}` save (validated, setpoint limits checked) or `{"i":0,"delete":true}` |
 | GET | `/api/run` | `run` (as in `/api/status`) + `program`: the running copy with its run edits |
-| POST | `/api/run` | `{"cmd":"extend","ch":0,"sec":30}`, `{"cmd":"hold","ch":1,"idx":4,"sec":45}`, `{"cmd":"ramp","ch":1,"idx":5,"sec":40}`, `{"cmd":"target","ch":0,"idx":-1,"t":170}` (`idx` = phase / step, -1 = current / kept), `{"cmd":"save"}`, `"next"`, `"continue"`; the result shows in `run.msg` |
+| POST | `/api/run` | `{"cmd":"start","i":0,"program":{…}}` (start slot 0 with this unsaved content), `{"cmd":"extend","ch":0,"sec":30}`, `{"cmd":"hold","ch":1,"idx":4,"sec":45}`, `{"cmd":"ramp","ch":1,"idx":5,"sec":40}`, `{"cmd":"target","ch":0,"idx":-1,"t":170}` (`idx` = phase / step, -1 = current / kept), `{"cmd":"save"}`, `"next"`, `"continue"`; the result shows in `run.msg` |
 | POST | `/api/select` | `{"i":index}` select the program for Main / Chart |
 | POST | `/api/manual` | `{"sp":150}` and/or `{"on":true}`, optional `"ch":1` (top; default 0 = bottom) |
 | POST | `/api/autotune` | local channels: `{"ch":1,"cmd":"start","sp":200}`, `"stop"`, `"accept"` (proposed kp/ki/kd → settings), `"discard"`; progress and result in `/api/status` → `channels[].autotune` |
