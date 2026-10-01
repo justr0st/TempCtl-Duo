@@ -512,6 +512,31 @@ static void testSettingsJson() {
   CHECK(b.pass[0] == 0);  // defaults kept (not overwritten)
 }
 
+static void testStaticIp() {
+  Settings s;
+  char msg[200];
+  settingsDefaults(s, S3);
+  CHECK(!s.staticIp && s.subnet[0] == 255 && s.subnet[3] == 0);
+  JsonDocument d;
+  deserializeJson(d, R"({"wifi":{"staticIp":true,"ip":"192.168.1.60","gateway":"192.168.1.1","dns1":"1.1.1.1"}})");
+  CHECK(settingsFromJson(d.as<JsonObjectConst>(), s, msg, sizeof(msg)));
+  CHECK(settingsValidate(s, S3, msg, sizeof(msg)) && s.staticIp && s.ip[3] == 60 && s.dns1[0] == 1 && s.dns2[0] == 0);
+  JsonDocument o;
+  settingsToJson(s, o.to<JsonObject>(), true);
+  CHECK(o["wifi"]["ip"] == "192.168.1.60" && o["wifi"]["subnet"] == "255.255.255.0" && o["wifi"]["dns2"] == "");
+  // gateway outside the subnet / bad mask / missing address: rejected, back to DHCP
+  deserializeJson(d, R"({"wifi":{"gateway":"192.168.2.1"}})");
+  CHECK(settingsFromJson(d.as<JsonObjectConst>(), s, msg, sizeof(msg)));
+  CHECK(!settingsValidate(s, S3, msg, sizeof(msg)) && strstr(msg, "gateway") && !s.staticIp);
+  deserializeJson(d, R"({"wifi":{"staticIp":true,"gateway":"192.168.1.1","subnet":"255.0.255.0"}})");
+  CHECK(settingsFromJson(d.as<JsonObjectConst>(), s, msg, sizeof(msg)));
+  CHECK(!settingsValidate(s, S3, msg, sizeof(msg)) && strstr(msg, "mask"));
+  deserializeJson(d, R"({"wifi":{"ip":"192.168.1.300"}})");
+  CHECK(!settingsFromJson(d.as<JsonObjectConst>(), s, msg, sizeof(msg)) && strstr(msg, "wifi.ip"));
+  deserializeJson(d, R"({"wifi":{"ip":"192.168.1.5x"}})");
+  CHECK(!settingsFromJson(d.as<JsonObjectConst>(), s, msg, sizeof(msg)));
+}
+
 static void testSettingsMerge() {
   Settings s;
   char msg[200];
@@ -792,6 +817,7 @@ int main() {
   testSettingsDefaults();
   testSettingsJson();
   testSettingsMerge();
+  testStaticIp();
   testSettingsVariants();
   testThermocouple();
   testPid();

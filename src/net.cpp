@@ -14,6 +14,20 @@ static uint32_t beginAt = 0;          // millis() for the pending WiFi.begin(), 
 static uint32_t lastBegin = 0;
 static constexpr uint32_t STA_RETRY_MS = 30000;
 static bool scanBusyNow();
+
+// Fixed address or DHCP for the station; call right before WiFi.begin()
+static void ipConfig(const Settings& s) {
+  if (!s.staticIp) {
+    WiFi.config(IPAddress((uint32_t)0), IPAddress((uint32_t)0), IPAddress((uint32_t)0));  // 0.0.0.0 = DHCP
+    return;
+  }
+  const auto A = [](const uint8_t* v) { return IPAddress(v[0], v[1], v[2], v[3]); };
+  const bool d1 = s.dns1[0] | s.dns1[1] | s.dns1[2] | s.dns1[3];
+  const bool d2 = s.dns2[0] | s.dns2[1] | s.dns2[2] | s.dns2[3];
+  if (!WiFi.config(A(s.ip), A(s.gateway), A(s.subnet), d1 ? A(s.dns1) : A(s.gateway), d2 ? A(s.dns2) : IPAddress((uint32_t)0)))
+    Serial.println("[wifi] fixed IP address not accepted - check the settings");
+}
+
 static void staBegin() {
   Settings s;
   {
@@ -23,6 +37,7 @@ static void staBegin() {
   beginAt = 0;
   if (!haveSta || !s.ssid[0]) return;
   WiFi.mode(apStarted ? WIFI_AP_STA : WIFI_STA);
+  ipConfig(s);
   WiFi.begin(s.ssid, s.pass);
   lastBegin = millis();
 }
@@ -59,6 +74,7 @@ void netBegin() {
   haveSta = s.ssid[0] != 0;
   if (haveSta) {
     WiFi.mode(WIFI_STA);
+    ipConfig(s);
     WiFi.begin(s.ssid, s.pass);
     lastBegin = millis();
   } else {
@@ -162,6 +178,7 @@ static void scanFinish() {
   }
   WiFi.setAutoReconnect(true);
   if (haveSta && s.ssid[0]) {
+    ipConfig(s);
     WiFi.begin(s.ssid, s.pass);
     lastBegin = t0 = millis();
   }

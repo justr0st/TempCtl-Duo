@@ -921,6 +921,8 @@ sequences with 'wait for previous phases' barriers"). Chosen after comparing the
   setpoint limits; Modbus: address + register map (PMA preset or custom) + ramp options; local: sensor
   type, calibration, PID, SSR window, max output, max temperature (cut-off); runaway enable + limits
   stored per channel type).
+- **Fixed IP (Rost, 2026-10-01)**: optional static address for the station (IP, mask, gateway, DNS) in
+  the Wi-Fi settings, web and touch.
 - **Polling interval (Rost, 2026-10-01)**: the polling interval (`bus.pollMs`, 250–10000 ms, default
   1000 ms) is a normal device setting, **editable on the touch UI and on the web GUI** (not only through
   `/api/config`). It sets how often the control task polls the channels (Modbus round robin; local
@@ -1318,6 +1320,15 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   "assoc leave" disconnect event, which the Arduino core does not retry → `netApplyWifi()` disconnects
   and `netLoop()` calls `begin()` 1 s later; a station that stays disconnected is retried every 30 s
   (not during a scan).
+- **1.0.10 (Rost)**: **fixed IP address** for the station: settings `wifi.staticIp`, `ip`, `subnet`,
+  `gateway`, `dns1`, `dns2` (strings "a.b.c.d", "" = none; DNS empty = the gateway). Validation rejects a
+  missing address, an invalid mask, network / broadcast address and a gateway outside the subnet (and
+  falls back to DHCP) so a typo cannot lock the device out. Applied with `WiFi.config()` before every
+  `WiFi.begin()` (DHCP = config with 0.0.0.0). Web System page: switch + fields (pre-filled from the
+  current address), "Save and connect" posts them with the host name, then `/api/wifi`. **Show / hide
+  button** (eye) inside both password fields. Touch Setup gets the same in step 6 (parity).
+  ArduinoJson pinned to `^7.3.0` (before 7.3 a `const char*` was stored by pointer — found by the
+  sanitizer in a new host test; Rost builds with 7.4.3, the cloud build now too).
 - Next: 7d "Run interrupted by a reset", then step 6 (touch UI, incl. the polling interval in Setup).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
   add phase, save (POST body checked), start without saving, new Timeline in an empty slot with a pause

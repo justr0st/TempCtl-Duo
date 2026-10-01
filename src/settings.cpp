@@ -93,6 +93,9 @@ void settingsDefaults(Settings& s, const BoardLimits& lim) {
   s.bottomBand = 5;
   copyStr(s.apPass, sizeof(s.apPass), "tempctl123");
   copyStr(s.hostname, sizeof(s.hostname), DEFAULT_HOSTNAME);
+  s.staticIp = 0;
+  memset(s.ip, 0, 4); memset(s.gateway, 0, 4); memset(s.dns1, 0, 4); memset(s.dns2, 0, 4);
+  s.subnet[0] = s.subnet[1] = s.subnet[2] = 255; s.subnet[3] = 0;
   s.brightness = 200;
   s.rotate180 = 0;
   s.tsMinX = 200; s.tsMaxX = 3700;
@@ -142,6 +145,22 @@ static void validRunaway(Runaway& r) {
   clampv<uint16_t>(r.holdSec, 5, 3600);
 }
 
+static uint32_t ip32(const uint8_t a[4]) {
+  return ((uint32_t)a[0] << 24) | ((uint32_t)a[1] << 16) | ((uint32_t)a[2] << 8) | a[3];
+}
+
+// Fixed station address: what is wrong with it, nullptr if usable
+static const char* staticIpError(const Settings& s) {
+  const uint32_t ip = ip32(s.ip), m = ip32(s.subnet), g = ip32(s.gateway);
+  if (ip == 0) return "Fixed IP: the IP address is missing";
+  if (m == 0 || (~m & (~m + 1)) != 0 || m == 0xFFFFFFFF) return "Fixed IP: invalid subnet mask";
+  if ((ip & ~m) == 0 || (ip & ~m) == ~m) return "Fixed IP: the IP address is the network or broadcast address";
+  if (g == 0) return "Fixed IP: the gateway is missing";
+  if ((g & m) != (ip & m)) return "Fixed IP: the gateway is not in the subnet of the IP address";
+  if (g == ip) return "Fixed IP: the gateway and the IP address are the same";
+  return nullptr;
+}
+
 static bool validHostname(const char* h) {
   if (!h[0]) return false;
   for (const char* p = h; *p; ++p)
@@ -168,6 +187,14 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
   if (strlen(s.apPass) < 8) copyStr(s.apPass, sizeof(s.apPass), "tempctl123");
   s.hostname[sizeof(s.hostname) - 1] = 0;
   if (!validHostname(s.hostname)) copyStr(s.hostname, sizeof(s.hostname), DEFAULT_HOSTNAME);
+  s.staticIp = s.staticIp ? 1 : 0;
+  if (s.staticIp) {
+    if (const char* e = staticIpError(s)) {  // never lock the device out of the network: back to DHCP
+      addMsg(msg, n, e);
+      s.staticIp = 0;
+      ok = false;
+    }
+  }
   clampv<uint8_t>(s.brightness, 10, 255);
   s.rotate180 = s.rotate180 ? 1 : 0;
   if (s.themeDark != THEME_DARK_DEFAULT) s.themeDark = s.themeDark ? 1 : 0;
@@ -288,6 +315,18 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
   JsonObject w = o["wifi"].to<JsonObject>();
   w["ssid"] = s.ssid;
   w["hostname"] = s.hostname;
+  w["staticIp"] = s.staticIp != 0;
+  char a[16];
+  const auto ipSet = [&](const char* key, const uint8_t* v) {
+    if (ip32(v)) snprintf(a, sizeof(a), "%u.%u.%u.%u", v[0], v[1], v[2], v[3]);
+    else a[0] = 0;
+    w[key] = a;  // a char array is copied into the document (a const char* is not, before 7.3)
+  };
+  ipSet("ip", s.ip);
+  ipSet("subnet", s.subnet);
+  ipSet("gateway", s.gateway);
+  ipSet("dns1", s.dns1);
+  ipSet("dns2", s.dns2);
   if (forApi) {
     w["passSet"] = s.pass[0] != 0;
     w["apPassSet"] = s.apPass[0] != 0;
@@ -405,6 +444,20 @@ struct Reader {
     if (!v.isNull() && !v.is<JsonObjectConst>()) fail(path, key, "object expected");
     return v.as<JsonObjectConst>();  // null object if missing / wrong: reads nothing
   }
+  // "a.b.c.d" (or "" = 0.0.0.0)
+  void ip(JsonObjectConst o, const char* path, const char* key, uint8_t out[4]) {
+    JsonVariantConst v = o[key];
+    if (v.isNull()) return;
+    const char* t = v.is<const char*>() ? v.as<const char*>() : nullptr;
+    if (!t) return fail(path, key, "IPv4 address (a.b.c.d) expected");
+    if (!*t) { memset(out, 0, 4); return; }
+    unsigned b[4];
+    char end;
+    if (sscanf(t, "%u.%u.%u.%u%c", &b[0], &b[1], &b[2], &b[3], &end) != 4 || b[0] > 255 || b[1] > 255 ||
+        b[2] > 255 || b[3] > 255)
+      return fail(path, key, "IPv4 address (a.b.c.d) expected");
+    for (int i = 0; i < 4; ++i) out[i] = (uint8_t)b[i];
+  }
   void runaway(JsonObjectConst o, const char* p, Runaway& r) {
     if (o.isNull()) return;
     flag(o, p, "enable", r.enable);
@@ -442,6 +495,12 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
     R.str(w, "wifi.", "pass", s.pass, sizeof(s.pass));
     R.str(w, "wifi.", "apPass", s.apPass, sizeof(s.apPass));
     R.str(w, "wifi.", "hostname", s.hostname, sizeof(s.hostname));
+    R.flag(w, "wifi.", "staticIp", s.staticIp);
+    R.ip(w, "wifi.", "ip", s.ip);
+    R.ip(w, "wifi.", "subnet", s.subnet);
+    R.ip(w, "wifi.", "gateway", s.gateway);
+    R.ip(w, "wifi.", "dns1", s.dns1);
+    R.ip(w, "wifi.", "dns2", s.dns2);
   }
   JsonObjectConst d = R.obj(o, "", "display");
   if (!d.isNull()) {

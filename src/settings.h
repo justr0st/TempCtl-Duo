@@ -101,6 +101,8 @@ struct Settings {
   char pass[65];
   char apPass[33];
   char hostname[24];
+  uint8_t staticIp;      // 1: fixed address below instead of DHCP (station)
+  uint8_t ip[4], subnet[4], gateway[4], dns1[4], dns2[4];  // a.b.c.d; dns 0.0.0.0 = gateway / none
 
   // Display
   uint8_t brightness;
