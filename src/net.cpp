@@ -6,6 +6,26 @@
 
 static bool apStarted = false, mdnsStarted = false, haveSta = false;
 static uint32_t t0 = 0;
+// Station (re)connect: WiFi.begin() right after WiFi.disconnect() is cancelled by the late
+// "disconnected (assoc leave)" event, and the core does not retry after that reason, so the
+// new network was only joined after a restart. netApplyWifi() therefore disconnects and
+// netLoop() calls begin() a moment later; a station that stays disconnected is retried.
+static uint32_t beginAt = 0;          // millis() for the pending WiFi.begin(), 0 = none
+static uint32_t lastBegin = 0;
+static constexpr uint32_t STA_RETRY_MS = 30000;
+static bool scanBusyNow();
+static void staBegin() {
+  Settings s;
+  {
+    Guard g;
+    s = gSettings;
+  }
+  beginAt = 0;
+  if (!haveSta || !s.ssid[0]) return;
+  WiFi.mode(apStarted ? WIFI_AP_STA : WIFI_STA);
+  WiFi.begin(s.ssid, s.pass);
+  lastBegin = millis();
+}
 static String apName;
 
 static void startAp(const Settings& s) {
@@ -40,6 +60,7 @@ void netBegin() {
   if (haveSta) {
     WiFi.mode(WIFI_STA);
     WiFi.begin(s.ssid, s.pass);
+    lastBegin = millis();
   } else {
     startAp(s);
   }
@@ -47,6 +68,13 @@ void netBegin() {
 }
 
 void netLoop() {
+  if (beginAt && (int32_t)(millis() - beginAt) >= 0 && !scanBusyNow()) staBegin();
+  if (haveSta && !beginAt && !scanBusyNow() && WiFi.status() != WL_CONNECTED && millis() - lastBegin > STA_RETRY_MS) {
+    Serial.printf("[wifi] not connected (status %d) - trying again\n", (int)WiFi.status());
+    WiFi.disconnect();
+    beginAt = millis() + 1000;
+    lastBegin = millis();
+  }
   if (haveSta && !apStarted && WiFi.status() != WL_CONNECTED && millis() - t0 > 20000) {
     Settings s;
     {
@@ -94,8 +122,8 @@ void netApplyWifi() {
   gotIpSinceApply = false;
   WiFi.disconnect();
   if (haveSta) {
-    WiFi.mode(apStarted ? WIFI_AP_STA : WIFI_STA);
-    WiFi.begin(s.ssid, s.pass);
+    beginAt = millis() + 1000;  // begin() in netLoop(), after the disconnect went through
+    if (!beginAt) beginAt = 1;
     t0 = millis();  // AP fallback again after 20 s without connection
   } else if (!apStarted) {
     startAp(s);
@@ -135,7 +163,7 @@ static void scanFinish() {
   WiFi.setAutoReconnect(true);
   if (haveSta && s.ssid[0]) {
     WiFi.begin(s.ssid, s.pass);
-    t0 = millis();
+    lastBegin = t0 = millis();
   }
 }
 
@@ -154,6 +182,7 @@ void netScanStart() {
 }
 
 bool netScanBusy() { return scanActive; }
+static bool scanBusyNow() { return scanActive; }
 
 static bool hasLine(const char* list, const char* name) {
   const size_t len = strlen(name);

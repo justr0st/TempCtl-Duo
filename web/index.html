@@ -432,8 +432,8 @@ async function loadSaved(i,force){ const g=live?live.progGen:0; if(!force&&saved
   SAVED[i]=r.used?normProg(r.program):null; savedGen[i]=g; if(!was) DRAFT[i]=clone(SAVED[i]); if(!UNDO[i]){ UNDO[i]=[]; REDO[i]=[]; } }
 async function loadPrograms(){ progs=await api('/api/programs'); progsGen=live?live.progGen:-1; fillProgSelect(); }
 function fillProgSelect(){ if(!progs) return; const s=$('prog'), cur=live?live.sel:progs.sel; if(document.activeElement===s) return;
-  const h=progs.programs.map((p,i)=>{ const d=DRAFT[i], dirty=isDirty(i);
-    const lab=d?`${esc(d.name)} (${d.type==='tl'?'timeline':'sequence'}${!dirty&&p.used?', '+fmt(p.total):''})`:'(empty)';
+  const h=progs.programs.map((p,i)=>{ const d=DRAFT[i], dirty=isDirty(i), q=d!=null?d:p.used?p:null;
+    const lab=q?`${esc(q.name)} (${q.type==='tl'?'timeline':'sequence'}${!dirty&&p.used?', '+fmt(p.total):''})`:'(empty)';
     return `<option value="${i}">${i+1} ${lab}${dirty?' – unsaved':''}</option>`; }).join('');
   if(s.dataset.h!==h){ s.innerHTML=h; s.dataset.h=h; } s.value=String(cur); }
 $('prog').onchange=async e=>{ const i=+e.target.value; showLast=false; await api('/api/select',{i}); if(live) live.sel=i; await loadSaved(i); chartAt=0; edKey=''; poll(); };
@@ -497,7 +497,7 @@ function modelPreview(p){
   return M;
 }
 function modelLive(d){
-  const M={kind:'live',now:0,hist:[],lanes:[[],[]],segs:[[],[]],ev:[],end:0,t0:-d.span};
+  const M={kind:'live',now:0,hist:[],lanes:[[],[]],segs:[[],[]],ev:[],end:0,t0:-d.span,at:Date.now()};
   for(const i of CH){ const pv=[],sp=[]; const n=d.pv[i].length; for(let k=0;k<n;k++){ const t=(k-n+1)*d.bin; if(d.pv[i][k]!=null) pv.push([t,d.pv[i][k]]); if(d.sp[i][k]!=null) sp.push([t,d.sp[i][k]]); } M.hist.push({pv,sp}); }
   return M;
 }
@@ -512,6 +512,13 @@ async function refreshChart(){
   if(live) await loadSaved(live.sel);
   previewDraft();
 }
+// latest values from /api/live onto the chart (each poll; the history comes every 2 s)
+function chartHead(){
+  if(!M||!live||drag) return;
+  const v=CH.map(i=>live.ch[i].pv!=null?live.ch[i].pv:null);
+  if(M.kind==='live'){ M.head={t:Math.min(5,(Date.now()-M.at)/1000),v}; lastChart=0; }
+  else if(M.kind==='run'&&live.run.state==='running'&&live.run.el!=null&&live.run.el>=M.now){ M.now=live.run.el; M.head={t:live.run.el,v}; lastChart=0; }
+}
 function previewDraft(){ const p=live?DRAFT[live.sel]:null; M=p&&progItems(p)?modelPreview(p):null; lastChart=0; }
 async function ensureRunProg(running){ const now=Date.now(); if(!runProg||(running&&now-runProgAt>5000)){ const r=await api('/api/run'); runProg=normProg(r.program); runProgAt=now; } }
 
@@ -525,7 +532,7 @@ const X=t=>CL+plotW()*(t-V0)/(V1-V0);
 const Y=v=>PB-(PB-PT)*(v-YMIN)/(YMAX-YMIN);
 const tAtX=x=>V0+(x-CL)/plotW()*(V1-V0);
 function setDomain(){
-  if(M.kind==='live'){ V0=M.t0; V1=0; return; }
+  if(M.kind==='live'){ const a=M.head?M.head.t:0; V0=M.t0+a; V1=a; return; }
   if(zv.fit||zv.span>=xfull){ zv.fit=true; V0=0; V1=xfull; return; }
   if(M.now!=null&&M.kind==='run'&&zv.follow&&M.now>zv.v0+zv.span*.85) zv.v0=M.now-zv.span*.3;
   zv.v0=Math.max(0,Math.min(zv.v0,xfull-zv.span)); V0=zv.v0; V1=zv.v0+zv.span;
@@ -583,6 +590,11 @@ function renderChart(){
   for(const i of CH){
     s+=`<path d="${pathOf(M.hist[i].sp)}" style="fill:none;stroke:${SP[i]};stroke-width:1.8;stroke-linejoin:round"/>`;
     s+=`<path d="${pathOf(M.hist[i].pv)}" style="fill:none;stroke:${PV[i]};stroke-width:2.5;stroke-linejoin:round"/>`;
+    // newest reading (polled faster than the chart history is fetched): line from the last point + dot
+    const hp=M.hist[i].pv, hv=M.head&&M.head.v[i];
+    if(hv!=null){ const L=hp.length?hp[hp.length-1]:null;
+      if(L&&M.head.t-L[0]<8) s+=`<path d="M${X(L[0]).toFixed(1)} ${Y(L[1]).toFixed(1)}L${X(M.head.t).toFixed(1)} ${Y(hv).toFixed(1)}" style="fill:none;stroke:${PV[i]};stroke-width:2.5"/>`;
+      s+=`<circle cx="${X(M.head.t).toFixed(1)}" cy="${Y(hv).toFixed(1)}" r="3.5" style="fill:${PV[i]}"/>`; }
     s+=`<path d="${segPath(M.segs[i])}" style="fill:none;stroke:${SP[i]};stroke-width:2;stroke-dasharray:6 4;opacity:.95"/>`;
   }
   if(M.now!=null&&M.kind==='run') s+=`<line x1="${X(M.now)}" x2="${X(M.now)}" y1="${LANE[0]-4}" y2="${PB}" style="stroke:var(--text);stroke-width:1.5"/>`;
@@ -1377,10 +1389,11 @@ async function poll(){
     updateRun(); updateChans(); updateEditor();
     const active=live.run.state==='running'||live.run.state==='paused', now=Date.now();
     if(page==='status'&&(!M||now-chartAt>(active||view==='live'?2000:5000))){ chartAt=now; await refreshChart(); }
+    if(page==='status') chartHead();
     await updateLog();
     await pageUpdate();
   }catch(e){ $('linkDot').className='dot'; $('linkTxt').textContent='Device not reachable'; }
-  finally{ polling=false; pollTimer=setTimeout(poll,1000); }
+  finally{ polling=false; pollTimer=setTimeout(poll,live&&live.pollMs?Math.max(250,Math.min(1000,live.pollMs)):1000); }
 }
 function frame(){ if(lastChart===0&&!drag&&page==='status'){ renderChart(); lastChart=1; } $('clk').textContent=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); requestAnimationFrame(frame); }
 applyPalette(true); route(); renderChart(); poll(); requestAnimationFrame(frame);

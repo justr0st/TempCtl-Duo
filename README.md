@@ -1,6 +1,6 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
 
-> **Work in progress (version 1.0.8).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
+> **Work in progress (version 1.0.9).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
 > of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
 > (the ESP32-S3 board, env `s3`, and the CYD, envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`,
 > build from the same sources), two channels (Modbus / local / off), local thermocouple + SSR channels,
@@ -342,6 +342,8 @@ Rules so the firmware keeps working:
   Start with unsaved changes asks: Save and start / Start without saving / Cancel. During a run the same
   tables and handles edit the running copy (targets, later ramps, holds; finished phases and the running
   ramp are locked) and the changes are sent to the device at once.
+- Refresh: the page asks for new values every polling interval (Channels page; 250 ms … 1 s) and draws
+  the newest temperature at the end of the chart; the chart history comes every 2 s.
 - Pages (sidebar; addresses `#/programs`, `#/channels`, `#/system`, `#/tools`, so a page can be
   bookmarked; all on the one page file, the drafts stay while switching pages):
   - **Programs**: the 20 slots with type, channels, phases / steps and time; Open (in the Status page

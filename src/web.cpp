@@ -829,6 +829,7 @@ static void handleLive() {
   snprintf(hex, sizeof(hex), "#%06X", (unsigned)(S.accentColor & 0xFFFFFF));
   d["accent"] = hex;
   d["band"] = S.bottomBand;
+  d["pollMs"] = S.pollMs;  // the page polls this fast (250..1000 ms)
   JsonObject r = d["run"].to<JsonObject>();
   r["state"] = runStateName(L.state);
   r["prog"] = L.runProg;

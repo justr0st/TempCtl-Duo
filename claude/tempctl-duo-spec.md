@@ -1308,6 +1308,16 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
 - Tested with the host mock (Playwright): every action posts what it should (partial config bodies,
   load defaults, params / actions with `ch`, Wi-Fi, restore), calibration maths, deep links, phone width.
   Page gzip ≈ 40 kB (was ≈ 24 kB); flash S3 29.6 %, CYD ≈ 63 % of the app partition. Not on hardware yet.
+- **1.0.9 (Rost's first test of 1.0.8)**: (a) the program dropdown showed "(empty)" for slots not
+  opened yet (labels came only from loaded drafts) → labels from the program list; (b) a shorter polling
+  interval did not speed up the page → `/api/live` has `pollMs`, the page polls every
+  clamp(pollMs, 250, 1000) ms and draws the newest PV on the chart (line from the last history point to
+  a dot at "now"; the Live window moves smoothly, in a run the time marker follows `run.el`); the chart
+  history itself is still fetched every 2 s (1 s bins live); (c) Wi-Fi: a new network/password was only
+  joined after a restart — `WiFi.begin()` right after `WiFi.disconnect()` is cancelled by the late
+  "assoc leave" disconnect event, which the Arduino core does not retry → `netApplyWifi()` disconnects
+  and `netLoop()` calls `begin()` 1 s later; a station that stays disconnected is retried every 30 s
+  (not during a scan).
 - Next: 7d "Run interrupted by a reset", then step 6 (touch UI, incl. the polling interval in Setup).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
   add phase, save (POST body checked), start without saving, new Timeline in an empty slot with a pause
