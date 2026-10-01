@@ -1334,6 +1334,13 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   `web/icons/`, embedded by `tools/web_embed.py`. (The touch UI could show it in step 6.)
 - **1.0.12 (Rost)**: icons regenerated from the edited logo; chart: state-lane names in the channel
   colours, a separator line under the lanes and more space above the temperature axis.
+- **1.0.13 (Rost)**: light / dark **switch** (pill, knob with sun → moon icon, no glow / shadow /
+  gradient) instead of the Auto / Dark / Light list — web theme in the sidebar (follows the system until
+  switched; switching back to the system's mode returns to "follow") and the touch screen theme on the
+  System page; theme changes **fade** (0.4 s colour transition, the chart keeps its elements);
+  **thick brightness slider** (accent fill, value in %); **masonry tiles**: `.cards` grids give each
+  tile a row span from its height (4 px rows), so short tiles move up next to tall ones (one column:
+  normal flow).
 - Next: 7d "Run interrupted by a reset", then step 6 (touch UI, incl. the polling interval in Setup).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
   add phase, save (POST body checked), start without saving, new Timeline in an empty slot with a pause

@@ -1,6 +1,6 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
 
-> **Work in progress (version 1.0.12).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
+> **Work in progress (version 1.0.13).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
 > of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
 > (the ESP32-S3 board, env `s3`, and the CYD, envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`,
 > build from the same sources), two channels (Modbus / local / off), local thermocouple + SSR channels,
@@ -335,8 +335,8 @@ Rules so the firmware keeps working:
   "Live" shows the last 5 minutes), channel cards (PV, SP, output, what the channel does, target
   −5 / −1 / +1 / +5 / Set and Extend hold during a run, manual switch + setpoint otherwise, fault +
   Acknowledge), the "Action required" overlay, "Save the run's changes?" after a run with run edits, and
-  the event log. Channel colours come from the device's accent colour (spec 6); theme Auto / Dark / Light
-  (remembered by the browser).
+  the event log. Channel colours come from the device's accent colour (spec 6); dark mode switch in the
+  sidebar (follows the system until switched; remembered by the browser; colours fade over).
 - Program editor (under the channel cards): the selected program as tables (Sequence: one row per
   phase, cards on narrow screens; Timeline: two tables side by side) and on the chart (drag squares up /
   down = target, diamonds = ramp end, circles = hold end; whole seconds and °C). Outside a run edits go
@@ -358,8 +358,8 @@ Rules so the firmware keeps working:
     (with a two-point helper), PID, SSR window, max. output / temperature, PID autotune; runaway limits
     of the selected type. Changed fields are marked; Save sends only the changed values
     (`POST /api/config`) and lists values the device had to adjust to the allowed range.
-  - **System**: device info, restart, Wi-Fi (with network scan, show / hide password, optional fixed IP
-    address), touch display (accent colour, theme,
+  - **System** (tiles fill the free space): device info, restart, Wi-Fi (with network scan, show / hide
+    password, optional fixed IP address), touch display (light / dark switch, brightness slider) (accent colour, theme,
     brightness, rotation).
   - **Tools**: Modbus tools for a Modbus channel (find the setpoint address, read registers, write one
     register); backup / restore of the settings and of all programs as JSON files.
