@@ -524,11 +524,21 @@ function laneCode(M,i,s){
     const tc=x.kind==='B'?0:1; if(x.kind==='BT'&&i===0&&s.src===k) return 'j'; return tc===i&&s.src===k?'h':'k'; }
   let lastEnd=-1; for(const e of M.ev) if(e.type===EV.HOLD_END&&e.ch===i) lastEnd=Math.max(lastEnd,e.t); return tm>lastEnd&&lastEnd>=0?'d':'h';
 }
+// PV points of one channel: each chart slot has its last reading (pv) and how far its lowest / highest
+// reading lay below / above it (dlo / dhi, 0.1 °C). The line visits both extremes of a slot (the
+// one nearer to the previous point first), so short peaks and dips stay visible.
+function pvPts(d,i,tOf,out){ const pv=d.pv[i], lo=d.dlo&&d.dlo[i], hi=d.dhi&&d.dhi[i]; let prev=null;
+  for(let k=0;k<pv.length;k++){ const v=pv[k]; if(v==null) continue; const t=tOf(k), a=lo?v-lo[k]/10:v, b=hi?v+hi[k]/10:v;
+    if(a===b){ out.push([t,v]); prev=v; continue; }
+    const aFirst=prev==null||Math.abs(prev-a)<=Math.abs(prev-b);
+    out.push([t,aFirst?a:b],[t,aFirst?b:a]); prev=aFirst?b:a; }
+  return out; }
 function modelFromRun(d){
   const M={kind:d.mode,now:d.el,prog:runProg,hist:[],lanes:[],segs:[[],[]],ev:[]};
   let lastT=0;
   for(const i of CH){ const pv=[],sp=[],ln=[]; const st=d.st[i]||'';
-    for(let k=0;k<d.pv[i].length;k++){ const t=k*d.bin; if(d.pv[i][k]!=null) pv.push([t,d.pv[i][k]]); if(d.sp[i][k]!=null) sp.push([t,d.sp[i][k]]);
+    pvPts(d,i,k=>k*d.bin,pv);
+    for(let k=0;k<d.pv[i].length;k++){ const t=k*d.bin; if(d.sp[i][k]!=null) sp.push([t,d.sp[i][k]]);
       const c=st[k]||' '; if(c!==' '){ lastT=Math.max(lastT,(k+1)*d.bin); const t1=Math.min((k+1)*d.bin,d.el); if(ln.length&&ln[ln.length-1].c===c) ln[ln.length-1].t1=t1; else ln.push({t0:t,t1,c}); } }
     M.hist.push({pv,sp}); M.lanes.push(ln); }
   for(const e of d.ev) M.ev.push({t:e[0],type:e[1],ch:e[2],idx:e[3],past:true});
@@ -546,7 +556,7 @@ function modelPreview(p){
 }
 function modelLive(d){
   const M={kind:'live',now:0,hist:[],lanes:[[],[]],segs:[[],[]],ev:[],end:0,t0:-d.span,at:Date.now()};
-  for(const i of CH){ const pv=[],sp=[]; const n=d.pv[i].length; for(let k=0;k<n;k++){ const t=(k-n+1)*d.bin; if(d.pv[i][k]!=null) pv.push([t,d.pv[i][k]]); if(d.sp[i][k]!=null) sp.push([t,d.sp[i][k]]); } M.hist.push({pv,sp}); }
+  for(const i of CH){ const pv=[],sp=[]; const n=d.pv[i].length; pvPts(d,i,k=>(k-n+1)*d.bin,pv); for(let k=0;k<n;k++){ const t=(k-n+1)*d.bin; if(d.sp[i][k]!=null) sp.push([t,d.sp[i][k]]); } M.hist.push({pv,sp}); }
   return M;
 }
 let M=null;

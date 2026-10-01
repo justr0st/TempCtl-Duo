@@ -115,12 +115,14 @@ typedef Tenth TenthRow[CHART_N];
 struct History {
   // Rolling live window: one sample per LIVE_SAMPLE_SEC, newest at the end.
   // (the value arrays are pointers into one block, see appInit(): IRAM on the CYD)
-  TenthRow *livePv, *liveSp;  // [NUM_CHANNELS]
+  TenthRow *livePv, *liveSp;  // [NUM_CHANNELS]; PV = the last reading of the slot
+  TenthRow *liveLo, *liveHi;  // lowest / highest PV reading within each slot (every poll counts)
   // Current / last program run: run time 0..runSpan in CHART_N bins (the
   // span doubles when the run gets longer than planned).
   bool runValid;
   float runBin, runSpan;
   TenthRow *runPv, *runSp;
+  TenthRow *runLo, *runHi;    // lowest / highest PV reading within each run bin
   // run's program curve: its setpoints so far + the forecast (kept after the run for the CSV)
   TenthRow* runPlan;
   float runTotal;     // elapsed + remaining

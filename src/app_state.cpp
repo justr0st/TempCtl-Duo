@@ -134,6 +134,8 @@ static void histResetLive() {
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
     fillNan(gHist->livePv[ch], CHART_N);
     fillNan(gHist->liveSp[ch], CHART_N);
+    fillNan(gHist->liveLo[ch], CHART_N);
+    fillNan(gHist->liveHi[ch], CHART_N);
     fillNan(gHist->plan[ch], CHART_N);
     fillNan(gHist->runPlan[ch], CHART_N);
   }
@@ -147,6 +149,8 @@ static void histStartRun(float total) {
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
     fillNan(gHist->runPv[ch], CHART_N);
     fillNan(gHist->runSp[ch], CHART_N);
+    fillNan(gHist->runLo[ch], CHART_N);
+    fillNan(gHist->runHi[ch], CHART_N);
     fillNan(gHist->runPlan[ch], CHART_N);
     memset(gHist->runSt[ch], ' ', CHART_N);
   }
@@ -158,10 +162,16 @@ static void histStartRun(float total) {
 
 // the run got longer than the chart: half the resolution, double the span
 static void histCompress() {
-  auto half = [](Tenth* a, bool mean) {
+  // mode: 0 first, 1 mean, 2 lowest, 3 highest of each pair
+  auto half = [](Tenth* a, int mode) {
     for (int i = 0; i < CHART_N / 2; ++i) {
       const float x = a[2 * i], y = a[2 * i + 1];
-      a[i] = !mean ? x : isnan(x) ? y : isnan(y) ? x : (x + y) / 2;
+      a[i] = mode == 0 ? x
+             : isnan(x) ? y
+             : isnan(y) ? x
+             : mode == 1 ? (x + y) / 2
+             : mode == 2 ? fminf(x, y)
+                         : fmaxf(x, y);
     }
     for (int i = CHART_N / 2; i < CHART_N; ++i) a[i] = NAN;
   };
@@ -172,9 +182,11 @@ static void histCompress() {
   }
   gHist->runStLast = (int16_t)(gHist->runStLast >= 0 ? gHist->runStLast / 2 : -1);
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
-    half(gHist->runPv[ch], true);
-    half(gHist->runSp[ch], true);
-    half(gHist->runPlan[ch], false);
+    half(gHist->runPv[ch], 1);
+    half(gHist->runSp[ch], 1);
+    half(gHist->runLo[ch], 2);
+    half(gHist->runHi[ch], 3);
+    half(gHist->runPlan[ch], 0);
   }
   gHist->runBin *= 2;
   gHist->runSpan *= 2;
@@ -390,6 +402,27 @@ static void jNum(String& o, float v, const char* fmt = "%.1f") {
   o += b;
 }
 
+// "dlo":[[..],[..]] / "dhi": how far the lowest / highest reading of each slot lies below / above
+// "pv" (the last reading), in 0.1 degC; 0 when equal or unknown (keeps the answer small)
+static void jDeltas(String& o, const char* key, TenthRow* pv, TenthRow* ext, bool below) {
+  o += ",\"";
+  o += key;
+  o += "\":[";
+  for (int c = 0; c < NUM_CHANNELS; ++c) {
+    if (c) o += ',';
+    o += '[';
+    for (int i = 0; i < CHART_N; ++i) {
+      if (i) o += ',';
+      const int32_t p = pv[c][i].v, x = ext[c][i].v;
+      int32_t d = (p == INT32_MIN || x == INT32_MIN) ? 0 : below ? p - x : x - p;
+      if (d < 0) d = 0;
+      o += String((long)d);
+    }
+    o += ']';
+  }
+  o += ']';
+}
+
 static void jArr(String& o, const Tenth* a, int n) {
   o += '[';
   for (int i = 0; i < n; ++i) {
@@ -472,7 +505,7 @@ static void fcEv(const PlanEv& e, void* u) {
 }
 
 void chartJson(String& o, bool run) {
-  o.reserve(run ? 9000 : 6000);
+  o.reserve(run ? 11000 : 8500);
   if (!run) {
     Guard g;
     o = "{\"mode\":\"live\",\"bin\":";
@@ -489,7 +522,10 @@ void chartJson(String& o, bool run) {
       if (c) o += ',';
       jArr(o, gHist->liveSp[c], CHART_N);
     }
-    o += "]}";
+    o += ']';
+    jDeltas(o, "dlo", gHist->livePv, gHist->liveLo, true);
+    jDeltas(o, "dhi", gHist->livePv, gHist->liveHi, false);
+    o += '}';
     return;
   }
   static FcSink sink;  // web task only
@@ -538,7 +574,10 @@ void chartJson(String& o, bool run) {
     if (c) o += ',';
     jArr(o, gHist->runSp[c], CHART_N);
   }
-  o += "],\"st\":[";
+  o += ']';
+  jDeltas(o, "dlo", gHist->runPv, gHist->runLo, true);
+  jDeltas(o, "dhi", gHist->runPv, gHist->runHi, false);
+  o += ",\"st\":[";
   for (int c = 0; c < NUM_CHANNELS; ++c) {
     if (c) o += ',';
     o += '"';
@@ -1226,12 +1265,26 @@ static void cycle(float dt) {
   flushRunEvents();
   Guard g;
   gEngSnap = eng;
+  // every reading counts for the lowest / highest value of its chart slot (the chart shows the
+  // spread, so short peaks and dips between two slots are not lost)
+  static float accLo[NUM_CHANNELS] = {NAN, NAN}, accHi[NUM_CHANNELS] = {NAN, NAN};
+  for (int i = 0; i < NUM_CHANNELS; ++i)
+    if (pvOk[i]) {
+      accLo[i] = isnan(accLo[i]) ? pv[i] : fminf(accLo[i], pv[i]);
+      accHi[i] = isnan(accHi[i]) ? pv[i] : fmaxf(accHi[i], pv[i]);
+    }
   if (eng.active() && gHist->runValid) {
     int idx = (int)(eng.elapsed() / gHist->runBin);
     if (idx >= CHART_N) idx = CHART_N - 1;
     if (idx < 0) idx = 0;
     for (int i = 0; i < NUM_CHANNELS; ++i) {
       gHist->runPv[i][idx] = pvOk[i] ? pv[i] : NAN;
+      if (pvOk[i]) {
+        const float lo = gHist->runLo[i][idx], hi = gHist->runHi[i][idx];
+        const bool fresh = idx > gHist->runStLast;  // first reading of this bin
+        gHist->runLo[i][idx] = fresh || isnan(lo) ? pv[i] : fminf(lo, pv[i]);
+        gHist->runHi[i][idx] = fresh || isnan(hi) ? pv[i] : fmaxf(hi, pv[i]);
+      }
       gHist->runSp[i][idx] = spNow[i];
       const ChState cs = eng.chState(i);
       const char code = cs == ChState::None ? (man[i].on ? 'm' : '-') : CH_STATE_CODE[(int)cs];
@@ -1252,10 +1305,17 @@ static void cycle(float dt) {
         gHist->livePv[c][i] = gHist->livePv[c][i + n];
         gHist->liveSp[c][i] = gHist->liveSp[c][i + n];
       }
+      for (int i = 0; i + n < CHART_N; ++i) {
+        gHist->liveLo[c][i] = gHist->liveLo[c][i + n];
+        gHist->liveHi[c][i] = gHist->liveHi[c][i + n];
+      }
       for (uint32_t i = CHART_N - n; i < CHART_N; ++i) {
         gHist->livePv[c][i] = pvOk[c] ? pv[c] : NAN;
         gHist->liveSp[c][i] = spNow[c];
+        gHist->liveLo[c][i] = pvOk[c] ? accLo[c] : NAN;
+        gHist->liveHi[c][i] = pvOk[c] ? accHi[c] : NAN;
       }
+      accLo[c] = accHi[c] = NAN;
     }
   }
   // run
@@ -1385,9 +1445,9 @@ void appInit() {
   // large buffers on the heap (the static DRAM segment is almost full)
   gHist = (History*)calloc(1, sizeof(History));
   runProg = (DuoProgram*)calloc(1, sizeof(DuoProgram));
-  // chart values: 6 x 2 x CHART_N words. No PSRAM (CYD): in the IRAM heap, which the rest of the
+  // chart values: 10 x 2 x CHART_N words. No PSRAM (CYD): in the IRAM heap, which the rest of the
   // firmware can't use (32-bit access only); DRAM is what runs short there (Wi-Fi, LVGL, web)
-  const size_t hvBytes = sizeof(TenthRow) * NUM_CHANNELS * 6;
+  const size_t hvBytes = sizeof(TenthRow) * NUM_CHANNELS * 10;
 #ifdef BOARD_HAS_PSRAM
   TenthRow* hv = (TenthRow*)malloc(hvBytes);
 #else
@@ -1401,7 +1461,11 @@ void appInit() {
     gHist->runSp = hv + 3 * NUM_CHANNELS;
     gHist->runPlan = hv + 4 * NUM_CHANNELS;
     gHist->plan = hv + 5 * NUM_CHANNELS;
-    for (int r = 0; r < 6 * NUM_CHANNELS; ++r)
+    gHist->liveLo = hv + 6 * NUM_CHANNELS;
+    gHist->liveHi = hv + 7 * NUM_CHANNELS;
+    gHist->runLo = hv + 8 * NUM_CHANNELS;
+    gHist->runHi = hv + 9 * NUM_CHANNELS;
+    for (int r = 0; r < 10 * NUM_CHANNELS; ++r)
       for (int i = 0; i < CHART_N; ++i) hv[r][i] = NAN;
   }
   if (!gHist || !hv || !runProg) {

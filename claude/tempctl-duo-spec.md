@@ -1399,6 +1399,13 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   8.9 kB of 16, control 3.1 kB of 6. Still tight: watch the `[mem] running` minimum; the lean CYD touch
   UI in step 6 is the real fix. Some `disconnected (reason 202)` while joining with the AP running.
   Committed as 1.0.15.
+- **1.0.16 (Rost, video from the S3)**: the dot (newest reading, every poll) jumped up and down, the line
+  did not show those peaks — a chart slot (live 1 s, run bins) kept only the reading at the moment it
+  closed. Now every reading counts: lowest and highest per slot (`liveLo/liveHi`, `runLo/runHi`, in the
+  IRAM block on the CYD; run compression keeps min / max), sent as `dlo` / `dhi` (0.1 °C below / above
+  `pv`, 0 = none, keeps `/api/chart` small); the page draws each slot through both extremes (nearer one
+  first). The visible dips are thermocouple noise (median-of-3 already in the local task): hardware hint
+  stays 10 nF across T+/T−, twisted leads away from mains wiring.
 - Next: 7d "Run interrupted by a reset", then step 6 (touch UI, incl. the polling interval in Setup).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
   add phase, save (POST body checked), start without saving, new Timeline in an empty slot with a pause
