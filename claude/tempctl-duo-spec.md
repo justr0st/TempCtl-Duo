@@ -1269,6 +1269,8 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
 - During a run the tables and handles edit the running copy through `/api/run` (target / ramp / hold);
   type, wait, pause options, add / delete are locked during a run (the engine has no structural edits).
 - Status LED: fault breathing magenta was tried and taken back (1.0.6): red blinking again.
+- 1.0.7: build fix for ArduinoJson 7.4 (its `MemberProxy` cannot be copied: helpers that write into
+  `doc["x"]` take it by reference and use `.set()`). Checked with ArduinoJson 7.2.1 and 7.4.3.
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
   add phase, save (POST body checked), start without saving, new Timeline in an empty slot with a pause
   text, phone width (no sideways scrolling).

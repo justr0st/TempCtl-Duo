@@ -37,10 +37,11 @@ static bool parseBody(JsonDocument& d) {
 
 // works on a document member (doc["x"]) too: a MemberProxy converted to a
 // JsonVariant does not create the member, so assign through the proxy itself
+// (by reference: ArduinoJson 7.4 proxies cannot be copied)
 template <typename T>
-static void setNum(T v, float x) {
-  if (isnan(x)) v = nullptr;
-  else v = roundf(x * 10.0f) / 10.0f;
+static void setNum(T&& v, float x) {
+  if (isnan(x)) v.set(nullptr);
+  else v.set(roundf(x * 10.0f) / 10.0f);
 }
 
 static int addrOut(uint16_t a) { return a == REG_UNSET ? -1 : (int)a; }
