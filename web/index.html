@@ -543,7 +543,7 @@ async function ensureRunProg(running){ const now=Date.now(); if(!runProg||(runni
 let CW=1000,CHh=452,CL=58,CR=18,PT=86,PB=410,YMAX=250,YMIN=0; const LANE=[22,46],LH=18;
 let xfull=600,V0=0,V1=600,lastChart=0; const zv={fit:true,v0:0,span:600,follow:true};
 function layout(){ const w=Math.floor($('chartbox').clientWidth)||1000; CW=Math.max(280,w); const n=CW<600;
-  CL=n?44:58; CR=n?10:18; CHh=n?340:Math.round(Math.min(460,Math.max(380,CW*0.42))); PT=M&&M.kind==='live'?20:86; PB=CHh-40; }
+  CL=n?44:58; CR=n?10:18; const lv=M&&M.kind==='live'; CHh=(n?340:Math.round(Math.min(460,Math.max(380,CW*0.42))))+(lv?0:16); PT=lv?20:102; PB=CHh-40; }
 const plotW=()=>CW-CL-CR;
 const X=t=>CL+plotW()*(t-V0)/(V1-V0);
 const Y=v=>PB-(PB-PT)*(v-YMIN)/(YMAX-YMIN);
@@ -583,7 +583,9 @@ function renderChart(){
   const step=tickStep();
   for(let t=Math.ceil(V0/step)*step;t<=V1+1e-6;t+=step) s+=`<text x="${X(t)}" y="${PB+18}" text-anchor="middle" style="fill:var(--muted);font-size:12px">${t<0?'−'+fmt(-t):fmt(t)}</text>`;
   const prog=M.kind!=='live';
-  if(prog) for(const i of CH){ s+=`<text x="${CL-6}" y="${LANE[i]+13}" text-anchor="end" style="fill:var(--muted);font-size:12px">${esc(chName(i).slice(0,CW<600?4:9))}</text><rect x="${CL}" y="${LANE[i]}" width="${plotW()}" height="${LH}" style="fill:none;stroke:var(--line)"/>`; }
+  if(prog){ for(const i of CH){ s+=`<text x="${CL-6}" y="${LANE[i]+13}" text-anchor="end" style="fill:${PV[i]};font-size:12px;font-weight:600">${esc(chName(i).slice(0,CW<600?4:9))}</text><rect x="${CL}" y="${LANE[i]}" width="${plotW()}" height="${LH}" style="fill:none;stroke:var(--line)"/>`; }
+    // separator between the state lanes and the chart
+    s+=`<line x1="4" x2="${CW-4}" y1="${LANE[1]+LH+10}" y2="${LANE[1]+LH+10}" style="stroke:var(--line);stroke-width:2"/>`; }
   s+=`<g clip-path="url(#pclip)">`;
   if(prog){
     for(const i of CH) s+=lanesSvg(i);

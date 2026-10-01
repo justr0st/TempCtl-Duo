@@ -1332,6 +1332,8 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
 - **1.0.11**: logo from `logo/` (Rost) as favicon (`/favicon.svg`, `/favicon.ico` 16/32/48,
   `/apple-touch-icon.png` 180 px, square for iOS) and next to the name in the sidebar; files in
   `web/icons/`, embedded by `tools/web_embed.py`. (The touch UI could show it in step 6.)
+- **1.0.12 (Rost)**: icons regenerated from the edited logo; chart: state-lane names in the channel
+  colours, a separator line under the lanes and more space above the temperature axis.
 - Next: 7d "Run interrupted by a reset", then step 6 (touch UI, incl. the polling interval in Setup).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
   add phase, save (POST body checked), start without saving, new Timeline in an empty slot with a pause
