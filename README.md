@@ -1,6 +1,6 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
 
-> **Work in progress (version 1.0.17).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
+> **Work in progress (version 1.0.18).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
 > of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
 > (the ESP32-S3 board, env `s3`, and the CYD, envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`,
 > build from the same sources), two channels (Modbus / local / off), local thermocouple + SSR channels,
@@ -121,8 +121,17 @@ The web *Main* page shows the number of setpoint writes in the current run.
 - End/stop action: keep setpoint, set an end setpoint, or switch controller outputs off (`C.Off`).
   The original `r.SP` is restored afterwards.
 - If a channel of the program doesn't answer for 30 s (configurable) the program pauses.
-- If the ESP32 resets, the program stops; a Modbus controller keeps controlling at its last setpoint (local
-  channels start with the SSR off). "Run interrupted by a reset" with a resume button comes later.
+- **Run interrupted by a reset** (watchdog, crash, brown-out, power loss …): the board starts with the
+  program's channels off (local: SSR off; Modbus: outputs-off register, if set — without it the controller
+  keeps its last setpoint) and the web page shows "Run interrupted by a reset" with the reason, program,
+  phase / steps and run time. Never an automatic resume: **Resume** (Sequence: the interrupted phase from
+  its beginning, ramps from the measured temperatures, channels the phase doesn't start get their kept
+  target at once; Timeline: on at the interrupted run time, ramps from the measured temperatures in the
+  time they had left, holds with their remaining time) or **Dismiss** (outputs stay off, the controller
+  gradient and front panel are restored). Starting another program also ends the offer. The running copy
+  (with run edits) is in `/duo/run.json`; the position in RTC memory (exact, survives resets) and in
+  `/duo/runpos.json` (every phase / step change and every minute, for a power loss). The touch screen
+  shows the message; its Resume button comes with the new touch UI (step 6).
 
 ## 2. Hardware
 
@@ -352,8 +361,11 @@ Rules so the firmware keeps working:
   and setpoint; lost on restart): 24 h on the S3 (1 MB of PSRAM), on the CYD what fits into the IRAM-only
   heap (about 30 min; the boot log says `[hist] live history N min`). The Live chart's Period (5 min …
   the whole history; saved as `display.liveMin`, also used by the touch screen) picks how much of it is
-  shown; its vertical axis always runs from 0 °C to the highest value in view. Export CSV (or "Download
-  live history" in the sidebar) downloads all of it, one row per second.
+  shown; its vertical axis always runs from 0 °C to the highest value in view. The legend switches the PV
+  and SP of each channel on / off (chart, scale and export; the browser remembers it). Export CSV
+  downloads the whole history of the switched-on series, one row per second ("Download live history" in
+  the sidebar: all series). A setpoint is recorded only while it is active: in a run, with the manual
+  setpoint on, or kept / set by a run's end action (Modbus; local channels: while their output is on).
 - Refresh: the page asks for new values every polling interval (Channels page; 250 ms … 1 s) and draws
   the newest temperature at the end of the chart; the chart history comes every 2 s.
 - Pages (sidebar; addresses `#/programs`, `#/channels`, `#/system`, `#/tools`, so a page can be
@@ -389,19 +401,19 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 
 | Method | Path | Body / query |
 |---|---|---|
-| GET | `/api/live` | web page, polled every second: both channels (pv, sp, out, state, target, kept, canExtend, manual, fault, autotune, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg), `sel`, `accent`, `progGen`, `cfgGen` (changes with every settings save), `logSeq` |
+| GET | `/api/live` | web page, polled every second: both channels (pv, sp, out, state, target, kept, canExtend, manual, fault, autotune, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg; `intr` while a run interrupted by a reset can be resumed: reason, exact, el, i / st / left per channel), `sel`, `accent`, `progGen`, `cfgGen` (changes with every settings save), `logSeq` |
 | GET | `/api/chart?v=run` | current / last run: 300 bins of `pv`, `sp` and state lanes `st` per channel, past events `ev` [t, type, ch, idx], forecast `fc` (`seg` [t0, t1, v0, v1, src, flags] per channel, `ev`; times from now) |
 | GET | `/api/chart?v=live` | the live period (`display.liveMin`) in 300 points of `pv` / `sp` / `dlo` / `dhi` per channel; `bin` s per point, `span`, `sh` (the points before the newest end `sh` s later than whole bins before now), `have` / `cap` (s recorded / s the history holds) |
 | GET | `/api/log?since=n` | event log entries after n: [seq, uptime s, run time s or null, text] |
 | GET | `/api/status` | live values (bottom), manual setpoint, selected program; `channels`: both channels (name, type, ok, err, pv, sp, out, mode, manual); `run`: state, `type` (`seq`/`tl`), `seq` (phase `idx`, `stage`, `el`, `dur`), `waiting`, `progPause`, `actionRequired`, `pauseText`, `elapsed`, `remaining`, `edited`, `channels[]` (inProgram, idle, sp, target, moving, Timeline `lane`) |
 | GET/POST | `/api/config` | the whole settings document (= `/duo/settings.json` without passwords) + `limits` (`rs485`, `localMax` of this board variant). POST changes only the keys given, e.g. `{"channels":[null,{"type":"modbus","modbus":{"addr":2}}]}`; `"modbus":{"loadDefaults":true}` loads the register map of the channel's controller type; errors come back as `{"ok":false,"err":"channels[1].type: one of …"}` |
 | GET | `/api/log.csv` | last program run (or, without one, the live history) as CSV, both channels |
-| GET | `/api/history.csv` | the whole live history, streamed: time_s (before now), uptime_s, then per channel pv, min, max, sp |
+| GET | `/api/history.csv` | the whole live history, streamed: time_s (before now), uptime_s, then per channel pv, min, max, sp; `?pv=3&sp=3` = channels (bit 0 bottom, bit 1 top) whose PV / SP columns are included (default all; rows without any value are left out) |
 | GET | `/api/programs` | all 20 slots: `used`, `name`, `type`, `steps` (phases / steps), `total` (s), `uses` [bottom, top], `waits`; `sel` |
 | GET | `/api/program?i=0` | `used`, `program`: the program JSON (spec 9.3.5) |
 | POST | `/api/program` | `{"i":0,"program":{…}}` save (validated, setpoint limits checked) or `{"i":0,"delete":true}` |
 | GET | `/api/run` | `run` (as in `/api/status`) + `program`: the running copy with its run edits |
-| POST | `/api/run` | `{"cmd":"start","i":0,"program":{…}}` (start slot 0 with this unsaved content), `{"cmd":"extend","ch":0,"sec":30}`, `{"cmd":"hold","ch":1,"idx":4,"sec":45}`, `{"cmd":"ramp","ch":1,"idx":5,"sec":40}`, `{"cmd":"target","ch":0,"idx":-1,"t":170}` (`idx` = phase / step, -1 = current / kept), `{"cmd":"save"}`, `"next"`, `"continue"`; the result shows in `run.msg` |
+| POST | `/api/run` | `{"cmd":"start","i":0,"program":{…}}` (start slot 0 with this unsaved content), `{"cmd":"extend","ch":0,"sec":30}`, `{"cmd":"hold","ch":1,"idx":4,"sec":45}`, `{"cmd":"ramp","ch":1,"idx":5,"sec":40}`, `{"cmd":"target","ch":0,"idx":-1,"t":170}` (`idx` = phase / step, -1 = current / kept), `{"cmd":"save"}`, `"next"`, `"continue"`, `"recover"` (resume the run interrupted by a reset), `"dismiss"` (dismiss it); the result shows in `run.msg` |
 | POST | `/api/select` | `{"i":index}` select the program for Main / Chart |
 | POST | `/api/manual` | `{"sp":150}` and/or `{"on":true}`, optional `"ch":1` (top; default 0 = bottom) |
 | POST | `/api/autotune` | local channels: `{"ch":1,"cmd":"start","sp":200}`, `"stop"`, `"accept"` (proposed kp/ki/kd → settings), `"discard"`; progress and result in `/api/status` → `channels[].autotune` |

@@ -324,6 +324,76 @@ static void testTimelineRun() {
   }
 }
 
+// "Run interrupted by a reset": position() + resumeAt()
+static void testResume() {
+  static DuoProgram p, q;
+  // Sequence: interrupted in phase 4 (top ramp to 190): the phase starts again, the top ramps from its
+  // measured value, the bottom gets the target of phase 3 (160) at once
+  progExample(0, p);
+  Sim s;
+  s.autoCont = true;
+  s.start(p);
+  while (s.e.active() && !(s.e.seq().idx == 3 && s.e.seq().st == Stage::Ramp && s.e.seq().el >= 10)) s.step(1);
+  const RunPos pos = s.e.position();
+  CHECK(pos.i[0] == 3 && pos.st[0] == (uint8_t)Stage::Ramp && pos.el > 200);
+  q = p;
+  Sim r;
+  r.pv[0] = 155;
+  r.pv[1] = 120;
+  CHECK(r.e.resumeAt(&q, pos, r.pv, r.ok, 5, true));
+  CHECK(r.e.active() && r.e.seq().idx == 3 && r.e.seq().st == Stage::Ramp && near(r.e.elapsed(), pos.el));
+  CHECK(near(r.sp(1), 120) && r.e.out(1).moving && near(r.e.out(1).rampLeft, 40) && near(r.e.out(1).target, 190));
+  CHECK(near(r.sp(0), 160) && !r.e.out(0).moving && !r.e.out(0).idle && r.e.edited());
+  r.t = pos.el;
+  r.runTo(pos.el + 20);
+  CHECK(near(r.sp(1), 155, 0.1f));
+  // resuming at the pause phase asks for Continue again; at a phase without kept targets all idle
+  RunPos pp = pos;
+  pp.i[0] = 1;
+  Sim r2;
+  CHECK(r2.e.resumeAt(&q, pp, r2.pv, r2.ok, 5, false) && r2.e.progPaused() && near(r2.sp(0), 150) && r2.e.out(1).idle);
+  pp.i[0] = 7;  // out of range
+  CHECK(!r2.e.resumeAt(&q, pp, r2.pv, r2.ok, 5, false));
+
+  // Timeline at 130 s: bottom holds 150 (80 s left), top ramps to 150 (30 s left)
+  progExample(2, p);
+  Sim t;
+  t.start(p);
+  t.runTo(130);
+  const RunPos tp = t.e.position();
+  CHECK(tp.st[0] == (uint8_t)Stage::Hold && near(tp.left[0], 80) && tp.i[1] == 1 && tp.st[1] == (uint8_t)Stage::Ramp &&
+        near(tp.left[1], 30));
+  q = p;
+  Sim u;
+  u.pv[0] = 140;
+  u.pv[1] = 50;
+  CHECK(u.e.resumeAt(&q, tp, u.pv, u.ok, 5, false));
+  CHECK(near(u.sp(0), 150) && u.e.lane(0).st == Stage::Hold && near(u.e.lane(0).el, 70));
+  CHECK(near(u.sp(1), 50) && u.e.lane(1).st == Stage::Ramp && near(u.e.out(1).rampLeft, 30));
+  u.t = 130;
+  u.pv[1] = 50;
+  u.runTo(145);
+  CHECK(near(u.sp(1), 100, 0.1f));
+  u.runTo(211);  // the bottom hold ends at 210 -> step 2 (ramp to 165)
+  CHECK(u.e.lane(0).idx == 1 && u.e.lane(0).st == Stage::Ramp);
+  u.runTo(1000);
+  CHECK(u.e.state() == RunState::Finished && near(u.e.elapsed(), 450, 1.01f));
+  // a finished lane keeps its last target; idle steps continue
+  RunPos dp = tp;
+  dp.i[0] = 2;
+  dp.st[0] = (uint8_t)Stage::Idle;
+  dp.left[0] = 20;
+  dp.i[1] = 6;
+  dp.st[1] = (uint8_t)Stage::Done;
+  Sim v;
+  CHECK(v.e.resumeAt(&q, dp, v.pv, v.ok, 5, false));
+  CHECK(v.e.out(0).idle && v.e.lane(0).st == Stage::Idle && near(v.e.lane(0).el, 40));
+  CHECK(v.e.lane(1).st == Stage::Done && near(v.sp(1), 150));
+  v.t = tp.el;
+  v.runTo(tp.el + 25);
+  CHECK(v.e.state() == RunState::Finished);
+}
+
 struct EvRec {
   PlanEv e[64];
   int n = 0;
@@ -815,6 +885,7 @@ int main() {
   testSeqEdits();
   testTimelineEdits();
   testEvents();
+  testResume();
   testSettingsDefaults();
   testSettingsJson();
   testSettingsMerge();

@@ -69,9 +69,13 @@ button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
 .zbar input[type=range]{flex:1;min-width:120px;accent-color:var(--acc)}
 .zr{color:var(--muted);font-size:13px;margin-left:4px}
 #histCsv{margin-left:auto;min-height:30px;padding:3px 12px}
+#histCsv.dis{opacity:.45}
 .legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted);margin-top:8px}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .sw{display:inline-block;width:18px;height:10px;border-radius:2px}
+.legend .lt{font:inherit;font-size:13px;color:var(--text);min-height:30px;padding:3px 10px;gap:6px;border-radius:999px}
+.legend .lt[aria-pressed=false]{color:var(--muted);background:transparent;border-style:dashed}.legend .lt[aria-pressed=false] .sw{opacity:.25}
+.legend .lh{color:var(--muted)}
 .msg{margin-top:8px;font-size:14px;color:var(--muted);min-height:1.4em}.msg.bad{color:var(--danger)}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
 .chan{border-top:4px solid var(--c)}
@@ -99,6 +103,9 @@ button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
 .log li span{color:var(--muted)}
 .halt{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:24px}
 .halt[hidden]{display:none}
+.intr{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin:0 0 12px;padding:12px 14px;border:2px solid var(--danger);border-radius:10px;background:var(--sunk)}
+.intr b{color:var(--danger);font-size:16px}.intr .t{flex:1 1 320px;min-width:0}.intr small{display:block;color:var(--muted);margin-top:2px}
+.intr .btns{display:flex;gap:8px;flex-wrap:wrap}
 .halt>div{background:var(--panel);border:3px solid var(--amber);border-radius:14px;padding:28px 32px;max-width:560px;width:100%;text-align:center}
 .halt h2{font-size:44px;line-height:1.05;margin:0 0 10px;color:var(--amber)}
 .halt .txt{font-size:22px;font-weight:600;margin:0 0 8px}
@@ -285,6 +292,8 @@ table.t input{width:90px}
     <button id="bNext" title="Sequence: ramp → hold → next phase; a wait for the bottom is skipped">Next phase</button>
     <span class="clock"><span id="badge" class="state">Ready</span><span id="clock">0:00</span><small id="remain"></small></span>
   </div>
+  <div class="intr" id="intr" hidden role="alert"><div class="t"><b>Run interrupted by a reset</b> <span id="intrTxt"></span><small id="intrNote"></small></div>
+    <span class="btns"><button class="pri" id="bRecover">Resume</button><button id="bDismiss">Dismiss</button></span></div>
   <div class="bar" style="margin-bottom:6px">
     <span class="seg" role="group" aria-label="Chart"><button id="vProg" aria-pressed="true">Program</button><button id="vLive" aria-pressed="false">Live</button></span>
     <label class="f" id="lmWrap" hidden>Period <select id="liveMin" aria-label="Live chart period"></select></label>
@@ -571,6 +580,9 @@ function liveMinSel(d){ const sel=$('liveMin'), cap=Math.floor((d.cap||d.span)/6
   const v=[5,10,15,30,60,120,240,480,720,1440].filter(m=>m<=cap); if(!v.includes(cap)) v.push(cap);
   const lab=m=>m%60?`${m} min`:`${m/60} h`, key=v.join()+'|'+cur;
   if(sel.dataset.k!==key&&document.activeElement!==sel){ sel.dataset.k=key; sel.innerHTML=v.map(m=>`<option value="${m}" ${m===cur?'selected':''}>${lab(m)}</option>`).join(''); } }
+$('legend').onclick=e=>{ const b=e.target.closest('[data-lv]'); if(!b) return; const k=b.dataset.lv.slice(0,2), i=+b.dataset.lv[2];
+  LVIS[k][i]=LVIS[k][i]?0:1; try{ localStorage.setItem('lvis',JSON.stringify(LVIS)); }catch(e){} legend(); lastChart=0; };
+$('histCsv').onclick=e=>{ if(!(lvMask('pv')|lvMask('sp'))){ e.preventDefault(); note('Switch on at least one PV or SP to export.',true); } };
 $('liveMin').onchange=async e=>{ const r=await postCfg({display:{liveMin:+e.target.value}}); if(r&&r.err) $('msg').textContent=r.err; chartAt=0; poll(); };
 let M=null;
 async function refreshChart(){
@@ -621,11 +633,11 @@ const LANE_ST={x:['url(#hatch)',.9],p:['var(--muted)',.28],r:[null,.35],h:[null,
 function lanesSvg(i){ let o=''; for(const r of M.lanes[i]){ const m=LANE_ST[r.c]; if(!m) continue; const x0=X(r.t0),w=Math.max(X(r.t1)-x0,.5);
   o+=`<rect x="${x0.toFixed(1)}" y="${LANE[i]}" width="${w.toFixed(1)}" height="${LH}" style="fill:${m[0]||PV[i]};opacity:${m[1]*(r.f?.7:1)}"/>`; } return o; }
 let YSTEP=50;
-function yRange(){ let mx=0; const see=v=>{ if(v!=null) mx=Math.max(mx,v); };
-  for(const i of CH){ M.hist[i].pv.forEach(p=>see(p[1])); M.hist[i].sp.forEach(p=>see(p[1])); M.segs[i].forEach(s=>{see(s.v0);see(s.v1);}); }
+function yRange(){ let mx=0; const see=v=>{ if(v!=null) mx=Math.max(mx,v); }, lv=M.kind==='live';
+  for(const i of CH){ if(!lv||LVIS.pv[i]) M.hist[i].pv.forEach(p=>see(p[1])); if(!lv||LVIS.sp[i]) M.hist[i].sp.forEach(p=>see(p[1])); M.segs[i].forEach(s=>{see(s.v0);see(s.v1);}); }
   YMIN=0;
   if(M.kind==='live'){ // always 0 .. the highest value in view (incl. the newest reading), on a round step
-    if(M.head) M.head.v.forEach(see);
+    if(M.head) M.head.v.forEach((v,i)=>{ if(LVIS.pv[i]) see(v); });
     const top=Math.max(mx*1.06,mx+2,10); YSTEP=[1,2,5,10,20,25,50,100,200,250,500].find(st=>top/st<=7)||1000; YMAX=Math.ceil(top/YSTEP)*YSTEP; return; }
   YMAX=Math.max(100,Math.ceil((mx+15)/50)*50); YSTEP=YMAX>300?100:50; }
 function renderChart(){
@@ -640,7 +652,8 @@ function renderChart(){
   s+=`<text x="${CL-6}" y="${PT-8}" text-anchor="end" style="fill:var(--muted);font-size:12px">°C</text>`;
   const step=tickStep();
   for(let t=Math.ceil(V0/step)*step;t<=V1+1e-6;t+=step) s+=`<text x="${X(t)}" y="${PB+18}" text-anchor="middle" style="fill:var(--muted);font-size:12px">${(t<0?'−':'')+(step>=3600&&t?Math.abs(t)/3600+' h':fmt(Math.abs(t)))}</text>`;
-  const prog=M.kind!=='live';
+  const prog=M.kind!=='live', lv=!prog;
+  if(legendKind!==(lv?'live':'prog')) legend();
   if(prog){ for(const i of CH){ s+=`<text x="${CL-6}" y="${LANE[i]+13}" text-anchor="end" style="fill:${PV[i]};font-size:12px;font-weight:600">${esc(chName(i).slice(0,CW<600?4:9))}</text><rect x="${CL}" y="${LANE[i]}" width="${plotW()}" height="${LH}" style="fill:none;stroke:var(--line)"/>`; }
     // separator between the state lanes and the chart
     s+=`<line x1="4" x2="${CW-4}" y1="${LANE[1]+LH+10}" y2="${LANE[1]+LH+10}" style="stroke:var(--line);stroke-width:2"/>`; }
@@ -665,10 +678,11 @@ function renderChart(){
         s+=`<text x="${X(e.t)+6}" y="${Y(v)-11}" style="fill:var(--text);font-size:11.5px;paint-order:stroke;stroke:var(--panel);stroke-width:3px">${fmt(e.t)}</text>`; } }
   }
   for(const i of CH){
-    s+=`<path d="${pathOf(M.hist[i].sp)}" style="fill:none;stroke:${SP[i]};stroke-width:1.8;stroke-linejoin:round"/>`;
-    s+=`<path d="${pathOf(M.hist[i].pv)}" style="fill:none;stroke:${PV[i]};stroke-width:2.5;stroke-linejoin:round"/>`;
+    const shSp=!lv||LVIS.sp[i], shPv=!lv||LVIS.pv[i];
+    if(shSp) s+=`<path d="${pathOf(M.hist[i].sp)}" style="fill:none;stroke:${SP[i]};stroke-width:1.8;stroke-linejoin:round"/>`;
+    if(shPv) s+=`<path d="${pathOf(M.hist[i].pv)}" style="fill:none;stroke:${PV[i]};stroke-width:2.5;stroke-linejoin:round"/>`;
     // newest reading (polled faster than the chart history is fetched): line from the last point + dot
-    const hp=M.hist[i].pv, hv=M.head&&M.head.v[i];
+    const hp=M.hist[i].pv, hv=shPv&&M.head?M.head.v[i]:null;
     if(hv!=null){ const L=hp.length?hp[hp.length-1]:null;
       if(L&&M.head.t-L[0]<8) s+=`<path d="M${X(L[0]).toFixed(1)} ${Y(L[1]).toFixed(1)}L${X(M.head.t).toFixed(1)} ${Y(hv).toFixed(1)}" style="fill:none;stroke:${PV[i]};stroke-width:2.5"/>`;
       s+=`<circle cx="${X(M.head.t).toFixed(1)}" cy="${Y(hv).toFixed(1)}" r="3.5" style="fill:${PV[i]}"/>`; }
@@ -681,10 +695,19 @@ function renderChart(){
   const zs=$('zscroll'); $('zbar').hidden=!prog; zs.hidden=zv.fit; $('zfit').disabled=zv.fit;
   if(!zv.fit){ zs.max=Math.max(0,xfull-zv.span); zs.step=1; if(document.activeElement!==zs) zs.value=zv.v0; }
   $('zrange').textContent=zv.fit?'Whole program':`${fmt(V0)} – ${fmt(V1)}`;
-  const lv=M.kind==='live'; $('lmWrap').hidden=!lv; $('histCsv').hidden=!lv;
+  $('lmWrap').hidden=!lv; $('histCsv').hidden=!lv;
   $('chartCap').textContent=lv?(M.have<M.cap?`${fmt(M.have)} recorded`:`memory holds ${fmt(M.cap)}`):M.kind==='preview'?`Preview of “${M.prog?M.prog.name:''}”${hasWaits(M.prog)?' (waits not counted)':''}`:M.kind==='last'?'Last run':'';
 }
-function legend(){ const n=[chName(0),chName(1)];
+// Live view: PV / SP of each channel can be switched off (chart, scale and CSV export; kept by the browser)
+let LVIS={pv:[1,1],sp:[1,1]}; try{ const v=JSON.parse(localStorage.getItem('lvis')); if(v&&v.pv&&v.sp) LVIS=v; }catch(e){}
+const lvMask=k=>CH.reduce((m,i)=>m|(LVIS[k][i]?1<<i:0),0);
+function histHref(){ const a=$('histCsv'), p=lvMask('pv'), s=lvMask('sp'); a.href=`/api/history.csv?pv=${p}&sp=${s}`;
+  a.classList.toggle('dis',!(p|s)); a.setAttribute('aria-disabled',!(p|s)); }
+let legendKind='';
+function legend(){ const n=[chName(0),chName(1)]; legendKind=M&&M.kind==='live'?'live':'prog';
+  if(legendKind==='live'){ histHref();
+    $('legend').innerHTML=`<span class="lh">Show / export:</span>`+CH.map(i=>['pv','sp'].map(k=>`<button class="lt" data-lv="${k}${i}" aria-pressed="${!!LVIS[k][i]}"><i class="sw" style="background:${k==='pv'?PV[i]:SP[i]}${k==='sp'?';height:4px':''}"></i>${esc(n[i])} ${k.toUpperCase()}</button>`).join('')).join('');
+    return; }
   $('legend').innerHTML=CH.map(i=>`<span><i class="sw" style="background:${PV[i]}"></i>${esc(n[i])} PV</span><span><i class="sw" style="background:${SP[i]};height:4px"></i>${esc(n[i])} SP</span>`).join('')+
   `<span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="var(--muted)" stroke-width="2" stroke-dasharray="6 4"/></svg>Forecast / plan</span>
   <span><i class="sw" style="background:var(--amber)"></i>Waiting for ${esc(n[0])}</span>
@@ -1035,7 +1058,14 @@ function updateRun(){
   $('bStop').disabled=!active;
   $('bNext').disabled=!active||r.type!=='seq'||r.progPause||r.state==='paused';
   $('prog').disabled=active;
-  note(r.msg,/cannot|fault|failed|not possible|no answer/i.test(r.msg||''));
+  note(r.intr&&/^Run interrupted/.test(r.msg||'')?'':r.msg,/cannot|fault|failed|not possible|no answer/i.test(r.msg||''));
+  // run interrupted by a reset: resume (never automatic) or dismiss
+  const x=r.intr, ib=$('intr'); ib.hidden=!x;
+  if(x){ const st=k=>({ramp:'ramp',hold:'hold',idle:'off',wait:'waiting',pause:'pause',done:'done'})[x.st[k]]||x.st[k];
+    const where=r.type==='seq'?`phase ${x.i[0]+1}${r.phases?' of '+r.phases:''} (${st(0)})`:CH.map(k=>`${esc(chName(k))}: ${x.st[k]==='done'?'done':`step ${x.i[k]+1} ${st(k)}${x.left[k]?' ('+fmt(x.left[k])+' left)':''}`}`).join(', ');
+    $('intrTxt').innerHTML=`(${esc(x.reason)}): “${esc(r.name||'')}” at run time ${x.exact?'':'about '}${fmt(x.el)}, ${where}.`;
+    $('intrNote').textContent='Its channels were switched off. '+(r.type==='seq'?`Resume starts phase ${x.i[0]+1} again from the measured temperatures.`:'Resume goes on at that run time: ramps from the measured temperatures, holds with their remaining time.')+(x.exact?'':' (Position as of the last phase / step change or minute: the board was off.)');
+    $('bRecover').textContent=r.type==='seq'?`Resume from phase ${x.i[0]+1}`:`Resume at ${fmt(x.el)}`; }
   const showHalt=active&&r.progPause&&r.actionRequired, hb=$('halt');
   if(hb.hidden===!!showHalt){ hb.hidden=!showHalt; if(showHalt) $('hCont').focus(); }
   if(showHalt){ $('haltText').textContent=r.pauseText||''; $('haltWhere').textContent=`${r.name}${r.seq?', phase '+(r.seq.idx+1):''}. Setpoints are kept until you continue.`; }
@@ -1048,6 +1078,7 @@ function updateRun(){
 }
 const cmd=c=>api('/api/cmd',{cmd:c,prog:live?live.sel:-1}).then(()=>{chartAt=0;poll();});
 $('bStart').onclick=async()=>{ if(!live) return; if(live.run.state==='paused'){ cmd('resume'); return; }
+  if(live.run.intr&&!await ask('Start a new run? The interrupted run can no longer be resumed afterwards.','Start')) return;
   const i=live.sel; showLast=true;
   if(isDirty(i)){ const a=await choose(`“${DRAFT[i].name}” has unsaved changes.`,[['save','Save and start',true],['draft','Start without saving'],['cancel','Cancel']]);
     if(a==='save'){ if(await saveDraft(i)) cmd('start'); }
@@ -1058,13 +1089,19 @@ $('bPause').onclick=()=>{ if(live&&live.run.progPause) cmd('continue'); else cmd
 $('bStop').onclick=async()=>{ if(await ask('Stop the program? Each channel applies its end action.','Stop')) cmd('stop'); };
 $('bNext').onclick=()=>cmd('next');
 $('hCont').onclick=()=>cmd('continue');
+$('bRecover').onclick=async()=>{ const r=await api('/api/run',{cmd:'recover'}); if(r&&r.err) note(r.err,true); showLast=true; chartAt=0; poll(); };
+$('bDismiss').onclick=async()=>{ if(await ask('Dismiss the interrupted run? Its channels stay off; it cannot be resumed afterwards.','Dismiss')){ await api('/api/run',{cmd:'dismiss'}); poll(); } };
 $('hStop').onclick=async()=>{ if(await ask('Stop the program? Each channel applies its end action.','Stop')) cmd('stop'); };
 $('dSave').onclick=async()=>{ $('saveDlg').close(); await api('/api/run',{cmd:'save'}); if(live){ savedGen[live.run.prog]=-1; delete DRAFT[live.run.prog]; } poll(); };
 $('dDiscard').onclick=()=>$('saveDlg').close();
 
 /* ---------- event log ---------- */
+let logUp=0;
 async function updateLog(){
-  if(!live||live.logSeq===logSeq) return;
+  if(!live) return;
+  if(live.logSeq<logSeq||live.up<logUp){ logSeq=0; logList.push({seq:0,wall:Date.now()/1000-live.up,rt:null,msg:'— device restarted —'}); }  // new log
+  logUp=live.up;
+  if(live.logSeq===logSeq) return;
   const d=await api('/api/log?since='+logSeq); logSeq=d.seq;
   const base=Date.now()/1000-d.up;
   for(const [seq,up,rt,msg] of d.log) logList.push({seq,wall:base+up,rt,msg});

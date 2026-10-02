@@ -68,6 +68,12 @@ struct LiveData {
   float lastWrittenSp;
   uint32_t spWrites;  // count of SP writes (EEPROM wear indicator)
   char runMsg[128];
+
+  // ---- "Run interrupted by a reset" offer (spec 9.3.5); the program is runProg / runName ----
+  bool intrValid;
+  bool intrExact;     // exact position (RTC memory) - else as of the last phase / step change or minute
+  RunPos intrPos;
+  char intrReason[20];
 };
 
 constexpr int RUN_EV_MAX = 400;
@@ -173,6 +179,8 @@ enum CmdType : uint8_t {
   CMD_TUNE_STOP,    // arg = channel
   CMD_RUN_EDIT,     // sub = RunEdit, arg = channel, idx = phase/step (-1 current), value
   CMD_SAVE_RUN,     // store the running copy (with its run edits) into its slot
+  CMD_RUN_RECOVER,  // "Resume from the interrupted phase" (run interrupted by a reset)
+  CMD_RUN_DISMISS,  // dismiss the interrupted run
 };
 
 enum RunEdit : uint8_t {
@@ -247,7 +255,8 @@ float runSpanFor(float total);   // x axis length for a program: total + spare
 void chartSnapshot(ChartData& d);
 // Live history as CSV: rows from slot `from` (counted since boot; the oldest kept slot if older) on,
 // as many as fit into buf. Returns the length (0 = done) and the next slot in `from`.
-size_t liveCsv(uint32_t& from, char* buf, size_t n);
+// pvMask / spMask: channels (bit 0 bottom, bit 1 top) whose PV (+ lowest, highest) / setpoint are written
+size_t liveCsv(uint32_t& from, char* buf, size_t n, uint8_t pvMask = 3, uint8_t spMask = 3);
 uint32_t liveHistSec();          // seconds the live history can hold
 uint32_t iramPureFree();         // free IRAM-only heap (32-bit access only, not usable as DRAM)
 // /api/chart: v = "run" (current / last run with its forecast) or "live" (rolling window)

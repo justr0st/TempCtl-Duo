@@ -278,17 +278,27 @@ static void handleStatus() {
   sendJson(d);
 }
 
-// The whole live history (both channels, one row per slot), streamed
+// The whole live history (one row per slot), streamed. ?pv=3&sp=3: channels (bit 0 bottom, bit 1
+// top) whose PV (+ lowest, highest) / setpoint columns are included (default all)
 static void handleHistCsv() {
+  const uint8_t pvMask = server.hasArg("pv") ? (uint8_t)(server.arg("pv").toInt() & 3) : 3;
+  const uint8_t spMask = server.hasArg("sp") ? (uint8_t)(server.arg("sp").toInt() & 3) : 3;
   extraHeaders = "Content-Disposition: attachment; filename=tempctl-duo-history.csv\r\nCache-Control: no-store\r\n";
   uint32_t from = 0;
   bool head = true;
   sendStream("text/csv", "history.csv", [&](char* b, size_t n) -> size_t {
     if (head) {
       head = false;
-      return snprintf(b, n, "time_s,uptime_s,bottom_pv,bottom_min,bottom_max,bottom_sp,top_pv,top_min,top_max,top_sp\n");
+      static const char* const K[NUM_CHANNELS] = {"bottom", "top"};
+      int w = snprintf(b, n, "time_s,uptime_s");
+      for (int c = 0; c < NUM_CHANNELS; ++c) {
+        if (pvMask & (1 << c)) w += snprintf(b + w, n - w, ",%s_pv,%s_min,%s_max", K[c], K[c], K[c]);
+        if (spMask & (1 << c)) w += snprintf(b + w, n - w, ",%s_sp", K[c]);
+      }
+      w += snprintf(b + w, n - w, "\n");
+      return w;
     }
-    return liveCsv(from, b, n);
+    return liveCsv(from, b, n, pvMask, spMask);
   });
 }
 
@@ -500,7 +510,9 @@ static void handlePostRun() {
   }
   else if (!strcmp(c, "next")) ok = sendCmd(CMD_NEXT);
   else if (!strcmp(c, "continue")) ok = sendCmd(CMD_CONTINUE);
-  else return sendError("cmd must be extend, hold, ramp, target, save, start, next or continue");
+  else if (!strcmp(c, "recover")) ok = sendCmd(CMD_RUN_RECOVER);  // resume the run interrupted by a reset
+  else if (!strcmp(c, "dismiss")) ok = sendCmd(CMD_RUN_DISMISS);
+  else return sendError("cmd must be extend, hold, ramp, target, save, start, next, continue, recover or dismiss");
   JsonDocument r;
   r["ok"] = ok;
   sendJson(r);
@@ -935,6 +947,18 @@ static void handleLive() {
     }
   }
   r["msg"] = L.runMsg;
+  if (L.intrValid) {  // "Run interrupted by a reset": where it was (program = prog / name / type)
+    JsonObject x = r["intr"].to<JsonObject>();
+    x["reason"] = L.intrReason;
+    x["exact"] = L.intrExact;
+    x["el"] = roundf(L.intrPos.el);
+    JsonArray xi = x["i"].to<JsonArray>(), xs = x["st"].to<JsonArray>(), xl = x["left"].to<JsonArray>();
+    for (int i = 0; i < NUM_CHANNELS; ++i) {
+      xi.add(L.intrPos.i[i]);
+      xs.add(stageName((Stage)L.intrPos.st[i]));
+      xl.add(roundf(L.intrPos.left[i]));
+    }
+  }
   JsonArray a = d["ch"].to<JsonArray>();
   for (int i = 0; i < NUM_CHANNELS; ++i) {
     const ChannelLive& C = L.ch[i];

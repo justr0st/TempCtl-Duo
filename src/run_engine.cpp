@@ -324,8 +324,7 @@ void RunEngine::advance(float d) {
   }
 }
 
-bool RunEngine::start(DuoProgram* p, const float* pv, const bool* pvOk, float band) {
-  if (!p || progItems(*p) == 0) return false;
+void RunEngine::begin(DuoProgram* p, const float* pv, const bool* pvOk, float band) {
   const uint32_t g0 = gen_[0], g1 = gen_[1];
   const EvFn efn = evFn_;
   void* const eu = evUser_;
@@ -344,6 +343,11 @@ bool RunEngine::start(DuoProgram* p, const float* pv, const bool* pvOk, float ba
   }
   st_ = RunState::Running;
   evT_ = 0;
+}
+
+bool RunEngine::start(DuoProgram* p, const float* pv, const bool* pvOk, float band) {
+  if (!p || progItems(*p) == 0) return false;
+  begin(p, pv, pvOk, band);
   if (p->type == PROG_SEQ) {
     startPhase(0);
   } else {
@@ -354,6 +358,117 @@ bool RunEngine::start(DuoProgram* p, const float* pv, const bool* pvOk, float ba
   settle();
   bumpAll();
   return true;
+}
+
+bool RunEngine::keptBefore(int ch, int idx, float& t, int& src) const {
+  bool has = false;
+  if (p_->type == PROG_SEQ) {
+    for (int j = 0; j < idx && j < p_->nPh; ++j) {
+      const SeqPhase& f = p_->ph[j];
+      if (ch == CH_BOTTOM && (f.kind == PH_B || (f.kind == PH_BT && !f.bIdle))) {
+        t = f.b.t;
+        has = true;
+        src = j;
+      } else if (ch == CH_BOTTOM && f.kind == PH_BT) {
+        has = false;  // idle
+      } else if (ch == CH_TOP && (f.kind == PH_T || f.kind == PH_BT)) {
+        t = f.t.t;
+        has = true;
+        src = j;
+      }
+    }
+  } else {
+    for (int j = 0; j < idx && j < p_->nSt[ch]; ++j) {
+      const TlStep& x = p_->st[ch][j];
+      if (x.kind == ST_TARGET) {
+        t = x.s.t;
+        has = true;
+        src = j;
+      } else if (x.kind == ST_IDLE) {
+        has = false;
+      }
+    }
+  }
+  return has;
+}
+
+bool RunEngine::resumeAt(DuoProgram* p, const RunPos& r, const float* pv, const bool* pvOk, float band, bool edited) {
+  if (!p || progItems(*p) == 0) return false;
+  if (p->type == PROG_SEQ && (r.i[0] < 0 || r.i[0] >= p->nPh)) return false;
+  begin(p, pv, pvOk, band);
+  el_ = r.el > 0 ? r.el : 0;
+  evT_ = el_;
+  edited_ = edited;
+  float t;
+  int src;
+  if (p->type == PROG_SEQ) {
+    const int k = r.i[0];
+    const SeqPhase& f = p->ph[k];
+    // channels the phase starts itself begin at the measured value (idle generator)
+    const bool own[NUM_CHANNELS] = {f.kind == PH_B || f.kind == PH_BT,
+                                    f.kind == PH_T || (f.kind == PH_BT && !(f.wait && !f.bIdle))};
+    for (int ch = 0; ch < NUM_CHANNELS; ++ch)
+      if (!own[ch] && keptBefore(ch, k, t, src)) jump(ch, t, src);
+    startPhase(k);
+  } else {
+    for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+      Lane& L = lane_[ch];
+      const int n = p->nSt[ch];
+      const int i = r.i[ch] < 0 ? 0 : r.i[ch];
+      const float left = r.left[ch] > 0 ? r.left[ch] : 0;
+      if (i >= n) {  // this channel's steps were over: it keeps its last target
+        if (keptBefore(ch, n, t, src)) jump(ch, t, src);
+        L.i = (int16_t)n;
+        L.st = Stage::Done;
+        L.el = 0;
+        continue;
+      }
+      const TlStep& x = p->st[ch][i];
+      const Stage stg = (Stage)r.st[ch];
+      L.i = (int16_t)i;
+      L.el = 0;
+      if (x.kind == ST_TARGET && stg == Stage::Ramp) {
+        ev(EV_STEP, ch, i);
+        startRamp(ch, x.s.t, (uint32_t)lroundf(left), i);
+        L.st = Stage::Ramp;
+      } else if (x.kind == ST_TARGET && stg == Stage::Hold) {
+        jump(ch, x.s.t, i);
+        L.st = Stage::Hold;
+        L.el = (float)x.s.h - left > 0 ? (float)x.s.h - left : 0;
+      } else if (x.kind == ST_IDLE && stg == Stage::Idle) {
+        ev(EV_STEP, ch, i);
+        L.st = Stage::Idle;
+        L.el = (float)x.s.h - left > 0 ? (float)x.s.h - left : 0;
+      } else {  // a pause, or a stage that doesn't fit the step: the step from its beginning
+        if (keptBefore(ch, i, t, src)) jump(ch, t, src);
+        startStep(ch, i);
+      }
+    }
+    updatePause();
+  }
+  settle();
+  bumpAll();
+  return true;
+}
+
+RunPos RunEngine::position() const {
+  RunPos r;
+  memset(&r, 0, sizeof(r));
+  r.el = el_;
+  if (!p_) return r;
+  if (p_->type == PROG_SEQ) {
+    r.i[0] = seq_.i;
+    r.st[0] = (uint8_t)seq_.st;
+    return r;
+  }
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    const Lane& L = lane_[ch];
+    r.i[ch] = L.i;
+    r.st[ch] = (uint8_t)L.st;
+    if (L.st == Stage::Ramp) r.left[ch] = genLeft(g_[ch]);
+    else if ((L.st == Stage::Hold || L.st == Stage::Idle) && L.i < p_->nSt[ch]) r.left[ch] = (float)p_->st[ch][L.i].s.h - L.el;
+  }
+  return r;
 }
 
 void RunEngine::tick(float dt, const float* pv, const bool* pvOk) {

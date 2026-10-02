@@ -59,6 +59,40 @@ struct Manual {
   bool offPending = false;  // outputs off still to be written
 };
 static Manual man[NUM_CHANNELS];
+// Modbus: the controller's setpoint counts as active (chart, history) while the run or the manual
+// setpoint drives it, and after the end of a run that kept or set it. Local channels: while on.
+static bool spHeld[NUM_CHANNELS];
+
+// ---- "Run interrupted by a reset" (spec 9.3.5)
+// RTC memory keeps the exact position over a reset (not a power loss); /duo/run.json + runpos.json
+// (program_store) keep the running copy and the position as of the last phase / step change or minute.
+struct RunRtc {
+  uint32_t magic, id;
+  RunPos pos;
+  uint32_t sum;
+};
+RTC_NOINIT_ATTR static RunRtc rtcRun;
+static constexpr uint32_t RTC_MAGIC = 0x52554E31;  // "RUN1"
+static uint32_t rtcSum(const RunRtc& r) {
+  uint32_t h = 2166136261u;
+  const uint8_t* b = (const uint8_t*)&r;
+  for (size_t i = 0; i < offsetof(RunRtc, sum); ++i) h = (h ^ b[i]) * 16777619u;
+  return h;
+}
+static RunFileInfo runInfo;        // the current run
+static RunPos posFlash;            // position last written to flash
+static uint32_t posFlashMs = 0;
+struct Interrupted {
+  bool valid;
+  bool exact;                      // position from RTC memory (else: flash, up to a minute old)
+  RunFileInfo info;
+  RunPos pos;
+  char reason[20];
+};
+static Interrupted intr;           // the offer (the program is in runProg)
+static bool intrOff[NUM_CHANNELS];      // outputs off still to be written (interrupted run's channels)
+static bool intrCleanup[NUM_CHANNELS];  // dismissed: outputs off, gradient / front lock restore
+static RunFileInfo cleanInfo;
 
 // ------------------------------------------------------------------ helpers
 
@@ -280,7 +314,7 @@ static void liveRow(uint32_t k, LiveField f, int c, int32_t* out) {
 #endif
 }
 
-size_t liveCsv(uint32_t& from, char* buf, size_t n) {
+size_t liveCsv(uint32_t& from, char* buf, size_t n, uint8_t pvMask, uint8_t spMask) {
   size_t len = 0;
   Guard g;
   if (!gHist->liveRing) return 0;
@@ -301,12 +335,28 @@ size_t liveCsv(uint32_t& from, char* buf, size_t n) {
       num(f[c * 4 + 2], sizeof(f[0]), x.hi[c]);
       num(f[c * 4 + 3], sizeof(f[0]), x.sp[c]);
     }
-    // time: seconds before the newest slot, and uptime (as in the event log)
+    // time: seconds before the newest slot, and uptime (as in the event log); then the chosen columns
+    // (pv, min, max / sp per channel). Rows without any of them are left out.
     const long age = (long)(tot - 1 - from) * LIVE_SAMPLE_SEC;
     char line[112];
-    const int w = snprintf(line, sizeof(line), "%ld,%ld,%s,%s,%s,%s,%s,%s,%s,%s\n", -age, (long)nowSec - age, f[0], f[1],
-                           f[2], f[3], f[4], f[5], f[6], f[7]);
-    if (w <= 0 || len + (size_t)w > n) break;
+    int w = snprintf(line, sizeof(line), "%ld,%ld", -age, (long)nowSec - age);
+    bool any = false;
+    for (int c = 0; c < NUM_CHANNELS; ++c) {
+      if (pvMask & (1 << c)) {
+        w += snprintf(line + w, sizeof(line) - w, ",%s,%s,%s", f[c * 4], f[c * 4 + 1], f[c * 4 + 2]);
+        any |= f[c * 4][0] != 0;
+      }
+      if (spMask & (1 << c)) {
+        w += snprintf(line + w, sizeof(line) - w, ",%s", f[c * 4 + 3]);
+        any |= f[c * 4 + 3][0] != 0;
+      }
+    }
+    w += snprintf(line + w, sizeof(line) - w, "\n");
+    if (!any) {
+      ++from;
+      continue;
+    }
+    if (len + (size_t)w > n) break;
     memcpy(buf + len, line, w);
     len += w;
     ++from;
@@ -836,6 +886,35 @@ static bool tuning(int ch) {
   return st.tuning;
 }
 
+// keeps the run's files and RTC record up to date
+static void saveRunFile() {
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    runInfo.rampSaved[ch] = drv[ch].rampSaved;
+    runInfo.rampOrig[ch] = drv[ch].rampOriginal;
+  }
+  runFileSave(runInfo, *runProg);
+}
+
+static void runTrack(bool force) {
+  const RunPos p = eng.position();
+  rtcRun.magic = RTC_MAGIC;
+  rtcRun.id = runInfo.id;
+  rtcRun.pos = p;
+  rtcRun.sum = rtcSum(rtcRun);
+  bool moved = false;
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) moved |= p.i[ch] != posFlash.i[ch] || p.st[ch] != posFlash.st[ch];
+  if (force || moved || millis() - posFlashMs >= 60000) {
+    runPosSave(runInfo.id, p);
+    posFlash = p;
+    posFlashMs = millis();
+  }
+}
+
+static void runForget() {
+  rtcRun.magic = 0;
+  runFileClear();
+}
+
 static DuoProgram* startBuf = nullptr;  // "Start without saving": the web page's draft (under gLock)
 
 bool startDraft(int idx, const DuoProgram& p) {
@@ -849,6 +928,10 @@ bool startDraft(int idx, const DuoProgram& p) {
   return sendCmd(CMD_START, idx, 0, -1, 1);
 }
 
+static bool runChecks(const DuoProgram& p, float* pv, bool* ok, const char* verb);
+static void takeChannels(const DuoProgram& p, const RunFileInfo* ri);
+static void dismissInterrupted();
+
 static void startProgram(int idx, bool draft) {
   if (eng.active()) return;
   if (anyFault()) {
@@ -858,6 +941,13 @@ static void startProgram(int idx, bool draft) {
   if (idx < 0 || idx >= PROG_MAX) {
     Guard g;
     idx = gSettings.selProgram < PROG_MAX ? gSettings.selProgram : 0;
+  }
+  // starting ends the "interrupted" offer (its running copy is replaced); the controller gradients it
+  // saved are carried over to the channels the new run takes
+  const RunFileInfo* carry = nullptr;
+  if (intr.valid) {
+    dismissInterrupted();
+    carry = &cleanInfo;
   }
   DuoProgram& p = *runProg;
   char err[96];
@@ -884,6 +974,34 @@ static void startProgram(int idx, bool draft) {
   }
   float pv[NUM_CHANNELS];
   bool ok[NUM_CHANNELS];
+  if (!runChecks(p, pv, ok, "Cannot start")) return;
+  if (!eng.start(&p, pv, ok, s.bottomBand)) {
+    setMsg("Cannot start: the program has no phases/steps");
+    return;
+  }
+  runIdx = (int8_t)idx;
+  editCount = savedCount = 0;
+  takeChannels(p, carry);
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch)
+    if (progUses(p, ch)) intrCleanup[ch] = false;  // the new run restores them at its end
+  float rem;
+  {
+    Guard g;
+    histStartRun(eng.forecast(nullptr, nullptr, pv));
+  }
+  updatePlan(pv, rem);
+  memset(&runInfo, 0, sizeof(runInfo));
+  runInfo.slot = (int8_t)idx;
+  runInfo.id = esp_random() | 1;
+  saveRunFile();
+  runTrack(true);
+  say("Program \"%s\" started%s", p.name, draft ? " (unsaved changes)" : "");
+}
+
+// Start / resume conditions (channels on, setpoint registers, temperatures, limits); pv / ok = the
+// measured values. False after a message "<verb>: ..."
+static bool runChecks(const DuoProgram& p, float* pv, bool* ok, const char* verb) {
+  char err[96];
   const char* names[NUM_CHANNELS] = {s.ch[0].name, s.ch[1].name};
   float lo[NUM_CHANNELS], hi[NUM_CHANNELS];
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
@@ -897,25 +1015,25 @@ static void startProgram(int idx, bool draft) {
     if (!progUses(p, ch)) continue;
     const char* n = names[ch];
     if (s.ch[ch].type == CH_OFF) {
-      say("Cannot start: \"%s\" uses %s, which is off (Settings)", p.name, n);
-      return;
+      say("%s: \"%s\" uses %s, which is off (Settings)", verb, p.name, n);
+      return false;
     }
     if (tuning(ch)) {
-      say("Cannot start: autotune is running on %s", n);
-      return;
+      say("%s: autotune is running on %s", verb, n);
+      return false;
     }
     if (!chan(ch).spConfigured()) {
-      say("Cannot start: %s has no setpoint register (web: Controller)", n);
-      return;
+      say("%s: %s has no setpoint register (web: Controller)", verb, n);
+      return false;
     }
     if (!ok[ch]) {
-      say("Cannot start: no valid temperature from %s", n);
-      return;
+      say("%s: no valid temperature from %s", verb, n);
+      return false;
     }
   }
   if (!progCheckLimits(p, lo, hi, err, sizeof(err), names)) {
-    say("Cannot start: %s", err);
-    return;
+    say("%s: %s", verb, err);
+    return false;
   }
   // The controller silently clamps setpoints to SP.LO..SP.Hi: check before starting
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
@@ -929,16 +1047,17 @@ static void startProgram(int idx, bool draft) {
     const float cl[NUM_CHANNELS] = {ch == 0 ? l : -1e9f, ch == 1 ? l : -1e9f};
     const float chh[NUM_CHANNELS] = {ch == 0 ? h : 1e9f, ch == 1 ? h : 1e9f};
     if (!progCheckLimits(p, cl, chh, err, sizeof(err), names)) {
-      say("Cannot start (controller limits): %.90s", err);
-      return;
+      say("%s (controller limits): %.90s", verb, err);
+      return false;
     }
   }
-  if (!eng.start(&p, pv, ok, s.bottomBand)) {
-    setMsg("Cannot start: the program has no phases/steps");
-    return;
-  }
-  runIdx = (int8_t)idx;
-  editCount = savedCount = 0;
+  return true;
+}
+
+// The run takes over its channels (manual off, controller gradient off, front lock). ri: resuming an
+// interrupted run - the gradient to restore at the end is the one it saved.
+static void takeChannels(const DuoProgram& p, const RunFileInfo* ri) {
+  const char* names[NUM_CHANNELS] = {s.ch[0].name, s.ch[1].name};
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
     drv[ch] = Drive();
     if (!progUses(p, ch)) continue;  // manual channel: untouched
@@ -948,7 +1067,10 @@ static void startProgram(int idx, bool draft) {
     Controller* mc = mbOf(ch);
     if (hasRampReg(ch)) {  // remember the controller's own gradient to restore it at the end
       int16_t raw;
-      if (mc->readRaw(mc->reg().rampRate, raw) == MbResult::Ok) {
+      if (ri && ri->rampSaved[ch]) {
+        drv[ch].rampOriginal = ri->rampOrig[ch];
+        drv[ch].rampSaved = true;
+      } else if (mc->readRaw(mc->reg().rampRate, raw) == MbResult::Ok) {
         drv[ch].rampOriginal = raw;
         drv[ch].rampSaved = true;
       }
@@ -958,13 +1080,69 @@ static void startProgram(int idx, bool draft) {
     if (!chan(ch).canSwitchOff() && s.ch[ch].type == CH_MODBUS)
       Serial.printf("[run] %s has no outputs-off register: Idle keeps the controller's setpoint\n", names[ch]);
   }
+}
+
+// "Resume from the interrupted phase" (spec 9.3.5)
+static void resumeInterrupted() {
+  if (eng.active()) return;
+  if (!intr.valid) {
+    setMsg("No interrupted run to resume");
+    return;
+  }
+  if (anyFault()) {
+    setMsg("Cannot resume: acknowledge the channel fault first");
+    return;
+  }
+  DuoProgram& p = *runProg;  // the running copy, loaded from /duo/run.json at boot
+  float pv[NUM_CHANNELS];
+  bool ok[NUM_CHANNELS];
+  if (!runChecks(p, pv, ok, "Cannot resume")) return;
+  if (!eng.resumeAt(&p, intr.pos, pv, ok, s.bottomBand, intr.info.edited)) {
+    setMsg("Cannot resume: the interrupted phase is not in the program");
+    return;
+  }
+  runIdx = intr.info.slot;
+  editCount = intr.info.edited ? 1 : 0;
+  savedCount = 0;
+  takeChannels(p, &intr.info);
   float rem;
   {
     Guard g;
-    histStartRun(eng.forecast(nullptr, nullptr, pv));
+    histStartRun(eng.elapsed() + eng.forecast(nullptr, nullptr, pv));
+    gHist->runStLast = (int16_t)((int)(eng.elapsed() / gHist->runBin) - 1);  // lanes empty before the resume
   }
   updatePlan(pv, rem);
-  say("Program \"%s\" started%s", p.name, draft ? " (unsaved changes)" : "");
+  runInfo = intr.info;
+  intr.valid = false;
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) intrOff[ch] = false;
+  saveRunFile();
+  runTrack(true);
+  const int t = (int)eng.elapsed();
+  if (p.type == PROG_SEQ) say("Program \"%s\" resumed: phase %d again (run time %d:%02d)", p.name, eng.seq().idx + 1, t / 60, t % 60);
+  else say("Program \"%s\" resumed at run time %d:%02d", p.name, t / 60, t % 60);
+}
+
+static void dismissInterrupted() {
+  if (!intr.valid) return;
+  cleanInfo = intr.info;
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    intrCleanup[ch] = progUses(*runProg, ch) && s.ch[ch].type != CH_OFF;
+    intrOff[ch] = false;
+  }
+  intr.valid = false;
+  runForget();
+  setMsg("Interrupted run dismissed");
+}
+
+// outputs off (+ the controller's gradient and front panel back) for a dismissed run
+static bool cleanupChannel(int ch) {
+  Channel& c = chan(ch);
+  bool ok = true;
+  if (c.canSwitchOff()) ok &= c.setOutputs(false, lastErr[ch], sizeof(lastErr[0]));
+  Controller* mc = mbOf(ch);
+  if (mc && cleanInfo.rampSaved[ch] && hasRampReg(ch)) ok &= mbWrite(ch, mc->reg().rampRate, cleanInfo.rampOrig[ch], "Ramp-rate restore");
+  if (mc && s.ch[ch].mb.lockFront) ok &= mbWrite(ch, mc->reg().remote, 0, "Front-lock write");
+  return ok;
 }
 
 static void manualSwitch(int ch, bool on) {
@@ -1001,6 +1179,7 @@ static void manualSwitch(int ch, bool on) {
   } else {
     if (!m.on) return;
     m.on = false;
+    spHeld[ch] = false;
     m.pending = false;
     m.offPending = c.canSwitchOff();
     say(m.offPending ? "%s: manual off, outputs switched off"
@@ -1065,6 +1244,8 @@ static void runEdit(const Cmd& c) {
   }
   if (ok) {
     ++editCount;
+    runInfo.edited = 1;
+    saveRunFile();  // the running copy survives a reset
     static const char* const W[] = {"hold time", "hold extended", "ramp time", "target"};
     say("Run edit (%s, %s): %s%.1f", name, c.sub < 4 ? W[c.sub] : "?",
              c.sub == EDIT_EXTEND && c.value > 0 ? "+" : "", c.value);
@@ -1086,6 +1267,8 @@ static void saveRun() {
   }
   if (ok) {
     savedCount = editCount;
+    runInfo.edited = 0;
+    saveRunFile();
     say("Run changes saved into \"%s\"", runProg->name);
   } else {
     say("Saving the run changes failed: %s", err);
@@ -1114,6 +1297,8 @@ static void handleCmd(const Cmd& c) {
       break;
     case CMD_RUN_EDIT: runEdit(c); break;
     case CMD_SAVE_RUN: saveRun(); break;
+    case CMD_RUN_RECOVER: resumeInterrupted(); break;
+    case CMD_RUN_DISMISS: dismissInterrupted(); break;
     case CMD_SETTINGS_CHANGED: {
       static Settings prev;  // static: large
       prev = s;
@@ -1447,12 +1632,20 @@ static void cycle(float dt) {
       if (commOk[i]) driveSetpoint(i);
   for (int i = 0; i < NUM_CHANNELS; ++i)
     if (commOk[i]) driveManual(i);
+  if (eng.active()) runTrack(false);
+  // interrupted run: its channels' outputs off; dismissed: controller gradient / front panel back
+  for (int i = 0; i < NUM_CHANNELS; ++i) {
+    if (!commOk[i] || inRun(i)) continue;
+    if (intrOff[i] && (!chan(i).canSwitchOff() || chan(i).setOutputs(false, lastErr[i], sizeof(lastErr[0])))) intrOff[i] = false;
+    if (intrCleanup[i] && cleanupChannel(i)) intrCleanup[i] = false;
+  }
 
   // end of program (finished or aborted): end action per channel of the program
   const RunState st = eng.state();
   const bool wasActive = prevState == RunState::Running || prevState == RunState::Paused;
   if (wasActive && (st == RunState::Finished || st == RunState::Aborted)) {
     for (int i = 0; i < NUM_CHANNELS; ++i) drv[i].endPending = eng.out(i).inProgram;
+    runForget();
     logEvent("\"%s\" %s after %d:%02d", runProg->name, st == RunState::Finished ? "finished" : "stopped",
              (int)eng.elapsed() / 60, (int)eng.elapsed() % 60);
   }
@@ -1464,6 +1657,10 @@ static void cycle(float dt) {
       continue;
     }
     d.endPending = !applyEndAction(i);
+    if (!d.endPending) {
+      const uint8_t a = s.ch[i].endAction;
+      spHeld[i] = a == END_SET_SP || (a == END_KEEP && !eng.out(i).idle) || (a == END_OUTPUTS_OFF && !chan(i).canSwitchOff());
+    }
     endOpen |= d.endPending;
     endDone |= !d.endPending;
   }
@@ -1479,8 +1676,14 @@ static void cycle(float dt) {
   ChOut out[NUM_CHANNELS];
   for (int i = 0; i < NUM_CHANNELS; ++i) {
     out[i] = eng.out(i);
+    char ft[4];
+    if (chan(i).fault(ft, sizeof(ft))) spHeld[i] = false;
+    else if (eng.active() && out[i].inProgram) spHeld[i] = !out[i].idle;
+    else if (man[i].on) spHeld[i] = true;
+    // only an active setpoint goes into the chart / history
+    const bool act = s.ch[i].type == CH_LOCAL ? spEffOk[i] : s.ch[i].type == CH_MODBUS && spHeld[i];
     const float runSp = (eng.active() && out[i].inProgram) ? out[i].sp : NAN;
-    spNow[i] = spEffOk[i] ? spEff[i] : !isnan(runSp) ? runSp : (man[i].on ? man[i].sp : NAN);
+    spNow[i] = !act ? NAN : spEffOk[i] ? spEff[i] : !isnan(runSp) ? runSp : (man[i].on ? man[i].sp : NAN);
   }
   flushRunEvents();
   Guard g;
@@ -1595,6 +1798,12 @@ static void cycle(float dt) {
     gLive.spWrites = drv[ENGINE_CH].spWrites;
   }
   strlcpy(gLive.runMsg, runMsg, sizeof(gLive.runMsg));
+  gLive.intrValid = intr.valid;
+  if (intr.valid) {
+    gLive.intrExact = intr.exact;
+    gLive.intrPos = intr.pos;
+    strlcpy(gLive.intrReason, intr.reason, sizeof(gLive.intrReason));
+  }
 
   bool fault = false, active = eng.active();
   for (int i = 0; i < NUM_CHANNELS; ++i) {
@@ -1649,6 +1858,36 @@ static const char* resetReasonText() {
     case ESP_RST_SDIO: return "SDIO";
     default: return "unknown reset";
   }
+}
+
+// A run was active when the board restarted: /duo/run.json is still there (spec 9.3.5). The channels
+// start with their outputs off; the user resumes or dismisses (never automatic).
+static void checkInterrupted() {
+  RunFileInfo fi;
+  RunPos fp;
+  bool havePos;
+  if (!runFileLoad(fi, *runProg, fp, havePos)) {
+    rtcRun.magic = 0;
+    return;
+  }
+  const bool rtcOk = rtcRun.magic == RTC_MAGIC && rtcRun.sum == rtcSum(rtcRun) && rtcRun.id == fi.id;
+  memset(&intr, 0, sizeof(intr));
+  intr.valid = true;
+  intr.exact = rtcOk;
+  intr.info = fi;
+  if (rtcOk) intr.pos = rtcRun.pos;
+  else if (havePos) intr.pos = fp;
+  strlcpy(intr.reason, resetReasonText(), sizeof(intr.reason));
+  runIdx = fi.slot;
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) intrOff[ch] = progUses(*runProg, ch);
+  const DuoProgram& p = *runProg;
+  const int t = (int)intr.pos.el;
+  char where[48];
+  if (p.type == PROG_SEQ) snprintf(where, sizeof(where), "phase %d of %d", intr.pos.i[0] + 1, p.nPh);
+  else snprintf(where, sizeof(where), "timeline");
+  logEvent("Run interrupted by a reset (%s): \"%s\", %s, run time %s%d:%02d", intr.reason, p.name, where,
+           rtcOk ? "" : "about ", t / 60, t % 60);
+  snprintf(runMsg, sizeof(runMsg), "Run interrupted by a reset (%s): \"%.40s\" - Resume or Dismiss on the web page", intr.reason, p.name);
 }
 
 void appInit() {
@@ -1736,6 +1975,7 @@ void appInit() {
   }
   programStoreBegin();
   logEvent("%s %s started (%s)", PRODUCT_NAME, FW_VERSION, resetReasonText());
+  checkInterrupted();
   gLive.manualSp = gSettings.ch[ENGINE_CH].manualSp;
   histResetLive();
   statusLedBegin();

@@ -71,12 +71,28 @@ typedef void (*EvFn)(const PlanEv& e, void* user);
 enum class ChState : uint8_t { None = 0, Off, Ramp, Hold, Wait, Jump, Keep, Halt, Pause, Done };
 const char* chStateName(ChState s);  // "none" "off" "ramp" "hold" "wait" "jump" "keep" "halt" "pause" "done"
 
+// Where a run is, to resume it after "Run interrupted by a reset" (spec 9.3.5)
+struct RunPos {
+  float el;                  // run time
+  int16_t i[NUM_CHANNELS];   // Sequence: i[0] = phase; Timeline: step of each channel
+  uint8_t st[NUM_CHANNELS];  // Stage (Sequence: st[0])
+  float left[NUM_CHANNELS];  // Timeline: seconds left in the channel's ramp / hold / idle
+};
+
 class RunEngine {
  public:
   // p = the running copy of the program (run edits change it); it must stay
   // valid while the run is active. pv/pvOk: measured values (first ramps
   // start there). band: "bottom reached" band for "wait for bottom".
   bool start(DuoProgram* p, const float* pv, const bool* pvOk, float band);
+  // Resumes an interrupted run (spec 9.3.5) with its running copy p, all channels starting from their
+  // measured values (outputs were off): Sequence = phase r.i[0] from its beginning (channels the phase
+  // doesn't start keep the target of the phases before it, set at once); Timeline = run time r.el,
+  // each channel in its step: a ramp ramps from the measured value in the time it had left, holds
+  // and idles go on for their remaining time, a pause asks for Continue again. Run time goes on from
+  // r.el. edited: the running copy had run edits.
+  bool resumeAt(DuoProgram* p, const RunPos& r, const float* pv, const bool* pvOk, float band, bool edited);
+  RunPos position() const;
   void tick(float dt, const float* pv, const bool* pvOk);
   void pause();   // user pause: everything stops (timers, ramps)
   void resume();
@@ -146,6 +162,8 @@ class RunEngine {
   void setIdle(int ch);
   void freeze();
   void finish();
+  void begin(DuoProgram* p, const float* pv, const bool* pvOk, float band);
+  bool keptBefore(int ch, int idx, float& t, int& src) const;  // target ch has before phase/step idx
   void startPhase(int k);
   void startStep(int ch, int k);
   bool seqStep();

@@ -168,3 +168,96 @@ void programStoreBegin() {
   }
   free(p);
 }
+
+// ------------------------------------------------------------ run files
+
+static bool saveJson(const char* path, const char* tmp, JsonDocument& d) {
+  if (!fsOk) return false;
+  File f = LittleFS.open(tmp, "w");
+  if (!f) return false;
+  const size_t len = measureJson(d);
+  const bool ok = serializeJson(d, f) == len;
+  f.close();
+  if (!ok || (LittleFS.exists(path) && !LittleFS.remove(path)) || !LittleFS.rename(tmp, path)) {
+    LittleFS.remove(tmp);
+    return false;
+  }
+  return true;
+}
+
+bool runFileSave(const RunFileInfo& i, const DuoProgram& p) {
+  JsonDocument d;
+  d["slot"] = i.slot;
+  d["id"] = i.id;
+  d["edited"] = i.edited != 0;
+  JsonArray r = d["ramp"].to<JsonArray>();
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    if (i.rampSaved[ch]) r.add(i.rampOrig[ch]);
+    else r.add(nullptr);
+  }
+  progToJson(p, d["program"].to<JsonObject>());
+  const bool ok = saveJson("/duo/run.json", "/duo/run.tmp", d);
+  if (!ok) Serial.println("[run] writing /duo/run.json failed");
+  return ok;
+}
+
+bool runPosSave(uint32_t id, const RunPos& r) {
+  JsonDocument d;
+  d["id"] = id;
+  d["el"] = r.el;
+  JsonArray a = d["ch"].to<JsonArray>();
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    JsonArray c = a.add<JsonArray>();
+    c.add(r.i[ch]);
+    c.add(r.st[ch]);
+    c.add(r.left[ch]);
+  }
+  return saveJson("/duo/runpos.json", "/duo/runpos.tmp", d);
+}
+
+bool runFileLoad(RunFileInfo& i, DuoProgram& p, RunPos& r, bool& havePos) {
+  memset(&i, 0, sizeof(i));
+  memset(&r, 0, sizeof(r));
+  havePos = false;
+  if (!fsOk || !LittleFS.exists("/duo/run.json")) return false;
+  JsonDocument d;
+  File f = LittleFS.open("/duo/run.json", "r");
+  if (!f) return false;
+  const DeserializationError e = deserializeJson(d, f);
+  f.close();
+  char err[96];
+  if (e || !progFromJson(d["program"].as<JsonObjectConst>(), p, err, sizeof(err))) {
+    Serial.printf("[run] /duo/run.json unreadable (%s) - removed\n", e ? e.c_str() : err);
+    runFileClear();
+    return false;
+  }
+  i.slot = d["slot"] | -1;
+  i.id = d["id"] | 0u;
+  i.edited = (d["edited"] | false) ? 1 : 0;
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    JsonVariantConst v = d["ramp"][ch];
+    i.rampSaved[ch] = v.is<int>() ? 1 : 0;
+    i.rampOrig[ch] = v.is<int>() ? (int16_t)v.as<int>() : 0;
+  }
+  if (LittleFS.exists("/duo/runpos.json")) {
+    JsonDocument q;
+    File g = LittleFS.open("/duo/runpos.json", "r");
+    if (g && !deserializeJson(q, g) && (q["id"] | 0u) == i.id) {
+      r.el = q["el"] | 0.0f;
+      for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+        r.i[ch] = q["ch"][ch][0] | 0;
+        r.st[ch] = q["ch"][ch][1] | 0;
+        r.left[ch] = q["ch"][ch][2] | 0.0f;
+      }
+      havePos = true;
+    }
+    if (g) g.close();
+  }
+  return true;
+}
+
+void runFileClear() {
+  if (!fsOk) return;
+  LittleFS.remove("/duo/run.json");
+  LittleFS.remove("/duo/runpos.json");
+}

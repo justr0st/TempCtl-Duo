@@ -5,6 +5,7 @@
 #pragma once
 #include <stddef.h>
 #include "duo_program.h"
+#include "run_engine.h"
 
 // What the program lists show without loading every program
 struct ProgSummary {
@@ -31,3 +32,20 @@ void programSummaries(ProgSummary* out);   // copy of all PROG_MAX summaries
 bool programSummary(int idx, ProgSummary& out);
 uint32_t programStoreGen();                // changes whenever a program is saved or deleted
 void programSummarize(const DuoProgram& p, ProgSummary& s);
+
+// "Run interrupted by a reset" (spec 9.3.5). /duo/run.json: the running copy and what resuming needs
+// (written at the start and after each run edit, removed at the end of the run); /duo/runpos.json:
+// where the run was (written when the phase / step changes and every minute; the exact position is
+// kept in RTC memory, which survives resets but not a power loss).
+struct RunFileInfo {
+  int8_t slot;                          // program slot
+  uint32_t id;                          // run id (matches the RTC record)
+  uint8_t edited;                       // the running copy has unsaved run edits
+  uint8_t rampSaved[NUM_CHANNELS];      // controller gradient to restore at the end
+  int16_t rampOrig[NUM_CHANNELS];
+};
+bool runFileSave(const RunFileInfo& i, const DuoProgram& p);
+bool runPosSave(uint32_t id, const RunPos& r);
+// false: no interrupted run. havePos: runpos.json of this run was there
+bool runFileLoad(RunFileInfo& i, DuoProgram& p, RunPos& r, bool& havePos);
+void runFileClear();
