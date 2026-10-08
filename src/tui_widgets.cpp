@@ -135,17 +135,18 @@ TPage tPageCreate(const char* title, lv_event_cb_t back) {
   lv_obj_add_style(p.scr, &S_.scr, 0);
   lv_obj_set_scrollable(p.scr, false);
   p.header = tRow(p.scr, 8);
-  lv_obj_set_style_pad_all(p.header, 4, 0);
-  lv_obj_set_height(p.header, 44);
-  tIconButton(p.header, LV_SYMBOL_LEFT, back, nullptr, 44, 36);
-  p.title = tLabel(p.header, &tfont_20c, title);
+  lv_obj_set_style_pad_all(p.header, TUI_SMALL ? 3 : 4, 0);
+  lv_obj_set_style_pad_gap(p.header, TUI_SMALL ? 6 : 8, 0);
+  lv_obj_set_height(p.header, T_HDR);
+  tIconButton(p.header, LV_SYMBOL_LEFT, back, nullptr, TUI_SMALL ? 40 : 44, T_HDR - 8);
+  p.title = tLabel(p.header, TUI_SMALL ? &tfont_16b : &tfont_20c, title);
   lv_obj_set_flex_grow(p.title, 1);
   p.body = lv_obj_create(p.scr);
   lv_obj_remove_style_all(p.body);
-  lv_obj_set_pos(p.body, 0, 44);
-  lv_obj_set_size(p.body, SCREEN_W, SCREEN_H - 44);
+  lv_obj_set_pos(p.body, 0, T_HDR);
+  lv_obj_set_size(p.body, SCREEN_W, SCREEN_H - T_HDR);
   lv_obj_set_flex_flow(p.body, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_style_pad_all(p.body, 6, 0);
+  lv_obj_set_style_pad_all(p.body, TUI_SMALL ? 4 : 6, 0);
   lv_obj_set_style_pad_top(p.body, 2, 0);
   lv_obj_set_style_pad_gap(p.body, 2, 0);  // setting rows close together
   lv_obj_set_scroll_dir(p.body, LV_DIR_VER);
@@ -201,13 +202,14 @@ static void dlgClicked(lv_event_t* e) {
 
 lv_obj_t* tDialog(const char* title, const char* text, const char* b1, const char* b2, const char* b3, TAnswerCb cb,
                   int arg, bool dangerPrimary) {
-  lv_obj_t* box = modalBox(380, LV_SIZE_CONTENT);
-  lv_obj_set_style_max_height(box, SCREEN_H - 24, 0);
+  lv_obj_t* box = modalBox(T_DLG_W, LV_SIZE_CONTENT);
+  lv_obj_set_style_max_height(box, SCREEN_H - (TUI_SMALL ? 8 : 24), 0);
+  if (TUI_SMALL) lv_obj_set_style_pad_all(box, 10, 0);
   dlgCb = cb;
   dlgArg = arg;
-  lv_obj_t* t = tLabel(box, &tfont_20c, title);
+  lv_obj_t* t = tLabel(box, TUI_SMALL ? &tfont_16b : &tfont_20c, title);
   lv_obj_set_width(t, LV_PCT(100));
-  lv_obj_t* l = tLabel(box, &tfont_14, text);
+  lv_obj_t* l = tLabel(box, TUI_SMALL ? &tfont_12 : &tfont_14, text);
   lv_obj_set_width(l, LV_PCT(100));
   lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
   lv_obj_t* row = tRow(box, 8);
@@ -219,12 +221,12 @@ lv_obj_t* tDialog(const char* title, const char* text, const char* b1, const cha
     if (bs[i] && *bs[i]) last = i;
   for (int i = 0; i < 3; ++i) {
     if (!bs[i] || !*bs[i]) continue;
-    lv_obj_t* b = tButton(row, bs[i], dlgClicked, (void*)(intptr_t)(i + 1), LV_SIZE_CONTENT, 40);
-    lv_obj_set_style_min_width(b, 84, 0);
+    lv_obj_t* b = tButton(row, bs[i], dlgClicked, (void*)(intptr_t)(i + 1), LV_SIZE_CONTENT, TUI_SMALL ? 34 : 40);
+    lv_obj_set_style_min_width(b, TUI_SMALL ? 70 : 84, 0);
     if (i == last) lv_obj_add_style(b, dangerPrimary ? &S_.btnDanger : &S_.btnPri, 0);
   }
   if (!b1 || !*b1) {  // no buttons: an OK to close
-    lv_obj_t* b = tButton(row, "OK", dlgClicked, (void*)(intptr_t)0, 84, 40);
+    lv_obj_t* b = tButton(row, "OK", dlgClicked, (void*)(intptr_t)0, TUI_SMALL ? 70 : 84, TUI_SMALL ? 34 : 40);
     lv_obj_add_style(b, &S_.btnPri, 0);
   }
   return box;
@@ -294,9 +296,12 @@ static void numOk(lv_event_t*) {
 static void numCancel(lv_event_t*) { tModalClose(); }
 
 void tNumPad(const char* title, float cur, float lo, float hi, int decimals, const char* unit, TNumCb cb, int arg) {
-  lv_obj_t* box = modalBox(300, 308);
-  lv_obj_set_style_pad_all(box, 10, 0);
-  lv_obj_set_style_pad_gap(box, 6, 0);
+  // 480x320: 300 x 308; 320x240: almost the whole screen, lower keys
+  constexpr int NW = TUI_SMALL ? 312 : 300, NH = TUI_SMALL ? 234 : 308, KH = TUI_SMALL ? 37 : 44, PAD = TUI_SMALL ? 6 : 10,
+                GAP = TUI_SMALL ? 4 : 6;
+  lv_obj_t* box = modalBox(NW, NH);
+  lv_obj_set_style_pad_all(box, PAD, 0);
+  lv_obj_set_style_pad_gap(box, GAP, 0);
   numCb = cb;
   numArg = arg;
   numLo = lo;
@@ -323,17 +328,17 @@ void tNumPad(const char* title, float cur, float lo, float hi, int decimals, con
   lv_obj_remove_style_all(grid);
   lv_obj_set_size(grid, LV_PCT(100), LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-  lv_obj_set_style_pad_gap(grid, 6, 0);
-  const int kw = (300 - 20 - 3 * 6) / 4;
+  lv_obj_set_style_pad_gap(grid, GAP, 0);
+  const int kw = (NW - 2 * PAD - 2 - 3 * GAP) / 4;  // (2: the border)
   for (const char* k : K) {
     const bool del = !strcmp(k, "del");
-    lv_obj_t* kb = tButton(grid, del ? LV_SYMBOL_BACKSPACE : !strcmp(k, "-") ? "\xC2\xB1" : k, numKey, (void*)k, kw, 44);
-    lv_obj_set_style_text_font(kb, del ? &tfont_20c : &tfont_28c, 0);
+    lv_obj_t* kb = tButton(grid, del ? LV_SYMBOL_BACKSPACE : !strcmp(k, "-") ? "\xC2\xB1" : k, numKey, (void*)k, kw, KH);
+    lv_obj_set_style_text_font(kb, del || TUI_SMALL ? &tfont_20c : &tfont_28c, 0);
     if ((!strcmp(k, ".") && decimals == 0) || (!strcmp(k, "-") && lo >= 0)) tSetEnabled(kb, false);
   }
-  lv_obj_t* cancel = tButton(grid, "Cancel", numCancel, nullptr, kw, 44);
+  lv_obj_t* cancel = tButton(grid, "Cancel", numCancel, nullptr, kw, KH);
   (void)cancel;
-  lv_obj_t* ok = tButton(grid, "OK", numOk, nullptr, kw * 2 + 6, 44);
+  lv_obj_t* ok = tButton(grid, "OK", numOk, nullptr, kw * 2 + GAP, KH);
   lv_obj_add_style(ok, &S_.btnPri, 0);
   lv_obj_set_style_text_font(ok, &tfont_16b, 0);
 }
@@ -374,26 +379,28 @@ void tKeyboard(const char* title, const char* cur, uint16_t maxLen, bool passwor
   lv_obj_set_size(modal, LV_PCT(100), LV_PCT(100));
   lv_obj_set_clickable(modal, true);
   lv_obj_set_scrollable(modal, false);
-  lv_obj_t* head = tRow(modal, 6);
-  lv_obj_set_style_pad_all(head, 6, 0);
-  tIconButton(head, LV_SYMBOL_CLOSE, [](lv_event_t*) { tModalClose(); }, nullptr, 44, 40);  // cancel: no change
-  lv_obj_t* t = tLabel(head, &tfont_16b, title);
-  lv_obj_set_width(t, 120);
+  lv_obj_t* head = tRow(modal, TUI_SMALL ? 4 : 6);
+  lv_obj_set_style_pad_all(head, TUI_SMALL ? 3 : 6, 0);
+  constexpr int KBH = TUI_SMALL ? 32 : 40;  // header row height
+  tIconButton(head, LV_SYMBOL_CLOSE, [](lv_event_t*) { tModalClose(); }, nullptr, TUI_SMALL ? 36 : 44, KBH);  // cancel: no change
+  lv_obj_t* t = tLabel(head, TUI_SMALL ? &tfont_14 : &tfont_16b, title);
+  lv_obj_set_width(t, TUI_SMALL ? 74 : 120);
+  if (TUI_SMALL) lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_WRAP);
   tOneLine(t);
   kbTa = lv_textarea_create(head);
   lv_obj_set_flex_grow(kbTa, 1);
-  lv_obj_set_height(kbTa, 40);
+  lv_obj_set_height(kbTa, KBH);
   lv_textarea_set_one_line(kbTa, true);
   lv_textarea_set_max_length(kbTa, maxLen);
   lv_obj_set_style_text_font(kbTa, &tfont_16b, 0);
   lv_textarea_set_text(kbTa, cur ? cur : "");
   lv_textarea_set_password_mode(kbTa, password);
   kbEye = nullptr;
-  if (password) kbEye = tIconButton(head, LV_SYMBOL_EYE_OPEN, kbEyeClicked, nullptr, 44, 40);
+  if (password) kbEye = tIconButton(head, LV_SYMBOL_EYE_OPEN, kbEyeClicked, nullptr, TUI_SMALL ? 36 : 44, KBH);
   lv_obj_t* kb = lv_keyboard_create(modal);
-  lv_obj_set_size(kb, SCREEN_W, SCREEN_H - 54);
+  lv_obj_set_size(kb, SCREEN_W, SCREEN_H - KBH - (TUI_SMALL ? 8 : 14));
   lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
-  lv_obj_set_style_text_font(kb, &tfont_16b, 0);
+  lv_obj_set_style_text_font(kb, TUI_SMALL ? &tfont_14 : &tfont_16b, 0);
   lv_keyboard_set_textarea(kb, kbTa);
   if (numeric) lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_NUMBER);
   lv_obj_add_event_cb(kb, kbEvent, LV_EVENT_READY, nullptr);
@@ -415,16 +422,17 @@ static void choiceClicked(lv_event_t* e) {
 void tChoice(const char* title, const char* items, int sel, TChoiceCb cb, int arg) {
   int rows = 1;
   for (const char* q = items; q && *q; ++q) rows += *q == '\n';
-  int h = 20 + 44 + rows * 38 + 8;
-  if (h > SCREEN_H - 24) h = SCREEN_H - 24;
-  lv_obj_t* box = modalBox(380, h);
-  lv_obj_set_style_pad_all(box, 10, 0);
+  int h = TUI_SMALL ? 12 + 38 + rows * 34 + 4 : 20 + 44 + rows * 38 + 8;
+  if (h > SCREEN_H - (TUI_SMALL ? 8 : 24)) h = SCREEN_H - (TUI_SMALL ? 8 : 24);
+  lv_obj_t* box = modalBox(T_DLG_W, h);
+  lv_obj_set_style_pad_all(box, TUI_SMALL ? 6 : 10, 0);
   chCb = cb;
   chArg = arg;
   lv_obj_t* head = tRow(box, 6);
-  lv_obj_t* t = tLabel(head, &tfont_20c, title);
+  lv_obj_t* t = tLabel(head, TUI_SMALL ? &tfont_16b : &tfont_20c, title);
   lv_obj_set_flex_grow(t, 1);
-  tIconButton(head, LV_SYMBOL_CLOSE, choiceClicked, (void*)(intptr_t)-1, 40, 34);
+  tOneLine(t);
+  tIconButton(head, LV_SYMBOL_CLOSE, choiceClicked, (void*)(intptr_t)-1, 40, TUI_SMALL ? 30 : 34);
   lv_obj_t* list = lv_obj_create(box);
   lv_obj_remove_style_all(list);
   lv_obj_set_width(list, LV_PCT(100));
@@ -444,7 +452,7 @@ void tChoice(const char* title, const char* items, int sel, TChoiceCb cb, int ar
     lv_obj_add_style(row, &S_.listRow, 0);
     lv_obj_add_style(row, &S_.btnPressed, LV_STATE_PRESSED);
     lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_t* l = tLabel(row, &tfont_16b, text);
+    lv_obj_t* l = tLabel(row, TUI_SMALL ? &tfont_14 : &tfont_16b, text);
     lv_obj_set_width(l, LV_PCT(100));
     tOneLine(l);
     if (i == sel) {

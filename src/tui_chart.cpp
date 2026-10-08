@@ -22,6 +22,13 @@ static ChartData& chartStore() {
   return *(ChartData*)p;
 }
 static ChartData& cd = chartStore();
+#ifdef CHART_LOHI
+#define LO(ch) ((ch) ? cd.loT : cd.lo)
+#define HI(ch) ((ch) ? cd.hiT : cd.hi)
+#else
+#define LO(ch) nullptr
+#define HI(ch) nullptr
+#endif
 static bool cdLive = false;  // the snapshot is shown as the live view
 static bool cdValid = false;
 
@@ -223,13 +230,20 @@ static void drawChart(lv_event_t* e) {
     const float bin = cd.binSec > 0 ? cd.binSec : 1;
     for (int i = 0; i < CHART_N; ++i) {
       if (-(float)(CHART_N - 1 - i) * bin < P.t0) continue;
+#ifdef CHART_LOHI
       for (const Tenth16* s : {cd.pv, cd.sp, cd.pvT, cd.spT, cd.hi, cd.hiT}) {
+#else
+      for (const Tenth16* s : {cd.pv, cd.sp, cd.pvT, cd.spT}) {
+#endif
         const float v = s[i];
         if (!isnan(v) && v > mx) mx = v;
       }
     }
   } else if (run) {
-    see(cd.pv), see(cd.sp), see(cd.pvT), see(cd.spT), see(cd.hi), see(cd.hiT);
+    see(cd.pv), see(cd.sp), see(cd.pvT), see(cd.spT);
+#ifdef CHART_LOHI
+    see(cd.hi), see(cd.hiT);
+#endif
   }
   if (!live) see(cd.plan), see(cd.planT);
   float ystep;
@@ -259,7 +273,7 @@ static void drawChart(lv_event_t* e) {
     for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
       area(P, ch ? cd.spT : cd.sp, tOf, tcSp(ch));
       series(P, ch ? cd.spT : cd.sp, 0, tOf, tcSp(ch), 2, 0, LV_OPA_50);
-      series(P, ch ? cd.pvT : cd.pv, 0, tOf, tcPv(ch), 3, 0, LV_OPA_COVER, ch ? cd.loT : cd.lo, ch ? cd.hiT : cd.hi);
+      series(P, ch ? cd.pvT : cd.pv, 0, tOf, tcPv(ch), 3, 0, LV_OPA_COVER, LO(ch), HI(ch));
     }
     return;
   }
@@ -271,7 +285,7 @@ static void drawChart(lv_event_t* e) {
     for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
       area(P, ch ? cd.spT : cd.sp, tOf, tcSp(ch));
       series(P, ch ? cd.spT : cd.sp, 0, tOf, tcSp(ch), 2, 0, LV_OPA_50);
-      series(P, ch ? cd.pvT : cd.pv, 0, tOf, tcPv(ch), 3, 0, LV_OPA_COVER, ch ? cd.loT : cd.lo, ch ? cd.hiT : cd.hi);
+      series(P, ch ? cd.pvT : cd.pv, 0, tOf, tcPv(ch), 3, 0, LV_OPA_COVER, LO(ch), HI(ch));
     }
     const float xn = P.X(cd.elapsed);
     line(P, xn, P.y0, xn, P.y0 + P.h, tc(C_TEXT), 1);

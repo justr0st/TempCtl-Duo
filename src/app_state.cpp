@@ -608,7 +608,7 @@ void chartSnapshot(ChartData& d, bool live) {
       d.pvT[i] = gHist->runPv[T][i];
       d.spT[i] = gHist->runSp[T][i];
       d.planT[i] = gHist->runPlan[T][i];
-#ifdef UI_V2
+#ifdef CHART_LOHI
       d.lo[i] = gHist->runLo[B][i];
       d.hi[i] = gHist->runHi[B][i];
       d.loT[i] = gHist->runLo[T][i];
@@ -637,7 +637,7 @@ void chartSnapshot(ChartData& d, bool live) {
   put(d.pvT);
   liveRow(k, LV_SP, T, row);
   put(d.spT);
-#ifdef UI_V2
+#ifdef CHART_LOHI
   liveRow(k, LV_LO, B, row);
   put(d.lo);
   liveRow(k, LV_HI, B, row);

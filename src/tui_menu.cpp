@@ -6,6 +6,10 @@
 #include <string.h>
 #include "net.h"
 #include "settings_store.h"
+#include <esp_heap_caps.h>
+
+// control sizes in the setting rows (480x320 / 320x240)
+constexpr int CW = TUI_SMALL ? 128 : 170, CW2 = TUI_SMALL ? 90 : 110, BH = TUI_SMALL ? 32 : 38;
 
 static void backToMenu(lv_event_t*) { tShow(SCR_MENU); }
 static void backToMain(lv_event_t*) { tShow(SCR_MAIN); }
@@ -16,8 +20,9 @@ static void onMenuItem(lv_event_t* e) { tShow((TScreen)(intptr_t)lv_event_get_us
 lv_obj_t* menuCreate() {
   TPage p = tPageCreate("Menu", backToMain);
   lv_obj_set_flex_flow(p.body, LV_FLEX_FLOW_ROW_WRAP);
-  lv_obj_set_style_pad_gap(p.body, 8, 0);
-  lv_obj_set_style_pad_all(p.body, 8, 0);
+  constexpr int G = TUI_SMALL ? 6 : 8;
+  lv_obj_set_style_pad_gap(p.body, G, 0);
+  lv_obj_set_style_pad_all(p.body, G, 0);
   struct Item {
     const char* icon;
     const char* text;
@@ -33,7 +38,7 @@ lv_obj_t* menuCreate() {
       {LV_SYMBOL_HOME, "System", "polling, info, restart", SCR_SYSTEM, true},
       {LV_SYMBOL_LIST, "Event log", "what happened", SCR_LOG, true},
   };
-  const int w = (SCREEN_W - 16 - 16) / 3, h = (SCREEN_H - 44 - 16 - 8) / 2;
+  const int w = (SCREEN_W - 2 * G - 2 * G) / 3, h = (SCREEN_H - T_HDR - 2 * G - G) / 2;
   for (const Item& it : items) {
     lv_obj_t* b = tButton(p.body, "", onMenuItem, (void*)(intptr_t)it.s, w, h);
     lv_obj_set_flex_flow(b, LV_FLEX_FLOW_COLUMN);
@@ -43,8 +48,10 @@ lv_obj_t* menuCreate() {
     lv_label_set_text(ic, it.icon);
     lv_obj_add_style(ic, &S_.acc, 0);
     tLabel(b, &tfont_16b, it.text);
-    lv_obj_t* s = tLabel(b, &tfont_12, it.sub);
-    lv_obj_add_style(s, &S_.muted, 0);
+    if (!TUI_SMALL) {  // 320x240: no room for the hint
+      lv_obj_t* s = tLabel(b, &tfont_12, it.sub);
+      lv_obj_add_style(s, &S_.muted, 0);
+    }
     tSetEnabled(b, it.on);
   }
   return p.scr;
@@ -55,6 +62,7 @@ static lv_obj_t* logList;
 static uint32_t logShownSeq = 0xFFFFFFFF;
 
 lv_obj_t* logCreate() {
+  logShownSeq = 0xFFFFFFFF;  // (320x240: the screen is built again each time)
   TPage p = tPageCreate("Event log", backToMenu);
   logList = p.body;
   lv_obj_set_style_pad_gap(logList, 0, 0);
@@ -87,8 +95,8 @@ void logUpdate() {
     }
     lv_obj_t* tl = tLabel(row, &tfont_12, t);
     lv_obj_add_style(tl, &S_.muted, 0);
-    lv_obj_set_width(tl, 70);
-    lv_obj_t* m = tLabel(row, &tfont_14, e[i].msg);
+    lv_obj_set_width(tl, TUI_SMALL ? 54 : 70);
+    lv_obj_t* m = tLabel(row, TUI_SMALL ? &tfont_12 : &tfont_14, e[i].msg);
     lv_obj_set_flex_grow(m, 1);
     lv_label_set_long_mode(m, LV_LABEL_LONG_MODE_WRAP);
   }
@@ -108,13 +116,14 @@ static lv_obj_t* settingRow(lv_obj_t* parent, const char* label, const char* hin
   lv_obj_set_style_pad_gap(row, 8, 0);
   lv_obj_t* col = tCol(row, 0);
   lv_obj_set_flex_grow(col, 1);
-  lv_obj_t* l = tLabel(col, &tfont_16b, label);
-  (void)l;
+  lv_obj_t* l = tLabel(col, TUI_SMALL ? &tfont_14 : &tfont_16b, label);
+  if (TUI_SMALL) lv_obj_set_width(l, LV_PCT(100));  // long labels wrap
   lv_obj_t* h = nullptr;
   if (hint) {
     h = tLabel(col, &tfont_12, hint);
     lv_obj_add_style(h, &S_.muted, 0);
-    lv_obj_set_width(h, 280);
+    if (TUI_SMALL) lv_obj_set_width(h, LV_PCT(100));
+    else lv_obj_set_width(h, 280);
     lv_label_set_long_mode(h, LV_LABEL_LONG_MODE_WRAP);
   }
   if (hintOut) *hintOut = h;
@@ -220,7 +229,7 @@ lv_obj_t* displayCreate() {
   lv_obj_t* r = settingRow(p.body, "Brightness", nullptr);
   lv_obj_set_style_pad_ver(r, 8, 0);  // the knob reaches 6 px above / below the bar
   dBright = lv_slider_create(r);
-  lv_obj_set_size(dBright, 220, 18);
+  lv_obj_set_size(dBright, TUI_SMALL ? 140 : 220, 18);
   lv_slider_set_range(dBright, 10, 255);
   lv_obj_set_style_pad_all(dBright, 6, LV_PART_KNOB);
   lv_obj_set_ext_click_area(dBright, 12);
@@ -229,13 +238,13 @@ lv_obj_t* displayCreate() {
   r = settingRow(p.body, "Dark mode", "The web page follows its own setting");
   dDark = tSwitch(r, onDark);
   r = settingRow(p.body, "Accent colour", "Channel colours follow it (touch and web)");
-  lv_obj_t* sw = tRow(r, 8);
+  lv_obj_t* sw = tRow(r, TUI_SMALL ? 4 : 8);
   lv_obj_set_width(sw, LV_SIZE_CONTENT);
   lv_obj_set_style_pad_all(sw, 5, 0);  // room for the ring of the chosen colour
   for (int i = 0; i < 6; ++i) {
     dAcc[i] = lv_button_create(sw);
     lv_obj_remove_style_all(dAcc[i]);
-    lv_obj_set_size(dAcc[i], 30, 30);
+    lv_obj_set_size(dAcc[i], TUI_SMALL ? 22 : 30, TUI_SMALL ? 22 : 30);
     lv_obj_set_style_radius(dAcc[i], LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(dAcc[i], LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(dAcc[i], lv_color_hex(ACCENTS[i]), 0);  // the preset itself, not a theme role
@@ -246,7 +255,7 @@ lv_obj_t* displayCreate() {
   r = settingRow(p.body, "Turn the screen", "Upside down (180\xC2\xB0)");
   dRotate = tSwitch(r, onRotate);
   r = settingRow(p.body, "Live chart period", "Also on the web page");
-  dPeriod = tButton(r, "", onPeriod, nullptr, 110, 38);
+  dPeriod = tButton(r, "", onPeriod, nullptr, CW2, BH);
   return p.scr;
 }
 
@@ -398,7 +407,7 @@ static void scanPoll() {
   const int n = netScanResult(scanNames, sizeof(scanNames));
   if (n == -1) return;
   scanning = false;
-  if (!scanShown) return;
+  if (!scanShown || tCurrent() != SCR_NETWORK) return;  // the page was left meanwhile
   scanShown = false;
   tModalClose();
   if (n <= 0) tToast(n == 0 ? "No networks found." : "The scan failed.", n < 0);
@@ -441,25 +450,25 @@ lv_obj_t* networkCreate() {
   lv_obj_set_width(nStatus, LV_PCT(100));
   lv_label_set_long_mode(nStatus, LV_LABEL_LONG_MODE_WRAP);
   lv_obj_t* r = settingRow(p.body, "Network name", nullptr);
-  nSsid = tButton(r, "", onSsid, nullptr, 170, 38);
+  nSsid = tButton(r, "", onSsid, nullptr, CW, BH);
   tOneLine(lv_obj_get_child(nSsid, 0));
-  lv_obj_set_width(lv_obj_get_child(nSsid, 0), 150);
-  tButton(r, "Scan", onScan, nullptr, 70, 38);
+  lv_obj_set_width(lv_obj_get_child(nSsid, 0), CW - 20);
+  tButton(r, "Scan", onScan, nullptr, TUI_SMALL ? 52 : 70, BH);
   r = settingRow(p.body, "Password", nullptr);
-  nPass = tButton(r, "", onPass, nullptr, 170, 38);
+  nPass = tButton(r, "", onPass, nullptr, CW, BH);
   r = settingRow(p.body, "Access point password", "Used when no network is reachable; 8+ characters");
-  nAp = tButton(r, "", onAp, nullptr, 170, 38);
+  nAp = tButton(r, "", onAp, nullptr, CW, BH);
   r = settingRow(p.body, "Host name", "http://<name>.local");
-  nHost = tButton(r, "", onHost, nullptr, 170, 38);
+  nHost = tButton(r, "", onHost, nullptr, CW, BH);
   r = settingRow(p.body, "Fixed IP address", "No DHCP: use an address outside the router's DHCP range");
   nStatic = tSwitch(r, onStatic);
   nIpBox = tCol(p.body, 6);
   lv_obj_set_width(nIpBox, LV_PCT(100));
   for (int i = 0; i < 5; ++i) {
     r = settingRow(nIpBox, IP_LABELS[i], i == 3 ? "Empty = the gateway" : nullptr);
-    nIp[i] = tButton(r, "", onIp, (void*)(intptr_t)i, 170, 38);
+    nIp[i] = tButton(r, "", onIp, (void*)(intptr_t)i, CW, BH);
   }
-  lv_obj_t* b = tButton(p.header, "Save and connect", onNetSave, nullptr, LV_SIZE_CONTENT, 36);  // always visible
+  lv_obj_t* b = tButton(p.header, TUI_SMALL ? "Save + connect" : "Save and connect", onNetSave, nullptr, LV_SIZE_CONTENT, T_HDR - 8);  // always visible
   lv_obj_add_style(b, &S_.btnPri, 0);
   return p.scr;
 }
@@ -531,15 +540,15 @@ static void onRestart(lv_event_t*) {
 lv_obj_t* systemCreate() {
   TPage p = tPageCreate("System", backToMenu);
   lv_obj_t* r = settingRow(p.body, "Polling interval", "How often PV, SP and output are read. Two Modbus channels: each every 2 \xC3\x97 this");
-  sPoll = tButton(r, "", onPoll, nullptr, 110, 38);
+  sPoll = tButton(r, "", onPoll, nullptr, CW2, BH);
   r = settingRow(p.body, "\"Bottom reached\" band", "\"Wait for bottom\" goes on within \xC2\xB1 this");
-  sBand = tButton(r, "", onBand, nullptr, 110, 38);
+  sBand = tButton(r, "", onBand, nullptr, CW2, BH);
   lv_obj_t* info = tPanel(p.body);
   lv_obj_set_size(info, LV_PCT(100), LV_SIZE_CONTENT);
   sInfo = tLabel(info, &tfont_14, "");
   lv_obj_set_width(sInfo, LV_PCT(100));
   lv_label_set_long_mode(sInfo, LV_LABEL_LONG_MODE_WRAP);
-  lv_obj_t* b = tButton(p.body, "Restart device", onRestart, nullptr, LV_PCT(100), 44);
+  lv_obj_t* b = tButton(p.body, "Restart device", onRestart, nullptr, LV_PCT(100), TUI_SMALL ? 36 : 44);
   lv_obj_add_style(b, &S_.btnDanger, 0);
   return p.scr;
 }
@@ -562,11 +571,18 @@ void systemUpdate() {
   char up[16], b[400], hist[16];
   fmtTime(millis() / 1000.0f, up, sizeof(up));
   fmtMinutes(liveHistSec() / 60, hist, sizeof(hist));
-  snprintf(b, sizeof(b),
-           PRODUCT_NAME " " FW_VERSION " \xC2\xB7 " BOARD_NAME "%s%s\n%s\nUp %s \xC2\xB7 RAM %u kB free \xC2\xB7 PSRAM %u kB free\n"
-           "Live history in memory: %s",
-           BOARD_VARIANT[0] ? " " : "", BOARD_VARIANT, netInfo().c_str(), up, (unsigned)(ESP.getFreeHeap() / 1024),
-           (unsigned)(ESP.getFreePsram() / 1024), hist);
+  // RAM: the internal byte-addressable heap (what runs short), its lowest point since the start
+  const uint32_t caps = MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL;
+  char ram[64];
+  snprintf(ram, sizeof(ram), "RAM %u kB free (lowest %u)", (unsigned)(heap_caps_get_free_size(caps) / 1024),
+           (unsigned)(heap_caps_get_minimum_free_size(caps) / 1024));
+#ifdef BOARD_HAS_PSRAM
+  char ps[32];
+  snprintf(ps, sizeof(ps), " \xC2\xB7 PSRAM %u kB free", (unsigned)(ESP.getFreePsram() / 1024));
+  strlcat(ram, ps, sizeof(ram));
+#endif
+  snprintf(b, sizeof(b), PRODUCT_NAME " " FW_VERSION " \xC2\xB7 " BOARD_NAME "%s%s\n%s\nUp %s \xC2\xB7 %s\nLive history in memory: %s",
+           BOARD_VARIANT[0] ? " " : "", BOARD_VARIANT, netInfo().c_str(), up, ram, hist);
   tSetText(sInfo, b);
 }
 

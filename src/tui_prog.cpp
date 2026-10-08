@@ -24,6 +24,7 @@ void progEditOpen(int slot);
 static void onListRow(lv_event_t* e) { progEditOpen((int)(intptr_t)lv_event_get_user_data(e)); }
 
 lv_obj_t* progListCreate() {
+  plGen = 0xFFFFFFFF;  // (320x240: the screen is built again each time)
   TPage p = tPageCreate("Programs", backToMenu);
   plBody = p.body;
   lv_obj_set_style_pad_gap(plBody, 4, 0);
@@ -51,12 +52,31 @@ void progListShow() {
     lv_obj_set_width(num, 24);
     lv_obj_add_style(num, &S_.muted, 0);
     const ProgSummary& s = sums[i];
+#if TUI_SMALL
+    // 320x240: name above, summary below
+    lv_obj_t* col = tCol(b, -2);
+    lv_obj_set_flex_grow(col, 1);
+    lv_obj_t* name = tLabel(col, &tfont_16b, s.used ? s.name : "(empty)");
+    lv_obj_set_width(name, LV_PCT(100));
+    tOneLine(name);
+    lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_LEFT, 0);
+    if (!s.used) lv_obj_add_style(name, &S_.muted, 0);
+    if (s.used) {
+      fmtTime(s.total, tt, sizeof(tt));
+      snprintf(t, sizeof(t), "%s \xC2\xB7 %u %s \xC2\xB7 %s%s", s.type == PROG_TL ? "Timeline" : "Sequence", s.items,
+               s.type == PROG_TL ? "steps" : "phases", tt, s.waits ? " + waits" : "");
+      lv_obj_t* sub = tLabel(col, &tfont_12, t);
+      lv_obj_add_style(sub, &S_.muted, 0);
+    }
+    if (false) {
+#else
     lv_obj_t* name = tLabel(b, &tfont_16b, s.used ? s.name : "(empty)");
     lv_obj_set_flex_grow(name, 1);
     tOneLine(name);
     lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_LEFT, 0);
     if (!s.used) lv_obj_add_style(name, &S_.muted, 0);
     if (s.used) {
+#endif
       fmtTime(s.total, tt, sizeof(tt));
       snprintf(t, sizeof(t), "%s \xC2\xB7 %u %s \xC2\xB7 %s%s", s.type == PROG_TL ? "Timeline" : "Sequence", s.items,
                s.type == PROG_TL ? "steps" : "phases", tt, s.waits ? " + waits" : "");
@@ -72,7 +92,9 @@ void progListShow() {
 }
 
 // ------------------------------------------------------------ editor state
-static constexpr int UNDO_N = 16;
+// undo steps: 15 on the S3 (PSRAM); 2 on the CYD (each snapshot is a whole program, ~3.9 kB of the
+// short internal RAM; freed again when the editor is left, progEditRelease())
+static constexpr int UNDO_N = TUI_SMALL ? 3 : 16;
 static DuoProgram* ed = nullptr;           // the draft (or the running copy during a run)
 static DuoProgram* undoBuf[UNDO_N];        // snapshots: [0..undoTop), current = undoPos
 static int undoPos = 0, undoTop = 0, savedPos = 0;
@@ -127,14 +149,22 @@ static void onUndo(lv_event_t*) {
 static constexpr int SEQ_COLS = 9;
 static const int SEQ_W[SEQ_COLS] = {30, 58, 50, 52, 52, 50, 52, 52, 66};
 static const int TL_W[4] = {28, 62, 66, 66};
+#if TUI_SMALL
+// 320x240: Sequence = one line per phase (# | type | values | option), a tap opens the phase menu;
+// Timeline = one table for the channel chosen with the switch above it
+static constexpr int SEQ_COLS_S = 4;
+static const int SEQ_W_S[SEQ_COLS_S] = {24, 50, 190, 46};
+static const int TL_W_S[4] = {30, 84, 98, 98};
+static int tlCh = 0;  // Timeline: the channel shown
+#endif
 static constexpr uint32_t MUTED = LV_TABLE_CELL_CTRL_CUSTOM_1, CURRENT = LV_TABLE_CELL_CTRL_CUSTOM_2,
-                          ACCENT = LV_TABLE_CELL_CTRL_CUSTOM_3;
+                          ACCENT = LV_TABLE_CELL_CTRL_CUSTOM_3, LEFT = LV_TABLE_CELL_CTRL_CUSTOM_4;
 
 static void fmtSec(uint32_t s, char* b, size_t n) { fmtTime((float)s, b, n); }
 
 static void cell(lv_obj_t* t, int r, int c, const char* v, uint32_t ctrl = 0) {
   lv_table_set_cell_value(t, r, c, v);
-  lv_table_clear_cell_ctrl(t, r, c, (lv_table_cell_ctrl_t)(MUTED | CURRENT | ACCENT));
+  lv_table_clear_cell_ctrl(t, r, c, (lv_table_cell_ctrl_t)(MUTED | CURRENT | ACCENT | LEFT));
   if (ctrl) lv_table_set_cell_ctrl(t, r, c, (lv_table_cell_ctrl_t)ctrl);
 }
 
@@ -153,11 +183,13 @@ static void seg(lv_obj_t* t, int r, int c0, const Seg& s, bool rampHold, uint32_
   }
 }
 
+#if !TUI_SMALL
 static void none3(lv_obj_t* t, int r, int c0, uint32_t cur, const char* first = "\xE2\x80\x94") {
   cell(t, r, c0, first, MUTED | cur);
   cell(t, r, c0 + 1, "\xE2\x80\x94", MUTED | cur);
   cell(t, r, c0 + 2, "\xE2\x80\x94", MUTED | cur);
 }
+#endif
 
 static int curRow(int ch) {  // the phase / step running now (-1 none)
   if (!edRun) return -1;
@@ -167,6 +199,49 @@ static int curRow(int ch) {  // the phase / step running now (-1 none)
   return ed->type == PROG_SEQ ? L.seq.idx : L.lane[ch].idx;
 }
 
+#if TUI_SMALL
+static void fillSeq() {
+  lv_obj_t* t = edTab[0];
+  const int n = ed->nPh;
+  lv_table_set_row_count(t, n ? n : 1);
+  const int cur = curRow(0);
+  static const char* const KIND[] = {"Bottom", "Top", "Both", "Pause"};
+  for (int i = 0; i < n; ++i) {
+    const SeqPhase& f = ed->ph[i];
+    const uint32_t c = i == cur ? CURRENT : 0;
+    char b[64], r1[12], h1[12];
+    snprintf(b, sizeof(b), "%d", i + 1);
+    cell(t, i, 0, b, MUTED | c);
+    cell(t, i, 1, f.kind < 4 ? KIND[f.kind] : "?", c);
+    auto seg3 = [&](const Seg& g, char* out, size_t m) {
+      fmtSec(g.r, r1, sizeof(r1));
+      fmtSec(g.h, h1, sizeof(h1));
+      snprintf(out, m, "%.0f\xC2\xB0 %s / %s", g.t, r1, h1);
+    };
+    switch (f.kind) {
+      case PH_B: seg3(f.b, b, sizeof(b)); break;
+      case PH_T: seg3(f.t, b, sizeof(b)); break;
+      case PH_BT: {
+        char tt[40];
+        seg3(f.t, tt, sizeof(tt));
+        if (f.bIdle) snprintf(b, sizeof(b), "B off \xC2\xB7 T %s", tt);
+        else snprintf(b, sizeof(b), "B %.0f\xC2\xB0 \xC2\xB7 T %s", f.b.t, tt);
+        break;
+      }
+      default: {
+        const char* tx = progText(*ed, f.text);
+        snprintf(b, sizeof(b), "%.30s", *tx ? tx : (f.msg ? "Action required" : "Pause"));
+        break;
+      }
+    }
+    cell(t, i, 2, b, (f.kind == PH_P ? MUTED : 0) | LEFT | c);
+    const char* opt = (f.kind == PH_B || f.kind == PH_BT) && f.wait ? "Wait" : f.kind == PH_P && f.msg ? "Action" : "";
+    cell(t, i, 3, opt, ACCENT | c);
+  }
+  if (!n)
+    for (int k = 0; k < SEQ_COLS_S; ++k) cell(t, 0, k, k == 2 ? "no phases - tap to add" : "", MUTED | LEFT);
+}
+#else
 static void fillSeq() {
   lv_obj_t* t = edTab[0];
   const int n = ed->nPh;
@@ -215,9 +290,10 @@ static void fillSeq() {
     for (int k = 0; k < SEQ_COLS; ++k) cell(t, 0, k, k == 1 ? "no phases" : "", MUTED);
   }
 }
+#endif
 
 static void fillTl(int ch) {
-  lv_obj_t* t = edTab[ch];
+  lv_obj_t* t = edTab[TUI_SMALL ? 0 : ch];
   const int n = ed->nSt[ch];
   lv_table_set_row_count(t, n ? n : 1);
   const int cur = curRow(ch);
@@ -258,6 +334,7 @@ static void tableDraw(lv_event_t* e) {
   lv_obj_t* t = (lv_obj_t*)lv_event_get_current_target(e);
   const uint32_t r = base->id1, c = base->id2;
   if (lv_draw_label_dsc_t* ld = lv_draw_task_get_label_dsc(task)) {
+    if (lv_table_has_cell_ctrl(t, r, c, (lv_table_cell_ctrl_t)LEFT)) ld->align = LV_TEXT_ALIGN_LEFT;
     if (lv_table_has_cell_ctrl(t, r, c, (lv_table_cell_ctrl_t)MUTED)) ld->color = tc(C_MUTED);
     else if (lv_table_has_cell_ctrl(t, r, c, (lv_table_cell_ctrl_t)ACCENT)) ld->color = tc(C_ACC);
   }
@@ -337,9 +414,10 @@ static void editField(int ch, int idx, int field, float cur) {
 // --- row menu
 enum RowAct : uint8_t {
   A_KIND_B, A_KIND_T, A_KIND_BT, A_KIND_P, A_KIND_TARGET, A_KIND_IDLE, A_KIND_PAUSE, A_WAIT, A_BIDLE, A_MSG, A_TEXT,
-  A_INS_ABOVE, A_INS_BELOW, A_UP, A_DOWN, A_DEL
+  A_INS_ABOVE, A_INS_BELOW, A_UP, A_DOWN, A_DEL,
+  A_FB_T, A_FB_R, A_FB_H, A_FT_T, A_FT_R, A_FT_H  // 320x240: edit a value (bottom / top: target, ramp, hold)
 };
-static uint8_t rowActs[16];
+static uint8_t rowActs[24];
 static int rowN, rowCh, rowIdx;
 
 static int count() { return ed->type == PROG_SEQ ? ed->nPh : ed->nSt[rowCh]; }
@@ -388,6 +466,13 @@ static void onRowAct(int i, int) {
   const int n = count();
   SeqPhase* f = ed->type == PROG_SEQ ? &ed->ph[rowIdx] : nullptr;
   TlStep* s = ed->type == PROG_TL ? &ed->st[rowCh][rowIdx] : nullptr;
+  if (a >= A_FB_T) {  // a value: the number entry (it does the undo step)
+    const int ch = ed->type == PROG_TL ? rowCh : a >= A_FT_T ? CH_TOP : CH_BOTTOM, field = (a - A_FB_T) % 3;
+    const Seg* g = progSeg(*ed, ch, rowIdx);
+    if (!g && ed->type == PROG_TL) g = &ed->st[ch][rowIdx].s;  // an "off" step: its time
+    if (g) editField(ch, rowIdx, field, field == 0 ? g->t : field == 1 ? g->r : g->h);
+    return;
+  }
   switch (a) {
     case A_KIND_B: case A_KIND_T: case A_KIND_BT: case A_KIND_P:
       f->kind = a - A_KIND_B;
@@ -439,11 +524,11 @@ static void onRowAct(int i, int) {
 }
 
 static void rowMenu(int ch, int idx) {
-  if (edRun) return editMsg("During a run only targets and times can be changed.");
+  if (edRun && !TUI_SMALL) return editMsg("During a run only targets and times can be changed.");
   rowCh = ch;
   rowIdx = idx;
   rowN = 0;
-  static char items[600];
+  static char items[900];
   items[0] = 0;
   auto add = [&](uint8_t a, const char* t) {
     if (rowN) strlcat(items, "\n", sizeof(items));
@@ -452,6 +537,46 @@ static void rowMenu(int ch, int idx) {
   };
   char b[64];
   const int n = count();
+#if TUI_SMALL
+  // the values first (the table shows them in one line)
+  auto values = [&](int vch, uint8_t a0, bool rampHold, bool target = true) {
+    const Seg* g = progSeg(*ed, vch, idx);
+    if (!g && ed->type == PROG_TL) g = &ed->st[vch][idx].s;  // an "off" step: its time
+    if (!g) return;
+    char t1[12], t2[12];
+    const char* nm = ES.ch[vch].name;
+    if (target) {
+      snprintf(b, sizeof(b), "%s target: %.0f \xC2\xB0" "C", nm, g->t);
+      add(a0, b);
+    }
+    if (rampHold) {
+      fmtSec(g->r, t1, sizeof(t1));
+      fmtSec(g->h, t2, sizeof(t2));
+      if (target) {
+        snprintf(b, sizeof(b), "%s ramp: %s", nm, t1);
+        add(a0 + 1, b);
+      }
+      snprintf(b, sizeof(b), "%s %s: %s", nm, target ? "hold" : "off for", t2);
+      add(a0 + 2, b);
+    }
+  };
+  if (ed->type == PROG_SEQ) {
+    const SeqPhase& f = ed->ph[idx];
+    if (f.kind == PH_B) values(CH_BOTTOM, A_FB_T, true);
+    if (f.kind == PH_BT && !f.bIdle) values(CH_BOTTOM, A_FB_T, false);
+    if (f.kind == PH_T || f.kind == PH_BT) values(CH_TOP, A_FT_T, true);
+  } else {
+    const TlStep& st = ed->st[ch][idx];
+    if (st.kind == ST_TARGET) values(ch, A_FB_T, true);
+    if (st.kind == ST_IDLE) values(ch, A_FB_T, true, false);
+  }
+  if (edRun) {
+    if (!rowN) return editMsg("During a run only targets and times can be changed.");
+    snprintf(b, sizeof(b), ed->type == PROG_SEQ ? "Phase %d (running copy)" : "Step %d (running copy)", idx + 1);
+    tChoice(b, items, -1, onRowAct, 0);
+    return;
+  }
+#endif
   if (ed->type == PROG_SEQ) {
     const SeqPhase& f = ed->ph[idx];
     snprintf(b, sizeof(b), "Type: %s (ramp, hold)", ES.ch[0].name);
@@ -497,7 +622,11 @@ static void onTable(lv_event_t* e) {
   uint32_t r, c;
   lv_table_get_selected_cell(t, &r, &c);
   if (r == LV_TABLE_CELL_NONE || c == LV_TABLE_CELL_NONE) return;
+#if TUI_SMALL
+  const int ch = ed->type == PROG_TL ? tlCh : 0;
+#else
   const int ch = t == edTab[1] ? 1 : 0;
+#endif
   rowCh = ch;
   const int n = count();
   if (n == 0) {  // the "no phases / steps" row: add the first one
@@ -509,6 +638,9 @@ static void onTable(lv_event_t* e) {
     return;
   }
   if ((int)r >= n) return;
+#if TUI_SMALL
+  if (ed->type == PROG_SEQ) return rowMenu(0, r);  // one line per phase: its menu has the values
+#endif
   if (ed->type == PROG_SEQ) {
     const SeqPhase& f = ed->ph[r];
     if (c <= 1 || c == 8) return rowMenu(0, r);
@@ -534,6 +666,9 @@ static void onTable(lv_event_t* e) {
 static void onAdd(lv_event_t* e) {
   if (edRun) return;
   rowCh = (int)(intptr_t)lv_event_get_user_data(e);
+#if TUI_SMALL
+  if (ed->type == PROG_TL) rowCh = tlCh;
+#endif
   insertAt(count());
   undoPush();
   edRefresh();
@@ -669,28 +804,29 @@ static lv_obj_t* edCreate() {
   edScr = lv_obj_create(nullptr);
   lv_obj_add_style(edScr, &S_.scr, 0);
   lv_obj_set_scrollable(edScr, false);
-  lv_obj_t* hdr = tRow(edScr, 6);
-  lv_obj_set_size(hdr, SCREEN_W, 44);
-  lv_obj_set_style_pad_hor(hdr, 4, 0);
-  tIconButton(hdr, LV_SYMBOL_LEFT, onEdBack, nullptr, 44, 36);
-  lv_obj_t* col = tCol(hdr, 0);
+  lv_obj_t* hdr = tRow(edScr, TUI_SMALL ? 4 : 6);
+  lv_obj_set_size(hdr, SCREEN_W, T_HDR);
+  lv_obj_set_style_pad_hor(hdr, TUI_SMALL ? 3 : 4, 0);
+  constexpr int HB = T_HDR - 8, NW = TUI_SMALL ? 118 : 230;
+  tIconButton(hdr, LV_SYMBOL_LEFT, onEdBack, nullptr, TUI_SMALL ? 36 : 44, HB);
+  lv_obj_t* col = tCol(hdr, TUI_SMALL ? -2 : 0);
   lv_obj_set_flex_grow(col, 1);
-  edName = tLabel(col, &tfont_16b, "");
-  lv_obj_set_width(edName, 230);
+  edName = tLabel(col, TUI_SMALL ? &tfont_14 : &tfont_16b, "");
+  lv_obj_set_width(edName, NW);
   tOneLine(edName);
   edInfo = tLabel(col, &tfont_12, "");
   lv_obj_add_style(edInfo, &S_.muted, 0);
-  lv_obj_set_width(edInfo, 230);
+  lv_obj_set_width(edInfo, NW);
   tOneLine(edInfo);
-  edUndo = tButton(hdr, "Undo", onUndo, nullptr, 58, 36);
-  edSave = tButton(hdr, "Save", onSave, nullptr, 58, 36);
-  tIconButton(hdr, LV_SYMBOL_BARS, onMoreBtn, nullptr, 40, 36);
+  edUndo = tButton(hdr, "Undo", onUndo, nullptr, TUI_SMALL ? 50 : 58, HB);
+  edSave = tButton(hdr, "Save", onSave, nullptr, TUI_SMALL ? 50 : 58, HB);
+  tIconButton(hdr, LV_SYMBOL_BARS, onMoreBtn, nullptr, TUI_SMALL ? 36 : 40, HB);
 
   edBody = lv_obj_create(edScr);
   lv_obj_remove_style_all(edBody);
-  lv_obj_set_pos(edBody, 0, 44);
-  lv_obj_set_size(edBody, SCREEN_W, SCREEN_H - 44);
-  lv_obj_set_style_pad_hor(edBody, 6, 0);
+  lv_obj_set_pos(edBody, 0, T_HDR);
+  lv_obj_set_size(edBody, SCREEN_W, SCREEN_H - T_HDR);
+  lv_obj_set_style_pad_hor(edBody, TUI_SMALL ? 4 : 6, 0);
   lv_obj_set_style_pad_bottom(edBody, 6, 0);
   lv_obj_set_scroll_dir(edBody, LV_DIR_VER);
   return edScr;
@@ -698,6 +834,59 @@ static lv_obj_t* edCreate() {
 
 // (re)builds the tables for the program's type
 static uint8_t builtType = 0xFF;
+#if TUI_SMALL
+static lv_obj_t* edTlBtn[2];
+static void edRefresh();
+static void onTlCh(lv_event_t* e) {
+  tlCh = (int)(intptr_t)lv_event_get_user_data(e);
+  edRefresh();
+  lv_obj_scroll_to_y(edBody, 0, LV_ANIM_OFF);
+}
+// 320x240: the body is a column (switch | header | table | add button)
+static void edBuild() {
+  if (builtType == ed->type && !edEmpty) return;
+  lv_obj_clean(edBody);
+  edTab[0] = edTab[1] = edHead[0] = edHead[1] = edAdd[0] = edAdd[1] = edEmptyBox = edTlBtn[0] = edTlBtn[1] = nullptr;
+  builtType = edEmpty ? 0xFE : ed->type;
+  lv_obj_set_flex_flow(edBody, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_style_pad_gap(edBody, 0, 0);
+  if (edEmpty) {
+    edEmptyBox = tCol(edBody, 8);
+    lv_obj_set_width(edEmptyBox, LV_PCT(100));
+    lv_obj_set_style_pad_top(edEmptyBox, 16, 0);
+    lv_obj_set_flex_align(edEmptyBox, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    tLabel(edEmptyBox, &tfont_16b, "This slot is empty.");
+    lv_obj_t* row = tRow(edEmptyBox, 8);
+    lv_obj_set_width(row, LV_SIZE_CONTENT);
+    tButton(row, "New sequence", onNew, (void*)(intptr_t)PROG_SEQ, 140, 40);
+    tButton(row, "New timeline", onNew, (void*)(intptr_t)PROG_TL, 140, 40);
+    lv_obj_t* h = tLabel(edEmptyBox, &tfont_12, "Sequence: phases one after another. Timeline: one step list per channel, started together.");
+    lv_obj_add_style(h, &S_.muted, 0);
+    lv_obj_set_width(h, 290);
+    lv_label_set_long_mode(h, LV_LABEL_LONG_MODE_WRAP);
+    return;
+  }
+  if (ed->type == PROG_SEQ) {
+    edHead[0] = makeHeader(edBody, SEQ_COLS_S, SEQ_W_S);
+    edTab[0] = makeTable(edBody, SEQ_COLS_S, SEQ_W_S);
+    lv_obj_add_event_cb(edTab[0], onTable, LV_EVENT_VALUE_CHANGED, nullptr);
+    edAdd[0] = tButton(edBody, "Add phase", onAdd, (void*)(intptr_t)0, 130, 34);
+  } else {
+    lv_obj_t* sw = tRow(edBody, 4);
+    lv_obj_set_style_pad_bottom(sw, 4, 0);
+    for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+      edTlBtn[ch] = tButton(sw, "", onTlCh, (void*)(intptr_t)ch, (SCREEN_W - 12) / 2, 30);
+      tOneLine(lv_obj_get_child(edTlBtn[ch], 0));
+      lv_obj_set_width(lv_obj_get_child(edTlBtn[ch], 0), (SCREEN_W - 12) / 2 - 12);
+    }
+    edHead[0] = makeHeader(edBody, 4, TL_W_S);
+    edTab[0] = makeTable(edBody, 4, TL_W_S);
+    lv_obj_add_event_cb(edTab[0], onTable, LV_EVENT_VALUE_CHANGED, nullptr);
+    edAdd[0] = tButton(edBody, "Add step", onAdd, (void*)(intptr_t)0, 130, 34);
+  }
+  lv_obj_set_style_margin_top(edAdd[0], 6, 0);
+}
+#else
 static void edBuild() {
   if (builtType == ed->type && !edEmpty) return;
   lv_obj_clean(edBody);
@@ -738,6 +927,7 @@ static void edBuild() {
     }
   }
 }
+#endif
 
 static void edRefresh() {
   edBuild();
@@ -756,6 +946,25 @@ static void edRefresh() {
   if (edDirty()) lv_obj_add_style(edSave, &S_.btnPri, 0);
   else lv_obj_remove_style(edSave, &S_.btnPri, 0);
   if (edEmpty) return;
+#if TUI_SMALL
+  if (ed->type == PROG_SEQ) {
+    static const char* const H[SEQ_COLS_S] = {"#", "Type", "Target  ramp / hold", ""};
+    for (int c = 0; c < SEQ_COLS_S; ++c) lv_table_set_cell_value(edHead[0], 0, c, H[c]);
+    fillSeq();
+  } else {
+    static const char* const H[4] = {"#", "\xC2\xB0" "C", "Ramp", "Hold"};
+    for (int c = 0; c < 4; ++c) lv_table_set_cell_value(edHead[0], 0, c, H[c]);
+    for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+      char b2[48];
+      snprintf(b2, sizeof(b2), "%s \xC2\xB7 %u", ES.ch[ch].name, (unsigned)ed->nSt[ch]);
+      tButtonText(edTlBtn[ch], b2);
+      tSetChecked(edTlBtn[ch], ch == tlCh);
+    }
+    fillTl(tlCh);
+  }
+  tSetHidden(edAdd[0], edRun);
+  return;
+#endif
   if (ed->type == PROG_SEQ) {
     lv_obj_t* h = edHead[0];
     static const char* const H1[SEQ_COLS] = {"#", "Type", "", "", "", "", "", "", "Option"};
@@ -818,7 +1027,27 @@ void progEditOpen(int slot) {
   edLoad();
 }
 
-lv_obj_t* progEditCreate() { return edCreate(); }
+// shown without progEditOpen() (320x240: built again after it was left): load the program again
+void progEditShow() {
+  if (ed) return;
+  if (edSlot < 0) edSlot = 0;
+  edLoad();
+}
+
+lv_obj_t* progEditCreate() {
+  builtType = 0xFF;  // (320x240: the screen is built again each time)
+  return edCreate();
+}
+
+void progEditRelease() {
+  free(ed);
+  ed = nullptr;
+  for (DuoProgram*& u : undoBuf) {
+    free(u);
+    u = nullptr;
+  }
+  undoPos = undoTop = savedPos = 0;
+}
 
 // every 250 ms while the editor is shown: the running copy changes with run edits and time
 void progEditUpdate() {

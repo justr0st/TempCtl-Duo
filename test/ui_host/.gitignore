@@ -1,3 +1,8 @@
 obj/
 shots/
+shots_cyd/
 uihost
+uihost_cyd
+uihost_mem
+sheet*.png
+*.log

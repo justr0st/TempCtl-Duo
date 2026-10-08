@@ -100,7 +100,7 @@ static void initStyles() {
   lv_style_set_bg_opa(&S_.panel, LV_OPA_COVER);
   lv_style_set_border_width(&S_.panel, 1);
   lv_style_set_radius(&S_.panel, 8);
-  lv_style_set_pad_all(&S_.panel, 8);
+  lv_style_set_pad_all(&S_.panel, TUI_SMALL ? 6 : 8);
 
   lv_style_set_bg_opa(&S_.sunk, LV_OPA_COVER);
   lv_style_set_border_width(&S_.sunk, 1);
@@ -109,7 +109,7 @@ static void initStyles() {
   lv_style_set_bg_opa(&S_.btn, LV_OPA_COVER);
   lv_style_set_border_width(&S_.btn, 1);
   lv_style_set_radius(&S_.btn, 6);
-  lv_style_set_pad_hor(&S_.btn, 10);
+  lv_style_set_pad_hor(&S_.btn, TUI_SMALL ? 6 : 10);
   lv_style_set_pad_ver(&S_.btn, 4);
   lv_style_set_text_font(&S_.btn, &tfont_14);
   lv_style_set_text_align(&S_.btn, LV_TEXT_ALIGN_CENTER);
@@ -137,14 +137,14 @@ static void initStyles() {
   lv_style_set_bg_opa(&S_.dialog, LV_OPA_COVER);
   lv_style_set_border_width(&S_.dialog, 1);
   lv_style_set_radius(&S_.dialog, 12);
-  lv_style_set_pad_all(&S_.dialog, 14);
+  lv_style_set_pad_all(&S_.dialog, TUI_SMALL ? 10 : 14);
 
   lv_style_set_bg_opa(&S_.listRow, LV_OPA_COVER);
   lv_style_set_border_width(&S_.listRow, 1);
   lv_style_set_border_side(&S_.listRow, LV_BORDER_SIDE_BOTTOM);
   lv_style_set_radius(&S_.listRow, 0);
-  lv_style_set_pad_hor(&S_.listRow, 10);
-  lv_style_set_pad_ver(&S_.listRow, 8);
+  lv_style_set_pad_hor(&S_.listRow, TUI_SMALL ? 8 : 10);
+  lv_style_set_pad_ver(&S_.listRow, TUI_SMALL ? 7 : 8);
 
   lv_style_set_bg_opa(&S_.sep, LV_OPA_COVER);
 
@@ -152,8 +152,8 @@ static void initStyles() {
   lv_style_set_border_width(&S_.cell, 1);
   lv_style_set_border_side(&S_.cell, (lv_border_side_t)(LV_BORDER_SIDE_BOTTOM | LV_BORDER_SIDE_RIGHT));
   lv_style_set_pad_hor(&S_.cell, 4);
-  lv_style_set_pad_ver(&S_.cell, 8);
-  lv_style_set_text_font(&S_.cell, &tfont_14);
+  lv_style_set_pad_ver(&S_.cell, TUI_SMALL ? 6 : 8);
+  lv_style_set_text_font(&S_.cell, TUI_SMALL ? &tfont_12 : &tfont_14);
   lv_style_set_text_align(&S_.cell, LV_TEXT_ALIGN_CENTER);
 
   lv_style_set_outline_width(&S_.ring, 3);

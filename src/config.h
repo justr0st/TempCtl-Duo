@@ -15,6 +15,11 @@
 // bins of the live history. Running: the program timeline (plus some spare time)
 // is divided into CHART_N bins.
 #define CHART_N 300
+// The touch chart's copy also keeps the lowest / highest PV of each point (peaks): with PSRAM only
+// (2.4 kB more; the CYD's internal RAM is short)
+#ifdef BOARD_HAS_PSRAM
+#define CHART_LOHI 1
+#endif
 #define LIVE_SAMPLE_SEC 1
 // Live history in RAM (lost on restart): one slot per LIVE_SAMPLE_SEC with the last,
 // lowest and highest reading and the setpoint of both channels, 12 bytes.

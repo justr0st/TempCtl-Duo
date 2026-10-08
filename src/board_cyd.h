@@ -125,3 +125,5 @@
 // ---- Screen used by the UI ----
 #define SCREEN_W 320
 #define SCREEN_H 240
+// Touch UI: the hand-written LVGL screens (src/tui_*.cpp, compact 320x240 set)
+#define UI_V2 1

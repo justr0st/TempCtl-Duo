@@ -8,6 +8,12 @@
 #include "local_ctrl.h"
 #include "tui.h"
 #include <vector>
+#ifdef MEMTEST
+#include <malloc.h>
+#include "src/display/lv_display_private.h"
+void trackStart();
+void trackReport();
+#endif
 
 SerialT Serial;
 EspT ESP;
@@ -87,7 +93,10 @@ static uint32_t liveShift = 0;
 void chartSnapshot(ChartData& d, bool live) {
   memset(&d, 0, sizeof(d));
   for (int i = 0; i < CHART_N; ++i)
-    d.pv[i] = d.sp[i] = d.plan[i] = d.pvT[i] = d.spT[i] = d.planT[i] = d.lo[i] = d.hi[i] = d.loT[i] = d.hiT[i] = NAN;
+    d.pv[i] = d.sp[i] = d.plan[i] = d.pvT[i] = d.spT[i] = d.planT[i] = NAN;
+#ifdef CHART_LOHI
+  for (int i = 0; i < CHART_N; ++i) d.lo[i] = d.hi[i] = d.loT[i] = d.hiT[i] = NAN;
+#endif
   auto spB = [](float t) -> float { return t < 60 ? 25 + 125 * t / 60 : t < 222 ? 150 : t < 482 ? 160 : NAN; };
   auto spT = [](float t) -> float {
     if (t < 222) return NAN;
@@ -115,8 +124,10 @@ void chartSnapshot(ChartData& d, bool live) {
       const int a = (int)n - 60;  // a 25 s heat burst with a jagged top
       if (a >= 0 && a < 25) pb = 24 + 20 * sinf(a * 3.14159f / 25) + ((a % 4) == 1 ? 4 : 0) + noise * 3;
       d.pv[i] = pb;
+#ifdef CHART_LOHI
       d.lo[i] = pb - 0.3f - fabsf(noise);
       d.hi[i] = pb + 0.3f + (a == 12 ? 6 : 0);
+#endif
       d.pvT[i] = NAN;
       d.sp[i] = 20;
       d.spT[i] = NAN;
@@ -192,6 +203,7 @@ static void run(uint32_t ms) {
     lv_timer_handler();
   }
 }
+#define SMALL (SCREEN_W < 400)
 static void tap(int x, int y) {
   tx = x, ty = y;
   run(80);
@@ -202,7 +214,7 @@ static void shot(const char* name) {
   run(300);
   lv_refr_now(hostDisp);
   char path[128];
-  snprintf(path, sizeof(path), "shots/%s.raw", name);
+  snprintf(path, sizeof(path), "%s/%s.raw", SCREEN_W < 400 ? "shots_cyd" : "shots", name);
   FILE* f = fopen(path, "wb");
   fwrite(fb, 2, SCREEN_W * SCREEN_H, f);
   fclose(f);
@@ -301,6 +313,60 @@ static void monkey(int n) {
 
 int main(int argc, char** argv) {
   baseState();
+#ifdef MEMTEST
+  if (argc > 1 && !strcmp(argv[1], "mem")) {  // heap in use per screen (no sanitizer build)
+    auto used = [] { return (long)mallinfo2().uordblks; };
+    const long base = used();
+    uiInit();
+    run(500);
+    printf("main screen: %ld\n", used() - base);
+    const TScreen S[] = {SCR_MENU, SCR_PROGRAMS, SCR_CHANNELS, SCR_NETWORK, SCR_DISPLAY, SCR_SYSTEM, SCR_LOG};
+    const char* N[] = {"menu", "programs", "channels", "network", "display", "system", "log"};
+    for (int i = 0; i < 7; ++i) {
+      tShow(S[i]);
+      run(500);
+      printf("%-9s %ld\n", N[i], used() - base);
+    }
+    progEditOpen(0);
+    run(500);
+    printf("editor    %ld\n", used() - base);
+    tShow(SCR_MAIN);
+    run(500);
+    printf("back main %ld\n", used() - base);
+    {  // what stays allocated while time passes on the main screen
+      run(2000);
+      const long u0 = used();
+      trackStart();
+      run(20000);
+      printf("20 s on main: %ld more\n", used() - u0);
+      trackReport();
+    }
+    for (int i = 0; i < 7; ++i) {
+      long a0 = 0;
+      for (int k = 0; k < 12; ++k) {
+        tShow(S[i]);
+        run(300);
+        tShow(SCR_MAIN);
+        run(300);
+        if (k == 1) a0 = used();
+      }
+      printf("leak %-9s %ld per visit\n", N[i], (used() - a0) / 10);
+      printf("   screens on the display: %u\n", (unsigned)((lv_display_t*)lv_display_get_default())->screen_cnt);
+    }
+    for (int k = 0; k < 3; ++k) {
+      for (int i = 0; i < 7; ++i) {
+        tShow(S[i]);
+        run(300);
+      }
+      progEditOpen(1);
+      run(300);
+      tShow(SCR_MAIN);
+      run(500);
+      printf("round %d   %ld\n", k, used() - base);
+    }
+    return 0;
+  }
+#endif
   if (argc > 1 && !strcmp(argv[1], "monkey")) {
     uiInit();
     monkey(atoi(argc > 2 ? argv[2] : "3000"));
@@ -315,17 +381,19 @@ int main(int argc, char** argv) {
   shot("01b-tune-toast");
   hostTune = false;
   run(5000);
-  tap(120, 18);  // program picker
+  tap(SMALL ? 60 : 120, SMALL ? 10 : 18);  // program picker
   shot("02-picker");
   tModalClose();
   runningState();
   run(1200);
   shot("03-running");
-  tap(390, 290);  // + on the top tile, twice
-  tap(390, 290);
+  if (!SMALL) {  // + on the top tile, twice (no stepper on 320x240)
+    tap(390, 290);
+    tap(390, 290);
+  }
   shot("04-stepper");
   run(1000);
-  tap(90, 290);  // value of the bottom tile -> numpad
+  tap(SMALL ? 120 : 90, SMALL ? 140 : 290);  // value of the bottom tile -> numpad
   shot("05-numpad");
   tModalClose();
   gLive.progPause = true;
@@ -337,7 +405,7 @@ int main(int argc, char** argv) {
   gLive.progPause = gLive.pauseMsg = false;
   gLive.seq = {4, Stage::Ramp, 10, 20};
   run(400);
-  tap(240, 110);  // chart -> live
+  tap(SMALL ? 160 : 240, SMALL ? 70 : 110);  // chart -> live
   run(1200);
   shot("07-live");
   for (int k = 0; k < 4; ++k) {  // window moves by 1 s per frame: the curve must keep its shape
@@ -351,7 +419,7 @@ int main(int argc, char** argv) {
   gSettings.accentColor = 0xD65D0E;
   run(800);
   shot("08-light");
-  tap(240, 110);  // chart -> program
+  tap(SMALL ? 160 : 240, SMALL ? 70 : 110);  // chart -> program
   gSettings.themeDark = 1;
   gSettings.accentColor = 0x2196F3;
   // idle with an interrupted run + a fault
@@ -375,7 +443,7 @@ int main(int argc, char** argv) {
   gLive.ch[0].fault = 0;
   gLive.ch[0].pvValid = true;
   gLive.intrValid = false;
-  tap(22, 22);  // menu
+  tap(SMALL ? 40 : 22, SMALL ? 222 : 22);  // menu
   shot("11-menu");
   tShow(SCR_DISPLAY);
   shot("12-display");
@@ -401,21 +469,32 @@ int main(int argc, char** argv) {
   shot("19-programs");
   progEditOpen(0);
   shot("20-edit-seq");
-  tap(60, 140);  // row 2 type -> row menu
+  tap(SMALL ? 120 : 60, SMALL ? 80 : 140);  // row 2 -> row menu
   shot("21-rowmenu");
   tModalClose();
   progEditOpen(2);
   shot("22-edit-tl");
+  if (SMALL) {  // the other channel, a step menu
+    tap(240, 52);
+    shot("22b-edit-tl-top");
+    tap(150, 100);
+    shot("22c-step-menu");
+    tModalClose();
+    progEditOpen(0);
+    tap(150, 63);  // phase 1 -> its menu with the values
+    shot("21b-phase-menu");
+    tModalClose();
+  }
   progEditOpen(5);
   shot("23-edit-empty");
   tShow(SCR_CHANNELS);
   shot("24-chan-local");
-  tap(220, 22);  // second tab
+  tap(SMALL ? 155 : 220, SMALL ? 18 : 22);  // second tab
   shot("25-chan-modbus");
   run(600);
-  tap(330, 22);  // bus tab
+  tap(SMALL ? 225 : 330, SMALL ? 18 : 22);  // bus tab
   shot("26-chan-bus");
-  tap(110, 22);  // first channel (local)
+  tap(SMALL ? 85 : 110, SMALL ? 18 : 22);  // first channel (local)
   lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 560, LV_ANIM_OFF);
   shot("27-chan-pid");
   lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 1100, LV_ANIM_OFF);

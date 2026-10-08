@@ -7,6 +7,17 @@
 #include <lvgl.h>
 #include "app_state.h"
 
+// ------------------------------------------------------------ sizes
+// Two screen sets from one code: 480x320 (S3) and the compact 320x240 (CYD, TUI_SMALL)
+#if SCREEN_W < 400
+#define TUI_SMALL 1
+#else
+#define TUI_SMALL 0
+#endif
+constexpr int T_HDR = TUI_SMALL ? 36 : 44;   // page header height
+constexpr int T_BTN = TUI_SMALL ? 32 : 36;   // standard button height
+constexpr int T_DLG_W = TUI_SMALL ? SCREEN_W - 12 : 380;  // dialog / list width
+
 // ------------------------------------------------------------ theme (tui_theme.cpp)
 // Same palette as the web page: fixed neutrals (dark / light), accent and channel colours derived
 // from the accent (split-complementary, contrast rule, spec 6).
@@ -75,7 +86,8 @@ bool tModalOpen();
 uint32_t tModalId();  // the open popup (0 = none), to close one that is no longer needed
 // Short message at the bottom (4 s); bad = error colour
 void tToast(const char* text, bool bad = false);
-constexpr int TOAST_MAIN_BOTTOM = 46 + 132 - 2;  // main screen: lower edge of the chart
+// main screen: lower edge of the chart (messages sit there, the tile controls stay free)
+constexpr int TOAST_MAIN_BOTTOM = TUI_SMALL ? 30 + 76 - 2 : 46 + 132 - 2;
 
 // ------------------------------------------------------------ formatting
 void fmtTime(float sec, char* out, size_t n);  // m:ss or h:mm:ss
@@ -106,6 +118,8 @@ void progListShow();
 lv_obj_t* progEditCreate();
 void progEditUpdate();
 void progEditOpen(int slot);
+void progEditShow();
+void progEditRelease();  // frees the draft and the undo steps (320x240: when the editor is left)
 lv_obj_t* chanCreate();
 void chanShow();
 void chanUpdate();

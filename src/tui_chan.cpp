@@ -12,6 +12,8 @@
 
 static Settings E;  // edited copy
 static bool eDirty = false;
+// control sizes (480x320 / 320x240)
+constexpr int CW = TUI_SMALL ? 128 : 150, CW2 = TUI_SMALL ? 90 : 110, BH = TUI_SMALL ? 32 : 36, TAB_W = TUI_SMALL ? 66 : 104;
 static int tab = 0;  // 0, 1 = channel, 2 = bus
 static lv_obj_t *cScr, *cTabs[3], *cBody, *cSave, *tuneLbl, *tuneRow;
 
@@ -251,12 +253,12 @@ static lv_obj_t* row(const char* label, const char* hint) {
   lv_obj_t* col = tCol(r, 0);
   lv_obj_set_flex_grow(col, 1);
   lv_obj_t* l = tLabel(col, &tfont_14, label);
-  lv_obj_set_width(l, 260);
+  lv_obj_set_width(l, TUI_SMALL ? LV_PCT(100) : 260);
   lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
   if (hint) {
     lv_obj_t* h = tLabel(col, &tfont_12, hint);
     lv_obj_add_style(h, &S_.muted, 0);
-    lv_obj_set_width(h, 260);
+    lv_obj_set_width(h, TUI_SMALL ? LV_PCT(100) : 260);
     lv_label_set_long_mode(h, LV_LABEL_LONG_MODE_WRAP);
   }
   return r;
@@ -288,7 +290,7 @@ static void build() {
   else lv_obj_remove_style(cSave, &S_.btnPri, 0);
   if (tab < 2) {
     lv_obj_t* r = row("Name", "Shown on all screens");
-    tButton(r, E.ch[tab].name, onNameBtn, nullptr, 150, 36);
+    tButton(r, E.ch[tab].name, onNameBtn, nullptr, CW, BH);
   }
   int n;
   const Field* F = fieldsOf(n);
@@ -306,7 +308,7 @@ static void build() {
         lv_obj_set_style_text_font(tuneLbl, &tfont_12, 0);
         tuneRow = tCol(r, 4);
         static const char* const B[] = {"Start", "Stop", "Take over", "Discard"};
-        for (int k = 0; k < 4; ++k) tButton(tuneRow, B[k], onTune, (void*)(intptr_t)k, 100, 34);
+        for (int k = 0; k < 4; ++k) tButton(tuneRow, B[k], onTune, (void*)(intptr_t)k, TUI_SMALL ? 86 : 100, TUI_SMALL ? 30 : 34);
         tuneUpdate();
       }
       continue;
@@ -314,7 +316,9 @@ static void build() {
     if (f.k == F_NOTE) {
       lv_obj_t* nt = tLabel(cBody, &tfont_12, f.label);
       lv_obj_add_style(nt, &S_.muted, 0);
-      if (tab < 2 && isMb(E, tab) && !strncmp(f.label, "Register", 8)) tButton(cBody, "Test link", onTest, nullptr, 120, 36);
+      lv_obj_set_width(nt, LV_PCT(100));
+      lv_label_set_long_mode(nt, LV_LABEL_LONG_MODE_WRAP);
+      if (tab < 2 && isMb(E, tab) && !strncmp(f.label, "Register", 8)) tButton(cBody, "Test link", onTest, nullptr, 120, BH);
       continue;
     }
     lv_obj_t* r = row(f.label, f.hint);
@@ -324,13 +328,13 @@ static void build() {
       tSetChecked(sw, f.get(E, tab) != 0);
     } else if (f.k == F_SEL) {
       selText(f.opts, (int)f.get(E, tab), b, sizeof(b));
-      lv_obj_t* btn = tButton(r, b, onField, (void*)(intptr_t)i, 150, 36);
+      lv_obj_t* btn = tButton(r, b, onField, (void*)(intptr_t)i, CW, BH);
       lv_obj_t* l = lv_obj_get_child(btn, 0);
-      lv_obj_set_width(l, 140);
+      lv_obj_set_width(l, CW - 10);
       tOneLine(l);
     } else {
       snprintf(b, sizeof(b), "%.*f%s%s", f.dec, f.get(E, tab), f.unit && *f.unit ? " " : "", f.unit ? f.unit : "");
-      tButton(r, b, onField, (void*)(intptr_t)i, 110, 36);
+      tButton(r, b, onField, (void*)(intptr_t)i, CW2, BH);
     }
   }
 }
@@ -396,15 +400,16 @@ lv_obj_t* chanCreate() {
   for (int i = 0; i < 3; ++i) {
     cTabs[i] = nullptr;
     if (i == 2 && !bus) continue;
-    cTabs[i] = tButton(p.header, i == 2 ? "RS485 (beta)" : "", onTab, (void*)(intptr_t)i, 104, 36);
+    cTabs[i] = tButton(p.header, i == 2 ? (TUI_SMALL ? "RS485" : "RS485 (beta)") : "", onTab, (void*)(intptr_t)i, TAB_W,
+                       T_HDR - 8);
     lv_obj_t* l = lv_obj_get_child(cTabs[i], 0);
-    lv_obj_set_width(l, 96);
+    lv_obj_set_width(l, TAB_W - 8);
     tOneLine(l);
   }
   lv_obj_t* sp = lv_obj_create(p.header);
   lv_obj_remove_style_all(sp);
   lv_obj_set_flex_grow(sp, 1);
-  cSave = tButton(p.header, "Save", onSave, nullptr, 64, 36);
+  cSave = tButton(p.header, "Save", onSave, nullptr, TUI_SMALL ? 52 : 64, T_HDR - 8);
   return p.scr;
 }
 

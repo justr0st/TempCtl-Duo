@@ -161,7 +161,7 @@ struct ChartData {
   char progName[PROG_NAME_LEN];
   Tenth16 pv[CHART_N], sp[CHART_N], plan[CHART_N];     // bottom (ENGINE_CH)
   Tenth16 pvT[CHART_N], spT[CHART_N], planT[CHART_N];  // top
-#ifdef UI_V2
+#ifdef CHART_LOHI
   Tenth16 lo[CHART_N], hi[CHART_N], loT[CHART_N], hiT[CHART_N];  // lowest / highest PV within each point
 #endif
 };

@@ -1,6 +1,6 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
 
-> **Work in progress (version 1.0.20).** Modbus RTU (RS485 controllers) is a **beta** feature: built
+> **Work in progress (version 1.0.21).** Modbus RTU (RS485 controllers) is a **beta** feature: built
 > in, but not tested with a real controller yet; local thermocouple + SSR channels are the tested path.
 > TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
 > of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
@@ -19,7 +19,8 @@ heaters (Sequence or Timeline, see "Programs" below) and can also hold a **manua
 Main use: the bottom and top heater of a **BGA rework station** (reflow / desolder profiles); on the first
 start three example programs are created (Lead-free BGA, Leaded BGA, Lead-free BGA as a Timeline).
 
-- LVGL 9.6 touch GUI. **S3 (480×320): the new touch UI** (step 6, `src/tui_*.cpp`, section 4a), same look
+- LVGL 9.6 touch GUI, **both boards: the new touch UI** (step 6, `src/tui_*.cpp`, section 4a; S3 480×320 in
+  1.0.19, CYD 320×240 in 1.0.21), same look
   as the web page (Barlow font, palette, accent and channel colours):
   - **Main screen**: header with the program (tap: choose the program for the next run), phase / steps,
     state, run time and remaining time, Start / Pause / Continue, Stop, Next phase; the chart of both
@@ -274,7 +275,13 @@ Touch calibration defaults (200…3700 / 240…3800) suit most CYDs. If touches 
 
 ## 4a. Touch UI
 
-**S3: `src/tui_*.cpp`** — screens written in LVGL C code (decided with Rost, step 6): `tui.cpp` (display +
+**`src/tui_*.cpp`** — screens written in LVGL C code (decided with Rost, step 6), one code for both screen
+sizes: 480×320 (S3) and a compact 320×240 set (CYD, `TUI_SMALL` in `tui.h`): there the main screen has one
+SP button per channel (tap: number pad) instead of the − value + stepper and the SP readout, the run buttons
+and the menu in a bottom bar; the Sequence editor shows one line per phase (tap: the phase menu with its
+values, type and row actions) and the Timeline editor one table with a channel switch above it. The CYD
+builds only the main screen once; the other screens are built when opened and freed when left (its
+internal RAM is short), the editor keeps 2 undo steps there (15 on the S3). `tui.cpp` (display +
 touch glue, screen switching, the 250 ms update), `tui_theme.cpp` (the web page's palette, accent-derived
 channel colours, named styles), `tui_widgets.cpp` (buttons, pages, number pad, keyboard, dialogs, choice
 lists, messages), `tui_main.cpp`, `tui_chart.cpp`, `tui_menu.cpp` (menu, log, display, network, system),
@@ -282,9 +289,11 @@ lists, messages), `tui_main.cpp`, `tui_chart.cpp`, `tui_menu.cpp` (menu, log, di
 `src/fonts/tfont_*.c`, made by `tools/lv_font_gen.py` from `tools/fonts/*.ttf` (OFL); LVGL's Montserrat
 supplies the symbols. **Preview without a board**: `test/ui_host/build.sh` builds the screens for the PC
 and renders screenshots of the main states (and `./uihost monkey` taps around at random under
-AddressSanitizer).
+AddressSanitizer); `BOARD=cyd ./build.sh` does the same for the 320×240 set (`uihost_cyd`, `shots_cyd/`),
+`python3 sheet.py [cyd] [names]` converts the shots and puts them on one sheet, `MEM=1 BOARD=cyd ./build.sh`
++ `./uihost_mem mem` prints the heap used per screen.
 
-### CYD: editing the old touch UI with LVGL Pro Editor
+### The old touch UI (LVGL Pro Editor, TempCtl 1.2 screens) — no longer built since 1.0.21
 
 The screen layout lives in `ui/` as an [LVGL Pro](https://lvgl.io/pro) project (`project.xml`,
 `globals.xml`, `translations.xml`, `components/`, `screens/`, target 320×240). Open the **`ui` folder**
@@ -487,10 +496,10 @@ src/local_ctrl.*          local channels: task reading the thermocouples, PID, S
 src/tc_sensor.*, pid.*, runaway.*, autotune.*  MAX31855/MAX6675 decoding, PID, runaway check, relay autotune
                           (pure C++, unit-tested)
 src/app_state.*           control task: polling both channels, run engine, manual setpoint per channel, chart history
-src/tui*.cpp, tui.h        touch UI of the S3 (480×320), section 4a
+src/tui*.cpp, tui.h        touch UI of both boards (480×320 S3, 320×240 CYD), section 4a
 src/fonts/                touch UI fonts (tools/lv_font_gen.py from tools/fonts/*.ttf)
-src/ui.*                  CYD touch UI behaviour (TempCtl 1.2 screens): event callbacks, dialogs
-src/ui_gen.*              CYD: bridge to the exported UI code (create functions, constants, font fallbacks)
+src/ui.*                  old touch UI (TempCtl 1.2 screens), not built since 1.0.21
+src/ui_gen.*              old touch UI: bridge to the exported UI code (not built since 1.0.21)
 src/web.*                 HTTP server, JSON API
 web/, tools/web_embed.py  web page + fonts → src/web_assets.h (generated before each build)
 test/ui_host/             touch UI preview on a PC (screenshots, random-tap test)

@@ -24,6 +24,8 @@ struct Tile {
   uint32_t pendAt;     // last stepper press
   uint32_t downAt;     // - / + pressed down (held > 3 s: steps of 5 degC)
   bool repeated;       // the press repeated (no extra step on release)
+  int8_t spStyled;
+  bool faultStyled;    // the status text shows the fault colour     // 320x240: the SP button shows the SP colour (-1 unknown)
   bool runTarget;      // the stepper edits the run's target (else the manual setpoint)
   float lo, hi;        // setpoint limits
   float shown;         // value the stepper shows
@@ -111,6 +113,7 @@ static void sendTarget(int ch, float v) {
   else setManualSp(v, ch);
 }
 
+#if !TUI_SMALL
 static void onStep(lv_event_t* e) {
   const int k = (int)(intptr_t)lv_event_get_user_data(e);  // ch * 2 + (0 minus, 1 plus)
   Tile& t = tiles[k / 2];
@@ -137,6 +140,8 @@ static void onStep(lv_event_t* e) {
   snprintf(b, sizeof(b), "%.0f \xC2\xB0" "C", v);
   tButtonText(t.value, b);
 }
+
+#endif
 
 static void onValueNum(float v, int ch) {
   tiles[ch].pend = NAN;
@@ -172,6 +177,7 @@ static void onExtend(lv_event_t* e) {
 
 static void onAck(lv_event_t* e) { sendCmd(CMD_ACK_FAULT, (int)(intptr_t)lv_event_get_user_data(e)); }
 
+#if !TUI_SMALL
 static void tileCreate(int ch, lv_obj_t* parent, int x, int y, int w, int h) {
   Tile& t = tiles[ch];
   t.pend = NAN;
@@ -243,12 +249,76 @@ static void tileCreate(int ch, lv_obj_t* parent, int x, int y, int w, int h) {
   lv_obj_add_style(t.ack, &S_.btnDanger, 0);
   lv_obj_set_pos(t.ack, 0, by);
 }
+#endif
+
+#if TUI_SMALL
+// 320x240: one SP button (current setpoint; tap: number entry for the target / manual setpoint)
+// instead of the stepper and the SP readout; manual / + Hold / Acknowledge in the bottom row
+static void tileCreateSmall(int ch, lv_obj_t* parent, int x, int y, int w, int h) {
+  Tile& t = tiles[ch];
+  t.pend = NAN;
+  t.shown = NAN;
+  t.spStyled = -1;
+  t.box = tPanel(parent);
+  lv_obj_set_pos(t.box, x, y);
+  lv_obj_set_size(t.box, w, h);
+  lv_obj_set_style_pad_all(t.box, 6, 0);
+  const int iw = w - 12;
+  t.name = tLabel(t.box, &tfont_14, "");
+  lv_obj_add_style(t.name, &S_.pv[ch], 0);
+  lv_obj_set_pos(t.name, 0, -2);
+  lv_obj_set_width(t.name, 64);
+  tOneLine(t.name);
+  t.status = tLabel(t.box, &tfont_12, "");
+  lv_obj_add_style(t.status, &S_.muted, 0);
+  lv_obj_set_width(t.status, iw - 66);
+  lv_obj_set_style_text_align(t.status, LV_TEXT_ALIGN_RIGHT, 0);
+  tOneLine(t.status);
+  lv_obj_align(t.status, LV_ALIGN_TOP_RIGHT, 0, 0);
+
+  t.pv = tLabel(t.box, &tfont_28c, "");
+  lv_obj_set_pos(t.pv, 0, 15);
+  t.pvUnit = tLabel(t.box, &tfont_12, "\xC2\xB0" "C");
+  lv_obj_add_style(t.pvUnit, &S_.muted, 0);
+  lv_obj_align_to(t.pvUnit, t.pv, LV_ALIGN_OUT_RIGHT_BOTTOM, 2, -6);
+  t.value = tButton(t.box, "", onValue, (void*)(intptr_t)ch, 62, 30);
+  lv_obj_set_style_text_font(t.value, &tfont_16b, 0);
+  lv_obj_set_style_pad_hor(t.value, 2, 0);
+  lv_obj_align(t.value, LV_ALIGN_TOP_RIGHT, 0, 16);
+
+  t.barBg = lv_obj_create(t.box);
+  lv_obj_remove_style_all(t.barBg);
+  lv_obj_add_style(t.barBg, &S_.barBg, 0);
+  lv_obj_set_size(t.barBg, iw, 5);
+  lv_obj_set_pos(t.barBg, 0, 51);
+  lv_obj_set_scrollable(t.barBg, false);
+  t.bar = lv_obj_create(t.barBg);
+  lv_obj_remove_style_all(t.bar);
+  lv_obj_add_style(t.bar, &S_.bar[ch], 0);
+  lv_obj_set_size(t.bar, 0, LV_PCT(100));
+
+  t.out = tLabel(t.box, &tfont_12, "");
+  lv_obj_add_style(t.out, &S_.muted, 0);
+  lv_obj_set_width(t.out, 80);
+  lv_obj_align(t.out, LV_ALIGN_BOTTOM_LEFT, 0, -5);
+  t.manSw = tIconButton(t.box, LV_SYMBOL_POWER, onManual, (void*)(intptr_t)ch, 46, 26);
+  lv_obj_set_style_text_font(t.manSw, &tfont_16b, 0);
+  lv_obj_add_style(t.manSw, &S_.btnOn[ch], LV_STATE_CHECKED);
+  lv_obj_align(t.manSw, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+  t.extend = tButton(t.box, "+ Hold", onExtend, (void*)(intptr_t)ch, 56, 26);
+  lv_obj_align(t.extend, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+  t.ack = tButton(t.box, "Acknowledge", onAck, (void*)(intptr_t)ch, iw, 30);
+  lv_obj_add_style(t.ack, &S_.btnDanger, 0);
+  lv_obj_align(t.ack, LV_ALIGN_TOP_LEFT, 0, 16);
+}
+#endif
 
 static const char* chStateText(int ch, char* b, size_t n) {
   const ChannelLive& C = L.ch[ch];
   const ChOut& o = L.run[ch];
   char tv[16];
-  fmtTemp(o.target, tv, sizeof(tv));
+  if (TUI_SMALL && !isnan(o.target)) snprintf(tv, sizeof(tv), "%.0f\xC2\xB0" "C", o.target);  // short
+  else fmtTemp(o.target, tv, sizeof(tv));
   if (C.type == CH_OFF) return "Off (settings)";
   if (C.fault) return C.faultText[0] ? C.faultText : "Fault";
   if (!C.commOk) return C.lastErr[0] ? C.lastErr : "No connection";
@@ -259,7 +329,7 @@ static const char* chStateText(int ch, char* b, size_t n) {
     case ChState::Wait: snprintf(b, n, "Waiting for %s", L.ch[0].name); return b;
     case ChState::Jump: snprintf(b, n, "Jump to %s", tv); return b;
     case ChState::Keep:
-      if (L.kept[ch] >= 0) snprintf(b, n, "Keeps %s (%s%d)", tv, L.progType == PROG_SEQ ? "P" : "S", L.kept[ch] + 1);
+      if (L.kept[ch] >= 0 && !TUI_SMALL) snprintf(b, n, "Keeps %s (%s%d)", tv, L.progType == PROG_SEQ ? "P" : "S", L.kept[ch] + 1);
       else snprintf(b, n, "Keeps %s", tv);
       return b;
     case ChState::Halt: return "Paused";
@@ -277,7 +347,8 @@ static const char* chStateText(int ch, char* b, size_t n) {
     if (lt.state == TuneState::Done) return "Autotune done";
   }
   if (C.manualOn) {
-    fmtTemp(C.manualSp, tv, sizeof(tv));
+    if (TUI_SMALL) snprintf(tv, sizeof(tv), "%.0f\xC2\xB0" "C", C.manualSp);
+    else fmtTemp(C.manualSp, tv, sizeof(tv));
     snprintf(b, n, "Manual %s", tv);
     return b;
   }
@@ -292,19 +363,23 @@ static void tileUpdate(int ch) {
   char b[96];
   tSetText(t.name, C.name);
   tSetText(t.status, chStateText(ch, b, sizeof(b)));
-  if (C.fault) lv_obj_add_style(t.status, &S_.danger, 0);
-  else lv_obj_remove_style(t.status, &S_.danger, 0);
+  if ((C.fault != 0) != t.faultStyled) {
+    t.faultStyled = C.fault != 0;
+    if (t.faultStyled) lv_obj_add_style(t.status, &S_.danger, 0);
+    else lv_obj_remove_style(t.status, &S_.danger, 0);
+  }
   if (C.pvValid) snprintf(b, sizeof(b), "%.1f", C.pv);
   else strlcpy(b, "\xE2\x80\x94", sizeof(b));
   tSetText(t.pv, b);
-  lv_obj_align_to(t.pvUnit, t.pv, LV_ALIGN_OUT_RIGHT_BOTTOM, 3, -8);
+  if (TUI_SMALL) lv_obj_align_to(t.pvUnit, t.pv, LV_ALIGN_OUT_RIGHT_BOTTOM, 2, -6);
+  else lv_obj_align_to(t.pvUnit, t.pv, LV_ALIGN_OUT_RIGHT_BOTTOM, 3, -8);
   float sp = C.spEffValid ? C.spEff : NAN;
   if (isnan(sp) && active(L.state) && o.inProgram && !o.idle) sp = o.sp;
   if (isnan(sp) && C.manualOn) sp = C.manualSp;
   if (isnan(sp)) strlcpy(b, "\xE2\x80\x94", sizeof(b));
   else snprintf(b, sizeof(b), "%.1f", sp);
   tSetText(t.sp, b);
-  if (C.outValid) snprintf(b, sizeof(b), "Output %.0f %%", C.out);
+  if (C.outValid) snprintf(b, sizeof(b), TUI_SMALL ? "Out %.0f %%" : "Output %.0f %%", C.out);
   else b[0] = 0;
   tSetText(t.out, b);
   const float outPct = C.outValid ? fmaxf(0, fminf(100, C.out)) : 0;
@@ -320,10 +395,24 @@ static void tileUpdate(int ch) {
     sendTarget(ch, t.pend);
     t.pend = NAN;
   }
+#if TUI_SMALL
+  // the button shows the setpoint in force (ramping: the moving one), else what would be applied
+  const float shown = !isnan(sp) ? sp : t.shown;
+  if (isnan(shown)) strlcpy(b, "\xE2\x80\x94", sizeof(b));
+  else snprintf(b, sizeof(b), "%.0f\xC2\xB0" "C", shown);
+  tButtonText(t.value, b);
+  if (t.spStyled != (int8_t)!isnan(sp)) {  // only on a change (a style change restyles the object)
+    t.spStyled = (int8_t)!isnan(sp);
+    lv_obj_t* vl = lv_obj_get_child(t.value, 0);
+    if (t.spStyled) lv_obj_add_style(vl, &S_.sp[ch], 0);
+    else lv_obj_remove_style(vl, &S_.sp[ch], 0);
+  }
+#else
   const float shown = isnan(t.pend) ? t.shown : t.pend;
   if (isnan(shown)) strlcpy(b, "\xE2\x80\x94", sizeof(b));
   else snprintf(b, sizeof(b), "%.0f \xC2\xB0" "C", shown);
   tButtonText(t.value, b);
+#endif
   const bool stepOk = !off && !C.fault && (t.runTarget || !runCh);
   tSetEnabled(t.minus, stepOk);
   tSetEnabled(t.plus, stepOk);
@@ -372,12 +461,12 @@ static void haltUpdate() {
     lv_obj_add_style(box, &S_.dialog, 0);
     lv_obj_set_style_border_width(box, 3, 0);
     lv_obj_set_style_border_color(box, tc(C_AMBER), 0);
-    lv_obj_set_size(box, 420, LV_SIZE_CONTENT);
+    lv_obj_set_size(box, TUI_SMALL ? SCREEN_W - 12 : 420, LV_SIZE_CONTENT);
     lv_obj_center(box);
     lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_gap(box, 8, 0);
-    lv_obj_t* h = tLabel(box, &tfont_40c, "Action required");
+    lv_obj_t* h = tLabel(box, TUI_SMALL ? &tfont_28c : &tfont_40c, "Action required");
     lv_obj_add_style(h, &S_.amber, 0);
     lv_obj_t* tx = tLabel(box, &tfont_20c, "");
     lv_obj_set_width(tx, LV_PCT(100));
@@ -390,9 +479,9 @@ static void haltUpdate() {
     lv_label_set_long_mode(wh, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_t* row = tRow(box, 10);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_t* st = tButton(row, "Stop", onHaltStop, nullptr, 120, 48);
+    lv_obj_t* st = tButton(row, "Stop", onHaltStop, nullptr, TUI_SMALL ? 110 : 120, TUI_SMALL ? 40 : 48);
     lv_obj_add_style(st, &S_.btnDanger, 0);
-    lv_obj_t* co = tButton(row, "Continue", onHaltCont, nullptr, 160, 48);
+    lv_obj_t* co = tButton(row, "Continue", onHaltCont, nullptr, TUI_SMALL ? 150 : 160, TUI_SMALL ? 40 : 48);
     lv_obj_add_style(co, &S_.btnPri, 0);
     lv_obj_set_style_text_font(co, &tfont_20c, 0);
     lv_obj_set_style_text_font(st, &tfont_20c, 0);
@@ -517,6 +606,65 @@ static void headerUpdate() {
 }
 
 // ------------------------------------------------------------ create / update
+#if TUI_SMALL
+// 320x240: header (program, where, badge, time), chart, the two tiles, run buttons + menu at the bottom
+lv_obj_t* mainCreate() {
+  scr = lv_obj_create(nullptr);
+  lv_obj_add_style(scr, &S_.scr, 0);
+  lv_obj_set_scrollable(scr, false);
+
+  lv_obj_t* hdr = tRow(scr, 6);
+  lv_obj_set_pos(hdr, 0, 0);
+  lv_obj_set_size(hdr, SCREEN_W, 30);
+  lv_obj_set_style_pad_hor(hdr, 6, 0);
+  titleBox = tCol(hdr, -2);
+  lv_obj_set_flex_grow(titleBox, 1);
+  lv_obj_set_clickable(titleBox, true);
+  lv_obj_add_event_cb(titleBox, onTitle, LV_EVENT_CLICKED, nullptr);
+  lblProg = tLabel(titleBox, &tfont_14, "");
+  lv_obj_set_width(lblProg, 170);
+  tOneLine(lblProg);
+  lblSub = tLabel(titleBox, &tfont_12, "");
+  lv_obj_add_style(lblSub, &S_.muted, 0);
+  lv_obj_set_width(lblSub, 170);
+  tOneLine(lblSub);
+  badge = tLabel(hdr, &tfont_12, "");
+  lv_obj_set_style_border_width(badge, 1, 0);
+  lv_obj_set_style_radius(badge, 9, 0);
+  lv_obj_set_style_pad_hor(badge, 5, 0);
+  lv_obj_set_style_pad_ver(badge, 1, 0);
+  lv_obj_set_clickable(badge, true);
+  lv_obj_set_ext_click_area(badge, 8);
+  lv_obj_add_event_cb(badge, onBadge, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t* tcol = tCol(hdr, -3);
+  lv_obj_set_flex_align(tcol, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+  lblTime = tLabel(tcol, &tfont_16b, "");
+  lblRem = tLabel(tcol, &tfont_12, "");
+  lv_obj_add_style(lblRem, &S_.muted, 0);
+
+  chart = chartCreate(scr);
+  lv_obj_set_pos(chart, 2, 30);
+  lv_obj_set_size(chart, SCREEN_W - 4, 76);
+  lv_obj_add_event_cb(chart, onChart, LV_EVENT_CLICKED, nullptr);
+  lblChartMode = tLabel(chart, &tfont_12, "");
+  lv_obj_add_style(lblChartMode, &S_.muted, 0);
+  lv_obj_align(lblChartMode, LV_ALIGN_TOP_RIGHT, -4, 0);
+
+  const int ty = 30 + 76 + 2, tw = (SCREEN_W - 10) / 2, th = 96;
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) tileCreateSmall(ch, scr, 3 + ch * (tw + 4), ty, tw, th);
+
+  lv_obj_t* bar = tRow(scr, 4);
+  lv_obj_set_pos(bar, 0, ty + th + 2);
+  lv_obj_set_size(bar, SCREEN_W, SCREEN_H - (ty + th + 2));
+  lv_obj_set_style_pad_hor(bar, 3, 0);
+  const int bw = (SCREEN_W - 6 - 3 * 4) / 4, bh = SCREEN_H - (ty + th + 2) - 2;
+  tIconButton(bar, LV_SYMBOL_LIST, onMenu, nullptr, bw, bh);
+  btnRun = tIconButton(bar, LV_SYMBOL_PLAY, onRun, nullptr, bw, bh);
+  btnStop = tIconButton(bar, LV_SYMBOL_STOP, onStop, nullptr, bw, bh);
+  btnNext = tIconButton(bar, LV_SYMBOL_NEXT, onNext, nullptr, bw, bh);
+  return scr;
+}
+#else
 lv_obj_t* mainCreate() {
   scr = lv_obj_create(nullptr);
   lv_obj_add_style(scr, &S_.scr, 0);
@@ -567,6 +715,7 @@ lv_obj_t* mainCreate() {
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) tileCreate(ch, scr, 4 + ch * (tw + 4), ty, tw, th);
   return scr;
 }
+#endif
 
 void mainUpdate(const LiveData& live, const Settings& set) {
   L = live;
@@ -581,9 +730,9 @@ void mainUpdate(const LiveData& live, const Settings& set) {
     if (chartLive) {
       char p[16];
       fmtTime(chartData().span, p, sizeof(p));
-      snprintf(b, sizeof(b), "Live \xC2\xB7 %s \xC2\xB7 tap: program", p);
+      snprintf(b, sizeof(b), TUI_SMALL ? "Live \xC2\xB7 %s" : "Live \xC2\xB7 %s \xC2\xB7 tap: program", p);
     } else {
-      strlcpy(b, chartData().run ? "Run \xC2\xB7 tap: live" : "Program preview \xC2\xB7 tap: live", sizeof(b));
+      strlcpy(b, TUI_SMALL ? (chartData().run ? "Run" : "Preview") : chartData().run ? "Run \xC2\xB7 tap: live" : "Program preview \xC2\xB7 tap: live", sizeof(b));
     }
     tSetText(lblChartMode, b);
   }

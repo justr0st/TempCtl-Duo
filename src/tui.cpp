@@ -96,6 +96,8 @@ void tShow(TScreen s) {
       default: return;  // not there yet
     }
   }
+  const TScreen prev = cur;
+  (void)prev;
   cur = s;
   tModalClose();
   if (s == SCR_DISPLAY) displayShow();
@@ -103,7 +105,17 @@ void tShow(TScreen s) {
   if (s == SCR_SYSTEM) systemShow();
   if (s == SCR_PROGRAMS) progListShow();
   if (s == SCR_CHANNELS) chanShow();
+  if (s == SCR_PROGEDIT) progEditShow();
   lv_screen_load(screens[s]);
+#if TUI_SMALL
+  // 320x240 (no PSRAM, short internal RAM): only the main screen stays; the others are built again when
+  // opened (a few ms), so their objects don't use RAM while they aren't shown
+  if (prev != s && prev != SCR_MAIN && screens[prev]) {
+    lv_obj_delete_async(screens[prev]);
+    screens[prev] = nullptr;
+    if (prev == SCR_PROGEDIT) progEditRelease();
+  }
+#endif
 }
 
 // ------------------------------------------------------------ periodic update
