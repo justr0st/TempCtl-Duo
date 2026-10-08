@@ -72,6 +72,7 @@ button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
 #histCsv.dis{opacity:.45}
 .legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted);margin-top:8px}
 .legend span{display:inline-flex;align-items:center;gap:6px}
+.beta{font-size:11px;font-weight:600;color:var(--amber);border:1px solid var(--amber);border-radius:8px;padding:0 6px;vertical-align:middle}
 .sw{display:inline-block;width:18px;height:10px;border-radius:2px}
 .legend .lt{font:inherit;font-size:13px;color:var(--text);min-height:30px;padding:3px 10px;gap:6px;border-radius:999px}
 .legend .lt[aria-pressed=false]{color:var(--muted);background:transparent;border-style:dashed}.legend .lt[aria-pressed=false] .sw{opacity:.25}
@@ -364,7 +365,7 @@ table.t input{width:90px}
 
 <div class="pg" id="pg-tools" hidden>
 <section class="panel" aria-label="Modbus tools">
-  <div class="edhead"><h2>Modbus tools</h2><label class="f">Controller <select id="tCh"></select></label></div>
+  <div class="edhead"><h2>Modbus tools <span class="beta">beta</span></h2><label class="f">Controller <select id="tCh"></select></label></div>
   <p class="hint" id="tNone" hidden>No channel is set to Modbus (Channels page).</p>
   <div class="cards" id="tBox">
     <div class="sub"><h3>Find the setpoint address</h3>
@@ -577,7 +578,7 @@ function modelLive(d){
 }
 // period choices: up to what the device keeps
 function liveMinSel(d){ const sel=$('liveMin'), cap=Math.floor((d.cap||d.span)/60), cur=Math.round(d.span/60);
-  const v=[5,10,15,30,60,120,240,480,720,1440].filter(m=>m<=cap); if(!v.includes(cap)) v.push(cap);
+  const v=[1,5,10,15,30,60,120,240,480,720,1440].filter(m=>m<=cap);
   const lab=m=>m%60?`${m} min`:`${m/60} h`, key=v.join()+'|'+cur;
   if(sel.dataset.k!==key&&document.activeElement!==sel){ sel.dataset.k=key; sel.innerHTML=v.map(m=>`<option value="${m}" ${m===cur?'selected':''}>${lab(m)}</option>`).join(''); } }
 $('legend').onclick=e=>{ const b=e.target.closest('[data-lv]'); if(!b) return; const k=b.dataset.lv.slice(0,2), i=+b.dataset.lv[2];
@@ -625,6 +626,11 @@ function zoomAt(t,f){ if(!M||M.kind==='live') return; const sp0=zv.fit?xfull:zv.
 function afterView(){ if(!zv.fit){ zv.v0=Math.max(0,Math.min(zv.v0,xfull-zv.span)); zv.follow=M&&M.kind==='run'&&M.now>=zv.v0&&M.now<=zv.v0+zv.span; } lastChart=0; }
 const pathOf=pts=>{ let d='',pen=false,lt=null; const gap=M.kind==='live'?M.gap:Infinity;
   for(const [t,v] of pts){ if(v==null){pen=false;continue;} if(lt!=null&&t-lt>gap) pen=false; d+=(pen?'L':'M')+X(t).toFixed(1)+','+Y(v).toFixed(1); pen=true; lt=t; } return d; };
+// closed area between a line (same gaps as pathOf) and the bottom of the chart
+const areaOf=pts=>{ let d='',run=[],lt=null; const gap=M.kind==='live'?M.gap:Infinity, b=Y(YMIN).toFixed(1);
+  const flush=()=>{ if(run.length>1) d+='M'+run[0][0]+','+b+run.map(p=>'L'+p[0]+','+p[1]).join('')+'L'+run[run.length-1][0]+','+b+'Z'; run=[]; };
+  for(const [t,v] of pts){ if(v==null){flush();lt=null;continue;} if(lt!=null&&t-lt>gap) flush(); run.push([X(t).toFixed(1),Y(v).toFixed(1)]); lt=t; }
+  flush(); return d; };
 function segPath(segs){ let d='',lx=null,ly=null; for(const s of segs){ if(s.fl&1||s.v0==null){lx=null;continue;} const x0=X(s.t0),y0=Y(s.v0),x1=X(s.t1),y1=Y(s.v1);
   d+=(lx!=null&&Math.abs(lx-x0)<.5&&Math.abs(ly-y0)<.5?'L':'M')+x0.toFixed(1)+','+y0.toFixed(1)+'L'+x1.toFixed(1)+','+y1.toFixed(1); lx=x1; ly=y1; } return d; }
 function tickStep(){ const span=V1-V0,px=plotW(); for(const st of [5,10,15,30,60,120,300,600,900,1800,3600,7200,10800,14400,21600,43200]) if(px/(span/st)>=64) return st; return 86400; }
@@ -634,7 +640,8 @@ function lanesSvg(i){ let o=''; for(const r of M.lanes[i]){ const m=LANE_ST[r.c]
   o+=`<rect x="${x0.toFixed(1)}" y="${LANE[i]}" width="${w.toFixed(1)}" height="${LH}" style="fill:${m[0]||PV[i]};opacity:${m[1]*(r.f?.7:1)}"/>`; } return o; }
 let YSTEP=50;
 function yRange(){ let mx=0; const see=v=>{ if(v!=null) mx=Math.max(mx,v); }, lv=M.kind==='live';
-  for(const i of CH){ if(!lv||LVIS.pv[i]) M.hist[i].pv.forEach(p=>see(p[1])); if(!lv||LVIS.sp[i]) M.hist[i].sp.forEach(p=>see(p[1])); M.segs[i].forEach(s=>{see(s.v0);see(s.v1);}); }
+  const inView=p=>!lv||p[0]>=M.t0;  // live: a short period shows only the newest points
+  for(const i of CH){ if(!lv||LVIS.pv[i]) M.hist[i].pv.forEach(p=>{ if(inView(p)) see(p[1]); }); if(!lv||LVIS.sp[i]) M.hist[i].sp.forEach(p=>{ if(inView(p)) see(p[1]); }); M.segs[i].forEach(s=>{see(s.v0);see(s.v1);}); }
   YMIN=0;
   if(M.kind==='live'){ // always 0 .. the highest value in view (incl. the newest reading), on a round step
     if(M.head) M.head.v.forEach((v,i)=>{ if(LVIS.pv[i]) see(v); });
@@ -679,7 +686,9 @@ function renderChart(){
   }
   for(const i of CH){
     const shSp=!lv||LVIS.sp[i], shPv=!lv||LVIS.pv[i];
-    if(shSp) s+=`<path d="${pathOf(M.hist[i].sp)}" style="fill:none;stroke:${SP[i]};stroke-width:1.8;stroke-linejoin:round"/>`;
+    // SP: half strength with the area under it lightly filled (the temperature line stays on top)
+    if(shSp) s+=`<path d="${areaOf(M.hist[i].sp)}" style="fill:${SP[i]};opacity:.2;stroke:none"/>`;
+    if(shSp) s+=`<path d="${pathOf(M.hist[i].sp)}" style="fill:none;stroke:${SP[i]};stroke-width:1.8;stroke-linejoin:round;opacity:.5"/>`;
     if(shPv) s+=`<path d="${pathOf(M.hist[i].pv)}" style="fill:none;stroke:${PV[i]};stroke-width:2.5;stroke-linejoin:round"/>`;
     // newest reading (polled faster than the chart history is fetched): line from the last point + dot
     const hp=M.hist[i].pv, hv=shPv&&M.head?M.head.v[i]:null;
@@ -1301,7 +1310,7 @@ function commonGroups(){ const bn=CFG.channels[0].name;
     {k:'bus.pollMs',l:'Polling interval',t:'num',min:250,max:10000,step:50,u:'ms',h:'How often PV, SP and output are read. With two Modbus controllers each one is polled every 2 × this interval.'},
     {k:'bus.commLossSec',l:'Pause the run after no answer for',t:'num',min:0,max:3600,u:'s',h:'0 = never pause'},
     {k:'run.bottomBand',l:`“${bn} reached” band ±`,t:'num',min:0.5,max:50,step:0.5,u:'°C',h:`Used by “Wait for ${bn}” in Sequence phases.`}]},
-   {h:'RS485 bus',show:()=>CFG.limits.rs485,note:'Shared by both Modbus channels.',fields:[
+   {h:'RS485 bus (beta)',show:()=>CFG.limits.rs485,note:'Shared by both Modbus channels. Modbus is a beta feature: not tested with a real controller yet.',fields:[
     {k:'bus.baud',l:'Baud rate',t:'sel',num:true,o:[2400,4800,9600,19200,38400].map(b=>[b,b])},
     {k:'bus.parity',l:'Parity',t:'sel',num:true,o:[[0,'None'],[1,'Even'],[2,'Odd']]},
     {k:'bus.stopBits',l:'Stop bits',t:'sel',num:true,o:[[1,'1'],[2,'2']]},
@@ -1319,12 +1328,12 @@ function runawayFields(P,ty){ const R=`${P}${ty}.runaway.`, sh=g=>g(P+'type')===
 function chanGroups(i){ const P=`channels.${i}.`, ty=t=>g=>g(P+'type')===t;
   return [
    {h:'General',fields:[{k:P+'name',l:'Name',t:'text',max:16,h:'Shown on all screens'},
-     {k:P+'type',l:'Type',t:'sel',o:[['off','Off (not used)'],...(CFG.limits.rs485?[['modbus','Modbus controller']]:[]),['local','Local (thermocouple + SSR)']]},
+     {k:P+'type',l:'Type',t:'sel',o:[['off','Off (not used)'],...(CFG.limits.rs485?[['modbus','Modbus controller (beta)']]:[]),['local','Local (thermocouple + SSR)']]},
      {k:P+'endAction',l:'When the program ends or stops',t:'sel',o:[['keep','Keep the last setpoint'],['sp','Go to the end setpoint'],['off','Switch the outputs off']],show:g=>g(P+'type')!=='off'},
      {k:P+'endSp',l:'End setpoint',t:'num',min:-200,max:1500,step:0.1,u:'°C',show:g=>g(P+'type')!=='off'&&g(P+'endAction')==='sp'},
      {k:P+'spMin',l:'Lowest setpoint',t:'num',min:-200,max:1500,step:0.1,u:'°C',show:g=>g(P+'type')!=='off'},
      {k:P+'spMax',l:'Highest setpoint',t:'num',min:-200,max:1500,step:0.1,u:'°C',show:g=>g(P+'type')!=='off',h:'Local: at most the max. temperature − 10 °C'}]},
-   {h:'Modbus controller',show:ty('modbus'),extra:`<div class="row"><button data-defs="${i}">Load register defaults for this controller type</button></div>`,fields:[
+   {h:'Modbus controller (beta)',show:ty('modbus'),extra:`<div class="row"><button data-defs="${i}">Load register defaults for this controller type</button></div>`,fields:[
      {k:P+'modbus.addr',l:'Slave address',t:'num',min:1,max:247},
      {k:P+'modbus.profile',l:'Controller type',t:'sel',o:[['pma','PMA KS 40-1 / 41-1 / 42-1'],['generic','Generic Modbus RTU']],h:'A new type loads its register defaults'},
      {k:P+'modbus.rampMode',l:'Setpoint ramps',t:'sel',o:[['host','ESP32 writes setpoint steps'],['controller','Controller ramps (r.SP), fewer writes']]},

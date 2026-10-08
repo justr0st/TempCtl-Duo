@@ -11,6 +11,7 @@
 #include "status_led.h"
 #include "version.h"
 #include <esp_system.h>
+#include <esp_rom_sys.h>
 
 Settings gSettings;
 LiveData gLive;
@@ -239,14 +240,23 @@ static uint32_t liveOldest() { return gHist->liveTotal > gHist->liveCap ? gHist-
 
 uint32_t liveHistSec() { return gHist ? gHist->liveCap * LIVE_SAMPLE_SEC : 0; }
 
-// Slots per bin of the live view: the chosen period (display.liveMin), at most what the ring holds,
-// a multiple of CHART_N slots
+const uint16_t LIVE_PERIODS[LIVE_PERIODS_N] = {1, 5, 10, 15, 30, 60, 120, 240, 480, 720, 1440};
+
+uint32_t liveMinEff() {
+  const uint32_t cap = liveHistSec() / 60;
+  uint32_t m = LIVE_PERIODS[0];
+  for (uint16_t p : LIVE_PERIODS)
+    if (p <= cap && p <= gSettings.liveMin) m = p;
+  return m;
+}
+
+// Slots per bin of the live view: the period in effect over CHART_N points (at least one slot; a
+// period shorter than CHART_N slots shows only the newest points)
 static uint32_t liveK() {
-  uint32_t v = (uint32_t)gSettings.liveMin * 60 / LIVE_SAMPLE_SEC;
-  if (v > gHist->liveCap) v = gHist->liveCap;
-  const uint32_t k = v / CHART_N;
+  const uint32_t k = liveMinEff() * 60 / LIVE_SAMPLE_SEC / CHART_N;
   return k ? k : 1;
 }
+static uint32_t liveSpan() { return liveMinEff() * 60; }
 
 // The live view: CHART_N bins of k slots, aligned to the slot count so that a bin doesn't change
 // once it is complete (the newest is partial). fn(j, pv, sp, lo, hi) per bin, 0.1 degC (INT32_MIN =
@@ -613,7 +623,7 @@ void chartSnapshot(ChartData& d, bool live) {
   strlcpy(d.progName, gHist->planName, sizeof(d.progName));
   const uint32_t k = liveK();
   d.binSec = k * LIVE_SAMPLE_SEC;
-  d.span = CHART_N * k * LIVE_SAMPLE_SEC;
+  d.span = liveSpan();
   d.elapsed = 0;
   int32_t row[CHART_N];
   auto put = [&](Tenth16* dst) {
@@ -768,7 +778,7 @@ void chartJson(String& o, bool run) {
     o = "{\"mode\":\"live\",\"bin\":";
     o += String(k * LIVE_SAMPLE_SEC);
     o += ",\"span\":";
-    o += String(CHART_N * k * LIVE_SAMPLE_SEC);
+    o += String(liveSpan());
     o += ",\"sh\":";
     o += String(sh);
     o += ",\"have\":";
@@ -1560,9 +1570,11 @@ static void driveSetpoint(int ch) {
   }
 }
 
-// end action of one channel (spec 9.3.5); true when everything was written
-static bool applyEndAction(int ch) {
+// end action of one channel (spec 9.3.5); true when everything was written. keptSp: the setpoint
+// the channel goes on with (NaN: outputs off / fault)
+static bool applyEndAction(int ch, float& keptSp) {
   bool ok = true;
+  keptSp = NAN;
   const bool aborted = eng.state() == RunState::Aborted;
   const ChOut o = eng.out(ch);
   Channel& c = chan(ch);
@@ -1581,10 +1593,12 @@ static bool applyEndAction(int ch) {
         if (c.canSwitchOff()) ok &= c.setOutputs(false, err, sizeof(lastErr[0]));
       } else {
         ok &= writeSp(ch, hold);
+        keptSp = hold;
       }
       break;
     case END_SET_SP:
       ok &= c.setOutputs(true, err, sizeof(lastErr[0])) && writeSp(ch, s.ch[ch].endSp);
+      keptSp = s.ch[ch].endSp;
       break;
     case END_OUTPUTS_OFF:
       if (!o.idle) ok &= writeSp(ch, hold);
@@ -1672,10 +1686,20 @@ static void cycle(float dt) {
       endOpen |= d.endPending;
       continue;
     }
-    d.endPending = !applyEndAction(i);
+    float kept;
+    d.endPending = !applyEndAction(i, kept);
     if (!d.endPending) {
       const uint8_t a = s.ch[i].endAction;
-      spHeld[i] = a == END_SET_SP || (a == END_KEEP && !eng.out(i).idle) || (a == END_OUTPUTS_OFF && !chan(i).canSwitchOff());
+      spHeld[i] = !isnan(kept) || (a == END_OUTPUTS_OFF && !chan(i).canSwitchOff());
+      // a kept / end setpoint continues as the manual setpoint: the manual button shows it and
+      // switches the outputs off
+      if (!isnan(kept)) {
+        Manual& m = man[i];
+        m.on = true;
+        m.sp = kept;
+        m.pending = m.offPending = false;
+        logEvent("%s: manual setpoint %.1f \xC2\xB0" "C after the program", s.ch[i].name, kept);
+      }
     }
     endOpen |= d.endPending;
     endDone |= !d.endPending;
@@ -1860,12 +1884,42 @@ static void controlTask(void*) {
 
 // ------------------------------------------------------------------ public API
 
+// A requested restart leaves a note in RTC memory (kept over a software reset, not a power loss)
+struct RestartRtc {
+  uint32_t magic;
+  char from[20];
+};
+RTC_NOINIT_ATTR static RestartRtc rtcRestart;
+static constexpr uint32_t RESTART_MAGIC = 0x52535431;  // "RST1"
+static volatile bool restartPending = false;
+
+void appRequestRestart(const char* from) {
+  logEvent("Restart requested %s", from);
+  strlcpy(rtcRestart.from, from, sizeof(rtcRestart.from));
+  rtcRestart.magic = RESTART_MAGIC;
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) localCtrlSetOutputs(ch, false);
+  restartPending = true;
+}
+bool appRestartPending() { return restartPending; }
+
 static const char* resetReasonText() {
-  switch (esp_reset_reason()) {
+  static char b[48];
+  const esp_reset_reason_t r = esp_reset_reason();
+  const bool asked = rtcRestart.magic == RESTART_MAGIC;
+  rtcRestart.magic = 0;
+  if (asked) rtcRestart.from[sizeof(rtcRestart.from) - 1] = 0;
+  if (asked && r == ESP_RST_SW) {
+    snprintf(b, sizeof(b), "restart %s", rtcRestart.from);
+    return b;
+  }
+  switch (r) {
     case ESP_RST_POWERON: return "power on";
     case ESP_RST_EXT: return "reset pin";
     case ESP_RST_SW: return "software restart";
-    case ESP_RST_PANIC: return "crash";
+    case ESP_RST_PANIC:
+      // the ROM's reset code helps telling a real crash from a restart (serial log has the details)
+      snprintf(b, sizeof(b), "%s, rst %d", asked ? "crash while restarting" : "crash", (int)esp_rom_get_reset_reason(0));
+      return b;
     case ESP_RST_INT_WDT:
     case ESP_RST_TASK_WDT:
     case ESP_RST_WDT: return "watchdog";

@@ -43,7 +43,7 @@ static bool raOn(const Settings& s, int c) { return isOn(s, c) && ra(s, c).enabl
 #define S(lhs, type) [](Settings& s, int c, float v) { (void)c; lhs = (type)v; }
 
 static const Field CH_FIELDS[] = {
-    {F_SEL, "Type", nullptr, 0, 0, 0, nullptr, "Off (not used)\nModbus controller\nLocal (thermocouple + SSR)",
+    {F_SEL, "Type", nullptr, 0, 0, 0, nullptr, "Off (not used)\nModbus controller (beta)\nLocal (thermocouple + SSR)",
      G(s.ch[c].type), S(s.ch[c].type, uint8_t), nullptr},
     {F_SEL, "When the program ends or stops", nullptr, 0, 0, 0, nullptr,
      "Keep the last setpoint\nGo to the end setpoint\nSwitch the outputs off", G(s.ch[c].endAction),
@@ -54,7 +54,7 @@ static const Field CH_FIELDS[] = {
     {F_NUM, "Highest setpoint", "Local: at most the cut-off temperature \xE2\x88\x92 10 \xC2\xB0" "C", -200, 1500, 1,
      "\xC2\xB0" "C", nullptr, G(s.ch[c].spMax), S(s.ch[c].spMax, float), isOn},
     // Modbus
-    {F_HEAD, "Modbus controller", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, isMb},
+    {F_HEAD, "Modbus controller (beta)", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, isMb},
     {F_NUM, "Slave address", nullptr, 1, 247, 0, "", nullptr, G(s.ch[c].mb.slaveId), S(s.ch[c].mb.slaveId, uint8_t), isMb},
     {F_SEL, "Controller type", "A new type loads its register defaults", 0, 0, 0, nullptr,
      "PMA KS 40-1 / 41-1 / 42-1\nGeneric Modbus RTU", G(s.ch[c].mb.profile),
@@ -102,7 +102,7 @@ static const Field CH_FIELDS[] = {
 
 static const uint32_t BAUDS[] = {2400, 4800, 9600, 19200, 38400};
 static const Field BUS_FIELDS[] = {
-    {F_NOTE, "Shared by both Modbus channels.", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, nullptr},
+    {F_NOTE, "Shared by both Modbus channels. Modbus is beta: not tested with a controller yet.", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, nullptr},
     {F_SEL, "Baud rate", nullptr, 0, 0, 0, nullptr, "2400\n4800\n9600\n19200\n38400",
      [](const Settings& s, int) -> float {
        for (int i = 0; i < 5; ++i)
@@ -396,7 +396,7 @@ lv_obj_t* chanCreate() {
   for (int i = 0; i < 3; ++i) {
     cTabs[i] = nullptr;
     if (i == 2 && !bus) continue;
-    cTabs[i] = tButton(p.header, i == 2 ? "RS485 bus" : "", onTab, (void*)(intptr_t)i, 104, 36);
+    cTabs[i] = tButton(p.header, i == 2 ? "RS485 (beta)" : "", onTab, (void*)(intptr_t)i, 104, 36);
     lv_obj_t* l = lv_obj_get_child(cTabs[i], 0);
     lv_obj_set_width(l, 96);
     tOneLine(l);

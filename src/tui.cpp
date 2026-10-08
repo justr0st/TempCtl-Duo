@@ -128,6 +128,7 @@ static void uiTimer(lv_timer_t*) {
   switch (cur) {
     case SCR_MAIN: mainUpdate(L, S); break;
     case SCR_LOG: logUpdate(); break;
+    case SCR_DISPLAY: displayUpdate(); break;
     case SCR_NETWORK: networkUpdate(); break;
     case SCR_SYSTEM: systemUpdate(); break;
     case SCR_PROGRAMS: progListShow(); break;

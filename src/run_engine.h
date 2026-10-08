@@ -77,6 +77,7 @@ struct RunPos {
   int16_t i[NUM_CHANNELS];   // Sequence: i[0] = phase; Timeline: step of each channel
   uint8_t st[NUM_CHANNELS];  // Stage (Sequence: st[0])
   float left[NUM_CHANNELS];  // Timeline: seconds left in the channel's ramp / hold / idle
+  float slope[NUM_CHANNELS];  // degC/s of the channel's last ramp (0 = none / unknown)
 };
 
 class RunEngine {
@@ -149,8 +150,11 @@ class RunEngine {
     int16_t i;
     Stage st;
     float el;
+    float hold0;  // hold seconds used up when the hold starts (resumed ramp longer / shorter than planned)
   };
 
+  float plannedRate(int ch, int idx, float target, uint32_t r, float saved) const;
+  float resumedRamp(int ch, float target, float rate, float fallback) const;
   float sp(const Gen& g) const;
   bool genDone(const Gen& g) const;
   float genLeft(const Gen& g) const;

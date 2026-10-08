@@ -30,6 +30,9 @@ void saveSettingsQuiet() {}
 void saveSettingsAndNotify() {}
 BoardLimits boardLimits() { return BoardLimits{true, 2}; }
 uint32_t liveHistSec() { return 86400; }
+const uint16_t LIVE_PERIODS[LIVE_PERIODS_N] = {1, 5, 10, 15, 30, 60, 120, 240, 480, 720, 1440};
+uint32_t liveMinEff() { return gSettings.liveMin ? gSettings.liveMin : 5; }
+void appRequestRestart(const char* from) { printf("[host] restart %s\n", from); }
 void logEvent(const char* fmt, ...) {}
 
 static std::vector<LogEntry> logv;
@@ -57,7 +60,13 @@ bool programSummary(int idx, ProgSummary& out) {
   return out.used;
 }
 
-void localCtrlTuneGet(int ch, LocalTune& t) { memset(&t, 0, sizeof(t)); t.state = TuneState::Idle; }
+static bool hostTune = false;
+void localCtrlTuneGet(int ch, LocalTune& t) {
+  memset(&t, 0, sizeof(t));
+  t.state = hostTune && ch == 0 ? TuneState::Running : TuneState::Idle;
+  t.sp = 200;
+  t.cycle = 2;
+}
 void localCtrlTuneClear(int) {}
 bool busRequest(BusRequest& r, uint32_t) { r.values[0] = 1234; return true; }
 static uint32_t storeGen = 1;
@@ -77,7 +86,8 @@ static bool runMode = false;
 static uint32_t liveShift = 0;
 void chartSnapshot(ChartData& d, bool live) {
   memset(&d, 0, sizeof(d));
-  for (int i = 0; i < CHART_N; ++i) d.pv[i] = d.sp[i] = d.plan[i] = d.pvT[i] = d.spT[i] = d.planT[i] = NAN;
+  for (int i = 0; i < CHART_N; ++i)
+    d.pv[i] = d.sp[i] = d.plan[i] = d.pvT[i] = d.spT[i] = d.planT[i] = d.lo[i] = d.hi[i] = d.loT[i] = d.hiT[i] = NAN;
   auto spB = [](float t) -> float { return t < 60 ? 25 + 125 * t / 60 : t < 222 ? 150 : t < 482 ? 160 : NAN; };
   auto spT = [](float t) -> float {
     if (t < 222) return NAN;
@@ -217,6 +227,7 @@ static void baseState() {
     c.commOk = true;
     c.pvValid = true;
     c.pv = i ? 25.4f : 24.8f;
+    c.manualSp = 120;
     c.spEff = NAN;
     c.out = 0;
     c.outValid = true;
@@ -299,6 +310,11 @@ int main(int argc, char** argv) {
   uiInit();
   run(500);
   shot("01-idle");
+  hostTune = true;  // autotune status in the tile, a message over the chart
+  tToast("IR head: manual setpoint on");
+  shot("01b-tune-toast");
+  hostTune = false;
+  run(5000);
   tap(120, 18);  // program picker
   shot("02-picker");
   tModalClose();

@@ -22,6 +22,7 @@ struct ProgSummary {
 // Mounts LittleFS (formats it on first use) and creates /duo. Safe to call
 // more than once. False = no file system (settings and programs not persistent).
 bool storageBegin();
+bool fsExists(const char* path);  // without the error log of LittleFS.exists()
 
 // Reads the summaries of all slots; creates the examples on the first start.
 void programStoreBegin();

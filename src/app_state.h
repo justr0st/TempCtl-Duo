@@ -231,6 +231,10 @@ struct Guard {
 
 void appInit();                  // create locks/queues, load settings and programs
 void controlTaskStart();
+// Restart on request (touch, web): noted in RTC memory (the next boot logs "restart from ..."),
+// local outputs off, then the main loop restarts once the display has finished drawing.
+void appRequestRestart(const char* from);
+bool appRestartPending();
 unsigned controlTaskStackFree();  // bytes of the control task's stack never used so far
 bool sendCmd(CmdType c, int arg = 0, float value = 0, int idx = -1, uint8_t sub = 0);
 bool busRequest(BusRequest& r, uint32_t timeoutMs = 20000);  // blocks until done
@@ -262,6 +266,11 @@ void chartSnapshot(ChartData& d, bool live = false);  // live: the live view eve
 // pvMask / spMask: channels (bit 0 bottom, bit 1 top) whose PV (+ lowest, highest) / setpoint are written
 size_t liveCsv(uint32_t& from, char* buf, size_t n, uint8_t pvMask = 3, uint8_t spMask = 3);
 uint32_t liveHistSec();          // seconds the live history can hold
+// Live chart periods (minutes) to choose from, up to what the history holds; the one in effect:
+// display.liveMin, at most the longest that fits (both under gLock / from the UI task)
+constexpr int LIVE_PERIODS_N = 11;
+extern const uint16_t LIVE_PERIODS[LIVE_PERIODS_N];
+uint32_t liveMinEff();
 uint32_t iramPureFree();         // free IRAM-only heap (32-bit access only, not usable as DRAM)
 // /api/chart: v = "run" (current / last run with its forecast) or "live" (rolling window)
 void chartJson(String& out, bool run);

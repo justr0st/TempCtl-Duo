@@ -43,7 +43,13 @@
  *  - LV_STDLIB_RTTHREAD
  *  - LV_STDLIB_CUSTOM: Custom (implemented externally)
  */
+/* TempCtl Duo: with PSRAM (S3) LVGL's objects, styles and draw tasks live in PSRAM (src/lv_mem_psram.c), so
+ * the internal RAM stays free for Wi-Fi, the display's DMA buffers and the tasks. CYD: the C library. */
+#if defined(BOARD_HAS_PSRAM) && defined(ESP_PLATFORM)
+#define LV_USE_STDLIB_MALLOC LV_STDLIB_CUSTOM
+#else
 #define LV_USE_STDLIB_MALLOC LV_STDLIB_CLIB
+#endif
 
 /** String functions source
  *  Possible values:

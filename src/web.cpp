@@ -730,7 +730,6 @@ static void handleRestart() {
     active = gLive.state == RunState::Running || gLive.state == RunState::Paused;
   }
   if (active) return sendError("A program is running - stop it first");
-  logEvent("Restart requested from the web page");
   JsonDocument r;
   r["ok"] = true;
   sendJson(r);
@@ -1084,5 +1083,8 @@ void webBegin() {
 
 void webLoop() {
   server.handleClient();
-  if (restartAt && (int32_t)(millis() - restartAt) >= 0) ESP.restart();
+  if (restartAt && (int32_t)(millis() - restartAt) >= 0) {
+    restartAt = 0;
+    appRequestRestart("from the web page");
+  }
 }

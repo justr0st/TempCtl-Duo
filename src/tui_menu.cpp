@@ -128,6 +128,13 @@ static lv_obj_t *dBright, *dDark, *dRotate, *dPeriod, *dAcc[6];
 static const uint32_t ACCENTS[6] = {0x2196F3, 0xD1449B, 0x6C71C4, 0xD65D0E, 0x8839EF, 0x50A14F};
 static const char* const ACC_NAMES[6] = {"Blue", "Pink", "Violet", "Orange", "Mauve", "Green"};
 static bool dLoading = false;
+// what the screen shows: a change from the web page is picked up (displayUpdate)
+struct DShown {
+  uint8_t bright, dark, rot;
+  uint32_t acc;
+  uint16_t liveMin;
+};
+static DShown dShown;
 
 static void onBright(lv_event_t* e) {
   if (dLoading) return;
@@ -167,20 +174,16 @@ static void onAccent(lv_event_t* e) {
   displayShow();
 }
 
-static const uint16_t PERIODS[] = {5, 10, 15, 30, 60, 120, 240, 480, 720, 1440};
+// periods up to what the live history holds (CYD: 30 min)
 static void onPeriodPick(int i, int) {
   const uint32_t cap = liveHistSec() / 60;
   int k = 0;
-  for (uint16_t m : PERIODS) {
+  for (uint16_t m : LIVE_PERIODS) {
     if (m > cap) break;
     if (k++ == i) {
       Guard g;
       gSettings.liveMin = m;
     }
-  }
-  if (i == k) {  // "whole history"
-    Guard g;
-    gSettings.liveMin = (uint16_t)cap;
   }
   saveQuiet();
   displayShow();
@@ -193,28 +196,21 @@ static void fmtMinutes(uint32_t m, char* b, size_t n) {
 
 static void onPeriod(lv_event_t*) {
   const uint32_t cap = liveHistSec() / 60;
-  Settings S;
-  settingsCopy(S);
+  uint32_t cur;
+  {
+    Guard g;
+    cur = liveMinEff();
+  }
   char items[200] = "";
   int n = 0, sel = -1;
-  bool capListed = false;
-  for (uint16_t m : PERIODS) {
+  for (uint16_t m : LIVE_PERIODS) {
     if (m > cap) break;
     char b[16];
     fmtMinutes(m, b, sizeof(b));
     if (n) strlcat(items, "\n", sizeof(items));
     strlcat(items, b, sizeof(items));
-    if (m == S.liveMin) sel = n;
-    capListed |= m == cap;
+    if (m == cur) sel = n;
     ++n;
-  }
-  if (!capListed) {
-    char b[32];
-    fmtMinutes(cap, b, sizeof(b));
-    strlcat(items, "\n", sizeof(items));
-    strlcat(items, b, sizeof(items));
-    strlcat(items, " (whole history)", sizeof(items));
-    if (S.liveMin >= cap) sel = n;
   }
   tChoice("Live chart period", items, sel, onPeriodPick, 0);
 }
@@ -263,10 +259,25 @@ void displayShow() {
   tSetChecked(dRotate, S.rotate180 != 0);
   for (int i = 0; i < 6; ++i) tSetChecked(dAcc[i], (S.accentColor & 0xFFFFFF) == ACCENTS[i]);
   char b[24];
-  fmtMinutes(S.liveMin < liveHistSec() / 60 ? S.liveMin : liveHistSec() / 60, b, sizeof(b));
+  uint32_t cur;
+  {
+    Guard g;
+    cur = liveMinEff();
+  }
+  fmtMinutes(cur, b, sizeof(b));
   tButtonText(dPeriod, b);
+  dShown = {S.brightness, S.themeDark, S.rotate180, S.accentColor, S.liveMin};
   dLoading = false;
   (void)ACC_NAMES;
+}
+
+void displayUpdate() {
+  if (lv_obj_has_state(dBright, LV_STATE_PRESSED)) return;  // being moved here
+  Settings S;
+  settingsCopy(S);
+  if (S.brightness != dShown.bright || S.themeDark != dShown.dark || S.rotate180 != dShown.rot ||
+      S.accentColor != dShown.acc || S.liveMin != dShown.liveMin)
+    displayShow();
 }
 
 // ------------------------------------------------------------ network
@@ -504,9 +515,7 @@ static void onBand(lv_event_t*) {
 }
 static void onRestartAnswer(int b, int) {
   if (b != 2) return;
-  logEvent("Restart requested on the touch screen");
-  delay(200);
-  ESP.restart();
+  appRequestRestart("on the touch screen");
 }
 static void onRestart(lv_event_t*) {
   LiveData L;

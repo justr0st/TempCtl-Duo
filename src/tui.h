@@ -72,8 +72,10 @@ lv_obj_t* tDialog(const char* title, const char* text, const char* b1, const cha
 void tChoice(const char* title, const char* items, int sel, TChoiceCb cb, int arg);
 void tModalClose();
 bool tModalOpen();
+uint32_t tModalId();  // the open popup (0 = none), to close one that is no longer needed
 // Short message at the bottom (4 s); bad = error colour
 void tToast(const char* text, bool bad = false);
+constexpr int TOAST_MAIN_BOTTOM = 46 + 132 - 2;  // main screen: lower edge of the chart
 
 // ------------------------------------------------------------ formatting
 void fmtTime(float sec, char* out, size_t n);  // m:ss or h:mm:ss
@@ -92,6 +94,7 @@ lv_obj_t* logCreate();
 void logUpdate();
 lv_obj_t* displayCreate();
 void displayShow();
+void displayUpdate();
 lv_obj_t* networkCreate();
 void networkShow();
 void networkUpdate();

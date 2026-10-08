@@ -200,7 +200,7 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
   s.rotate180 = s.rotate180 ? 1 : 0;
   if (s.themeDark != THEME_DARK_DEFAULT) s.themeDark = s.themeDark ? 1 : 0;
   s.accentColor &= 0xFFFFFF;
-  clampv<uint16_t>(s.liveMin, 5, 1440);
+  clampv<uint16_t>(s.liveMin, 1, 1440);
   clampv<uint16_t>(s.tsMinX, 0, 4095); clampv<uint16_t>(s.tsMaxX, 0, 4095);
   clampv<uint16_t>(s.tsMinY, 0, 4095); clampv<uint16_t>(s.tsMaxY, 0, 4095);
 

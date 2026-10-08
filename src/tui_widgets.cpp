@@ -154,8 +154,10 @@ TPage tPageCreate(const char* title, lv_event_cb_t back) {
 
 // ------------------------------------------------------------ modal popups
 static lv_obj_t* modal = nullptr;  // overlay on the top layer
+static uint32_t modalGen = 0;      // counts the popups opened
 
 bool tModalOpen() { return modal != nullptr; }
+uint32_t tModalId() { return modal ? modalGen : 0; }
 
 void tModalClose() {
   if (!modal) return;
@@ -167,6 +169,7 @@ void tModalClose() {
 static lv_obj_t* modalBox(int w, int h) {
   tModalClose();
   modal = lv_obj_create(lv_layer_top());
+  ++modalGen;
   lv_obj_remove_style_all(modal);
   lv_obj_add_style(modal, &S_.overlay, 0);
   lv_obj_set_size(modal, LV_PCT(100), LV_PCT(100));
@@ -365,6 +368,7 @@ void tKeyboard(const char* title, const char* cur, uint16_t maxLen, bool passwor
   kbCb = cb;
   kbArg = arg;
   modal = lv_obj_create(lv_layer_top());
+  ++modalGen;
   lv_obj_remove_style_all(modal);
   lv_obj_add_style(modal, &S_.scr, 0);
   lv_obj_set_size(modal, LV_PCT(100), LV_PCT(100));
@@ -372,8 +376,9 @@ void tKeyboard(const char* title, const char* cur, uint16_t maxLen, bool passwor
   lv_obj_set_scrollable(modal, false);
   lv_obj_t* head = tRow(modal, 6);
   lv_obj_set_style_pad_all(head, 6, 0);
+  tIconButton(head, LV_SYMBOL_CLOSE, [](lv_event_t*) { tModalClose(); }, nullptr, 44, 40);  // cancel: no change
   lv_obj_t* t = tLabel(head, &tfont_16b, title);
-  lv_obj_set_width(t, 150);
+  lv_obj_set_width(t, 120);
   tOneLine(t);
   kbTa = lv_textarea_create(head);
   lv_obj_set_flex_grow(kbTa, 1);
@@ -474,7 +479,8 @@ void tToast(const char* text, bool bad) {
   lv_obj_set_style_border_width(toast, 2, 0);
   lv_obj_set_style_border_color(toast, bad ? tc(C_DANGER) : tc(C_ACC), 0);
   lv_obj_set_size(toast, SCREEN_W - 40, LV_SIZE_CONTENT);
-  lv_obj_align(toast, LV_ALIGN_BOTTOM_MID, 0, -8);
+  // main screen: over the lower part of the chart (the channel controls stay free); else at the bottom
+  lv_obj_align(toast, LV_ALIGN_BOTTOM_MID, 0, tCurrent() == SCR_MAIN ? -(SCREEN_H - TOAST_MAIN_BOTTOM) : -8);
   lv_obj_set_scrollable(toast, false);
   lv_obj_set_clickable(toast, true);
   lv_obj_add_event_cb(toast, [](lv_event_t*) { toastGone(nullptr); }, LV_EVENT_CLICKED, nullptr);

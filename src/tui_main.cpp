@@ -3,6 +3,7 @@
 // switch / extend hold / acknowledge). Overlays: "Action required", "Run interrupted by a reset",
 // "Save the run's changes?", messages.
 #include "tui.h"
+#include "local_ctrl.h"
 #ifdef UI_V2
 #include <math.h>
 #include <stdio.h>
@@ -21,6 +22,8 @@ struct Tile {
   lv_obj_t *minus, *value, *plus, *manSw, *extend, *ack;
   float pend;          // stepper value not sent yet (NaN = none)
   uint32_t pendAt;     // last stepper press
+  uint32_t downAt;     // - / + pressed down (held > 3 s: steps of 5 degC)
+  bool repeated;       // the press repeated (no extra step on release)
   bool runTarget;      // the stepper edits the run's target (else the manual setpoint)
   float lo, hi;        // setpoint limits
   float shown;         // value the stepper shows
@@ -32,6 +35,7 @@ static Settings S;
 static RunState prevState = RunState::Idle;
 static char lastMsg[128] = "";
 static bool intrAsked = false;
+static uint32_t intrDlg = 0;  // the "Run interrupted" dialog (closed when answered elsewhere)
 static lv_obj_t* halt = nullptr;  // "Action required" overlay
 
 static bool active(RunState s) { return s == RunState::Running || s == RunState::Paused; }
@@ -110,9 +114,21 @@ static void sendTarget(int ch, float v) {
 static void onStep(lv_event_t* e) {
   const int k = (int)(intptr_t)lv_event_get_user_data(e);  // ch * 2 + (0 minus, 1 plus)
   Tile& t = tiles[k / 2];
+  const lv_event_code_t code = lv_event_get_code(e);
+  if (code == LV_EVENT_PRESSED) {
+    t.downAt = lv_tick_get();
+    t.repeated = false;
+    return;
+  }
+  if (code == LV_EVENT_CLICKED && t.repeated) return;  // held: the repeats did the steps
+  if (code == LV_EVENT_LONG_PRESSED_REPEAT) t.repeated = true;
   float v = isnan(t.pend) ? t.shown : t.pend;
   if (isnan(v)) v = t.lo > 0 ? t.lo : 25;
-  v = roundf(v) + (k & 1 ? 1 : -1);
+  if (code == LV_EVENT_LONG_PRESSED_REPEAT && lv_tick_elaps(t.downAt) > 3000) {
+    v = k & 1 ? floorf(v / 5) * 5 + 5 : ceilf(v / 5) * 5 - 5;  // held > 3 s: 5 degC steps (round values)
+  } else {
+    v = roundf(v) + (k & 1 ? 1 : -1);
+  }
   if (v < t.lo) v = t.lo;
   if (v > t.hi) v = t.hi;
   t.pend = v;
@@ -209,12 +225,14 @@ static void tileCreate(int ch, lv_obj_t* parent, int x, int y, int w, int h) {
   t.minus = tIconButton(t.box, LV_SYMBOL_MINUS, onStep, (void*)(intptr_t)(ch * 2), 38, 38);
   lv_obj_set_pos(t.minus, 0, by);
   lv_obj_add_event_cb(t.minus, onStep, LV_EVENT_LONG_PRESSED_REPEAT, (void*)(intptr_t)(ch * 2));
+  lv_obj_add_event_cb(t.minus, onStep, LV_EVENT_PRESSED, (void*)(intptr_t)(ch * 2));
   t.value = tButton(t.box, "", onValue, (void*)(intptr_t)ch, 74, 38);
   lv_obj_set_style_text_font(t.value, &tfont_16b, 0);
   lv_obj_set_pos(t.value, 42, by);
   t.plus = tIconButton(t.box, LV_SYMBOL_PLUS, onStep, (void*)(intptr_t)(ch * 2 + 1), 38, 38);
   lv_obj_set_pos(t.plus, 120, by);
   lv_obj_add_event_cb(t.plus, onStep, LV_EVENT_LONG_PRESSED_REPEAT, (void*)(intptr_t)(ch * 2 + 1));
+  lv_obj_add_event_cb(t.plus, onStep, LV_EVENT_PRESSED, (void*)(intptr_t)(ch * 2 + 1));
 
   t.manSw = tIconButton(t.box, LV_SYMBOL_POWER, onManual, (void*)(intptr_t)ch, 48, 38);
   lv_obj_add_style(t.manSw, &S_.btnOn[ch], LV_STATE_CHECKED);
@@ -248,6 +266,15 @@ static const char* chStateText(int ch, char* b, size_t n) {
     case ChState::Pause: return "Program pause";
     case ChState::Done: snprintf(b, n, "Done \xC2\xB7 %s", tv); return b;
     default: break;
+  }
+  if (C.type == CH_LOCAL) {  // autotune (Channels screen) running / waiting for take-over
+    LocalTune lt;
+    localCtrlTuneGet(ch, lt);
+    if (lt.state == TuneState::Running) {
+      snprintf(b, n, "Autotune %.0f \xC2\xB0" "C", lt.sp);
+      return b;
+    }
+    if (lt.state == TuneState::Done) return "Autotune done";
   }
   if (C.manualOn) {
     fmtTemp(C.manualSp, tv, sizeof(tv));
@@ -288,7 +315,7 @@ static void tileUpdate(int ch) {
   t.runTarget = runCh && !isnan(o.target) && !o.idle;
   t.lo = S.ch[ch].spMin;
   t.hi = S.ch[ch].spMax;
-  t.shown = t.runTarget ? o.target : S.ch[ch].manualSp;
+  t.shown = t.runTarget ? o.target : C.manualSp;  // (after a run: the kept / end setpoint)
   if (!isnan(t.pend) && lv_tick_elaps(t.pendAt) > 700) {  // send after the last press
     sendTarget(ch, t.pend);
     t.pend = NAN;
@@ -404,6 +431,7 @@ static void intrOpen() {
   if (L.progType == PROG_SEQ) snprintf(resume, sizeof(resume), "Resume P%d", p.i[0] + 1);
   else snprintf(resume, sizeof(resume), "Resume at %s", t);
   tDialog("Run interrupted by a reset", txt, "Dismiss", "Later", resume, onIntrAnswer, 0);
+  intrDlg = tModalId();
 }
 
 static void onBadge(lv_event_t*) {
@@ -417,6 +445,8 @@ static void onSaveAnswer(int b, int) {
 // ------------------------------------------------------------ header
 static void headerUpdate() {
   const bool act = active(L.state);
+  // the last run's result stays until another program is chosen
+  const bool ended = (L.state == RunState::Finished || L.state == RunState::Aborted) && L.runProg == S.selProgram;
   char b[96], t[16];
   // badge
   const char* bt = "Ready";
@@ -425,8 +455,8 @@ static void headerUpdate() {
   else if (act && L.progPause) bt = L.pauseMsg ? "Action required" : "Program pause", bc = C_AMBER;
   else if (L.state == RunState::Running) bt = L.waiting ? "Waiting" : "Running", bc = L.waiting ? C_AMBER : C_OK;
   else if (L.state == RunState::Paused) bt = "Paused", bc = C_AMBER;
-  else if (L.state == RunState::Finished) bt = "Finished", bc = C_ACC;
-  else if (L.state == RunState::Aborted) bt = "Stopped", bc = C_DANGER;
+  else if (ended && L.state == RunState::Finished) bt = "Finished", bc = C_ACC;
+  else if (ended) bt = "Stopped", bc = C_DANGER;
   else if (L.ch[0].manualOn || L.ch[1].manualOn) bt = "Manual", bc = C_MANUAL;
   tSetText(badge, bt);
   lv_obj_set_style_text_color(badge, tc(bc), 0);
@@ -434,7 +464,7 @@ static void headerUpdate() {
   // program + where
   static ProgSummary sel;
   const bool haveSel = programSummary(S.selProgram, sel);
-  if (act || L.state == RunState::Finished || L.state == RunState::Aborted || L.intrValid) {
+  if (act || ended || L.intrValid) {
     tSetText(lblProg, L.runName);
   } else {
     snprintf(b, sizeof(b), "%d  %s", S.selProgram + 1, haveSel ? sel.name : "(empty slot)");
@@ -450,7 +480,7 @@ static void headerUpdate() {
       snprintf(b, sizeof(b), "Timeline \xC2\xB7 %s step %d/%d \xC2\xB7 %s step %d/%d", L.ch[0].name, L.lane[0].idx + 1,
                L.steps[0], L.ch[1].name, L.lane[1].idx + 1, L.steps[1]);
     }
-  } else if (L.state == RunState::Finished || L.state == RunState::Aborted) {
+  } else if (ended) {
     fmtTime(L.elapsed, t, sizeof(t));
     snprintf(b, sizeof(b), "%s after %s \xC2\xB7 tap for the next program", L.state == RunState::Finished ? "Finished" : "Stopped", t);
   } else if (haveSel) {
@@ -469,8 +499,8 @@ static void headerUpdate() {
     snprintf(b, sizeof(b), "%s left", t);
     tSetText(lblRem, b);
   } else {
-    tSetText(lblTime, L.state == RunState::Finished || L.state == RunState::Aborted ? (fmtTime(L.elapsed, t, sizeof(t)), t) : "0:00");
-    if (haveSel && !(L.state == RunState::Finished || L.state == RunState::Aborted)) {
+    tSetText(lblTime, ended ? (fmtTime(L.elapsed, t, sizeof(t)), t) : "0:00");
+    if (haveSel && !ended) {
       fmtTime(sel.total, t, sizeof(t));
       snprintf(b, sizeof(b), "%s total", t);
     } else {
@@ -568,7 +598,11 @@ void mainEvents(const LiveData& live, const Settings& set) {
     intrAsked = true;
     intrOpen();
   }
-  if (!L.intrValid) intrAsked = false;
+  if (!L.intrValid) {
+    intrAsked = false;
+    if (intrDlg && tModalId() == intrDlg) tModalClose();  // resumed / dismissed on the web page
+    intrDlg = 0;
+  }
   const bool ended = active(prevState) && (L.state == RunState::Finished || L.state == RunState::Aborted);
   if (ended && L.runEdited) {
     char b[120];

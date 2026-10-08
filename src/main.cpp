@@ -63,17 +63,33 @@ void setup() {
 }
 
 void loop() {
-#ifndef BOARD_HAS_PSRAM
-  // CYD (no PSRAM): heap check once a minute (free, largest block, lowest so far)
-  static uint32_t memAt = 0;
-  if (millis() - memAt > 60000) {
-    memAt = millis();
-    memLog("running");
-    Serial.printf("[mem] stack free: loop %u, control %u bytes\n", (unsigned)uxTaskGetStackHighWaterMark(nullptr),
-                  controlTaskStackFree());
-    if (WiFi.status() == WL_CONNECTED) Serial.printf("[wifi] RSSI %d dBm\n", (int)WiFi.RSSI());
-  }
+  // heap check once a minute (internal RAM: free, largest block, lowest so far)
+  {
+    static uint32_t memAt = 0;
+    if (millis() - memAt > 60000) {
+      memAt = millis();
+      memLog("running");
+      Serial.printf("[mem] stack free: loop %u, control %u bytes\n", (unsigned)uxTaskGetStackHighWaterMark(nullptr),
+                    controlTaskStackFree());
+#ifdef BOARD_HAS_PSRAM
+      Serial.printf("[mem] PSRAM free %u\n", (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 #endif
+      if (WiFi.status() == WL_CONNECTED) Serial.printf("[wifi] RSSI %d dBm\n", (int)WiFi.RSSI());
+    }
+  }
+  if (appRestartPending()) {  // requested restart: no more drawing, backlight off, then restart
+    static uint32_t at = 0;
+    if (!at) {
+      at = millis() | 1;
+      uiSetBrightness(0);
+    }
+    if (millis() - at > 400) {
+      Serial.flush();
+      ESP.restart();
+    }
+    delay(10);
+    return;
+  }
   uiLoop();
   webLoop();
   netLoop();

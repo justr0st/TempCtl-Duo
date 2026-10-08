@@ -7,8 +7,21 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <esp_heap_caps.h>
 
-static ChartData cd;         // last snapshot (static: ~6 kB)
+// last snapshot (~6 kB): in PSRAM where there is some (internal RAM is the scarce one)
+static ChartData& chartStore() {
+#ifdef BOARD_HAS_PSRAM
+  void* p = heap_caps_malloc(sizeof(ChartData), MALLOC_CAP_SPIRAM);
+#else
+  void* p = nullptr;
+#endif
+  if (!p) p = malloc(sizeof(ChartData));
+  memset(p, 0, sizeof(ChartData));
+  return *(ChartData*)p;
+}
+static ChartData& cd = chartStore();
 static bool cdLive = false;  // the snapshot is shown as the live view
 static bool cdValid = false;
 
@@ -153,6 +166,27 @@ static void series(const Plot& P, const Tenth16* v, int from, F tOf, lv_color_t 
   flush();
 }
 
+// Area under a series down to the axis (live / run SP): one 1 px column per pixel, 20 % opacity
+template <typename F>
+static void area(const Plot& P, const Tenth16* v, F tOf, lv_color_t c) {
+  lv_draw_rect_dsc_t d;
+  lv_draw_rect_dsc_init(&d);
+  d.bg_color = c;
+  d.bg_opa = LV_OPA_20;
+  const int32_t base = P.y0 + P.h;
+  for (int i = 0; i + 1 < CHART_N; ++i) {
+    const float a = v[i], b = v[i + 1];
+    if (isnan(a) || isnan(b)) continue;
+    const float x1 = P.X(tOf(i)), x2 = P.X(tOf(i + 1));
+    int32_t c1 = (int32_t)ceilf(fmaxf(x1, (float)P.x0)), c2 = (int32_t)ceilf(fminf(x2, (float)(P.x0 + P.w)));
+    for (int32_t x = c1; x < c2; ++x) {  // columns [x1, x2): each column once
+      const float y = P.Y(a + (b - a) * (x - x1) / (x2 - x1));
+      lv_area_t r = {x, (int32_t)lroundf(y), x, base - 1};
+      if (r.y1 < base) lv_draw_rect(P.layer, &d, &r);
+    }
+  }
+}
+
 static void drawChart(lv_event_t* e) {
   if (!cdValid) return;
   lv_obj_t* obj = (lv_obj_t*)lv_event_get_current_target(e);
@@ -185,7 +219,16 @@ static void drawChart(lv_event_t* e) {
       if (!isnan(v) && v > mx) mx = v;
     }
   };
-  if (live || run) {
+  if (live) {  // only what is in view (a period shorter than the points shows the newest ones)
+    const float bin = cd.binSec > 0 ? cd.binSec : 1;
+    for (int i = 0; i < CHART_N; ++i) {
+      if (-(float)(CHART_N - 1 - i) * bin < P.t0) continue;
+      for (const Tenth16* s : {cd.pv, cd.sp, cd.pvT, cd.spT, cd.hi, cd.hiT}) {
+        const float v = s[i];
+        if (!isnan(v) && v > mx) mx = v;
+      }
+    }
+  } else if (run) {
     see(cd.pv), see(cd.sp), see(cd.pvT), see(cd.spT), see(cd.hi), see(cd.hiT);
   }
   if (!live) see(cd.plan), see(cd.planT);
@@ -214,7 +257,8 @@ static void drawChart(lv_event_t* e) {
   if (live) {
     auto tOf = [&](int i) { return -(float)(CHART_N - 1 - i) * bin; };
     for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
-      series(P, ch ? cd.spT : cd.sp, 0, tOf, tcSp(ch), 2, 0);
+      area(P, ch ? cd.spT : cd.sp, tOf, tcSp(ch));
+      series(P, ch ? cd.spT : cd.sp, 0, tOf, tcSp(ch), 2, 0, LV_OPA_50);
       series(P, ch ? cd.pvT : cd.pv, 0, tOf, tcPv(ch), 3, 0, LV_OPA_COVER, ch ? cd.loT : cd.lo, ch ? cd.hiT : cd.hi);
     }
     return;
@@ -225,7 +269,8 @@ static void drawChart(lv_event_t* e) {
     if (now < 0) now = 0;
     for (int ch = 0; ch < NUM_CHANNELS; ++ch) series(P, ch ? cd.planT : cd.plan, now, tOf, tcSp(ch), 2, 6, LV_OPA_50);
     for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
-      series(P, ch ? cd.spT : cd.sp, 0, tOf, tcSp(ch), 2, 0);
+      area(P, ch ? cd.spT : cd.sp, tOf, tcSp(ch));
+      series(P, ch ? cd.spT : cd.sp, 0, tOf, tcSp(ch), 2, 0, LV_OPA_50);
       series(P, ch ? cd.pvT : cd.pv, 0, tOf, tcPv(ch), 3, 0, LV_OPA_COVER, ch ? cd.loT : cd.lo, ch ? cd.hiT : cd.hi);
     }
     const float xn = P.X(cd.elapsed);

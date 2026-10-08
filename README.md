@@ -1,6 +1,8 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
 
-> **Work in progress (version 1.0.19).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
+> **Work in progress (version 1.0.20).** Modbus RTU (RS485 controllers) is a **beta** feature: built
+> in, but not tested with a real controller yet; local thermocouple + SSR channels are the tested path.
+> TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
 > of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
 > (the ESP32-S3 board, env `s3`, and the CYD, envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`,
 > build from the same sources), two channels (Modbus / local / off), local thermocouple + SSR channels,
@@ -115,6 +117,11 @@ The web *Main* page shows the number of setpoint writes in the current run.
   are kept and times adapt; in a Timeline a timing change of one channel shifts the other one through its
   holds. The edits go to the running copy; `{"cmd":"save"}` stores them into the program.
 - End: each channel of the program applies its own end action (keep setpoint / end setpoint / outputs off).
+  With "keep" or "end setpoint" the channel goes on in manual mode with that setpoint (its manual button
+  is on and switches the outputs off).
+- Resume after a reset: a ramp starts at the measured temperature with its planned speed (from the
+  previous target to its own in its ramp time); Sequence: the phase's ramp takes as long as that needs;
+  Timeline: the hold after the ramp takes up the difference, so later steps keep their run time.
   A fault on any channel stops the run.
 - **Seconds:** times are stored in seconds. With *Controller ramps (r.SP)* the KS 4x-1 gradient is per
   minute, so a short ramp only uses the controller gradient if it fits the register (see above); otherwise
@@ -381,9 +388,10 @@ Rules so the firmware keeps working:
   lowest and highest reading, and the line passes through both, so short peaks and dips stay visible.
 - Live history: the device keeps every second of both channels in RAM (last, lowest and highest reading
   and setpoint; lost on restart): 24 h on the S3 (1 MB of PSRAM), on the CYD what fits into the IRAM-only
-  heap (about 30 min; the boot log says `[hist] live history N min`). The Live chart's Period (5 min …
-  the whole history; saved as `display.liveMin`, also used by the touch screen) picks how much of it is
-  shown; its vertical axis always runs from 0 °C to the highest value in view. The legend switches the PV
+  heap (about 30 min; the boot log says `[hist] live history N min`). The Live chart's Period (1 min …
+  24 h, up to what the history holds, so 30 min on the CYD; saved as `display.liveMin`, also used by the touch screen) picks how much of it is
+  shown; its vertical axis always runs from 0 °C to the highest value in view. Setpoint lines are drawn
+  at half strength with the area below them lightly filled. The legend switches the PV
   and SP of each channel on / off (chart, scale and export; the browser remembers it). Export CSV
   downloads the whole history of the switched-on series, one row per second ("Download live history" in
   the sidebar: all series). A setpoint is recorded only while it is active: in a run, with the manual

@@ -1,4 +1,5 @@
 #include "program_store.h"
+#include <sys/stat.h>
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
@@ -16,6 +17,15 @@ struct SumGuard {
 
 static void pathFor(int idx, char* out, size_t n) { snprintf(out, n, "/duo/prog%d.json", idx); }
 
+// LittleFS.exists() of Arduino-ESP32 2.0.x opens the file and logs an error when it is missing
+// ("does not exist, no permits for creation"); stat() asks quietly
+bool fsExists(const char* path) {
+  char full[48];
+  snprintf(full, sizeof(full), "/littlefs%s", path);
+  struct stat st;
+  return stat(full, &st) == 0;
+}
+
 bool storageBegin() {
   static bool tried = false;
   if (tried) return fsOk;
@@ -25,7 +35,7 @@ bool storageBegin() {
     Serial.println("[fs] LittleFS mount failed: settings and programs are not persistent");
     return false;
   }
-  if (!LittleFS.exists("/duo")) LittleFS.mkdir("/duo");
+  if (!fsExists("/duo")) LittleFS.mkdir("/duo");
   return true;
 }
 
@@ -52,7 +62,7 @@ bool programLoad(int idx, DuoProgram& p, char* err, size_t n) {
   }
   char path[24];
   pathFor(idx, path, sizeof(path));
-  if (!fsOk || !LittleFS.exists(path)) {
+  if (!fsOk || !fsExists(path)) {
     snprintf(err, n, "Program %d is empty", idx + 1);
     return false;
   }
@@ -94,7 +104,7 @@ bool programSave(int idx, const DuoProgram& p, char* err, size_t n) {
   const bool ok = serializeJson(d, f) == len;
   f.close();
   // write-then-rename so a power loss never leaves a half-written program
-  if (!ok || (LittleFS.exists(path) && !LittleFS.remove(path)) || !LittleFS.rename(tmp, path)) {
+  if (!ok || (fsExists(path) && !LittleFS.remove(path)) || !LittleFS.rename(tmp, path)) {
     LittleFS.remove(tmp);
     snprintf(err, n, "Writing %s failed (flash full?)", path);
     return false;
@@ -113,7 +123,7 @@ bool programDelete(int idx) {
   if (idx < 0 || idx >= PROG_MAX || !fsOk) return false;
   char path[24];
   pathFor(idx, path, sizeof(path));
-  if (LittleFS.exists(path) && !LittleFS.remove(path)) return false;
+  if (fsExists(path) && !LittleFS.remove(path)) return false;
   {
     SumGuard g;
     memset(&sums[idx], 0, sizeof(sums[idx]));
@@ -148,7 +158,7 @@ void programStoreBegin() {
     pathFor(i, path, sizeof(path));
     ProgSummary s;
     memset(&s, 0, sizeof(s));
-    if (fsOk && LittleFS.exists(path)) {
+    if (fsOk && fsExists(path)) {
       any = true;
       if (programLoad(i, *p, err, sizeof(err))) {
         programSummarize(*p, s);
@@ -178,7 +188,7 @@ static bool saveJson(const char* path, const char* tmp, JsonDocument& d) {
   const size_t len = measureJson(d);
   const bool ok = serializeJson(d, f) == len;
   f.close();
-  if (!ok || (LittleFS.exists(path) && !LittleFS.remove(path)) || !LittleFS.rename(tmp, path)) {
+  if (!ok || (fsExists(path) && !LittleFS.remove(path)) || !LittleFS.rename(tmp, path)) {
     LittleFS.remove(tmp);
     return false;
   }
@@ -211,6 +221,7 @@ bool runPosSave(uint32_t id, const RunPos& r) {
     c.add(r.i[ch]);
     c.add(r.st[ch]);
     c.add(r.left[ch]);
+    c.add(r.slope[ch]);
   }
   return saveJson("/duo/runpos.json", "/duo/runpos.tmp", d);
 }
@@ -219,7 +230,7 @@ bool runFileLoad(RunFileInfo& i, DuoProgram& p, RunPos& r, bool& havePos) {
   memset(&i, 0, sizeof(i));
   memset(&r, 0, sizeof(r));
   havePos = false;
-  if (!fsOk || !LittleFS.exists("/duo/run.json")) return false;
+  if (!fsOk || !fsExists("/duo/run.json")) return false;
   JsonDocument d;
   File f = LittleFS.open("/duo/run.json", "r");
   if (!f) return false;
@@ -239,7 +250,7 @@ bool runFileLoad(RunFileInfo& i, DuoProgram& p, RunPos& r, bool& havePos) {
     i.rampSaved[ch] = v.is<int>() ? 1 : 0;
     i.rampOrig[ch] = v.is<int>() ? (int16_t)v.as<int>() : 0;
   }
-  if (LittleFS.exists("/duo/runpos.json")) {
+  if (fsExists("/duo/runpos.json")) {
     JsonDocument q;
     File g = LittleFS.open("/duo/runpos.json", "r");
     if (g && !deserializeJson(q, g) && (q["id"] | 0u) == i.id) {
@@ -248,6 +259,7 @@ bool runFileLoad(RunFileInfo& i, DuoProgram& p, RunPos& r, bool& havePos) {
         r.i[ch] = q["ch"][ch][0] | 0;
         r.st[ch] = q["ch"][ch][1] | 0;
         r.left[ch] = q["ch"][ch][2] | 0.0f;
+        r.slope[ch] = q["ch"][ch][3] | 0.0f;
       }
       havePos = true;
     }

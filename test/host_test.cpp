@@ -327,8 +327,9 @@ static void testTimelineRun() {
 // "Run interrupted by a reset": position() + resumeAt()
 static void testResume() {
   static DuoProgram p, q;
-  // Sequence: interrupted in phase 4 (top ramp to 190): the phase starts again, the top ramps from its
-  // measured value, the bottom gets the target of phase 3 (160) at once
+  // Sequence: interrupted in phase 4 (top ramp 150 -> 190 in 40 s = 1 degC/s): the phase starts again,
+  // the top ramps from its measured value at the planned speed, the bottom gets the target of phase 3
+  // (160) at once
   progExample(0, p);
   Sim s;
   s.autoCont = true;
@@ -342,11 +343,11 @@ static void testResume() {
   r.pv[1] = 120;
   CHECK(r.e.resumeAt(&q, pos, r.pv, r.ok, 5, true));
   CHECK(r.e.active() && r.e.seq().idx == 3 && r.e.seq().st == Stage::Ramp && near(r.e.elapsed(), pos.el));
-  CHECK(near(r.sp(1), 120) && r.e.out(1).moving && near(r.e.out(1).rampLeft, 40) && near(r.e.out(1).target, 190));
+  CHECK(near(r.sp(1), 120) && r.e.out(1).moving && near(r.e.out(1).rampLeft, 70) && near(r.e.out(1).target, 190));
   CHECK(near(r.sp(0), 160) && !r.e.out(0).moving && !r.e.out(0).idle && r.e.edited());
   r.t = pos.el;
   r.runTo(pos.el + 20);
-  CHECK(near(r.sp(1), 155, 0.1f));
+  CHECK(near(r.sp(1), 140, 0.1f));
   // resuming at the pause phase asks for Continue again; at a phase without kept targets all idle
   RunPos pp = pos;
   pp.i[0] = 1;
@@ -369,11 +370,18 @@ static void testResume() {
   u.pv[1] = 50;
   CHECK(u.e.resumeAt(&q, tp, u.pv, u.ok, 5, false));
   CHECK(near(u.sp(0), 150) && u.e.lane(0).st == Stage::Hold && near(u.e.lane(0).el, 70));
-  CHECK(near(u.sp(1), 50) && u.e.lane(1).st == Stage::Ramp && near(u.e.out(1).rampLeft, 30));
+  // top: its first ramp (from the measured value) had tp.slope[1]; from 50 at that speed, the hold
+  // after it is shorter by the difference so step 2 still starts at 180 s
+  const float k = tp.slope[1], dur = 100 / k;
+  CHECK(k > 0 && near(u.sp(1), 50) && u.e.lane(1).st == Stage::Ramp && near(u.e.out(1).rampLeft, dur, 1.01f));
   u.t = 130;
   u.pv[1] = 50;
   u.runTo(145);
-  CHECK(near(u.sp(1), 100, 0.1f));
+  CHECK(near(u.sp(1), 50 + 15 * 100 / roundf(dur), 0.2f));
+  u.runTo(179);
+  CHECK(u.e.lane(1).idx == 1 && u.e.lane(1).st == Stage::Hold && u.e.lane(1).dur < 20);
+  u.runTo(181);
+  CHECK(u.e.lane(1).idx == 2);
   u.runTo(211);  // the bottom hold ends at 210 -> step 2 (ramp to 165)
   CHECK(u.e.lane(0).idx == 1 && u.e.lane(0).st == Stage::Ramp);
   u.runTo(1000);

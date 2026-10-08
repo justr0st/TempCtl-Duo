@@ -217,6 +217,7 @@ void RunEngine::startStep(int ch, int k) {
   Lane& L = lane_[ch];
   L.i = (int16_t)k;
   L.el = 0;
+  L.hold0 = 0;
   if (k >= p_->nSt[ch]) {
     L.st = Stage::Done;  // the channel keeps its last target (or stays idle)
     g_[ch].stageRamp = 0;
@@ -251,7 +252,7 @@ bool RunEngine::laneStep(int ch) {
       g.stageRamp = 0;
       ev(EV_RAMP_END, ch, L.i);
       L.st = Stage::Hold;
-      L.el = 0;
+      L.el = L.hold0;
       return true;
     }
     case Stage::Hold:
@@ -410,6 +411,16 @@ bool RunEngine::resumeAt(DuoProgram* p, const RunPos& r, const float* pv, const 
     for (int ch = 0; ch < NUM_CHANNELS; ++ch)
       if (!own[ch] && keptBefore(ch, k, t, src)) jump(ch, t, src);
     startPhase(k);
+    // the phase's ramp starts at the measured value with its planned speed (not in its full time)
+    if (seq_.st == Stage::Ramp) {
+      const int ch = rampCh(f);
+      Gen& g = g_[ch];
+      const uint32_t rt = ch == CH_BOTTOM ? f.b.r : f.t.r;
+      const float dur = resumedRamp(ch, g.to, plannedRate(ch, k, g.to, rt, r.slope[ch]), (float)rt);
+      g.dur = dur;
+      g.slope = dur > 0 ? fabsf(g.to - g.from) / dur : 0;
+      g.stageRamp = dur > 0;
+    }
   } else {
     for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
       Lane& L = lane_[ch];
@@ -427,10 +438,15 @@ bool RunEngine::resumeAt(DuoProgram* p, const RunPos& r, const float* pv, const 
       const Stage stg = (Stage)r.st[ch];
       L.i = (int16_t)i;
       L.el = 0;
+      L.hold0 = 0;
       if (x.kind == ST_TARGET && stg == Stage::Ramp) {
+        // from the measured value with the planned speed; the hold after it takes up the difference,
+        // so the later steps keep their run time (both channels stay in step)
         ev(EV_STEP, ch, i);
-        startRamp(ch, x.s.t, (uint32_t)lroundf(left), i);
+        const float dur = resumedRamp(ch, x.s.t, plannedRate(ch, i, x.s.t, x.s.r, r.slope[ch]), left);
+        startRamp(ch, x.s.t, (uint32_t)lroundf(dur), i);
         L.st = Stage::Ramp;
+        L.hold0 = dur - left;
       } else if (x.kind == ST_TARGET && stg == Stage::Hold) {
         jump(ch, x.s.t, i);
         L.st = Stage::Hold;
@@ -451,11 +467,29 @@ bool RunEngine::resumeAt(DuoProgram* p, const RunPos& r, const float* pv, const 
   return true;
 }
 
+// Ramp speed of phase / step idx of channel ch (degC/s): from the target before it to this one in its
+// ramp time r. Without a target before it (first ramp, from the measured value): the speed the run
+// had (saved), 0 = unknown.
+float RunEngine::plannedRate(int ch, int idx, float target, uint32_t r, float saved) const {
+  float t;
+  int src;
+  if (r > 0 && keptBefore(ch, idx, t, src) && fabsf(target - t) > 0.05f) return fabsf(target - t) / (float)r;
+  return saved > 0 ? saved : 0;
+}
+
+// Seconds a resumed ramp needs from the measured value to target at rate (fallback: unknown speed /
+// no reading)
+float RunEngine::resumedRamp(int ch, float target, float rate, float fallback) const {
+  if (!(rate > 0) || !pvOk_[ch] || isnan(lastPv_[ch])) return fallback;
+  return fabsf(target - lastPv_[ch]) / rate;
+}
+
 RunPos RunEngine::position() const {
   RunPos r;
   memset(&r, 0, sizeof(r));
   r.el = el_;
   if (!p_) return r;
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) r.slope[ch] = g_[ch].slope;
   if (p_->type == PROG_SEQ) {
     r.i[0] = seq_.i;
     r.st[0] = (uint8_t)seq_.st;
@@ -624,9 +658,10 @@ StageInfo RunEngine::lane(int ch) const {
   if (L.st == Stage::Ramp) {
     s.el = g_[ch].pre + g_[ch].el;
     s.dur = g_[ch].pre + g_[ch].dur;
-  } else if (L.st == Stage::Hold || L.st == Stage::Idle) {
-    s.el = L.el;
-    s.dur = (float)p_->st[ch][L.i].s.h;
+  } else if (L.st == Stage::Hold || L.st == Stage::Idle) {  // the hold as it is (resume may change it)
+    s.el = L.el - L.hold0;
+    s.dur = (float)p_->st[ch][L.i].s.h - L.hold0;
+    if (s.dur < 0) s.dur = 0;
   }
   return s;
 }
@@ -750,7 +785,7 @@ float RunEngine::laneEnd(int ch, int idx, bool rampEnd) const {
     if (k == L.i) {
       if (L.st == Stage::Ramp) t += genLeft(g_[ch]);
       if (k == idx && rampEnd) return t;
-      if (L.st == Stage::Ramp) t += (float)s.s.h;
+      if (L.st == Stage::Ramp) t += fmaxf((float)s.s.h - L.hold0, 0);
       else if (L.st == Stage::Hold || L.st == Stage::Idle) t += (float)s.s.h - L.el;
     } else if (s.kind == ST_TARGET) {
       t += (float)s.s.r;
@@ -780,7 +815,7 @@ void RunEngine::shiftOther(int ch, float delta, float moment) {
     if (k == L.i) {
       if (L.st == Stage::Pause) continue;
       if (L.st == Stage::Ramp) t += genLeft(g_[o]);
-      start = (L.st == Stage::Hold || L.st == Stage::Idle) ? -L.el : t;
+      start = (L.st == Stage::Hold || L.st == Stage::Idle) ? -L.el : t - L.hold0;
       end = start + (float)s.s.h;
     } else {
       if (s.kind == ST_TARGET) t += (float)s.s.r;
