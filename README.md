@@ -1,6 +1,6 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
 
-> **Work in progress (version 1.0.18).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
+> **Work in progress (version 1.0.19).** TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
 > of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
 > (the ESP32-S3 board, env `s3`, and the CYD, envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`,
 > build from the same sources), two channels (Modbus / local / off), local thermocouple + SSR channels,
@@ -17,17 +17,27 @@ heaters (Sequence or Timeline, see "Programs" below) and can also hold a **manua
 Main use: the bottom and top heater of a **BGA rework station** (reflow / desolder profiles); on the first
 start three example programs are created (Lead-free BGA, Leaded BGA, Lead-free BGA as a Timeline).
 
-- LVGL 9.6 touch GUI, designed as an **LVGL Pro Editor** project (`ui/`, see section 4a):
-  - **Main**: live values, manual setpoint (numeric entry + on/off), program selection and Start / Pause / Stop /
-    Next phase (= Continue in a program pause)
-  - **Program**: read-only view of a program (the bottom channel as steps) until the new touch UI
-  - **Chart**: updated every second. Idle: the live history over the chosen period (5 min default, PV scrolls from right to left) plus a
-    preview of the selected program on its own time scale. Running: fixed time axis covering the whole program
-    plus spare time; the program curve and the PV trace grow from the left. Program and setpoint lines are
-    solid while active and dashed while not active.
-  - **Setup → System**: rotate the screen by 180°, brightness, colour theme and dark mode, Wi-Fi (scan,
-    password, AP password)
-  - **Setup → Controller**: controller type, serial link, ramp mode, "bottom reached" band, front-panel lock, end action
+- LVGL 9.6 touch GUI. **S3 (480×320): the new touch UI** (step 6, `src/tui_*.cpp`, section 4a), same look
+  as the web page (Barlow font, palette, accent and channel colours):
+  - **Main screen**: header with the program (tap: choose the program for the next run), phase / steps,
+    state, run time and remaining time, Start / Pause / Continue, Stop, Next phase; the chart of both
+    channels (tap: program / live view); one tile per channel with PV, SP, output, what the channel does,
+    a target stepper (− value +, tap the value for the number pad; during a run it changes the current or
+    kept target, otherwise the manual setpoint), the manual on / off button (filled in the channel colour
+    while on), "+ Hold" (extend the running hold),
+    Acknowledge for a fault. Overlays: "Action required" (Continue / Stop), "Run interrupted by a reset"
+    (Resume / Later / Dismiss; the red "Interrupted" badge opens it again), "Save the run's changes?",
+    messages at the bottom.
+  - **Menu**: Programs (list; editor: Sequence as one table, Timeline as two tables side by side; tap a
+    value to change it, tap # / Type for type, wait, pause text, insert, move, delete; Undo, Save, Start,
+    Rename, Discard, Delete; during a run the running program with run edits of targets and times),
+    Channels (name, type, limits, end action, Modbus controller, thermocouple, PID + autotune, runaway
+    protection, RS485 bus; register addresses and the two-point calibration on the web page), Network
+    (Wi-Fi with scan and password, AP password, host name, fixed IP), Display (brightness, dark mode,
+    accent colour, upside down, live chart period), System (polling interval, "bottom reached" band, info,
+    restart), Event log.
+  - **CYD (320×240)**: still the TempCtl 1.2 screens (LVGL Pro Editor project in `ui/`, section 4a) until
+    its own set of the new screens exists.
 - Web interface (section 5a): Status, Programs, Channels (incl. controller parameters, full register
   map, calibration, PID autotune), System (Wi-Fi, display, restart) and Tools (register read/write, a
   setpoint-address finder, backup) pages; CSV log download
@@ -255,7 +265,19 @@ local); change them on the web page's *Channels* page. After switching from the 
 Touch calibration defaults (200…3700 / 240…3800) suit most CYDs. If touches land off, adjust them with
 `POST /api/config {"display":{"touchCal":[minX,maxX,minY,maxY]}}` and restart.
 
-## 4a. Editing the touch UI with LVGL Pro Editor
+## 4a. Touch UI
+
+**S3: `src/tui_*.cpp`** — screens written in LVGL C code (decided with Rost, step 6): `tui.cpp` (display +
+touch glue, screen switching, the 250 ms update), `tui_theme.cpp` (the web page's palette, accent-derived
+channel colours, named styles), `tui_widgets.cpp` (buttons, pages, number pad, keyboard, dialogs, choice
+lists, messages), `tui_main.cpp`, `tui_chart.cpp`, `tui_menu.cpp` (menu, log, display, network, system),
+`tui_prog.cpp`, `tui_chan.cpp`. Fonts: Barlow / Barlow Semi Condensed (as on the web page) in
+`src/fonts/tfont_*.c`, made by `tools/lv_font_gen.py` from `tools/fonts/*.ttf` (OFL); LVGL's Montserrat
+supplies the symbols. **Preview without a board**: `test/ui_host/build.sh` builds the screens for the PC
+and renders screenshots of the main states (and `./uihost monkey` taps around at random under
+AddressSanitizer).
+
+### CYD: editing the old touch UI with LVGL Pro Editor
 
 The screen layout lives in `ui/` as an [LVGL Pro](https://lvgl.io/pro) project (`project.xml`,
 `globals.xml`, `translations.xml`, `components/`, `screens/`, target 320×240). Open the **`ui` folder**
@@ -457,10 +479,13 @@ src/local_ctrl.*          local channels: task reading the thermocouples, PID, S
 src/tc_sensor.*, pid.*, runaway.*, autotune.*  MAX31855/MAX6675 decoding, PID, runaway check, relay autotune
                           (pure C++, unit-tested)
 src/app_state.*           control task: polling both channels, run engine, manual setpoint per channel, chart history
-src/ui.*                  touch UI behaviour: event callbacks, dialogs, bring-up panel
-src/ui_gen.*              bridge to the exported UI code (create functions, constants, font fallbacks)
+src/tui*.cpp, tui.h        touch UI of the S3 (480×320), section 4a
+src/fonts/                touch UI fonts (tools/lv_font_gen.py from tools/fonts/*.ttf)
+src/ui.*                  CYD touch UI behaviour (TempCtl 1.2 screens): event callbacks, dialogs
+src/ui_gen.*              CYD: bridge to the exported UI code (create functions, constants, font fallbacks)
 src/web.*                 HTTP server, JSON API
 web/, tools/web_embed.py  web page + fonts → src/web_assets.h (generated before each build)
+test/ui_host/             touch UI preview on a PC (screenshots, random-tap test)
 test/host_test.cpp        g++ -std=c++17 -Isrc -I<ArduinoJson>/src test/host_test.cpp src/program.cpp src/duo_program.cpp src/run_engine.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp && ./a.out
 ```
 

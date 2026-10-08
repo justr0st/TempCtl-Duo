@@ -1,4 +1,6 @@
 // Forwards the UI code exported by LVGL Pro to ui.cpp (see ui_gen.h).
+#include "config.h"
+#ifndef UI_V2  // the S3 has the new touch UI (tui_*.cpp)
 #include "ui_gen.h"
 #include "tempctl_ui.h"
 
@@ -159,3 +161,4 @@ lv_color_t uiGenColor(UiGenColor c) {
 }
 
 bool uiGenThemeDark(void) { return THEME_DARK != 0; }
+#endif  // UI_V2

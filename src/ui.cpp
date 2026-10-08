@@ -11,6 +11,8 @@
 // 320x240 TempCtl screens run in the top left corner of the 480x320 display
 // (UI_LEGACY_W/H in board_s3.h), next to a small bring-up panel.
 #include "ui.h"
+#include "config.h"
+#ifndef UI_V2  // the S3 has the new touch UI (tui_*.cpp)
 #include <lvgl.h>
 #include <math.h>
 #include "app_state.h"
@@ -1573,3 +1575,4 @@ void uiInit() {
 void uiLoop() {
   if (disp) lv_timer_handler();
 }
+#endif  // UI_V2

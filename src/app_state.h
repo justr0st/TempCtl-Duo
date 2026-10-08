@@ -161,6 +161,9 @@ struct ChartData {
   char progName[PROG_NAME_LEN];
   Tenth16 pv[CHART_N], sp[CHART_N], plan[CHART_N];     // bottom (ENGINE_CH)
   Tenth16 pvT[CHART_N], spT[CHART_N], planT[CHART_N];  // top
+#ifdef UI_V2
+  Tenth16 lo[CHART_N], hi[CHART_N], loT[CHART_N], hiT[CHART_N];  // lowest / highest PV within each point
+#endif
 };
 
 enum CmdType : uint8_t {
@@ -249,10 +252,11 @@ bool loadLegacyView(int idx, Program& out);
 bool startDraft(int idx, const DuoProgram& p);
 // Running copy of the program as JSON (under gLock); false if there was no run
 bool runProgramJson(JsonObject o);
+bool runProgramCopy(DuoProgram& out);  // the running copy (false if there was no run)
 void selectProgram(int idx);     // select + persist
 void setManualSp(float v, int ch = ENGINE_CH);  // clamp, persist and send to the control task
 float runSpanFor(float total);   // x axis length for a program: total + spare
-void chartSnapshot(ChartData& d);
+void chartSnapshot(ChartData& d, bool live = false);  // live: the live view even during a run
 // Live history as CSV: rows from slot `from` (counted since boot; the oldest kept slot if older) on,
 // as many as fit into buf. Returns the length (0 = done) and the next slot in `from`.
 // pvMask / spMask: channels (bit 0 bottom, bit 1 top) whose PV (+ lowest, highest) / setpoint are written

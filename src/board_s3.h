@@ -67,9 +67,7 @@
 // ---- Screen used by the UI ----
 #define SCREEN_W 480
 #define SCREEN_H 320
-// Bring-up (9.10 step 1): the TempCtl 1.2 UI (320x240) runs in the top left
-// corner until the 480x320 screens exist.
-#define UI_LEGACY_W 320
-#define UI_LEGACY_H 240
+// The new touch UI (tui_*.cpp, step 6); the old exported 320x240 UI (ui.cpp) is not built
+#define UI_V2 1
 
 #define BOARD_HAS_LARGE_RAM 1  // 8 MB PSRAM

@@ -577,10 +577,10 @@ static float updatePlan(const float* pv, float& remaining) {
   return updatePreview(pv);
 }
 
-void chartSnapshot(ChartData& d) {
+void chartSnapshot(ChartData& d, bool live) {
   Guard g;
   const bool active = gLive.state == RunState::Running || gLive.state == RunState::Paused;
-  d.run = active && gHist->runValid;
+  d.run = !live && active && gHist->runValid;
   d.planActive = d.run;
   d.spActive = d.run || gLive.manualOn;
   const int T = CH_TOP, B = ENGINE_CH;
@@ -598,6 +598,12 @@ void chartSnapshot(ChartData& d) {
       d.pvT[i] = gHist->runPv[T][i];
       d.spT[i] = gHist->runSp[T][i];
       d.planT[i] = gHist->runPlan[T][i];
+#ifdef UI_V2
+      d.lo[i] = gHist->runLo[B][i];
+      d.hi[i] = gHist->runHi[B][i];
+      d.loT[i] = gHist->runLo[T][i];
+      d.hiT[i] = gHist->runHi[T][i];
+#endif
     }
     return;
   }
@@ -621,6 +627,16 @@ void chartSnapshot(ChartData& d) {
   put(d.pvT);
   liveRow(k, LV_SP, T, row);
   put(d.spT);
+#ifdef UI_V2
+  liveRow(k, LV_LO, B, row);
+  put(d.lo);
+  liveRow(k, LV_HI, B, row);
+  put(d.hi);
+  liveRow(k, LV_LO, T, row);
+  put(d.loT);
+  liveRow(k, LV_HI, T, row);
+  put(d.hiT);
+#endif
   for (int i = 0; i < CHART_N; ++i) {
     d.plan[i] = gHist->plan[B][i];
     d.planT[i] = gHist->plan[T][i];
@@ -2041,6 +2057,13 @@ bool loadLegacyView(int idx, Program& out) {
     return false;
   }
   programLegacyView(*sp, out);
+  return true;
+}
+
+bool runProgramCopy(DuoProgram& out) {
+  Guard g;
+  if (runIdx < 0) return false;
+  out = *runProg;
   return true;
 }
 
