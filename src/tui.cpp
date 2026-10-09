@@ -2,6 +2,7 @@
 // Screens: tui_main.cpp (main), tui_menu.cpp (menu, log, display, network, system), tui_chart.cpp,
 // building blocks and popups: tui_widgets.cpp, colours and styles: tui_theme.cpp.
 #include "tui.h"
+#include "console.h"
 #ifdef UI_V2
 #include "lcd.h"
 #include "touch.h"
@@ -170,7 +171,7 @@ void uiInit() {
   lv_delay_set_cb(delay);
   disp = lcdInit(rot);
   if (!disp) {
-    Serial.println("[ui] display could not be set up - no touch UI");
+    LogSerial.println("[ui] display could not be set up - no touch UI");
     return;
   }
   lv_indev_t* indev = lv_indev_create();

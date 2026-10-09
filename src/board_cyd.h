@@ -16,7 +16,10 @@
 #define LCD_PIN_DC 2
 #define LCD_PIN_RST -1
 #define LCD_SPI_HZ 40000000
-#define LCD_BGR 1
+// Colour order of the panel (MADCTL BGR bit). Rost's CYD shows red and blue swapped with BGR = 1 (pink
+// accent looked violet, blue looked orange; greys don't change, so it is easy to miss): RGB. CYD
+// revisions differ - if red and blue look swapped on another board, set 1 here.
+#define LCD_BGR 0
 #define LCD_INVERT 0
 // Draw buffers (2 x, internal DMA RAM; the CYD has no PSRAM). 10 lines = 2 x 6.4 kB: the heap is
 // tight with Wi-Fi + web server + two channels (20 lines took 12.8 kB more)

@@ -1,4 +1,5 @@
 #include "net.h"
+#include "console.h"
 #include <ESPmDNS.h>
 #include <WiFi.h>
 #include "app_state.h"
@@ -25,7 +26,7 @@ static void ipConfig(const Settings& s) {
   const bool d1 = s.dns1[0] | s.dns1[1] | s.dns1[2] | s.dns1[3];
   const bool d2 = s.dns2[0] | s.dns2[1] | s.dns2[2] | s.dns2[3];
   if (!WiFi.config(A(s.ip), A(s.gateway), A(s.subnet), d1 ? A(s.dns1) : A(s.gateway), d2 ? A(s.dns2) : IPAddress((uint32_t)0)))
-    Serial.println("[wifi] fixed IP address not accepted - check the settings");
+    LogSerial.println("[wifi] fixed IP address not accepted - check the settings");
 }
 
 static void staBegin() {
@@ -61,6 +62,9 @@ static void startAp(const Settings& s) {
 // Set by the Wi-Fi event task when the station got an IP address after the
 // last netApplyWifi() (so the UI can close its "Connecting..." message).
 static volatile bool gotIpSinceApply = false;
+// station disconnects (count + last reason) for the serial console's connect result
+static volatile uint32_t discCount = 0;
+static volatile uint8_t discReason = 0;
 
 void netBegin() {
   Settings s;
@@ -73,17 +77,19 @@ void netBegin() {
   WiFi.onEvent([](arduino_event_id_t e, arduino_event_info_t info) {
     switch (e) {
       case ARDUINO_EVENT_WIFI_STA_GOT_IP:
-        Serial.printf("[wifi] connected to %s, IP %s, RSSI %d dBm\n", WiFi.SSID().c_str(),
+        LogSerial.printf("[wifi] connected to %s, IP %s, RSSI %d dBm\n", WiFi.SSID().c_str(),
                       WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
         break;
       case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-        Serial.printf("[wifi] disconnected (reason %u)\n", (unsigned)info.wifi_sta_disconnected.reason);
+        discReason = info.wifi_sta_disconnected.reason;
+        ++discCount;
+        LogSerial.printf("[wifi] disconnected (reason %u)\n", (unsigned)info.wifi_sta_disconnected.reason);
         break;
       case ARDUINO_EVENT_WIFI_AP_START:
-        Serial.printf("[wifi] access point %s started, %s\n", WiFi.softAPSSID().c_str(), WiFi.softAPIP().toString().c_str());
+        LogSerial.printf("[wifi] access point %s started, %s\n", WiFi.softAPSSID().c_str(), WiFi.softAPIP().toString().c_str());
         break;
       case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
-        Serial.println("[wifi] a device joined the access point");
+        LogSerial.println("[wifi] a device joined the access point");
         break;
       default:
         break;
@@ -107,7 +113,7 @@ void netBegin() {
 void netLoop() {
   if (beginAt && (int32_t)(millis() - beginAt) >= 0 && !scanBusyNow()) staBegin();
   if (haveSta && !beginAt && !scanBusyNow() && WiFi.status() != WL_CONNECTED && millis() - lastBegin > STA_RETRY_MS) {
-    Serial.printf("[wifi] not connected (status %d) - trying again\n", (int)WiFi.status());
+    LogSerial.printf("[wifi] not connected (status %d) - trying again\n", (int)WiFi.status());
     WiFi.disconnect();
     beginAt = millis() + 1000;
     lastBegin = millis();
@@ -174,6 +180,13 @@ void netApplyWifi() {
 // afterwards. Starting is retried a few times because the first attempt right
 // after the disconnect can still fail.
 static bool scanActive = false;
+// details of the last scan, in the order of netScanResult()'s names
+static constexpr int SCAN_DETAIL_N = 32;
+static struct {
+  int8_t rssi;
+  uint8_t auth, ch;
+} scanDetail[SCAN_DETAIL_N];
+static int scanDetailN = 0;
 static bool scanResume = false;  // reconnect the station when the scan ends
 static uint8_t scanTries = 0;
 static uint32_t scanRetryAt = 0;
@@ -182,7 +195,7 @@ static constexpr uint32_t SCAN_RETRY_MS = 500;
 
 static bool scanKick() {
   const int16_t r = WiFi.scanNetworks(true, false, false, 300);
-  Serial.printf("[wifi] scan start #%u -> %d (sta status %d)\n", scanTries, r, (int)WiFi.status());
+  LogSerial.printf("[wifi] scan start #%u -> %d (sta status %d)\n", scanTries, r, (int)WiFi.status());
   if (r == WIFI_SCAN_RUNNING) return true;
   scanRetryAt = millis() + SCAN_RETRY_MS;
   return false;
@@ -246,7 +259,7 @@ int netScanResult(char* out, size_t n) {
       }
       return -1;
     }
-    Serial.println("[wifi] scan failed");
+    LogSerial.println("[wifi] scan failed");
     scanFinish();
     return -2;
   }
@@ -264,13 +277,39 @@ int netScanResult(char* out, size_t n) {
     if (strlen(out) + ssid.length() + 2 >= n) break;
     if (count) strcat(out, "\n");
     strcat(out, ssid.c_str());
+    if (count < SCAN_DETAIL_N) scanDetail[count] = {(int8_t)WiFi.RSSI(best), (uint8_t)WiFi.encryptionType(best), (uint8_t)WiFi.channel(best)};
     ++count;
   }
-  Serial.printf("[wifi] scan done: %d networks (%d unique)\n", r, count);
+  scanDetailN = count < SCAN_DETAIL_N ? count : SCAN_DETAIL_N;
+  LogSerial.printf("[wifi] scan done: %d networks (%d unique)\n", r, count);
   WiFi.scanDelete();
   scanFinish();
   return count;
 }
+
+bool netScanDetail(int i, int& rssi, uint8_t& auth, int& channel) {
+  if (i < 0 || i >= scanDetailN) return false;
+  rssi = scanDetail[i].rssi;
+  auth = scanDetail[i].auth;
+  channel = scanDetail[i].ch;
+  return true;
+}
+
+uint32_t netDisconnects(uint8_t* lastReason) {
+  if (lastReason) *lastReason = discReason;
+  return discCount;
+}
+
+void netStartAp() {
+  Settings s;
+  {
+    Guard g;
+    s = gSettings;
+  }
+  startAp(s);
+}
+
+String netApName() { return apStarted ? apName : String(""); }
 
 bool netConnectedSinceApply() { return gotIpSinceApply && WiFi.status() == WL_CONNECTED; }
 

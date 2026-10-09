@@ -19,3 +19,10 @@ bool netScanBusy();
 // Names are written '\n'-separated (unique, strongest first) to out.
 // Must be polled until it returns >= -2 != -1, even if the UI moved on.
 int netScanResult(char* out, size_t n);
+// details of entry i of the last netScanResult() list (auth = wifi_auth_mode_t)
+bool netScanDetail(int i, int& rssi, uint8_t& auth, int& channel);
+// station disconnect events so far and the reason of the last one (wifi_err_reason_t)
+uint32_t netDisconnects(uint8_t* lastReason);
+// starts the access point (name TempCtl-Duo-XXXX, password from the settings) next to the station
+void netStartAp();
+String netApName();  // "" if the access point is not running

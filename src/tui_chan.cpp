@@ -422,7 +422,7 @@ void chanShow() {
 void chanUpdate() {
   static uint32_t at = 0;
   if (at && lv_tick_elaps(at) < 1000) return;
-  at = lv_tick_get() | 1;
+  at = tTickNow();
   if (tab < 2 && isLoc(E, tab)) tuneUpdate();
 }
 #endif

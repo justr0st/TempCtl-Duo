@@ -1,6 +1,7 @@
 // HTTP server: single-page web UI + JSON API.
 // No authentication: keep the device on a trusted network.
 #include "web.h"
+#include "console.h"
 #include <ArduinoJson.h>
 #include <WebServer.h>
 #include <WiFi.h>
@@ -63,7 +64,7 @@ static void sendBody(int code, const char* type, const uint8_t* data, size_t len
   const bool ok = fd >= 0 && sendRaw(fd, (const uint8_t*)head.c_str(), head.length(), sent, last) &&
                   sendRaw(fd, data, len, sent, last);
   if (!ok && fd >= 0 && millis() - last > 5000)
-    Serial.printf("[web] %s: no progress for 5 s after %u of %u bytes - dropped (DRAM %u free, %u min, "
+    LogSerial.printf("[web] %s: no progress for 5 s after %u of %u bytes - dropped (DRAM %u free, %u min, "
                   "%u largest)\n",
                   what, (unsigned)sent, (unsigned)(head.length() + len),
                   (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
@@ -94,7 +95,7 @@ static void sendStream(const char* type, const char* what, F next) {
     if (!n) break;
     ok = sendRaw(fd, (const uint8_t*)buf, n, sent, last);
   }
-  if (!ok && fd >= 0) Serial.printf("[web] %s: dropped after %u bytes\n", what, (unsigned)sent);
+  if (!ok && fd >= 0) LogSerial.printf("[web] %s: dropped after %u bytes\n", what, (unsigned)sent);
   c.stop();
 }
 

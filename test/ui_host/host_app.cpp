@@ -16,6 +16,9 @@ void trackReport();
 #endif
 
 SerialT Serial;
+#include "console.h"
+LogPort LogSerial;  // (console.cpp is not part of the UI preview)
+size_t LogPort::write(const uint8_t* b, size_t n) { return fwrite(b, 1, n, stdout); }
 EspT ESP;
 static uint32_t now_ = 1000;
 uint32_t millis() { return now_; }

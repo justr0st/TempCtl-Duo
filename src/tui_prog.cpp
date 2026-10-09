@@ -1053,7 +1053,7 @@ void progEditRelease() {
 void progEditUpdate() {
   static uint32_t at = 0;
   if (!edRun || tModalOpen() || (at && lv_tick_elaps(at) < 1000)) return;
-  at = lv_tick_get() | 1;
+  at = tTickNow();
   LiveData L;
   liveCopy(L);
   if (!(L.state == RunState::Running || L.state == RunState::Paused)) {  // the run ended

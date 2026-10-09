@@ -1,4 +1,5 @@
 #include "program_store.h"
+#include "console.h"
 #include <sys/stat.h>
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -32,7 +33,7 @@ bool storageBegin() {
   tried = true;
   fsOk = LittleFS.begin(true);  // formats the partition on first use
   if (!fsOk) {
-    Serial.println("[fs] LittleFS mount failed: settings and programs are not persistent");
+    LogSerial.println("[fs] LittleFS mount failed: settings and programs are not persistent");
     return false;
   }
   if (!fsExists("/duo")) LittleFS.mkdir("/duo");
@@ -163,7 +164,7 @@ void programStoreBegin() {
       if (programLoad(i, *p, err, sizeof(err))) {
         programSummarize(*p, s);
       } else {
-        Serial.printf("[prog] %s\n", err);  // the slot shows as empty; the file is kept
+        LogSerial.printf("[prog] %s\n", err);  // the slot shows as empty; the file is kept
       }
     }
     SumGuard g;
@@ -172,9 +173,9 @@ void programStoreBegin() {
   if (!any && fsOk) {
     for (int i = 0; i < PROG_EXAMPLES; ++i) {
       progExample(i, *p);
-      if (!programSave(i, *p, err, sizeof(err))) Serial.printf("[prog] example %d: %s\n", i + 1, err);
+      if (!programSave(i, *p, err, sizeof(err))) LogSerial.printf("[prog] example %d: %s\n", i + 1, err);
     }
-    Serial.println("[prog] example programs created");
+    LogSerial.println("[prog] example programs created");
   }
   free(p);
 }
@@ -207,7 +208,7 @@ bool runFileSave(const RunFileInfo& i, const DuoProgram& p) {
   }
   progToJson(p, d["program"].to<JsonObject>());
   const bool ok = saveJson("/duo/run.json", "/duo/run.tmp", d);
-  if (!ok) Serial.println("[run] writing /duo/run.json failed");
+  if (!ok) LogSerial.println("[run] writing /duo/run.json failed");
   return ok;
 }
 
@@ -238,7 +239,7 @@ bool runFileLoad(RunFileInfo& i, DuoProgram& p, RunPos& r, bool& havePos) {
   f.close();
   char err[96];
   if (e || !progFromJson(d["program"].as<JsonObjectConst>(), p, err, sizeof(err))) {
-    Serial.printf("[run] /duo/run.json unreadable (%s) - removed\n", e ? e.c_str() : err);
+    LogSerial.printf("[run] /duo/run.json unreadable (%s) - removed\n", e ? e.c_str() : err);
     runFileClear();
     return false;
   }

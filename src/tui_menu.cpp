@@ -489,7 +489,7 @@ void networkShow() {
 void networkUpdate() {
   static uint32_t at = 0;
   if (at && lv_tick_elaps(at) < 2000) return;
-  at = lv_tick_get() | 1;
+  at = tTickNow();
   tSetText(nStatus, netInfo().c_str());
 }
 
@@ -567,7 +567,7 @@ void systemShow() {
 void systemUpdate() {
   static uint32_t at = 0;
   if (at && lv_tick_elaps(at) < 2000) return;
-  at = lv_tick_get() | 1;
+  at = tTickNow();
   char up[16], b[400], hist[16];
   fmtTime(millis() / 1000.0f, up, sizeof(up));
   fmtMinutes(liveHistSec() / 60, hist, sizeof(hist));

@@ -724,7 +724,7 @@ void mainUpdate(const LiveData& live, const Settings& set) {
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) tileUpdate(ch);
   // chart: every second (more often brings nothing: one point per second at most)
   if (!chartAt || lv_tick_elaps(chartAt) >= 1000) {
-    chartAt = lv_tick_get() | 1;
+    chartAt = tTickNow();
     chartUpdate(chart, chartLive);
     char b[40];
     if (chartLive) {

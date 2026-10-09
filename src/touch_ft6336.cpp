@@ -7,6 +7,7 @@
 // 0xA4 G_MODE. The raw coordinates are in the panel's native portrait
 // orientation (LCD_NATIVE_W x LCD_NATIVE_H).
 #include "config.h"
+#include "console.h"
 #if defined(TOUCH_FT6336)
 #include <Arduino.h>
 #include <Wire.h>
@@ -53,7 +54,7 @@ bool touchInit(const TouchCal&) {
   ok = readRegs(0xA3, &id, 1);
   readRegs(0xA6, &fw, 1);
   if (ok) writeReg(0xA4, 0);  // G_MODE 0: INT low while touched
-  Serial.printf("[touch] FT6336 %s, chip id 0x%02X, firmware 0x%02X\n", ok ? "found" : "NOT FOUND", id, fw);
+  LogSerial.printf("[touch] FT6336 %s, chip id 0x%02X, firmware 0x%02X\n", ok ? "found" : "NOT FOUND", id, fw);
   return ok;
 }
 

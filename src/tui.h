@@ -89,6 +89,13 @@ void tToast(const char* text, bool bad = false);
 // main screen: lower edge of the chart (messages sit there, the tile controls stay free)
 constexpr int TOAST_MAIN_BOTTOM = TUI_SMALL ? 30 + 76 - 2 : 46 + 132 - 2;
 
+// now as a time stamp where 0 means "none" (not "lv_tick_get() | 1": that can be 1 ms ahead, and
+// lv_tick_elaps() of a time ahead is huge)
+inline uint32_t tTickNow() {
+  const uint32_t t = lv_tick_get();
+  return t ? t : 1;
+}
+
 // ------------------------------------------------------------ formatting
 void fmtTime(float sec, char* out, size_t n);  // m:ss or h:mm:ss
 void fmtTemp(float v, char* out, size_t n, bool unit = true);  // "123.4 °C", "—" for NaN

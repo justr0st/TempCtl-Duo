@@ -7,6 +7,7 @@
 // lv_display_flush_ready(). LVGL renders into the second draw buffer while
 // the first one is sent.
 #include "lcd.h"
+#include "console.h"
 #include <Arduino.h>
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
@@ -163,7 +164,7 @@ lv_display_t* lcdInit(bool rotate180) {
   bus.max_transfer_sz = bufBytes;
   esp_err_t err = spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO);
   if (err != ESP_OK) {
-    Serial.printf("[lcd] spi_bus_initialize failed: %s\n", esp_err_to_name(err));
+    LogSerial.printf("[lcd] spi_bus_initialize failed: %s\n", esp_err_to_name(err));
     return nullptr;
   }
   spi_device_interface_config_t dev = {};
@@ -175,7 +176,7 @@ lv_display_t* lcdInit(bool rotate180) {
   dev.post_cb = postCb;
   err = spi_bus_add_device(SPI2_HOST, &dev, &spi);
   if (err != ESP_OK) {
-    Serial.printf("[lcd] spi_bus_add_device failed: %s\n", esp_err_to_name(err));
+    LogSerial.printf("[lcd] spi_bus_add_device failed: %s\n", esp_err_to_name(err));
     return nullptr;
   }
 
@@ -193,7 +194,7 @@ lv_display_t* lcdInit(bool rotate180) {
   void* buf2 = nullptr;
 #endif
   if (!buf1 || (!buf2 && LCD_DOUBLE_BUF)) {
-    Serial.printf("[lcd] no RAM for the draw buffers (2 x %u bytes)\n", (unsigned)bufBytes);
+    LogSerial.printf("[lcd] no RAM for the draw buffers (2 x %u bytes)\n", (unsigned)bufBytes);
     return nullptr;
   }
 
@@ -206,7 +207,7 @@ lv_display_t* lcdInit(bool rotate180) {
   lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
   lv_display_set_buffers(disp, buf1, buf2, bufBytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
   lcdSetRotation(rotate180);
-  Serial.printf("[lcd] %dx%d, SPI %d MHz, %d x %u bytes draw buffer\n", (int)lv_display_get_horizontal_resolution(disp),
+  LogSerial.printf("[lcd] %dx%d, SPI %d MHz, %d x %u bytes draw buffer\n", (int)lv_display_get_horizontal_resolution(disp),
                 (int)lv_display_get_vertical_resolution(disp), LCD_SPI_HZ / 1000000, LCD_DOUBLE_BUF ? 2 : 1, (unsigned)bufBytes);
   return disp;
 }

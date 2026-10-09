@@ -1,4 +1,5 @@
 #include "app_state.h"
+#include "console.h"
 #include <esp_heap_caps.h>
 #include <math.h>
 #include <stdarg.h>
@@ -473,7 +474,7 @@ void logEvent(const char* fmt, ...) {
   vsnprintf(m, sizeof(m), fmt, ap);
   va_end(ap);
   const float rt = logRunT;
-  Serial.printf("[event] %s\n", m);
+  LogSerial.printf("[event] %s\n", m);
   portENTER_CRITICAL(&logMux);
   LogEntry& e = logBuf[logNext % LOG_N];
   e.seq = logNext++;
@@ -1104,7 +1105,7 @@ static void takeChannels(const DuoProgram& p, const RunFileInfo* ri) {
     }
     if (mc && s.ch[ch].mb.lockFront) mbWrite(ch, mc->reg().remote, 1, "Front-lock write");
     if (!chan(ch).canSwitchOff() && s.ch[ch].type == CH_MODBUS)
-      Serial.printf("[run] %s has no outputs-off register: Idle keeps the controller's setpoint\n", names[ch]);
+      LogSerial.printf("[run] %s has no outputs-off register: Idle keeps the controller's setpoint\n", names[ch]);
   }
 }
 
@@ -2017,11 +2018,11 @@ void appInit() {
     }
     gHist->liveCap = cap;
     gHist->liveTotal = 0;
-    Serial.printf("[hist] live history %lu min (%lu bytes, %s)\n", (unsigned long)(cap * LIVE_SAMPLE_SEC / 60),
+    LogSerial.printf("[hist] live history %lu min (%lu bytes, %s)\n", (unsigned long)(cap * LIVE_SAMPLE_SEC / 60),
                   (unsigned long)(cap * SLOT_W * 4), where);
   }
   if (!gHist || !hv || !runProg || !gHist->liveRing) {
-    Serial.println("Out of memory");
+    LogSerial.println("Out of memory");
     abort();
   }
   gLock = xSemaphoreCreateMutex();
@@ -2041,7 +2042,7 @@ void appInit() {
     strlcpy(L.name, gSettings.ch[i].name, sizeof(L.name));
     L.pv = L.spEff = L.out = NAN;
     L.manualSp = gSettings.ch[i].manualSp;
-    Serial.printf("[settings] channel %d: %s, %s\n", i + 1, gSettings.ch[i].name, channelTypeName(gSettings.ch[i].type));
+    LogSerial.printf("[settings] channel %d: %s, %s\n", i + 1, gSettings.ch[i].name, channelTypeName(gSettings.ch[i].type));
   }
   programStoreBegin();
   logEvent("%s %s started (%s)", PRODUCT_NAME, FW_VERSION, resetReasonText());

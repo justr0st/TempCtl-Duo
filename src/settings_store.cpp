@@ -1,4 +1,5 @@
 #include "settings_store.h"
+#include "console.h"
 #include <Arduino.h>
 #include <LittleFS.h>
 #include "config.h"
@@ -14,7 +15,7 @@ bool settingsLoad(Settings& s) {
   const BoardLimits lim = boardLimits();
   settingsDefaults(s, lim);
   if (!storageBegin() || !fsExists(PATH)) {
-    Serial.println("[settings] no /duo/settings.json - defaults");
+    LogSerial.println("[settings] no /duo/settings.json - defaults");
     return false;
   }
   File f = LittleFS.open(PATH, "r");
@@ -23,14 +24,14 @@ bool settingsLoad(Settings& s) {
   if (f) f.close();
   char msg[160];
   if (e || !settingsFromJson(d.as<JsonObjectConst>(), s, msg, sizeof(msg))) {
-    Serial.printf("[settings] %s unreadable (%s) - kept as %s, defaults loaded\n", PATH,
+    LogSerial.printf("[settings] %s unreadable (%s) - kept as %s, defaults loaded\n", PATH,
                   e ? e.c_str() : msg, BAD);
     LittleFS.remove(BAD);
     LittleFS.rename(PATH, BAD);
     settingsDefaults(s, lim);
     return false;
   }
-  if (!settingsValidate(s, lim, msg, sizeof(msg))) Serial.printf("[settings] %s\n", msg);
+  if (!settingsValidate(s, lim, msg, sizeof(msg))) LogSerial.printf("[settings] %s\n", msg);
   return true;
 }
 

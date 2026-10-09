@@ -1,6 +1,6 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
 
-> **Work in progress (version 1.0.21).** Modbus RTU (RS485 controllers) is a **beta** feature: built
+> **Work in progress (version 1.0.22).** Modbus RTU (RS485 controllers) is a **beta** feature: built
 > in, but not tested with a real controller yet; local thermocouple + SSR channels are the tested path.
 > TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
 > of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
@@ -175,8 +175,9 @@ Wiring picture: `claude/wiring/s3-wiring.png` (display on J1, RS485 / thermocoup
 | CTP_SDA / CTP_SCL | 16 / 15 | | TC CS bottom / top (later) | 39 / 38 |
 | CTP_RST / CTP_INT | 17 / 7 | | SSR bottom / top (later) | 21 / 47 |
 
-Flash and watch the log through the USB port labelled **"UART"**. The native "USB" port is kept for the
-serial console / Web Serial page (later steps).
+Flash and watch the log through the USB port labelled **"UART"**. The native **"USB"** port is the serial
+console (section 4b; later also the Web Serial page): open it with any terminal at 115200 baud, opening it
+never resets the board.
 
 Status LED (WS2812): green = idle, blue = running, amber blinking = paused / waiting, red blinking = fault
 (no answer from a channel, latched fault), purple = access point mode.
@@ -365,6 +366,32 @@ Rules so the firmware keeps working:
 - A new component or screen is picked up by the build automatically; to use it from the firmware, add
   a wrapper for its `<name>_create()` function to `src/ui_gen.c` / `ui_gen.h`.
 
+## 4b. Serial console
+
+Commands over USB serial, **115200 baud** (S3: the port labelled **"USB"**, the log stays on "UART"; CYD:
+its one USB port, shared with the log). The help is printed at the start (S3: when a terminal opens the
+port) and with `help`. One command per line; commands and keys are not case-sensitive; parameters are
+`key=value`, a value with spaces in quotes (`s="My Net"`). Typed characters are echoed, Backspace works
+(PlatformIO's monitor or any terminal); on the CYD a log line that arrives while you type appears on its
+own line and your typed text is shown again. Errors start with `error:`.
+
+| Command | |
+|---|---|
+| `status` | per channel PV, SP, output and what it does; run state; Wi-Fi |
+| `manual b\|t on [sp=<C>]` · `manual b\|t sp=<C>` · `manual b\|t off` | manual setpoint (b = bottom, t = top); not for a channel of the running program |
+| `wifi scan` · `wifi connect n=<number> [pw=…]` · `wifi connect s=<SSID> [pw=…]` | join a network; without `pw=` the password is asked for (hidden; empty = open network). The result: `connected, IP …` (then saved) or `failed: wrong password / network not found / timeout` (the previous network is used again) |
+| `wifi ap [pw=…]` · `wifi status` | start the access point (`TempCtl-Duo-XXXX`, password 8–32 characters, saved), Wi-Fi state |
+| `programs` · `program n=<n>` · `show` | list, select for the next run, print the selected / running program (no editing over serial) |
+| `start` `pause` `resume` `stop` `next` `continue` | run control |
+| `extend b\|t +<s>` · `target b\|t <C>` | extend the running hold, change the current / kept target |
+| `resume run` · `dismiss run` | after "Run interrupted by a reset" |
+| `save` · `discard` | the changes made during the last run |
+| `reboot` | restart the device (refused while a program runs, like on touch / web) |
+
+Passwords are never shown (also not a `pw=` typed on the command line: shown as `*`). Run events
+(phases, messages, faults, the end) are printed as they happen; "Action required" as a highlighted block,
+repeated every 30 s. The PC test `test/console_host` types a script of commands and shows the output.
+
 ## 5a. Web page
 
 - Source: `web/index.html` (one file: HTML, CSS, JS) and the Barlow / Barlow Semi Condensed fonts in
@@ -503,6 +530,8 @@ src/ui_gen.*              old touch UI: bridge to the exported UI code (not buil
 src/web.*                 HTTP server, JSON API
 web/, tools/web_embed.py  web page + fonts → src/web_assets.h (generated before each build)
 test/ui_host/             touch UI preview on a PC (screenshots, random-tap test)
+test/console_host/        serial console on a PC (scripted commands -> output)
+src/console.*             serial console (section 4b), LogSerial (log lines that don't break typed input)
 test/host_test.cpp        g++ -std=c++17 -Isrc -I<ArduinoJson>/src test/host_test.cpp src/program.cpp src/duo_program.cpp src/run_engine.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp && ./a.out
 ```
 
