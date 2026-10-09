@@ -66,6 +66,14 @@ int uiTouchCalPoll(int& step, uint16_t& a, uint16_t& b, uint16_t& c, uint16_t& d
 }
 void uiTouchCalCancel() { calState = -1; }
 String netApName() { return String("TempCtl-Duo-1A2B"); }
+static bool scrReq = false;
+static uint32_t scrN = 0;
+void uiScreenRestart() { scrReq = true; }
+uint32_t uiScreenRestartPoll(bool& l, bool& t) {
+  if (scrReq) { scrReq = false; ++scrN; }  // (the UI loop's part)
+  l = true; t = scrN < 2;
+  return scrN;
+}
 
 static void run(int ms) { for (int t = 0; t < ms; t += 50) { consoleLoop(); delay(50); } }
 static void type(const char* s) { Serial.feed(s); run(300); }
@@ -170,6 +178,25 @@ int main() {
   type("touch cal\r");
   type("q");
   run(300);
+  // 1.0.24: screen restart, history (Up / Down), pw= masked when the line is shown again
+  type("screen restart\r");
+  type("screen reset\r");
+  type("\x1b[A");          // Up: "screen reset"
+  type("\x1b[A");          // Up: "screen restart"
+  type("\x1b[B");          // Down: "screen reset"
+  type("\x1b[B");          // Down: empty line
+  type("\x1b[B");          // nothing more
+  type("\x1bOA\r");       // Up (application mode) + Enter: "screen reset" again
+  type("wifi connect n=1 pw=abc");
+  logEvent("a log line while a password is typed");
+  run(200);
+  type("\x03");
+  type("\x1b[A\x1b[A\x1b[A");  // the pw= line is not in the history
+  type("\x03");
+  type("watch\r\n");
+  run(1100);
+  type("\x1b[A");          // an arrow key stops watch, its "[A" is not typed
+  type("status\r");
   type("wifi forget\r");
   type("factory reset\r");
   type("factory reset yes\r");

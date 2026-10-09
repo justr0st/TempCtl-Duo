@@ -136,6 +136,23 @@ void lcdSetRotation(bool rotate180) {
   lv_display_set_rotation(disp, rotate180 ? LV_DISPLAY_ROTATION_270 : LV_DISPLAY_ROTATION_90);
 }
 
+static void resetPulse() {
+  if (LCD_PIN_RST < 0) return;  // (CYD: no reset pin; the init sequence starts with a software reset)
+  pinMode(LCD_PIN_RST, OUTPUT);
+  digitalWrite(LCD_PIN_RST, HIGH);
+  delay(5);
+  digitalWrite(LCD_PIN_RST, LOW);
+  delay(20);
+  digitalWrite(LCD_PIN_RST, HIGH);
+  delay(150);
+}
+
+static lv_lcd_flag_t panelFlags() {
+  lv_lcd_flag_t flags = LV_LCD_FLAG_MIRROR_Y;
+  if (LCD_BGR) flags |= LV_LCD_FLAG_BGR;
+  return flags;
+}
+
 lv_display_t* lcdInit(bool rotate180) {
   backlightInit();
 #ifdef PIN_SD_CS
@@ -144,15 +161,7 @@ lv_display_t* lcdInit(bool rotate180) {
 #endif
   pinMode(LCD_PIN_DC, OUTPUT);
   digitalWrite(LCD_PIN_DC, HIGH);
-  if (LCD_PIN_RST >= 0) {  // hardware reset
-    pinMode(LCD_PIN_RST, OUTPUT);
-    digitalWrite(LCD_PIN_RST, HIGH);
-    delay(5);
-    digitalWrite(LCD_PIN_RST, LOW);
-    delay(20);
-    digitalWrite(LCD_PIN_RST, HIGH);
-    delay(150);
-  }
+  resetPulse();
 
   const size_t bufBytes = (size_t)SCREEN_W * LCD_BUF_LINES * 2;
   spi_bus_config_t bus = {};
@@ -198,9 +207,7 @@ lv_display_t* lcdInit(bool rotate180) {
     return nullptr;
   }
 
-  lv_lcd_flag_t flags = LV_LCD_FLAG_MIRROR_Y;
-  if (LCD_BGR) flags |= LV_LCD_FLAG_BGR;
-  disp = LCD_CREATE(LCD_NATIVE_W, LCD_NATIVE_H, flags, sendCmd, sendColor);
+  disp = LCD_CREATE(LCD_NATIVE_W, LCD_NATIVE_H, panelFlags(), sendCmd, sendColor);
   if (!disp) return nullptr;
   LCD_SEND_CMD_LIST(disp, PANEL_FIXUP);
   LCD_SET_INVERT(disp, LCD_INVERT != 0);
@@ -210,4 +217,28 @@ lv_display_t* lcdInit(bool rotate180) {
   LogSerial.printf("[lcd] %dx%d, SPI %d MHz, %d x %u bytes draw buffer\n", (int)lv_display_get_horizontal_resolution(disp),
                 (int)lv_display_get_vertical_resolution(disp), LCD_SPI_HZ / 1000000, LCD_DOUBLE_BUF ? 2 : 1, (unsigned)bufBytes);
   return disp;
+}
+
+// The panel controller set up again from scratch (hardware reset where wired, then LVGL's whole init
+// sequence): for a display that lost its setup (interference, a loose cable). LVGL keeps the display
+// object, the screens and the draw buffers; the init sequence is sent by a short-lived second LVGL
+// display on the same SPI device (LVGL's driver has no separate "init again"), then the rotation
+// (MADCTL) is sent for the real one and everything is drawn again.
+bool lcdReinit() {
+  if (!disp) return false;
+  drainQueue();  // a flush in progress finishes first
+  resetPulse();
+  lv_display_t* tmp = LCD_CREATE(LCD_NATIVE_W, LCD_NATIVE_H, panelFlags(), sendCmd, sendColor);
+  if (!tmp) {
+    LogSerial.println("[lcd] restart: no RAM for the init");
+    return false;
+  }
+  LCD_SEND_CMD_LIST(tmp, PANEL_FIXUP);
+  LCD_SET_INVERT(tmp, LCD_INVERT != 0);
+  lv_display_delete(tmp);
+  lv_display_set_rotation(disp, lv_display_get_rotation(disp));  // MADCTL again, all redrawn
+  lv_obj_invalidate(lv_display_get_screen_active(disp));
+  lv_obj_invalidate(lv_display_get_layer_top(disp));
+  LogSerial.println("[lcd] display controller set up again");
+  return true;
 }

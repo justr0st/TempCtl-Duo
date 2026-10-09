@@ -7,6 +7,7 @@
 #include <SPI.h>
 #include <XPT2046_Touchscreen.h>
 #include "touch.h"
+#include "console.h"
 
 static SPIClass touchSpi(VSPI);
 static XPT2046_Touchscreen ts(PIN_TOUCH_CS, PIN_TOUCH_IRQ);
@@ -19,6 +20,14 @@ bool touchInit(const TouchCal& c) {
   touchSpi.begin(PIN_TOUCH_CLK, PIN_TOUCH_MISO, PIN_TOUCH_MOSI, PIN_TOUCH_CS);
   ts.begin(touchSpi);
   ts.setRotation(1);  // raw orientation; 180 degree rotation is handled in touchRead()
+  return true;
+}
+
+bool touchReset(const TouchCal& c) {
+  detachInterrupt(digitalPinToInterrupt(PIN_TOUCH_IRQ));  // attached again by begin()
+  touchSpi.end();
+  touchInit(c);
+  LogSerial.println("[touch] XPT2046 SPI set up again");
   return true;
 }
 

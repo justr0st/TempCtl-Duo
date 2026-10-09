@@ -122,8 +122,7 @@ static lv_obj_t* settingRow(lv_obj_t* parent, const char* label, const char* hin
   if (hint) {
     h = tLabel(col, &tfont_12, hint);
     lv_obj_add_style(h, &S_.muted, 0);
-    if (TUI_SMALL) lv_obj_set_width(h, LV_PCT(100));
-    else lv_obj_set_width(h, 280);
+    lv_obj_set_width(h, LV_PCT(100));  // wraps where the control leaves too little room
     lv_label_set_long_mode(h, LV_LABEL_LONG_MODE_WRAP);
   }
   if (hintOut) *hintOut = h;
@@ -133,7 +132,7 @@ static lv_obj_t* settingRow(lv_obj_t* parent, const char* label, const char* hin
 static void saveQuiet() { saveSettingsQuiet(); }
 
 // ------------------------------------------------------------ display
-static lv_obj_t *dBright, *dDark, *dRotate, *dPeriod, *dAcc[6];
+static lv_obj_t *dBright, *dDark, *dRotate, *dPeriod, *dAcc[7], *dAccIcon;  // dAcc[6]: custom colour
 static const uint32_t ACCENTS[6] = {0x2196F3, 0xD1449B, 0x6C71C4, 0xD65D0E, 0x8839EF, 0x50A14F};
 static const char* const ACC_NAMES[6] = {"Blue", "Pink", "Violet", "Orange", "Mauve", "Green"};
 static bool dLoading = false;
@@ -181,6 +180,130 @@ static void onAccent(lv_event_t* e) {
   }
   saveQuiet();
   displayShow();
+}
+
+// --- custom accent colour: hue, saturation and brightness sliders in a dialog (OK applies it)
+static lv_obj_t *pkSw, *pkHex, *pkSl[3];
+static uint16_t pkH;
+static uint8_t pkS, pkV;
+static uint32_t pkOrig;  // the colour when opened: kept exactly as long as no slider was moved
+static bool pkMoved;
+static constexpr int PK_VMIN = 20;  // darker than this is no usable accent
+
+static uint32_t hsvRgb(uint16_t h, uint8_t s, uint8_t v) { return lv_color_to_u32(lv_color_hsv_to_rgb(h, s, v)) & 0xFFFFFF; }
+
+static uint32_t pkRgb() { return pkMoved ? hsvRgb(pkH, pkS, pkV) : pkOrig; }
+
+static void pkShow() {
+  const uint32_t rgb = pkRgb();
+  lv_obj_set_style_bg_color(pkSw, lv_color_hex(rgb), 0);
+  char b[12];
+  snprintf(b, sizeof(b), "#%06lX", (unsigned long)rgb);
+  lv_label_set_text(pkHex, b);
+  // saturation: grey ... full colour; brightness: dark ... bright (at the other two values)
+  lv_obj_set_style_bg_color(pkSl[1], lv_color_hex(hsvRgb(pkH, 0, pkV)), LV_PART_MAIN);
+  lv_obj_set_style_bg_grad_color(pkSl[1], lv_color_hex(hsvRgb(pkH, 100, pkV)), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(pkSl[2], lv_color_hex(hsvRgb(pkH, pkS, PK_VMIN)), LV_PART_MAIN);
+  lv_obj_set_style_bg_grad_color(pkSl[2], lv_color_hex(hsvRgb(pkH, pkS, 100)), LV_PART_MAIN);
+}
+
+static void pkSlider(lv_event_t*) {
+  pkH = lv_slider_get_value(pkSl[0]);
+  pkS = lv_slider_get_value(pkSl[1]);
+  pkV = lv_slider_get_value(pkSl[2]);
+  pkMoved = true;
+  pkShow();
+}
+
+static void pkAnswer(int b, int) {
+  if (b != 2) return;  // 2 = OK
+  {
+    Guard g;
+    gSettings.accentColor = pkRgb();
+  }
+  saveQuiet();
+  displayShow();
+}
+
+// a slider whose bar is a colour scale: the knob is white with a dark edge, no indicator
+static lv_obj_t* pkMakeSlider(lv_obj_t* parent, int lo, int hi, int v) {
+  lv_obj_t* sl = lv_slider_create(parent);
+  lv_obj_set_height(sl, TUI_SMALL ? 12 : 14);
+  lv_obj_set_flex_grow(sl, 1);
+  lv_slider_set_range(sl, lo, hi);
+  lv_slider_set_value(sl, v, LV_ANIM_OFF);
+  lv_obj_set_style_bg_opa(sl, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_bg_grad_dir(sl, LV_GRAD_DIR_HOR, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(sl, LV_OPA_TRANSP, LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(sl, lv_color_white(), LV_PART_KNOB);
+  lv_obj_set_style_border_color(sl, lv_color_black(), LV_PART_KNOB);
+  lv_obj_set_style_border_opa(sl, LV_OPA_60, LV_PART_KNOB);
+  lv_obj_set_style_border_width(sl, 2, LV_PART_KNOB);
+  lv_obj_set_style_pad_all(sl, TUI_SMALL ? 5 : 6, LV_PART_KNOB);
+  lv_obj_set_ext_click_area(sl, 10);
+  lv_obj_add_event_cb(sl, pkSlider, LV_EVENT_VALUE_CHANGED, nullptr);
+  return sl;
+}
+
+static void onAccentCustom(lv_event_t*) {
+  Settings S;
+  settingsCopy(S);
+  const uint32_t cur = S.accentColor & 0xFFFFFF;
+  const lv_color_hsv_t hsv = lv_color_rgb_to_hsv((cur >> 16) & 0xFF, (cur >> 8) & 0xFF, cur & 0xFF);
+  pkH = hsv.h % 360;
+  pkS = hsv.s;
+  pkV = hsv.v < PK_VMIN ? PK_VMIN : hsv.v;
+  pkOrig = cur;
+  pkMoved = false;
+  lv_obj_t* box = tDialog("Custom colour", "", "Cancel", "OK", "", pkAnswer, 0);
+  tSetHidden(lv_obj_get_child(box, 1), true);  // the dialog's (empty) text
+  lv_obj_t* content = tCol(box, TUI_SMALL ? 8 : 10);
+  lv_obj_set_width(content, LV_PCT(100));
+  lv_obj_move_to_index(content, 1);  // above the buttons
+  lv_obj_t* top = tRow(content, 10);
+  pkSw = lv_obj_create(top);
+  lv_obj_remove_style_all(pkSw);
+  lv_obj_set_size(pkSw, TUI_SMALL ? 26 : 32, TUI_SMALL ? 26 : 32);
+  lv_obj_set_style_radius(pkSw, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_opa(pkSw, LV_OPA_COVER, 0);
+  pkHex = tLabel(top, TUI_SMALL ? &tfont_16b : &tfont_20c, "");
+  static const char* const NAMES[3] = {"Hue", "Saturation", "Brightness"};
+  for (int i = 0; i < 3; ++i) {
+    lv_obj_t* r = tRow(content, 8);
+    lv_obj_t* l = tLabel(r, TUI_SMALL ? &tfont_12 : &tfont_14, NAMES[i]);
+    lv_obj_set_width(l, TUI_SMALL ? 66 : 84);
+    lv_obj_add_style(l, &S_.muted, 0);
+    if (i == 0) {
+      // the hue scale: 6 segments with a 2-colour gradient each, the slider (knob only) on top
+      lv_obj_t* w = lv_obj_create(r);
+      lv_obj_remove_style_all(w);
+      lv_obj_set_flex_grow(w, 1);
+      lv_obj_set_height(w, TUI_SMALL ? 22 : 26);
+      lv_obj_set_scrollable(w, false);
+      lv_obj_t* bar = tRow(w, 0);
+      lv_obj_set_height(bar, TUI_SMALL ? 12 : 14);
+      lv_obj_center(bar);
+      lv_obj_set_style_radius(bar, LV_RADIUS_CIRCLE, 0);
+      lv_obj_set_style_clip_corner(bar, true, 0);
+      for (int k = 0; k < 6; ++k) {
+        lv_obj_t* seg = lv_obj_create(bar);
+        lv_obj_remove_style_all(seg);
+        lv_obj_set_height(seg, LV_PCT(100));
+        lv_obj_set_flex_grow(seg, 1);
+        lv_obj_set_style_bg_opa(seg, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(seg, lv_color_hex(hsvRgb(k * 60, 100, 100)), 0);
+        lv_obj_set_style_bg_grad_color(seg, lv_color_hex(hsvRgb((k + 1) * 60 % 360, 100, 100)), 0);
+        lv_obj_set_style_bg_grad_dir(seg, LV_GRAD_DIR_HOR, 0);
+      }
+      pkSl[0] = pkMakeSlider(w, 0, 359, pkH);
+      lv_obj_set_width(pkSl[0], LV_PCT(100));
+      lv_obj_center(pkSl[0]);
+      lv_obj_set_style_bg_opa(pkSl[0], LV_OPA_TRANSP, LV_PART_MAIN);
+    } else {
+      pkSl[i] = pkMakeSlider(r, i == 1 ? 0 : PK_VMIN, 100, i == 1 ? pkS : pkV);
+    }
+  }
+  pkShow();
 }
 
 // periods up to what the live history holds (CYD: 30 min)
@@ -252,6 +375,17 @@ lv_obj_t* displayCreate() {
     lv_obj_set_ext_click_area(dAcc[i], 4);
     lv_obj_add_event_cb(dAcc[i], onAccent, LV_EVENT_CLICKED, (void*)(intptr_t)i);
   }
+  dAcc[6] = lv_button_create(sw);  // any colour: opens the picker (filled with the colour when chosen)
+  lv_obj_remove_style_all(dAcc[6]);
+  lv_obj_set_size(dAcc[6], TUI_SMALL ? 22 : 30, TUI_SMALL ? 22 : 30);
+  lv_obj_set_style_radius(dAcc[6], LV_RADIUS_CIRCLE, 0);
+  lv_obj_add_style(dAcc[6], &S_.ring, LV_STATE_CHECKED);
+  lv_obj_set_ext_click_area(dAcc[6], 4);
+  lv_obj_add_event_cb(dAcc[6], onAccentCustom, LV_EVENT_CLICKED, nullptr);
+  dAccIcon = lv_label_create(dAcc[6]);
+  lv_obj_set_style_text_font(dAccIcon, TUI_SMALL ? &lv_font_montserrat_12 : &lv_font_montserrat_14, 0);
+  lv_label_set_text(dAccIcon, LV_SYMBOL_EDIT);
+  lv_obj_center(dAccIcon);
   r = settingRow(p.body, "Turn the screen", "Upside down (180\xC2\xB0)");
   dRotate = tSwitch(r, onRotate);
   r = settingRow(p.body, "Live chart period", "Also on the web page");
@@ -266,7 +400,25 @@ void displayShow() {
   lv_slider_set_value(dBright, S.brightness, LV_ANIM_OFF);
   tSetChecked(dDark, S.themeDark != 0);
   tSetChecked(dRotate, S.rotate180 != 0);
-  for (int i = 0; i < 6; ++i) tSetChecked(dAcc[i], (S.accentColor & 0xFFFFFF) == ACCENTS[i]);
+  const uint32_t acc = S.accentColor & 0xFFFFFF;
+  bool preset = false;
+  for (int i = 0; i < 6; ++i) {
+    tSetChecked(dAcc[i], acc == ACCENTS[i]);
+    preset = preset || acc == ACCENTS[i];
+  }
+  tSetChecked(dAcc[6], !preset);
+  if (preset) {  // an outlined circle with the pen
+    lv_obj_set_style_bg_opa(dAcc[6], LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(dAcc[6], 2, 0);
+    lv_obj_set_style_border_color(dAcc[6], tc(C_MUTED), 0);
+    lv_obj_set_style_text_color(dAccIcon, tc(C_MUTED), 0);
+  } else {  // filled with the custom colour, the pen in black or white (whichever reads better)
+    const lv_color_t c = lv_color_hex(acc);
+    lv_obj_set_style_bg_opa(dAcc[6], LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(dAcc[6], c, 0);
+    lv_obj_set_style_border_width(dAcc[6], 0, 0);
+    lv_obj_set_style_text_color(dAccIcon, lv_color_luminance(c) > 150 ? lv_color_black() : lv_color_white(), 0);
+  }
   char b[24];
   uint32_t cur;
   {

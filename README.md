@@ -37,7 +37,8 @@ start three example programs are created (Lead-free BGA, Leaded BGA, Lead-free B
     Channels (name, type, limits, end action, Modbus controller, thermocouple, PID + autotune, runaway
     protection, RS485 bus; register addresses and the two-point calibration on the web page), Network
     (Wi-Fi with scan and password, AP password, host name, fixed IP), Display (brightness, dark mode,
-    accent colour, upside down, live chart period), System (polling interval, "bottom reached" band, info,
+    accent colour: six presets or any colour (hue / saturation / brightness), upside down, live chart
+    period), System (polling interval, "bottom reached" band, info,
     restart), Event log.
   - **CYD (320×240)**: still the TempCtl 1.2 screens (LVGL Pro Editor project in `ui/`, section 4a) until
     its own set of the new screens exists.
@@ -396,6 +397,8 @@ their ranges and an example per section.
 | `factory reset yes` | all settings to their defaults, Wi-Fi included (programs are kept), then a restart; not while a program runs |
 | `touch cal` | CYD: calibrate the resistive touch screen (tap 4 crosses; any key cancels) |
 | `reboot` | restart the device (refused while a program runs, like on touch / web) |
+| `screen restart` | set only the display and the touch controller up again (S3: reset pins + I2C bus freed; CYD: software reset + SPI) and redraw; prints whether the touch controller answers |
+| Up / Down keys | the last 20 commands (lines with `pw=` and password entries are not kept) |
 
 Passwords are never shown (also not a `pw=` typed on the command line: shown as `*`). Run events
 (phases, messages, faults, the end) are printed as they happen; "Action required" as a highlighted block,
@@ -454,10 +457,11 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
     (with a two-point helper), PID, SSR window, max. output / temperature, PID autotune; runaway limits
     of the selected type. Changed fields are marked; Save sends only the changed values
     (`POST /api/config`) and lists values the device had to adjust to the allowed range.
-  - **System** (tiles fill the free space): device info, restart, Wi-Fi (with network scan, show / hide
+  - **System** (tiles fill the free space): device info, restart, restart of the screen only (display
+    and touch controller set up again, the device keeps running), Wi-Fi (with network scan, show / hide
     password, optional fixed IP address), touch display (light / dark switch, brightness slider;
-    applied at once, no Save button — the screen follows the slider while it is dragged) (accent colour, theme,
-    brightness, rotation).
+    applied at once, no Save button — the screen follows the slider while it is dragged) (accent colour:
+    a preset or "Custom" with the browser's colour picker; theme, brightness, rotation).
   - **Tools**: Modbus tools for a Modbus channel (find the setpoint address, read registers, write one
     register); backup / restore of the settings and of all programs as JSON files.
 
@@ -498,6 +502,7 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 | GET | `/api/wifiscan` | `?start=1` starts a network scan; then `{"busy":true}` until `{"networks":[…]}` (strongest first) |
 | POST | `/api/brightness` | `{"v":128}` touch screen brightness while the web slider moves (not saved) |
 | POST | `/api/restart` | restarts the device (refused while a program runs) |
+| POST | `/api/screen/restart` | sets the display and the touch controller up again (reset + init), redraws; the device keeps running (result in the serial log) |
 | GET | `/api/mb/read?addr=&n=&fn=&ch=` | raw registers (`ch`: channel whose controller address is used, default 0; also in the POST tools below) |
 | POST | `/api/mb/write` | `{"addr","value"}` raw |
 | POST | `/api/mb/findsp` | `{"from","to"}` |

@@ -17,3 +17,6 @@ bool touchRead(int32_t* x, int32_t* y);
 void touchLastRaw(int32_t* rx, int32_t* ry);
 // New calibration range, used at once (XPT2046; the FT6336 needs none)
 void touchSetCal(const TouchCal& cal);
+// Touch controller started again (FT6336: reset pin + I2C bus freed and set up again; XPT2046: its
+// SPI bus set up again). True if the controller answers (XPT2046: always, it cannot be asked).
+bool touchReset(const TouchCal& cal);

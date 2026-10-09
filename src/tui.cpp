@@ -190,7 +190,46 @@ void uiInit() {
   uiSetBrightness(b);
 }
 
+// Screen restart (serial "screen restart", web): asked from any task, done here in the UI task
+static volatile bool scrRestartReq = false;
+static volatile uint32_t scrRestarts = 0;
+static volatile bool scrLcdOk = false, scrTouchOk = false;
+
+void uiScreenRestart() { scrRestartReq = true; }
+
+uint32_t uiScreenRestartPoll(bool& lcdOk, bool& touchOk) {
+  lcdOk = scrLcdOk;
+  touchOk = scrTouchOk;
+  return scrRestarts;
+}
+
+static void screenRestartNow() {
+  TouchCal cal;
+  uint8_t b;
+  bool rot;
+  {
+    Guard g;
+    cal = {gSettings.tsMinX, gSettings.tsMaxX, gSettings.tsMinY, gSettings.tsMaxY};
+    b = gSettings.brightness;
+    rot = gSettings.rotate180;
+  }
+  LogSerial.println("[ui] screen restart: display and touch controller");
+  scrTouchOk = touchReset(cal);
+  touchSetRotation(rot);
+  lv_indev_reset(nullptr, nullptr);  // a press that got stuck is dropped
+  scrLcdOk = lcdReinit();
+  if (scrLcdOk) {
+    lv_refr_now(disp);
+    uiSetBrightness(b);
+  }
+  ++scrRestarts;
+}
+
 void uiLoop() {
+  if (scrRestartReq) {
+    scrRestartReq = false;
+    screenRestartNow();
+  }
   if (disp) lv_timer_handler();
 }
 

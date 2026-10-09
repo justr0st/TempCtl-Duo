@@ -187,6 +187,7 @@ lv_display_t* lcdInit(bool) {
   return hostDisp;
 }
 void lcdSetRotation(bool) {}
+bool lcdReinit() { return true; }
 void lcdSetBrightness(uint8_t) {}
 static int tx = -1, ty = -1;
 bool touchInit(const TouchCal&) { return true; }
@@ -203,6 +204,7 @@ void touchLastRaw(int32_t* x, int32_t* y) {
   *y = ty < 0 ? -1 : 3700 - ty * 3400 / (SCREEN_H - 1);
 }
 void touchSetCal(const TouchCal&) {}
+bool touchReset(const TouchCal&) { return true; }
 
 // ------------------------------------------------------------ scenarios
 static void run(uint32_t ms) {
@@ -227,6 +229,35 @@ static void shot(const char* name) {
   fwrite(fb, 2, SCREEN_W * SCREEN_H, f);
   fclose(f);
   printf("[host] %s\n", path);
+}
+
+// centre of the object (under `o`) showing the label text `t`; false if none
+static bool findText(lv_obj_t* o, const char* t, int& x, int& y) {
+  if (lv_obj_check_type(o, &lv_label_class) && !strcmp(lv_label_get_text(o), t) && !lv_obj_is_hidden(o)) {
+    lv_area_t a;
+    lv_obj_get_coords(lv_obj_get_parent(o), &a);
+    x = (a.x1 + a.x2) / 2;
+    y = (a.y1 + a.y2) / 2;
+    return true;
+  }
+  for (uint32_t i = 0; i < lv_obj_get_child_count(o); ++i)
+    if (findText(lv_obj_get_child(o, i), t, x, y)) return true;
+  return false;
+}
+static int nthSlider(lv_obj_t* o, int& n, lv_area_t& a) {  // the n-th slider under o (depth first)
+  if (lv_obj_check_type(o, &lv_slider_class) && n-- == 0) {
+    lv_obj_get_coords(o, &a);
+    return 1;
+  }
+  for (uint32_t i = 0; i < lv_obj_get_child_count(o); ++i)
+    if (nthSlider(lv_obj_get_child(o, i), n, a)) return 1;
+  return 0;
+}
+static void tapSlider(int idx, float frac) {
+  lv_area_t a;
+  int n = idx;
+  if (!nthSlider(lv_layer_top(), n, a)) return (void)printf("[host] no slider %d\n", idx);
+  tap(a.x1 + (int)((a.x2 - a.x1) * frac), (a.y1 + a.y2) / 2);
 }
 
 static void baseState() {
@@ -455,6 +486,23 @@ int main(int argc, char** argv) {
   shot("11-menu");
   tShow(SCR_DISPLAY);
   shot("12-display");
+  {  // custom accent: the pen circle -> picker, hue / saturation / brightness, OK
+    int x, y;
+    if (findText(lv_screen_active(), LV_SYMBOL_EDIT, x, y)) {
+      tap(x, y);
+      shot("12b-accent-picker");
+      tapSlider(0, 0.47f);  // hue ~170 (teal)
+      tapSlider(1, 0.85f);
+      tapSlider(2, 0.70f);
+      shot("12c-accent-picked");
+      if (findText(lv_layer_top(), "OK", x, y)) tap(x, y);
+      run(600);
+      printf("[host] accent after OK: #%06lX\n", (unsigned long)(gSettings.accentColor & 0xFFFFFF));
+      shot("12d-display-custom");
+      gSettings.accentColor = 0x2196F3;
+      run(600);
+    } else printf("[host] custom accent button not found\n");
+  }
   tShow(SCR_NETWORK);
   shot("13-network");
   tShow(SCR_SYSTEM);

@@ -58,6 +58,32 @@ bool touchInit(const TouchCal&) {
   return ok;
 }
 
+// A device that was cut off in the middle of a byte can hold SDA low: up to 9 clocks let it finish,
+// then a STOP; afterwards the reset pulse and a new start of the I2C driver (touchInit).
+bool touchReset(const TouchCal& cal) {
+  Wire.end();
+  pinMode(TOUCH_PIN_SDA, INPUT_PULLUP);
+  pinMode(TOUCH_PIN_SCL, OUTPUT_OPEN_DRAIN);
+  digitalWrite(TOUCH_PIN_SCL, HIGH);
+  delayMicroseconds(10);
+  int clocks = 0;
+  while (digitalRead(TOUCH_PIN_SDA) == LOW && clocks < 9) {
+    digitalWrite(TOUCH_PIN_SCL, LOW);
+    delayMicroseconds(10);
+    digitalWrite(TOUCH_PIN_SCL, HIGH);
+    delayMicroseconds(10);
+    ++clocks;
+  }
+  pinMode(TOUCH_PIN_SDA, OUTPUT_OPEN_DRAIN);  // STOP: SDA low -> high while SCL is high
+  digitalWrite(TOUCH_PIN_SDA, LOW);
+  delayMicroseconds(10);
+  digitalWrite(TOUCH_PIN_SDA, HIGH);
+  delayMicroseconds(10);
+  if (clocks) LogSerial.printf("[touch] I2C bus freed (%d clocks)\n", clocks);
+  wasPressed = false;
+  return touchInit(cal);
+}
+
 void touchSetRotation(bool rotate180) { rotated = rotate180; }
 
 void touchSetCal(const TouchCal&) {}  // capacitive: no calibration

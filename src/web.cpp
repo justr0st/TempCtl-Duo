@@ -2,6 +2,7 @@
 // No authentication: keep the device on a trusted network.
 #include "web.h"
 #include "console.h"
+#include "ui.h"
 #include <ArduinoJson.h>
 #include <WebServer.h>
 #include <WiFi.h>
@@ -738,6 +739,15 @@ static void handleRestart() {
   if (!restartAt) restartAt = 1;
 }
 
+// POST /api/screen/restart: display and touch controller set up again (not the device); the result
+// is in the serial log ("[ui] screen restart", "[touch] ...", "[lcd] ...")
+static void handleScreenRestart() {
+  uiScreenRestart();
+  JsonDocument r;
+  r["ok"] = true;
+  sendJson(r);
+}
+
 // ------------------------------------------------------------ bus tools
 // Optional "ch" (query or JSON body): channel whose controller is used, 0 = bottom (default), 1 = top
 static uint8_t argCh() {
@@ -1069,6 +1079,7 @@ void webBegin() {
   server.on("/api/wifi", HTTP_POST, handleWifi);
   server.on("/api/wifiscan", HTTP_GET, handleWifiScan);
   server.on("/api/restart", HTTP_POST, handleRestart);
+  server.on("/api/screen/restart", HTTP_POST, handleScreenRestart);
   server.on("/api/brightness", HTTP_POST, handleBrightness);
   server.on("/api/config", HTTP_GET, handleGetConfig);
   server.on("/api/config", HTTP_POST, handlePostConfig);

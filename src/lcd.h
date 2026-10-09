@@ -12,3 +12,6 @@ lv_display_t* lcdInit(bool rotate180);
 void lcdSetRotation(bool rotate180);
 // Backlight 0..255
 void lcdSetBrightness(uint8_t b);
+// Sets the panel controller up again (reset + init sequence) and redraws; keeps the UI as it is.
+// Call from the UI task. False without a display.
+bool lcdReinit();

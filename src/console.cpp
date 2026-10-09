@@ -42,6 +42,7 @@ static volatile bool promptShown = false;  // "> " + the typed text is on the sc
 static volatile bool reprompt = false;     // a log line removed it: show it again
 static bool lastCr = false;                // CR LF counts as one line end
 static uint8_t esc = 0;                    // skipping an escape sequence (arrow keys ...)
+static bool escUsed = false;               // ... whose key already stopped "watch" etc.: no Up / Down
 // password entry: masked, then `pwDone` runs with the text
 static bool pwMode = false;
 static void (*pwDone)(const char* pw) = nullptr;
@@ -85,13 +86,76 @@ static bool inPwValue() {
 static void showPrompt() {
   if (!portReady()) return;
   raw(pwMode ? "Password: " : "> ");
+  bool inPw = false;  // inside the value of a "pw=" (as typed: shown as '*')
   for (int i = 0; i < len; ++i) {
     char c[2] = {line[i], 0};
-    if (pwMode) c[0] = '*';
+    if (line[i] == ' ') inPw = false;
+    if (pwMode || inPw) c[0] = '*';
     raw(c);
+    if (i >= 2 && line[i] == '=' && tolower(line[i - 1]) == 'w' && tolower(line[i - 2]) == 'p' && (i == 2 || line[i - 3] == ' '))
+      inPw = true;
   }
   promptShown = true;
   reprompt = false;
+}
+
+// ------------------------------------------------------------ command history (Up / Down keys)
+// The last commands (up to 20, 1 kB), oldest first, each '\0'-terminated. Lines with a password
+// (pw=) and password entries are not kept.
+static char hist[1024];
+static int histUsed = 0;
+static int histPos = -1;  // -1 = the line being typed, 0 = the newest entry, 1 = the one before ...
+
+static int histCount() {
+  int n = 0;
+  for (int i = 0; i < histUsed; ++i)
+    if (!hist[i]) ++n;
+  return n;
+}
+
+static const char* histGet(int k) {  // k = 0: the newest
+  const int want = histCount() - 1 - k;
+  if (want < 0 || k < 0) return nullptr;
+  const char* p = hist;
+  for (int i = 0; i < want; ++i) p += strlen(p) + 1;
+  return p;
+}
+
+static bool hasPw(const char* t) {
+  for (const char* p = t; *p; ++p)
+    if ((p == t || p[-1] == ' ') && tolower(p[0]) == 'p' && tolower(p[1]) == 'w' && p[2] == '=') return true;
+  return false;
+}
+
+static void histAdd(const char* t) {
+  while (*t == ' ') ++t;
+  const size_t n = strlen(t);
+  if (!n || n + 1 > sizeof(hist) || hasPw(t)) return;
+  const char* last = histGet(0);
+  if (last && !strcmp(last, t)) return;
+  while (histUsed && (histUsed + (int)n + 1 > (int)sizeof(hist) || histCount() >= 20)) {  // drop the oldest
+    const int f = strlen(hist) + 1;
+    memmove(hist, hist + f, histUsed - f);
+    histUsed -= f;
+  }
+  memcpy(hist + histUsed, t, n + 1);
+  histUsed += n + 1;
+}
+
+static void histShow(int pos) {  // puts entry `pos` (-1 = empty line) on the command line
+  const char* t = pos < 0 ? "" : histGet(pos);
+  if (!t) return;
+  histPos = pos;
+  strlcpy(line, t, sizeof(line));
+  len = strlen(line);
+  if (promptShown && portReady()) raw("\r\x1b[K");
+  showPrompt();
+}
+
+static void histKey(char k) {  // 'A' = Up, 'B' = Down
+  if (pwMode) return;
+  if (k == 'A' && histPos + 1 < histCount()) histShow(histPos + 1);
+  else if (k == 'B' && histPos >= 0) histShow(histPos - 1);
 }
 
 // before output that is not the answer to a typed command (events, async results): clear the line
@@ -277,7 +341,10 @@ static const char* const H_SETTINGS_SHORT[] = {
 static const char* const H_DEVICE[] = {
     "DEVICE",
     "  reboot                         restart (not while a program runs)",
+    "  screen restart                 restart only the display and the touch controller",
+    "                                 (when the screen hangs or shows rubbish)",
     "  help [section]                 this list, or one section: help wifi",
+    "  Up / Down keys                 the last commands (without passwords)",
 };
 static const char* const H_SETTINGS[] = {
     "SETTINGS - all settings, changed with set, shown with get",
@@ -1468,6 +1535,35 @@ static void calPoll() {
   say("touch calibrated and saved: x %u ... %u, y %u ... %u", r[0], r[1], r[2], r[3]);
 }
 
+// ------------------------------------------------------------ screen restart
+static uint32_t scrWaitN = 0, scrWaitAt = 0;
+static bool scrWaiting = false;
+
+static void cmdScreen(const Args& a) {
+  if (strcmp(a.word(1), "restart") && strcmp(a.word(1), "reset")) return err("screen restart");
+  bool l, t;
+  scrWaitN = uiScreenRestartPoll(l, t);
+  uiScreenRestart();
+  scrWaiting = true;
+  scrWaitAt = millis();
+  say("restarting the display and the touch controller...");
+}
+
+static void screenPoll() {
+  if (!scrWaiting) return;
+  bool lcdOk, touchOk;
+  if (uiScreenRestartPoll(lcdOk, touchOk) != scrWaitN) {
+    scrWaiting = false;
+    breakLine();
+    say("screen restarted: display %s, touch controller %s", lcdOk ? "set up" : "NOT set up (no display?)",
+        touchOk ? "answers" : "does NOT answer (cable?)");
+  } else if (millis() - scrWaitAt > 5000) {
+    scrWaiting = false;
+    breakLine();
+    say("the screen task does not respond - restart the device (reboot)");
+  }
+}
+
 // ------------------------------------------------------------ dispatch
 static void dispatch(const Args& a);
 static void execute(char* text) {
@@ -1509,6 +1605,7 @@ static void dispatch(const Args& a) {
   if (!strcmp(c, "set")) return cmdSet(a);
   if (!strcmp(c, "factory")) return cmdFactory(a);
   if (!strcmp(c, "touch")) return cmdTouchCal(a);
+  if (!strcmp(c, "screen")) return cmdScreen(a);
   if (!strcmp(c, "reboot") || !strcmp(c, "restart")) {  // same rules as the touch / web restart
     if (runActive()) return err("a program is running - stop it first");
     say("restarting...");
@@ -1538,6 +1635,8 @@ static void enterLine() {
     char cmd[sizeof(line)];
     strlcpy(cmd, line, sizeof(cmd));
     len = 0;
+    histAdd(cmd);
+    histPos = -1;
     execute(cmd);
     memset(cmd, 0, sizeof(cmd));  // may hold a pw=
   }
@@ -1553,21 +1652,34 @@ static void input(char c) {
   if (watching) {  // any key ends "watch" (and is used up)
     watching = false;
     lastCr = c == '\r';
+    esc = c == 0x1B;  // the rest of an arrow key's sequence is skipped
+    escUsed = true;
     say("(watch stopped)");
     return showPrompt();
   }
   if (calRunning) {  // any key cancels the touch calibration
     uiTouchCalCancel();
     lastCr = c == '\r';
+    esc = c == 0x1B;
+    escUsed = true;
     return;
   }
-  if (esc) {  // ESC [ ... letter / ~
-    if (esc == 1 && c == '[') esc = 2;
-    else if (esc == 1 || (c >= '@' && c <= '~')) esc = 0;
+  if (esc) {  // ESC [ ... letter / ~ (also ESC O A: arrow keys in "application" mode)
+    if (esc == 1 && (c == '[' || c == 'O')) esc = 2;
+    else if (esc == 1 || (c >= '@' && c <= '~')) {
+      const bool arrow = esc == 2 && (c == 'A' || c == 'B') && !escUsed;
+      esc = 0;
+      escUsed = false;
+      if (arrow) {
+        if (!promptShown) showPrompt();
+        return histKey(c);
+      }
+    }
     return;
   }
   if (c == 0x1B) {
     esc = 1;
+    escUsed = false;
     return;
   }
   lastCr = c == '\r';
@@ -1582,6 +1694,7 @@ static void input(char c) {
   }
   if (c == 0x03) {  // Ctrl-C: drop the line (and a password entry)
     len = 0;
+    histPos = -1;
     pwMode = false;
     raw("^C\r\n");
     promptShown = false;
@@ -1708,6 +1821,7 @@ void consoleLoop() {
   scanPoll();
   connectPoll();
   calPoll();
+  screenPoll();
   if (watching && millis() - watchAt >= 1000) {
     watchAt += 1000;
     if (millis() - watchAt >= 1000) watchAt = millis();  // (fell behind: no burst)
