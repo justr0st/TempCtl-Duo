@@ -3,6 +3,10 @@
 #include "console.h"
 #include "net.h"
 #include <WiFi.h>
+#include "local_ctrl.h"
+#include "settings_store.h"
+#include "touch.h"
+#include "ui.h"
 SerialT Serial;
 EspT ESP;
 WiFiT WiFi;
@@ -45,6 +49,22 @@ bool netScanDetail(int i, int& rssi, uint8_t& auth, int& ch) { rssi = -50 - i * 
 uint32_t netDisconnects(uint8_t* r) { if (r) *r = reason; return disc; }
 void netStartAp() {}
 void appRequestRestart(const char* from) { printf("<restart %s>", from); }
+// stubs for the settings / autotune / touch commands
+void saveSettingsAndNotify() { printf("<saved + notify>"); }
+BoardLimits boardLimits() { return BoardLimits{true, 2}; }
+uint32_t liveHistSec() { return 30 * 60; }
+static LocalTune tune[2];
+void localCtrlTuneGet(int ch, LocalTune& t) { t = tune[ch]; }
+void localCtrlTuneClear(int ch) { tune[ch].state = TuneState::Idle; printf("<tune clear %d>", ch); }
+void touchSetCal(const TouchCal& c) { printf("<touch cal %u %u %u %u>", c.minX, c.maxX, c.minY, c.maxY); }
+static int calState = 0, calStep = 1;
+bool uiTouchCalStart() { calState = 0; calStep = 1; return true; }
+int uiTouchCalPoll(int& step, uint16_t& a, uint16_t& b, uint16_t& c, uint16_t& d) {
+  step = calStep;
+  if (calState == 1) { a = 220; b = 3850; c = 3700; d = 300; }
+  return calState;
+}
+void uiTouchCalCancel() { calState = -1; }
 String netApName() { return String("TempCtl-Duo-1A2B"); }
 
 static void run(int ms) { for (int t = 0; t < ms; t += 50) { consoleLoop(); delay(50); } }
@@ -115,5 +135,43 @@ int main() {
   type("resume run\r");
   gLive.state = RunState::Running; type("reboot\r");  // refused: running
   gLive.state = RunState::Idle; type("REBOOT\r");
+  // 1.0.23: help sections, status extras, autotune, settings, factory reset, touch calibration, wifi forget
+  type("help wifi\r");
+  type("help bogus\r");
+  type("help settings\r");
+  type("info\r");
+  type("log 3\r");
+  type("watch\r\n");                       // CR LF (PlatformIO monitor): the LF must not stop it
+  run(2100);
+  type("x");
+  type("ack b\r");
+  gLive.ch[0].fault = 1; strcpy(gLive.ch[0].faultText, "Runaway: no rise");
+  type("ack b\r");
+  gLive.ch[0].fault = 0;
+  type("tune b start temp=200\r");
+  type("tune b start temp=500\r");
+  tune[0].state = TuneState::Done; tune[0].res.kp = 3.2f; tune[0].res.ki = 0.021f; tune[0].res.kd = 45;
+  type("status\r");
+  type("tune b accept\r");
+  type("get b.local\r");
+  type("get display\r");
+  type("set b.spMax=300 b.local.kp=2.5 display.accent=orange t.name=\"IR head 2\"\r");
+  type("set b.spMax=2000\r");
+  type("set b.local.maxTemp=200 b.spMax=300\r");   // spMax adjusted to maxTemp - 10
+  type("set wifi.staticIp=on wifi.ip=192.168.1.60 wifi.subnet=255.255.255.0 wifi.gateway=192.168.1.1\r");
+  type("set wifi.ip=300.1.1.1\r");
+  type("set bus.parity=odd bus.baud=19200 t.modbus.reg.alarm=\r");
+  type("get bus\r");
+  type("set nope=1\r");
+  type("set set b.spMax=300\r");
+  type("set b.spMin=0 b.spMin=0 b.spMin=0 b.spMin=0 b.spMin=0 b.spMin=0 b.spMin=0 b.spMin=0 b.spMin=0\r");
+  type("touch cal\r");
+  calStep = 2; run(300); calStep = 3; run(300); calState = 1; run(300);
+  type("touch cal\r");
+  type("q");
+  run(300);
+  type("wifi forget\r");
+  type("factory reset\r");
+  type("factory reset yes\r");
   printf("\n");
 }

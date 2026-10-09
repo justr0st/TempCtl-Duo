@@ -24,6 +24,8 @@ bool touchInit(const TouchCal& c) {
 
 void touchSetRotation(bool rotate180) { rotated = rotate180; }
 
+void touchSetCal(const TouchCal& c) { cal = c; }
+
 void touchLastRaw(int32_t* rx, int32_t* ry) {
   *rx = lastRawX;
   *ry = lastRawY;

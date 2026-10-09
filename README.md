@@ -375,17 +375,26 @@ port) and with `help`. One command per line; commands and keys are not case-sens
 (PlatformIO's monitor or any terminal); on the CYD a log line that arrives while you type appears on its
 own line and your typed text is shown again. Errors start with `error:`.
 
+`help` lists the commands in sections (status, manual control, programs and runs, autotune, Wi-Fi,
+settings, device); `help <section>` prints one of them (`help wifi`), `help settings` all settings with
+their ranges and an example per section.
+
 | Command | |
 |---|---|
-| `status` | per channel PV, SP, output and what it does; run state; Wi-Fi |
-| `manual b\|t on [sp=<C>]` · `manual b\|t sp=<C>` · `manual b\|t off` | manual setpoint (b = bottom, t = top); not for a channel of the running program |
-| `wifi scan` · `wifi connect n=<number> [pw=…]` · `wifi connect s=<SSID> [pw=…]` | join a network; without `pw=` the password is asked for (hidden; empty = open network). The result: `connected, IP …` (then saved) or `failed: wrong password / network not found / timeout` (the previous network is used again) |
-| `wifi ap [pw=…]` · `wifi status` | start the access point (`TempCtl-Duo-XXXX`, password 8–32 characters, saved), Wi-Fi state |
+| `status` · `watch` · `info` · `log [n]` | per channel PV, SP, output and what it does, run state, Wi-Fi · the same as one line per second (any key stops) · firmware, uptime, memory, network · the last n events |
+| `manual b\|t on [sp=<C>]` · `manual b\|t sp=<C>` · `manual b\|t off` · `ack b\|t` | manual setpoint (b = bottom, t = top); not for a channel of the running program · acknowledge a channel fault |
 | `programs` · `program n=<n>` · `show` | list, select for the next run, print the selected / running program (no editing over serial) |
 | `start` `pause` `resume` `stop` `next` `continue` | run control |
 | `extend b\|t +<s>` · `target b\|t <C>` | extend the running hold, change the current / kept target |
 | `resume run` · `dismiss run` | after "Run interrupted by a reset" |
 | `save` · `discard` | the changes made during the last run |
+| `tune b\|t start temp=<C>` · `tune b\|t stop` · `tune b\|t accept\|discard` · `tune b\|t` | autotune of a local channel (test temperature 50 … max − 20 °C, not during a run) · stop · take over / drop the values found · its state |
+| `wifi scan` · `wifi connect n=<number> [pw=…]` · `wifi connect s=<SSID> [pw=…]` | join a network; without `pw=` the password is asked for (hidden; empty = open network). The result: `connected, IP …` (then saved) or `failed: wrong password / network not found / timeout` (the previous network is used again) |
+| `wifi ap [pw=…]` · `wifi status` · `wifi forget` | start the access point (`TempCtl-Duo-XXXX`, password 8–32 characters, saved), Wi-Fi state, forget the network (access point only) |
+| `get [b\|t\|bus\|run\|wifi\|display\|<key prefix>]` | settings as `key=value` lines, ready to be used with `set` |
+| `set <key>=<value> …` | up to 8 settings at once, the keys of the web API (`b.` / `t.` = the channels). Stricter than touch / web: a value out of range is an error and then nothing is changed; a value the device adjusts because of another setting is reported. Saved at once |
+| `factory reset yes` | all settings to their defaults, Wi-Fi included (programs are kept), then a restart; not while a program runs |
+| `touch cal` | CYD: calibrate the resistive touch screen (tap 4 crosses; any key cancels) |
 | `reboot` | restart the device (refused while a program runs, like on touch / web) |
 
 Passwords are never shown (also not a `pw=` typed on the command line: shown as `*`). Run events

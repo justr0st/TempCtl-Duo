@@ -11,6 +11,12 @@
 #include "net.h"
 #include "program_store.h"
 #include "version.h"
+#include <ArduinoJson.h>
+#include <esp_heap_caps.h>
+#include "local_ctrl.h"
+#include "settings_store.h"
+#include "touch.h"
+#include "ui.h"
 
 #if defined(BOARD_S3) && ARDUINO_USB_MODE == 0
 #include "USB.h"
@@ -141,8 +147,9 @@ struct Args {
   int n;                 // words
   char* w[8];            // words (lower case)
   int nk;                // key=value pairs
-  char* k[6];            // keys (lower case)
-  char* v[6];            // values (as typed)
+  char* k[8];            // keys (lower case)
+  char* v[8];            // values (as typed)
+  bool over;             // more than 8 pairs (the rest is dropped)
   const char* get(const char* key) const {
     for (int i = 0; i < nk; ++i)
       if (!strcmp(k[i], key)) return v[i];
@@ -153,6 +160,7 @@ struct Args {
 
 static void parse(char* s, Args& a) {
   a.n = a.nk = 0;
+  a.over = false;
   while (*s) {
     while (*s == ' ' || *s == '\t') ++s;
     if (!*s) break;
@@ -181,10 +189,10 @@ static void parse(char* s, Args& a) {
     if (!end) ++s;
     if (eq) {
       for (char* p = start; *p; ++p) *p = tolower(*p);
-      if (a.nk < 6) {
+      if (a.nk < 8) {
         a.k[a.nk] = start;
         a.v[a.nk++] = val;
-      }
+      } else a.over = true;
     } else {
       for (char* p = start; *p; ++p) *p = tolower(*p);
       if (a.n < 8) a.w[a.n++] = start;
@@ -202,31 +210,208 @@ static bool number(const char* s, float& v) {
 
 // ------------------------------------------------------------ help / banner
 static void banner() {
-  say("%s %s (%s%s%s) - serial commands:", PRODUCT_NAME, FW_VERSION, BOARD_NAME, BOARD_VARIANT[0] ? " " : "", BOARD_VARIANT);
+  say("%s %s (%s%s%s) - serial console", PRODUCT_NAME, FW_VERSION, BOARD_NAME, BOARD_VARIANT[0] ? " " : "", BOARD_VARIANT);
+  char nb[CH_NAME_LEN], nt[CH_NAME_LEN];
+  {
+    Guard g;
+    strlcpy(nb, gSettings.ch[0].name, sizeof(nb));
+    strlcpy(nt, gSettings.ch[1].name, sizeof(nt));
+  }
+  say("b = bottom (%s), t = top (%s). A value with spaces in quotes: s=\"My Net\"", nb, nt);
 }
 
-static void help() {
+// Help: sections (help <name> prints one); "settings" has a long page of its own
+static const char* const H_STATUS[] = {
+    "STATUS",
+    "  status                         temperatures, setpoints, outputs, run and Wi-Fi",
+    "  watch                          status as one line per second, any key stops",
+    "  info                           firmware, board, uptime, memory, network",
+    "  log [n]                        the last n events (default 20)",
+};
+static const char* const H_MANUAL[] = {
+    "MANUAL CONTROL",
+    "  manual b|t on [sp=<C>]         manual setpoint on",
+    "  manual b|t sp=<C>              change the manual setpoint (switches it on)",
+    "  manual b|t off                 outputs off",
+    "  ack b|t                        acknowledge a channel fault",
+};
+static const char* const H_RUN[] = {
+    "PROGRAMS AND RUNS",
+    "  programs                       list the stored programs (* = selected)",
+    "  program n=<n>                  select a program for the next run",
+    "  show                           print the selected / running program",
+    "  start | pause | resume | stop  run control",
+    "  next | continue                next phase / continue after a program pause",
+    "  extend b|t +<s>                extend the running hold",
+    "  target b|t <C>                 change the current / kept target",
+    "  resume run | dismiss run       after \"Run interrupted by a reset\"",
+    "  save | discard                 keep / drop the changes made during the last run",
+};
+static const char* const H_TUNE[] = {
+    "AUTOTUNE (local channels)",
+    "  tune b|t start temp=<C>        find PID values around a test temperature",
+    "  tune b|t stop                  stop it (outputs off)",
+    "  tune b|t accept | discard      take over / drop the values found",
+};
+static const char* const H_WIFI[] = {
+    "WI-FI",
+    "  wifi status                    mode, network, IP address, signal",
+    "  wifi scan                      list networks (numbered)",
+    "  wifi connect n=<n> [pw=<PW>]   join a network from the scan list",
+    "  wifi connect s=<SSID> [pw=<PW>]  join a network by name",
+    "  wifi ap [pw=<PW>]              start the access point (TempCtl-Duo-XXXX)",
+    "  wifi forget                    forget the network: access point only",
+    "  Without pw= the password is asked for (hidden).",
+};
+static const char* const H_SETTINGS_SHORT[] = {
+    "SETTINGS (help settings: all settings and their values)",
+    "  get [b|t|bus|run|wifi|display] show settings (as key=value, ready for set)",
+    "  set <key>=<value> ...          change settings, checked like on the web page",
+    "                                 e.g. set b.spMax=300 t.endAction=off",
+    "  factory reset yes              all settings to defaults, Wi-Fi included",
+    "                                 (programs are kept)",
+#if defined(TOUCH_XPT2046)
+    "  touch cal                      calibrate the touch screen (tap 4 targets)",
+#endif
+};
+static const char* const H_DEVICE[] = {
+    "DEVICE",
+    "  reboot                         restart (not while a program runs)",
+    "  help [section]                 this list, or one section: help wifi",
+};
+static const char* const H_SETTINGS[] = {
+    "SETTINGS - all settings, changed with set, shown with get",
+    "  get                          all settings below as key=value (passwords never shown)",
+    "  get <section>                one section: b, t, bus, run, wifi, display",
+    "  set <key>=<value> ...        change one or more settings; checked first, nothing is",
+    "                               changed if one value is wrong; saved and used at once",
+    "  factory reset yes            all settings to defaults, Wi-Fi included (programs kept)",
+#if defined(TOUCH_XPT2046)
+    "  touch cal                    calibrate the touch screen (CYD)",
+#endif
+    "  b. = bottom channel, t. = top channel. On/off values: on|off (also true|false, 1|0)",
+    "  e.g. get b                   show the bottom channel's settings",
+    "",
+    "CHANNEL (b.* / t.*)",
+    "  name=<text>                  shown on all screens, 1 ... 31 characters",
+    "  type=off|local|modbus        what the channel is (only what this board can wire;",
+    "                               modbus is beta)",
+    "  spMin=<C>  spMax=<C>         setpoint limits, -200 ... 1500",
+    "                               (local channel: spMax at most maxTemp - 10)",
+    "  endAction=keep|sp|off        when a program ends or stops: keep the last setpoint /",
+    "                               go to endSp / outputs off (keep and sp continue as manual)",
+    "  endSp=<C>                    the setpoint for endAction=sp",
+    "  e.g. set b.name=\"Bottom heater\" b.spMax=300 t.endAction=sp t.endSp=100",
+    "",
+    "LOCAL CHANNEL: THERMOCOUPLE, PID, SSR (b.local.* / t.local.*)",
+    "  sensor=max31855|max6675      thermocouple converter",
+    "  calOffset=<C>                calibration offset, -50 ... 50",
+    "  calGain=<x>                  calibration gain, 0.5 ... 2",
+    "  kp=<x>  ki=<x>  kd=<x>       PID values: 0 ... 1000 / 0 ... 100 / 0 ... 10000",
+    "                               (or let the autotune find them: tune b|t start temp=<C>)",
+    "  windowSec=<s>                SSR time window, 0.2 ... 10",
+    "  maxOut=<%>                   highest output, 0 ... 100",
+    "  maxTemp=<C>                  cut-off: outputs off above it, 50 ... 600",
+    "  e.g. set b.local.calOffset=-1.5 b.local.kp=2.5 b.local.ki=0.02 b.local.kd=40",
+    "",
+    "RUNAWAY PROTECTION (b.local.runaway.* / t.local.runaway.*,",
+    "                    Modbus channel: b.modbus.runaway.* / t.modbus.runaway.*)",
+    "  enable=on|off                runaway detection",
+    "  minOut=<%>  heatSec=<s>      heating failed: output at least minOut (0 ... 100) for",
+    "  minRise=<C>                  heatSec (10 ... 3600) with a rise below minRise (0.5 ... 100)",
+    "  holdBand=<C>  holdSec=<s>    holding failed: PV more than holdBand (1 ... 200) off the",
+    "                               setpoint for longer than holdSec (5 ... 3600)",
+    "  e.g. set b.local.runaway.enable=on b.local.runaway.heatSec=300 b.local.runaway.minRise=5",
+    "",
+    "MODBUS CONTROLLER - beta (b.modbus.* / t.modbus.*)",
+    "  addr=<n>                     controller address, 1 ... 247",
+    "  profile=pma|generic          controller type; a new type loads its register defaults",
+    "  rampMode=host|controller     who ramps the setpoint: this device or the controller",
+    "  minStep=<C>                  smallest setpoint change that is written, 0.1 ... 100",
+    "  minWriteSec=<s>              at most one setpoint write per minWriteSec, 1 ... 3600",
+    "  lockFront=on|off             lock the controller's front keys during a run",
+    "  reg.<name>=<addr>            register addresses: pv spEff out status alarm sp spLo spHi",
+    "                               rampRate ctrlOff remote (0 ... 65534, empty = not used)",
+    "  reg.scale=<x>  reg.offRaw=<n>  value scale (1 ... 1000), raw \"outputs off\" value",
+    "  reg.readFn=3|4  reg.writeFn=6|16   Modbus function codes",
+    "  e.g. set t.modbus.addr=2 t.modbus.profile=generic t.modbus.reg.pv=1 t.modbus.reg.sp=2",
+    "",
+    "RS485 BUS - beta (bus.*)",
+    "  baud=2400|4800|9600|19200|38400",
+    "  parity=none|even|odd",
+    "  stopBits=1|2",
+    "  timeoutMs=<ms>               answer timeout, 50 ... 2000",
+    "  commLossSec=<s>              pause the run after no answer for this long, 0 ... 3600",
+    "                               (0 = never)",
+    "  e.g. set bus.baud=19200 bus.parity=none bus.commLossSec=30",
+    "",
+    "POLLING AND RUNS",
+    "  bus.pollMs=<ms>              how often PV, SP and output are read, 250 ... 10000",
+    "  run.bottomBand=<C>           \"wait for bottom\" goes on within +- this, 0.5 ... 50",
+    "  e.g. set bus.pollMs=500 run.bottomBand=3",
+    "",
+    "NETWORK (wifi.*; network name and passwords: wifi connect / wifi ap)",
+    "  hostname=<name>              http://<name>.local; letters, digits and '-', 1 ... 23",
+    "  staticIp=on|off              fixed IP address instead of DHCP",
+    "  ip=  subnet=  gateway=       fixed address, subnet mask, router (a.b.c.d)",
+    "  dns1=  dns2=                 DNS servers (empty dns1 = the gateway)",
+    "  Network settings are applied right away (the Wi-Fi reconnects).",
+    "  e.g. set wifi.staticIp=on wifi.ip=192.168.1.60 wifi.subnet=255.255.255.0 wifi.gateway=192.168.1.1",
+    "",
+    "DISPLAY (display.*)",
+    "  brightness=<n>               touch screen backlight, 10 ... 255",
+    "  themeDark=on|off             dark theme on the touch screen",
+    "  accent=<name>|#RRGGBB        blue, pink, violet, orange, mauve, green or any colour",
+    "  rotate180=on|off             turn the screen upside down",
+    "  liveMin=<min>                live chart period: 1 5 10 15 30 60 120 240 480 720 1440",
+    "  e.g. set display.accent=orange display.brightness=180 display.liveMin=30",
+};
+
+struct HelpSec {
+  const char* names;  // '|'-separated names for "help <name>"
+  const char* const* lines;
+  int n;
+};
+#define HS(names, arr) {names, arr, (int)(sizeof(arr) / sizeof(arr[0]))}
+static const HelpSec HELP[] = {
+    HS("status|watch|info|log", H_STATUS),
+    HS("manual|ack", H_MANUAL),
+    HS("programs|program|runs|run|start", H_RUN),
+    HS("autotune|tune", H_TUNE),
+    HS("wifi|network", H_WIFI),
+    HS("", H_SETTINGS_SHORT),  // (help settings: the long page)
+    HS("device|reboot|help", H_DEVICE),
+};
+
+static bool nameIn(const char* names, const char* w) {
+  const size_t n = strlen(w);
+  for (const char* p = names; *p;) {
+    const char* e = strchr(p, '|');
+    const size_t l = e ? (size_t)(e - p) : strlen(p);
+    if (l == n && !strncasecmp(p, w, n)) return true;
+    if (!e) break;
+    p = e + 1;
+  }
+  return false;
+}
+
+static void printLines(const char* const* lines, int n) {
+  for (int i = 0; i < n; ++i) say("%s", lines[i]);
+}
+
+static void help(const char* section = nullptr) {
+  if (section && *section) {
+    if (!strcasecmp(section, "settings") || !strcasecmp(section, "set") || !strcasecmp(section, "get"))
+      return printLines(H_SETTINGS, sizeof(H_SETTINGS) / sizeof(H_SETTINGS[0]));
+    for (const HelpSec& h : HELP)
+      if (nameIn(h.names, section)) return printLines(h.lines, h.n);
+    return err("no help section \"%s\" (status, manual, programs, autotune, wifi, settings, device)", section);
+  }
   banner();
-  static const char* const H[] = {
-      "  help                         this list",
-      "  status                       temperatures, setpoints, outputs, run and Wi-Fi state",
-      "  manual b|t on [sp=<C>]       manual setpoint on (b = bottom, t = top)",
-      "  manual b|t sp=<C>            change the manual setpoint (switches it on)",
-      "  manual b|t off               outputs off",
-      "  wifi scan                    list networks (numbered)",
-      "  wifi connect s=<SSID> [pw=<PASSWORD>]",
-      "  wifi connect n=<number> [pw=<PASSWORD>]",
-      "  wifi ap [pw=<PASSWORD>]      start the access point (TempCtl-Duo-XXXX)",
-      "  wifi status                  current Wi-Fi state",
-      "  programs | program n=<n> | show   list, select, show programs",
-      "  start | pause | resume | stop | next | continue   run control",
-      "  extend b|t +<s> | target b|t <C>   extend the running hold, change a target",
-      "  resume run | dismiss run     after \"Run interrupted by a reset\"",
-      "  save | discard               keep / drop the changes made during the last run",
-      "  reboot                       restart the device (not while a program runs)",
-      "Without pw= the password is asked for (hidden). A value with spaces in quotes: s=\"My Net\"",
-  };
-  for (const char* h : H) say("%s", h);
+  for (const HelpSec& h : HELP) {
+    say("%s", "");
+    printLines(h.lines, h.n);
+  }
 }
 
 // ------------------------------------------------------------ status
@@ -255,6 +440,19 @@ static const char* chStateText(int ch, char* b, size_t n) {
     case ChState::Pause: return "program pause";
     case ChState::Done: snprintf(b, n, "program done, %s", tv); return b;
     default: break;
+  }
+  if (C.type == CH_LOCAL) {
+    LocalTune lt;
+    localCtrlTuneGet(ch, lt);
+    if (lt.state == TuneState::Running) {
+      snprintf(b, n, "autotune at %.0f \xC2\xB0" "C, cycle %d", lt.sp, lt.cycle);
+      return b;
+    }
+    if (lt.state == TuneState::Done) {
+      snprintf(b, n, "autotune done: kp %.3g ki %.3g kd %.3g - tune %s accept|discard", lt.res.kp, lt.res.ki,
+               lt.res.kd, ch ? "t" : "b");
+      return b;
+    }
   }
   if (C.manualOn) {
     fmtC(C.manualSp, tv, sizeof(tv));
@@ -505,7 +703,17 @@ static void cmdWifi(const Args& a) {
     say("Access point password (8 ... 32 characters):");
     return askPassword(doAp);
   }
-  err("wifi scan | wifi connect ... | wifi ap [pw=...] | wifi status");
+  if (!strcmp(sub, "forget")) {
+    {
+      Guard g;
+      gSettings.ssid[0] = 0;
+      memset(gSettings.pass, 0, sizeof(gSettings.pass));
+    }
+    saveSettingsQuiet();
+    netApplyWifi();  // no station: the access point runs
+    return say("network forgotten - access point \"%s\" (connect with wifi connect ...)", netApName().length() ? netApName().c_str() : AP_NAME_PREFIX "-XXXX");
+  }
+  err("wifi scan | wifi connect ... | wifi ap [pw=...] | wifi forget | wifi status");
 }
 
 // ------------------------------------------------------------ programs
@@ -682,6 +890,584 @@ static void runCmd(const Args& a) {
   }
 }
 
+// ------------------------------------------------------------ status extras: watch, info, log
+static bool watching = false;
+static uint32_t watchAt = 0;
+
+static void watchLine() {
+  struct {
+    float pv[2], sp[2], out[2];
+    bool pvOk[2], outOk[2], manual[2], fault[2];
+    RunState st;
+    uint8_t type;
+    StageInfo seq;
+    float el;
+  } W;
+  {
+    Guard g;
+    for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+      const ChannelLive& C = gLive.ch[ch];
+      W.pv[ch] = C.pv;
+      W.pvOk[ch] = C.pvValid;
+      W.sp[ch] = C.spEffValid ? C.spEff : (C.manualOn ? C.manualSp : NAN);
+      if (isnan(W.sp[ch]) && gLive.run[ch].inProgram && !gLive.run[ch].idle) W.sp[ch] = gLive.run[ch].sp;
+      W.out[ch] = C.out;
+      W.outOk[ch] = C.outValid;
+      W.manual[ch] = C.manualOn;
+      W.fault[ch] = C.fault != 0;
+    }
+    W.st = gLive.state;
+    W.type = gLive.progType;
+    W.seq = gLive.seq;
+    W.el = gLive.elapsed;
+  }
+  char line[160] = "", part[64];
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    char pv[12] = "-", sp[12] = "-", out[8] = "-";
+    if (W.pvOk[ch]) snprintf(pv, sizeof(pv), "%.1f", W.pv[ch]);
+    if (!isnan(W.sp[ch])) snprintf(sp, sizeof(sp), "%.1f", W.sp[ch]);
+    if (W.outOk[ch]) snprintf(out, sizeof(out), "%.0f%%", W.out[ch]);
+    snprintf(part, sizeof(part), "%s%s PV %6s SP %6s %4s%s", ch ? " | " : "", ch ? "t" : "b", pv, sp, out,
+             W.fault[ch] ? " FAULT" : W.manual[ch] ? " man" : "");
+    strlcat(line, part, sizeof(line));
+  }
+  if (W.st == RunState::Running || W.st == RunState::Paused) {
+    char t[16];
+    fmtT(W.el, t, sizeof(t));
+    if (W.type == PROG_SEQ) snprintf(part, sizeof(part), " | %s %s P%d %s", W.st == RunState::Paused ? "paused" : "run", t, W.seq.idx + 1, stageName(W.seq.st));
+    else snprintf(part, sizeof(part), " | %s %s", W.st == RunState::Paused ? "paused" : "run", t);
+    strlcat(line, part, sizeof(line));
+  }
+  say("%s", line);
+}
+
+static void cmdInfo() {
+  char up[16];
+  fmtT(millis() / 1000.0f, up, sizeof(up));
+  say("firmware  %s %s, %s%s%s", PRODUCT_NAME, FW_VERSION, BOARD_NAME, BOARD_VARIANT[0] ? " " : "", BOARD_VARIANT);
+  say("uptime    %s", up);
+  const uint32_t caps = MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL;
+#ifdef BOARD_HAS_PSRAM
+  say("memory    RAM %u kB free (lowest %u kB, largest block %u kB), PSRAM %u kB free",
+      (unsigned)(heap_caps_get_free_size(caps) / 1024), (unsigned)(heap_caps_get_minimum_free_size(caps) / 1024),
+      (unsigned)(heap_caps_get_largest_free_block(caps) / 1024), (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+#else
+  say("memory    RAM %u kB free (lowest %u kB, largest block %u kB)", (unsigned)(heap_caps_get_free_size(caps) / 1024),
+      (unsigned)(heap_caps_get_minimum_free_size(caps) / 1024), (unsigned)(heap_caps_get_largest_free_block(caps) / 1024));
+#endif
+  char h[16];
+  const uint32_t m = liveHistSec() / 60;
+  if (m % 60) snprintf(h, sizeof(h), "%lu min", (unsigned long)m);
+  else snprintf(h, sizeof(h), "%lu h", (unsigned long)(m / 60));
+  say("history   live history in memory: %s (lost on restart)", h);
+  String ni = netInfo();
+  ni.replace("\n", ", ");
+  say("network   %s", ni.length() ? ni.c_str() : "off");
+  say("web       http://%s.local/", S.hostname);
+  ProgSummary* sums = (ProgSummary*)malloc(sizeof(ProgSummary) * PROG_MAX);
+  if (sums) {
+    programSummaries(sums);
+    int used = 0;
+    for (int i = 0; i < PROG_MAX; ++i) used += sums[i].used ? 1 : 0;
+    const ProgSummary& sel = sums[S.selProgram < PROG_MAX ? S.selProgram : 0];
+    say("programs  %d of %d slots used, selected %d%s%s%s", used, PROG_MAX, S.selProgram + 1, sel.used ? " \"" : " (empty)",
+        sel.used ? sel.name : "", sel.used ? "\"" : "");
+    free(sums);
+  }
+}
+
+static void cmdLog(const Args& a) {
+  float v = 20;
+  if (*a.word(1) && (!number(a.word(1), v) || v < 1)) return err("log [n]: n = 1 ... %d", LOG_N);
+  int n = (int)v;
+  if (n > LOG_N) n = LOG_N;
+  LogEntry* e = (LogEntry*)malloc(sizeof(LogEntry) * n);
+  if (!e) return err("out of memory");
+  const uint32_t seq = logSeq();
+  const int got = logSince(seq > (uint32_t)n ? seq - n : 0, e, n);
+  if (!got) say("no events yet");
+  for (int i = 0; i < got; ++i) {
+    char t[20], u[16];
+    if (!isnan(e[i].runT)) {
+      fmtT(e[i].runT, u, sizeof(u));
+      snprintf(t, sizeof(t), "run %s", u);
+    } else {
+      fmtT(e[i].upSec, u, sizeof(u));
+      snprintf(t, sizeof(t), "up %s", u);
+    }
+    say("[%10s] %s", t, e[i].msg);
+  }
+  free(e);
+}
+
+// ------------------------------------------------------------ faults, autotune
+static void cmdAck(const Args& a) {
+  const int ch = chanOf(a.word(1));
+  if (ch < 0) return err("ack b|t");
+  if (!L.ch[ch].fault) return err("%s has no fault", chWord(ch));
+  sendCmd(CMD_ACK_FAULT, ch);
+  say("%s: acknowledging \"%s\"", chWord(ch), L.ch[ch].faultText);
+}
+
+static void cmdTune(const Args& a) {
+  const int ch = chanOf(a.word(1));
+  const char* what = a.word(2);
+  if (ch < 0) return err("tune b|t start temp=<C> | tune b|t stop | tune b|t accept|discard");
+  if (S.ch[ch].type != CH_LOCAL) return err("%s is not a local channel (Modbus controllers tune themselves)", chWord(ch));
+  LocalTune t;
+  localCtrlTuneGet(ch, t);
+  if (!strcmp(what, "start")) {
+    float v;
+    const float hi = S.ch[ch].loc.maxTemp - 20;
+    if (!number(a.get("temp"), v)) return err("tune %s start temp=<C> (50 ... %.0f)", a.word(1), hi);
+    if (v < 50 || v > hi) return err("temp=%s: allowed 50 ... %.0f (cut-off temperature - 20)", a.get("temp"), hi);
+    if (runActive() && L.run[ch].inProgram) return err("%s is running a program", chWord(ch));
+    if (L.ch[ch].fault) return err("%s has a fault: ack %s first", chWord(ch), a.word(1));
+    sendCmd(CMD_TUNE_START, ch, v);
+    return say("%s: autotune at %.0f \xC2\xB0" "C - the heater is switched on and off around it (tune %s stop ends it)",
+               chWord(ch), v, a.word(1));
+  }
+  if (!strcmp(what, "stop")) {
+    if (t.state != TuneState::Running) return err("no autotune is running on %s", chWord(ch));
+    sendCmd(CMD_TUNE_STOP, ch);
+    return say("%s: autotune stopped, outputs off", chWord(ch));
+  }
+  if (!strcmp(what, "accept")) {
+    if (t.state != TuneState::Done) return err("no autotune result for %s", chWord(ch));
+    {
+      Guard g;
+      gSettings.ch[ch].loc.kp = t.res.kp;
+      gSettings.ch[ch].loc.ki = t.res.ki;
+      gSettings.ch[ch].loc.kd = t.res.kd;
+    }
+    saveSettingsAndNotify();
+    localCtrlTuneClear(ch);
+    return say("%s: PID values taken over: kp %.3g ki %.3g kd %.3g", chWord(ch), t.res.kp, t.res.ki, t.res.kd);
+  }
+  if (!strcmp(what, "discard")) {
+    if (t.state != TuneState::Done && t.state != TuneState::Failed) return err("no autotune result for %s", chWord(ch));
+    localCtrlTuneClear(ch);
+    return say("%s: autotune result dropped", chWord(ch));
+  }
+  // no sub-command: the state
+  if (t.state == TuneState::Running) say("%s: autotune at %.0f \xC2\xB0" "C, cycle %d", chWord(ch), t.sp, t.cycle);
+  else if (t.state == TuneState::Done) say("%s: autotune done: kp %.3g ki %.3g kd %.3g (accept / discard)", chWord(ch), t.res.kp, t.res.ki, t.res.kd);
+  else if (t.state == TuneState::Failed) say("%s: autotune failed: %s", chWord(ch), t.msg);
+  else say("%s: no autotune (tune %s start temp=<C>)", chWord(ch), a.word(1));
+}
+
+// ------------------------------------------------------------ settings: get / set
+// One table: the keys of the settings API (channels[i]. -> b. / t.), what values they take (checked
+// before anything is changed) and how get shows them.
+enum KType : uint8_t { K_NUM, K_INT, K_BOOL, K_CHOICE, K_SET, K_STR, K_IP, K_ADDR, K_ACCENT, K_PARITY, K_HOST };
+enum KSec : uint8_t { KS_CH, KS_BUS, KS_RUN, KS_WIFI, KS_DISP };
+static const char* const KSEC_NAME[] = {"", "bus", "run", "wifi", "display"};
+struct SKey {
+  uint8_t sec, t;
+  const char* key;  // path below the section (channels: below channels[i])
+  float lo, hi;
+  const char* opts;  // K_CHOICE / K_SET / K_PARITY: '|'-separated
+};
+#define RUNAWAY(p)                                                                                      \
+  {KS_CH, K_BOOL, p "runaway.enable", 0, 0, nullptr}, {KS_CH, K_NUM, p "runaway.minOut", 0, 100, nullptr}, \
+      {KS_CH, K_INT, p "runaway.heatSec", 10, 3600, nullptr}, {KS_CH, K_NUM, p "runaway.minRise", 0.5f, 100, nullptr}, \
+      {KS_CH, K_NUM, p "runaway.holdBand", 1, 200, nullptr}, {KS_CH, K_INT, p "runaway.holdSec", 5, 3600, nullptr}
+static const SKey KEYS[] = {
+    {KS_CH, K_STR, "name", 1, 31, nullptr},
+    {KS_CH, K_CHOICE, "type", 0, 0, "off|local|modbus"},
+    {KS_CH, K_NUM, "spMin", -200, 1500, nullptr},
+    {KS_CH, K_NUM, "spMax", -200, 1500, nullptr},
+    {KS_CH, K_CHOICE, "endAction", 0, 0, "keep|sp|off"},
+    {KS_CH, K_NUM, "endSp", -200, 1500, nullptr},
+    {KS_CH, K_CHOICE, "local.sensor", 0, 0, "max31855|max6675"},
+    {KS_CH, K_NUM, "local.calOffset", -50, 50, nullptr},
+    {KS_CH, K_NUM, "local.calGain", 0.5f, 2, nullptr},
+    {KS_CH, K_NUM, "local.kp", 0, 1000, nullptr},
+    {KS_CH, K_NUM, "local.ki", 0, 100, nullptr},
+    {KS_CH, K_NUM, "local.kd", 0, 10000, nullptr},
+    {KS_CH, K_NUM, "local.windowSec", 0.2f, 10, nullptr},
+    {KS_CH, K_NUM, "local.maxOut", 0, 100, nullptr},
+    {KS_CH, K_NUM, "local.maxTemp", 50, 600, nullptr},
+    RUNAWAY("local."),
+    {KS_CH, K_INT, "modbus.addr", 1, 247, nullptr},
+    {KS_CH, K_CHOICE, "modbus.profile", 0, 0, "pma|generic"},
+    {KS_CH, K_CHOICE, "modbus.rampMode", 0, 0, "host|controller"},
+    {KS_CH, K_NUM, "modbus.minStep", 0.1f, 100, nullptr},
+    {KS_CH, K_INT, "modbus.minWriteSec", 1, 3600, nullptr},
+    {KS_CH, K_BOOL, "modbus.lockFront", 0, 0, nullptr},
+    {KS_CH, K_ADDR, "modbus.reg.pv", 0, 0, nullptr},
+    {KS_CH, K_ADDR, "modbus.reg.spEff", 0, 0, nullptr},
+    {KS_CH, K_ADDR, "modbus.reg.out", 0, 0, nullptr},
+    {KS_CH, K_ADDR, "modbus.reg.status", 0, 0, nullptr},
+    {KS_CH, K_ADDR, "modbus.reg.alarm", 0, 0, nullptr},
+    {KS_CH, K_ADDR, "modbus.reg.sp", 0, 0, nullptr},
+    {KS_CH, K_ADDR, "modbus.reg.spLo", 0, 0, nullptr},
+    {KS_CH, K_ADDR, "modbus.reg.spHi", 0, 0, nullptr},
+    {KS_CH, K_ADDR, "modbus.reg.rampRate", 0, 0, nullptr},
+    {KS_CH, K_ADDR, "modbus.reg.ctrlOff", 0, 0, nullptr},
+    {KS_CH, K_ADDR, "modbus.reg.remote", 0, 0, nullptr},
+    {KS_CH, K_NUM, "modbus.reg.scale", 1, 1000, nullptr},
+    {KS_CH, K_INT, "modbus.reg.offRaw", -32768, 32767, nullptr},
+    {KS_CH, K_SET, "modbus.reg.readFn", 0, 0, "3|4"},
+    {KS_CH, K_SET, "modbus.reg.writeFn", 0, 0, "6|16"},
+    RUNAWAY("modbus."),
+    {KS_BUS, K_SET, "baud", 0, 0, "2400|4800|9600|19200|38400"},
+    {KS_BUS, K_PARITY, "parity", 0, 0, "none|even|odd"},
+    {KS_BUS, K_SET, "stopBits", 0, 0, "1|2"},
+    {KS_BUS, K_INT, "timeoutMs", 50, 2000, nullptr},
+    {KS_BUS, K_INT, "commLossSec", 0, 3600, nullptr},
+    {KS_BUS, K_INT, "pollMs", 250, 10000, nullptr},
+    {KS_RUN, K_NUM, "bottomBand", 0.5f, 50, nullptr},
+    {KS_WIFI, K_HOST, "hostname", 1, 23, nullptr},
+    {KS_WIFI, K_BOOL, "staticIp", 0, 0, nullptr},
+    {KS_WIFI, K_IP, "ip", 0, 0, nullptr},
+    {KS_WIFI, K_IP, "subnet", 0, 0, nullptr},
+    {KS_WIFI, K_IP, "gateway", 0, 0, nullptr},
+    {KS_WIFI, K_IP, "dns1", 0, 0, nullptr},
+    {KS_WIFI, K_IP, "dns2", 0, 0, nullptr},
+    {KS_DISP, K_INT, "brightness", 10, 255, nullptr},
+    {KS_DISP, K_BOOL, "themeDark", 0, 0, nullptr},
+    {KS_DISP, K_ACCENT, "accent", 0, 0, nullptr},
+    {KS_DISP, K_BOOL, "rotate180", 0, 0, nullptr},
+    {KS_DISP, K_SET, "liveMin", 0, 0, "1|5|10|15|30|60|120|240|480|720|1440"},
+};
+static const char* const ACCENT_NAMES[] = {"blue", "pink", "violet", "orange", "mauve", "green"};
+static const uint32_t ACCENT_RGB[] = {0x2196F3, 0xD1449B, 0x6C71C4, 0xD65D0E, 0x8839EF, 0x50A14F};
+
+// i-th option of "a|b|c" into out; false past the end
+static bool opt(const char* opts, int i, char* out, size_t n) {
+  const char* p = opts;
+  for (int k = 0; k < i; ++k) {
+    p = strchr(p, '|');
+    if (!p) return false;
+    ++p;
+  }
+  const char* e = strchr(p, '|');
+  snprintf(out, n, "%.*s", (int)(e ? e - p : (long)strlen(p)), p);
+  return true;
+}
+static int optIndex(const char* opts, const char* v) {
+  char o[24];
+  for (int i = 0; opt(opts, i, o, sizeof(o)); ++i)
+    if (!strcasecmp(o, v)) return i;
+  return -1;
+}
+
+// the JSON value of key k (channel ch) in a settings document
+static JsonVariantConst kValue(JsonObjectConst root, const SKey& k, int ch) {
+  JsonVariantConst v = k.sec == KS_CH ? root["channels"][ch] : root[KSEC_NAME[k.sec]];
+  char seg[24];
+  for (const char* p = k.key; *p;) {
+    const char* e = strchr(p, '.');
+    snprintf(seg, sizeof(seg), "%.*s", (int)(e ? e - p : (long)strlen(p)), p);
+    v = v[seg];
+    if (!e) break;
+    p = e + 1;
+  }
+  return v;
+}
+
+// a value as get shows it (and set accepts it back)
+static void kFormat(JsonVariantConst v, const SKey& k, char* b, size_t n) {
+  switch (k.t) {
+    case K_NUM: snprintf(b, n, "%.6g", v.as<float>()); break;
+    case K_INT:
+    case K_SET: snprintf(b, n, "%ld", v.as<long>()); break;
+    case K_BOOL: snprintf(b, n, "%s", v.isNull() || v.as<bool>() ? "on" : "off"); break;  // themeDark: null = dark
+    case K_PARITY: opt(k.opts, (int)v.as<long>(), b, n); break;
+    case K_ADDR: {
+      const long a = v.as<long>();
+      if (a < 0) b[0] = 0;
+      else snprintf(b, n, "%ld", a);
+      break;
+    }
+    case K_ACCENT: {
+      const char* h = v.as<const char*>();
+      const uint32_t rgb = h && h[0] == '#' ? strtoul(h + 1, nullptr, 16) : 0;
+      snprintf(b, n, "%s", h ? h : "");
+      for (int i = 0; i < 6; ++i)
+        if (rgb == ACCENT_RGB[i]) snprintf(b, n, "%s", ACCENT_NAMES[i]);
+      break;
+    }
+    default: {
+      const char* t = v.as<const char*>();
+      if (t && strchr(t, ' ')) snprintf(b, n, "\"%s\"", t);
+      else snprintf(b, n, "%s", t ? t : "");
+    }
+  }
+}
+
+static void keyName(const SKey& k, int ch, char* b, size_t n) {
+  if (k.sec == KS_CH) snprintf(b, n, "%s.%s", ch ? "t" : "b", k.key);
+  else snprintf(b, n, "%s.%s", KSEC_NAME[k.sec], k.key);
+}
+
+static bool keyShown(const SKey& k) {  // Modbus keys only where the board has RS485
+  if (boardLimits().rs485) return true;
+  return !(k.sec == KS_BUS && strcmp(k.key, "pollMs")) && !(k.sec == KS_CH && !strncmp(k.key, "modbus.", 7));
+}
+
+static void cmdGet(const Args& a) {
+  const char* f = a.word(1);  // a section or any key prefix ("b", "b.local", "display")
+  JsonDocument doc;
+  settingsToJson(S, doc.to<JsonObject>(), true);
+  JsonObjectConst root = doc.as<JsonObjectConst>();
+  int shown = 0, lastGroup = -1;
+  char name[48], val[48];
+  for (int ch = 0; ch < NUM_CHANNELS + 1; ++ch) {  // the two channels, then the other sections
+    for (const SKey& k : KEYS) {
+      if ((ch < NUM_CHANNELS) != (k.sec == KS_CH) || !keyShown(k)) continue;
+      keyName(k, ch < NUM_CHANNELS ? ch : 0, name, sizeof(name));
+      const size_t fl = strlen(f);
+      if (fl && !(strncasecmp(name, f, fl) == 0 && (name[fl] == 0 || name[fl] == '.'))) continue;
+      const int group = ch < NUM_CHANNELS ? ch : 2 + k.sec;
+      if (lastGroup >= 0 && group != lastGroup) say("%s", "");
+      lastGroup = group;
+      kFormat(kValue(root, k, ch < NUM_CHANNELS ? ch : 0), k, val, sizeof(val));
+      say("%s=%s", name, val);
+      ++shown;
+    }
+  }
+  if (!shown) err("no settings \"%s\" (b, t, bus, run, wifi, display; help settings)", f);
+}
+
+static bool validHost(const char* h) {
+  const size_t n = strlen(h);
+  if (n < 1 || n > 23 || h[0] == '-' || h[n - 1] == '-') return false;
+  for (const char* p = h; *p; ++p)
+    if (!isalnum((unsigned char)*p) && *p != '-') return false;
+  return true;
+}
+
+static bool validIp(const char* t) {
+  if (!*t) return true;
+  unsigned b[4];
+  char end;
+  return sscanf(t, "%u.%u.%u.%u%c", &b[0], &b[1], &b[2], &b[3], &end) == 4 && b[0] < 256 && b[1] < 256 && b[2] < 256 && b[3] < 256;
+}
+
+static void cmdSet(const Args& a) {
+  if (!a.nk) return err("set <key>=<value> ... (help settings lists them)");
+  if (a.over) return err("at most 8 settings at once - nothing changed");
+  if (a.n > 1) return err("\"%s\" is not key=value - nothing changed", a.w[1]);
+  struct Item {
+    const SKey* k;
+    int ch;
+    char name[48];
+    char val[48];  // canonical value (JSON string / number text)
+  } it[8];
+  JsonDocument patch;
+  JsonObject root = patch.to<JsonObject>();
+  JsonArray chs;
+  bool wifi = false, host = false;
+  for (int i = 0; i < a.nk; ++i) {
+    // a.k[i] is lower case: match the table without case
+    const char* key = a.k[i];
+    const char* v = a.v[i];
+    int ch = 0;
+    const SKey* k = nullptr;
+    for (const SKey& t : KEYS) {
+      char n0[48], n1[48];
+      keyName(t, 0, n0, sizeof(n0));
+      keyName(t, 1, n1, sizeof(n1));
+      if (!strcasecmp(key, n0)) { k = &t; ch = 0; }
+      else if (t.sec == KS_CH && !strcasecmp(key, n1)) { k = &t; ch = 1; }
+      if (k) break;
+    }
+    if (!k || !keyShown(*k)) return err("unknown setting \"%s\" (help settings lists them)", key);
+    Item& m = it[i];
+    m.k = k;
+    m.ch = ch;
+    keyName(*k, ch, m.name, sizeof(m.name));
+    // the value: check and convert
+    float f;
+    char o[24];
+    // the object the key lives in (created as needed) and the key in it; assigned through the object
+    // (a JsonVariant taken from obj[key] does not create the member). Keys are char arrays: copied.
+    JsonObject dobj;
+    char dkey[24];
+    {
+      JsonObject obj;
+      if (k->sec == KS_CH) {
+        if (chs.isNull()) {
+          chs = root["channels"].to<JsonArray>();
+          chs.add(nullptr);
+          chs.add(nullptr);
+        }
+        obj = chs[ch].is<JsonObject>() ? chs[ch].as<JsonObject>() : chs[ch].to<JsonObject>();
+      } else {
+        obj = root[KSEC_NAME[k->sec]].is<JsonObject>() ? root[KSEC_NAME[k->sec]].as<JsonObject>() : root[KSEC_NAME[k->sec]].to<JsonObject>();
+      }
+      char seg[24];
+      for (const char* p = k->key;;) {
+        const char* e = strchr(p, '.');
+        snprintf(seg, sizeof(seg), "%.*s", (int)(e ? e - p : (long)strlen(p)), p);
+        if (!e) {
+          dobj = obj;
+          strlcpy(dkey, seg, sizeof(dkey));
+          break;
+        }
+        obj = obj[seg].is<JsonObject>() ? obj[seg].as<JsonObject>() : obj[seg].to<JsonObject>();
+        p = e + 1;
+      }
+    }
+    switch (k->t) {
+      case K_NUM:
+      case K_INT:
+        if (!number(v, f)) return err("%s=%s: a number is expected", m.name, v);
+        if (k->t == K_INT && f != floorf(f)) return err("%s=%s: a whole number is expected", m.name, v);
+        if (f < k->lo || f > k->hi) return err("%s=%s: allowed %g ... %g", m.name, v, k->lo, k->hi);
+        if (k->t == K_INT) dobj[dkey] = (long)f;
+        else dobj[dkey] = f;
+        break;
+      case K_SET:
+        if (!number(v, f) || optIndex(k->opts, v) < 0) return err("%s=%s: one of %s", m.name, v, k->opts);
+        dobj[dkey] = (long)f;
+        break;
+      case K_BOOL: {
+        const bool on = !strcasecmp(v, "on") || !strcasecmp(v, "true") || !strcmp(v, "1");
+        const bool off = !strcasecmp(v, "off") || !strcasecmp(v, "false") || !strcmp(v, "0");
+        if (!on && !off) return err("%s=%s: on or off", m.name, v);
+        dobj[dkey] = on;
+        break;
+      }
+      case K_CHOICE:
+      case K_PARITY: {
+        const int x = optIndex(k->opts, v);
+        if (x < 0) return err("%s=%s: one of %s", m.name, v, k->opts);
+        if (k->t == K_PARITY) dobj[dkey] = x;
+        else {
+          opt(k->opts, x, o, sizeof(o));
+          strlcpy(m.val, o, sizeof(m.val));
+          dobj[dkey] = m.val;
+        }
+        break;
+      }
+      case K_STR:
+        if (strlen(v) < k->lo || strlen(v) > k->hi) return err("%s: %g ... %g characters", m.name, k->lo, k->hi);
+        strlcpy(m.val, v, sizeof(m.val));
+        dobj[dkey] = m.val;
+        break;
+      case K_HOST:
+        if (!validHost(v)) return err("%s=%s: letters, digits and '-', 1 ... 23 characters, not starting or ending with '-'", m.name, v);
+        strlcpy(m.val, v, sizeof(m.val));
+        dobj[dkey] = m.val;
+        host = true;
+        break;
+      case K_IP:
+        if (!validIp(v)) return err("%s=%s: an address a.b.c.d (or empty)", m.name, v);
+        strlcpy(m.val, v, sizeof(m.val));
+        dobj[dkey] = m.val;
+        break;
+      case K_ADDR:
+        if (!*v) dobj[dkey] = -1;
+        else if (!number(v, f) || f != floorf(f) || f < 0 || f > 65534) return err("%s=%s: 0 ... 65534 (empty = not used)", m.name, v);
+        else dobj[dkey] = (long)f;
+        break;
+      case K_ACCENT: {
+        int x = -1;
+        for (int c = 0; c < 6; ++c)
+          if (!strcasecmp(v, ACCENT_NAMES[c])) x = c;
+        uint32_t rgb;
+        if (x >= 0) rgb = ACCENT_RGB[x];
+        else if (v[0] == '#' && strlen(v) == 7 && strspn(v + 1, "0123456789abcdefABCDEF") == 6) rgb = strtoul(v + 1, nullptr, 16);
+        else return err("%s=%s: blue, pink, violet, orange, mauve, green or #RRGGBB", m.name, v);
+        snprintf(m.val, sizeof(m.val), "#%06lX", (unsigned long)rgb);
+        dobj[dkey] = m.val;
+        break;
+      }
+    }
+    if (k->sec == KS_WIFI) wifi = true;
+  }
+  // apply to a copy, check the rules between settings, then take it over (nothing changes on an error)
+  Settings* nx = (Settings*)malloc(sizeof(Settings));
+  if (!nx) return err("out of memory");
+  char msg[200] = "";
+  bool ok;
+  {
+    Guard g;
+    *nx = gSettings;
+    ok = settingsFromJson(patch.as<JsonObjectConst>(), *nx, msg, sizeof(msg)) && settingsValidate(*nx, boardLimits(), msg, sizeof(msg));
+    if (ok) gSettings = *nx;
+  }
+  if (!ok) {
+    free(nx);
+    return err("%s - nothing changed", msg);
+  }
+  JsonDocument after;  // (may point into *nx: freed after the comparison below)
+  settingsToJson(*nx, after.to<JsonObject>(), true);
+  saveSettingsAndNotify();
+  char want[48], got[48];
+  for (int i = 0; i < a.nk; ++i) {
+    const Item& m = it[i];
+    kFormat(kValue(patch.as<JsonObjectConst>(), *m.k, m.ch), *m.k, want, sizeof(want));
+    kFormat(kValue(after.as<JsonObjectConst>(), *m.k, m.ch), *m.k, got, sizeof(got));
+    if (strcmp(want, got)) say("%s=%s (adjusted: it depends on other settings)", m.name, got);
+    else say("%s=%s", m.name, got);
+  }
+  free(nx);
+  say("saved%s%s", wifi ? ", Wi-Fi reconnects" : "", host ? " (the new host name is used after a reboot)" : "");
+  if (wifi) netApplyWifi();  // after the report: its log lines come after it
+}
+
+static void cmdFactory(const Args& a) {
+  if (strcmp(a.word(1), "reset") || strcmp(a.word(2), "yes"))
+    return err("factory reset yes - all settings to defaults, Wi-Fi included (programs kept), then a restart");
+  if (runActive()) return err("a program is running - stop it first");
+  Settings* d = (Settings*)malloc(sizeof(Settings));
+  if (!d) return err("out of memory");
+  settingsDefaults(*d, boardLimits());
+  {
+    Guard g;
+    gSettings = *d;
+  }
+  free(d);
+  saveSettingsAndNotify();
+  say("settings reset to defaults - restarting (then the access point %s is open)", netApName().c_str());
+  appRequestRestart("after a factory reset from the serial console");
+}
+
+// ------------------------------------------------------------ touch calibration (CYD)
+static bool calRunning = false;
+static int calShownStep = 0;
+
+static void cmdTouchCal(const Args& a) {
+  if (strcmp(a.word(1), "cal")) return err("touch cal");
+  if (!uiTouchCalStart()) return err("this touch screen needs no calibration (capacitive)");
+  calRunning = true;
+  calShownStep = 0;
+  say("Tap the centre of each of the 4 crosses on the touch screen, one after the other");
+  say("(with a pen or fingernail; any key here cancels)");
+}
+
+static void calPoll() {
+  if (!calRunning) return;
+  int step;
+  uint16_t r[4];
+  const int st = uiTouchCalPoll(step, r[0], r[1], r[2], r[3]);
+  if (st == 0) {
+    if (step != calShownStep && step > 1) {
+      breakLine();
+      say("cross %d / 4", step);
+    }
+    calShownStep = step;
+    return;
+  }
+  calRunning = false;
+  breakLine();
+  if (st < 0) return say("touch calibration cancelled (or the crosses were not hit) - unchanged");
+  {
+    Guard g;
+    gSettings.tsMinX = r[0];
+    gSettings.tsMaxX = r[1];
+    gSettings.tsMinY = r[2];
+    gSettings.tsMaxY = r[3];
+  }
+  touchSetCal(TouchCal{r[0], r[1], r[2], r[3]});
+  saveSettingsQuiet();
+  say("touch calibrated and saved: x %u ... %u, y %u ... %u", r[0], r[1], r[2], r[3]);
+}
+
 // ------------------------------------------------------------ dispatch
 static void dispatch(const Args& a);
 static void execute(char* text) {
@@ -702,13 +1488,27 @@ static void execute(char* text) {
 
 static void dispatch(const Args& a) {
   const char* c = a.word(0);
-  if (!strcmp(c, "help") || !strcmp(c, "?")) return help();
+  if (!strcmp(c, "help") || !strcmp(c, "?")) return help(a.word(1));
   if (!strcmp(c, "status")) return status();
   if (!strcmp(c, "manual")) return cmdManual(a);
   if (!strcmp(c, "wifi")) return cmdWifi(a);
   if (!strcmp(c, "programs")) return cmdPrograms();
   if (!strcmp(c, "program")) return cmdProgram(a);
   if (!strcmp(c, "show")) return cmdShow();
+  if (!strcmp(c, "watch")) {
+    watching = true;
+    watchAt = millis();
+    say("(one line per second, any key stops)");
+    return watchLine();
+  }
+  if (!strcmp(c, "info")) return cmdInfo();
+  if (!strcmp(c, "log")) return cmdLog(a);
+  if (!strcmp(c, "ack")) return cmdAck(a);
+  if (!strcmp(c, "tune")) return cmdTune(a);
+  if (!strcmp(c, "get")) return cmdGet(a);
+  if (!strcmp(c, "set")) return cmdSet(a);
+  if (!strcmp(c, "factory")) return cmdFactory(a);
+  if (!strcmp(c, "touch")) return cmdTouchCal(a);
   if (!strcmp(c, "reboot") || !strcmp(c, "restart")) {  // same rules as the touch / web restart
     if (runActive()) return err("a program is running - stop it first");
     say("restarting...");
@@ -742,10 +1542,25 @@ static void enterLine() {
     memset(cmd, 0, sizeof(cmd));  // may hold a pw=
   }
   memset(line, 0, sizeof(line));
-  showPrompt();
+  if (!watching) showPrompt();
 }
 
 static void input(char c) {
+  if (c == '\n' && lastCr) {  // the LF of a CR LF line end (also the one after "watch" / "touch cal")
+    lastCr = false;
+    return;
+  }
+  if (watching) {  // any key ends "watch" (and is used up)
+    watching = false;
+    lastCr = c == '\r';
+    say("(watch stopped)");
+    return showPrompt();
+  }
+  if (calRunning) {  // any key cancels the touch calibration
+    uiTouchCalCancel();
+    lastCr = c == '\r';
+    return;
+  }
   if (esc) {  // ESC [ ... letter / ~
     if (esc == 1 && c == '[') esc = 2;
     else if (esc == 1 || (c >= '@' && c <= '~')) esc = 0;
@@ -753,10 +1568,6 @@ static void input(char c) {
   }
   if (c == 0x1B) {
     esc = 1;
-    return;
-  }
-  if (c == '\n' && lastCr) {
-    lastCr = false;
     return;
   }
   lastCr = c == '\r';
@@ -857,6 +1668,7 @@ static void events() {
 // ------------------------------------------------------------ begin / loop
 static void greet() {
   raw("\r\n");
+  watching = false;
   help();
   intrShown = false;  // tell a new terminal about an interrupted run again
   showPrompt();
@@ -895,10 +1707,16 @@ void consoleLoop() {
   while (budget-- > 0 && port().available() > 0) input((char)port().read());
   scanPoll();
   connectPoll();
+  calPoll();
+  if (watching && millis() - watchAt >= 1000) {
+    watchAt += 1000;
+    if (millis() - watchAt >= 1000) watchAt = millis();  // (fell behind: no burst)
+    watchLine();
+  }
   static uint32_t evAt = 0;
   if (millis() - evAt >= 250) {
     evAt = millis();
     events();
   }
-  if (reprompt && !promptShown) showPrompt();
+  if (reprompt && !promptShown && !watching) showPrompt();
 }

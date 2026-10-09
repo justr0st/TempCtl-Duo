@@ -60,6 +60,8 @@ bool touchInit(const TouchCal&) {
 
 void touchSetRotation(bool rotate180) { rotated = rotate180; }
 
+void touchSetCal(const TouchCal&) {}  // capacitive: no calibration
+
 void touchLastRaw(int32_t* rx, int32_t* ry) {
   *rx = lastRawX;
   *ry = lastRawY;

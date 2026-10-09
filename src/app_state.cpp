@@ -1888,10 +1888,10 @@ static void controlTask(void*) {
 // A requested restart leaves a note in RTC memory (kept over a software reset, not a power loss)
 struct RestartRtc {
   uint32_t magic;
-  char from[20];
+  char from[48];
 };
 RTC_NOINIT_ATTR static RestartRtc rtcRestart;
-static constexpr uint32_t RESTART_MAGIC = 0x52535431;  // "RST1"
+static constexpr uint32_t RESTART_MAGIC = 0x52535432;  // "RST2" (from[] was 20 in "RST1")
 static volatile bool restartPending = false;
 
 void appRequestRestart(const char* from) {
@@ -1903,8 +1903,8 @@ void appRequestRestart(const char* from) {
 }
 bool appRestartPending() { return restartPending; }
 
-static const char* resetReasonText() {
-  static char b[48];
+static const char* resetReasonFind() {
+  static char b[64];
   const esp_reset_reason_t r = esp_reset_reason();
   const bool asked = rtcRestart.magic == RESTART_MAGIC;
   rtcRestart.magic = 0;
@@ -1929,6 +1929,12 @@ static const char* resetReasonText() {
     case ESP_RST_SDIO: return "SDIO";
     default: return "unknown reset";
   }
+}
+// the reason, worked out once (the RTC note is used up on the first look)
+static const char* resetReasonText() {
+  static const char* r = nullptr;
+  if (!r) r = resetReasonFind();
+  return r;
 }
 
 // A run was active when the board restarted: /duo/run.json is still there (spec 9.3.5). The channels

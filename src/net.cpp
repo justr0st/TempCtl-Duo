@@ -85,9 +85,14 @@ void netBegin() {
         ++discCount;
         LogSerial.printf("[wifi] disconnected (reason %u)\n", (unsigned)info.wifi_sta_disconnected.reason);
         break;
-      case ARDUINO_EVENT_WIFI_AP_START:
+      case ARDUINO_EVENT_WIFI_AP_START: {  // mode(AP) + softAP() start it twice: one line is enough
+        static uint32_t at = 0;
+        if (at && millis() - at < 3000) break;
+        at = millis();
+        if (!at) at = 1;
         LogSerial.printf("[wifi] access point %s started, %s\n", WiFi.softAPSSID().c_str(), WiFi.softAPIP().toString().c_str());
         break;
+      }
       case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
         LogSerial.println("[wifi] a device joined the access point");
         break;

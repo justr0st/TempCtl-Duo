@@ -197,7 +197,12 @@ bool touchRead(int32_t* x, int32_t* y) {
   *y = ty;
   return true;
 }
-void touchLastRaw(int32_t* x, int32_t* y) { *x = tx, *y = ty; }
+// raw values like an XPT2046 (x 200 ... 3850, y reversed 3700 ... 300) for the calibration test
+void touchLastRaw(int32_t* x, int32_t* y) {
+  *x = tx < 0 ? -1 : 200 + tx * 3650 / (SCREEN_W - 1);
+  *y = ty < 0 ? -1 : 3700 - ty * 3400 / (SCREEN_H - 1);
+}
+void touchSetCal(const TouchCal&) {}
 
 // ------------------------------------------------------------ scenarios
 static void run(uint32_t ms) {
@@ -502,5 +507,20 @@ int main(int argc, char** argv) {
   shot("27-chan-pid");
   lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 1100, LV_ANIM_OFF);
   shot("28-chan-runaway");
+#if defined(TOUCH_XPT2046)
+  tShow(SCR_MAIN);
+  if (uiTouchCalStart()) {  // touch calibration: the 4 crosses (24 px from the edges)
+    shot("29-touch-cal");
+    const int X[] = {24, SCREEN_W - 25, SCREEN_W - 25, 24}, Y[] = {24, 24, SCREEN_H - 25, SCREEN_H - 25};
+    for (int i = 0; i < 4; ++i) {
+      tap(X[i], Y[i]);
+      if (i == 1) shot("29b-touch-cal-3");
+    }
+    int step;
+    uint16_t a, b, c, d;
+    const int st = uiTouchCalPoll(step, a, b, c, d);
+    printf("[host] touch cal: %d -> x %u ... %u, y %u ... %u\n", st, a, b, c, d);
+  }
+#endif
   return 0;
 }

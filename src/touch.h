@@ -15,3 +15,5 @@ void touchSetRotation(bool rotate180);
 bool touchRead(int32_t* x, int32_t* y);
 // Last raw controller coordinates (for the bring-up screen / calibration)
 void touchLastRaw(int32_t* rx, int32_t* ry);
+// New calibration range, used at once (XPT2046; the FT6336 needs none)
+void touchSetCal(const TouchCal& cal);
