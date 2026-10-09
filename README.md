@@ -367,6 +367,26 @@ Rules so the firmware keeps working:
 - A new component or screen is picked up by the build automatically; to use it from the firmware, add
   a wrapper for its `<name>_create()` function to `src/ui_gen.c` / `ui_gen.h`.
 
+### Automatic screen check (setting "Screen check", `display.screenCheck`, on by default)
+
+Every second the firmware checks the screen hardware and restarts a part that hangs, without restarting
+the device; each automatic restart is an event in the log ("Screen restarted automatically: …").
+
+- **Display** (both boards): its state is read back over the display's MISO line (S3 GPIO13, CYD
+  GPIO12): power mode (sleep out, display on), MADCTL (orientation) and pixel format. A panel reset by
+  interference wakes up asleep / with its defaults (white or garbled screen) → set up again. Whether the
+  state can be read at all is decided right after the start (`[lcd] status: …` in the log); if it does
+  not read back as set up, this part of the check stays off.
+- **Touch, S3 (FT6336)**: its chip id is read; no answer twice in a row → reset pin, I2C bus freed,
+  set up again. The CYD's XPT2046 cannot be asked.
+- **Touch stuck** (both): a press that does not move at all for a minute → touch controller restarted
+  (3 tries, then left as it is until it is released).
+- At most one automatic restart per 30 s; after 3 that did not help it stops until a check passes.
+  Not covered: pixels garbled while the controller's state is fine, a resistive touch that simply stops
+  reacting, a hanging UI program (that is the loop watchdog's job: device restart).
+- Test: the serial command `screen check test` (not in the help) switches the display off and puts it
+  to sleep; within a few seconds the check should restart it (event "Screen restarted automatically").
+
 ## 4b. Serial console
 
 Commands over USB serial, **115200 baud** (S3: the port labelled **"USB"**, the log stays on "UART"; CYD:
@@ -398,6 +418,7 @@ their ranges and an example per section.
 | `touch cal` | CYD: calibrate the resistive touch screen (tap 4 crosses; any key cancels) |
 | `reboot` | restart the device (refused while a program runs, like on touch / web) |
 | `screen restart` | set only the display and the touch controller up again (S3: reset pins + I2C bus freed; CYD: software reset + SPI) and redraw; prints whether the touch controller answers |
+| `screen check` | what the automatic screen check sees now: display status read back, touch controller, number of automatic restarts |
 | Up / Down keys | the last 20 commands (lines with `pw=` and password entries are not kept) |
 
 Passwords are never shown (also not a `pw=` typed on the command line: shown as `*`). Run events
@@ -461,7 +482,7 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
     and touch controller set up again, the device keeps running), Wi-Fi (with network scan, show / hide
     password, optional fixed IP address), touch display (light / dark switch, brightness slider;
     applied at once, no Save button — the screen follows the slider while it is dragged) (accent colour:
-    a preset or "Custom" with the browser's colour picker; theme, brightness, rotation).
+    a preset or "Custom" with the browser's colour picker; theme, brightness, rotation, screen check).
   - **Tools**: Modbus tools for a Modbus channel (find the setpoint address, read registers, write one
     register); backup / restore of the settings and of all programs as JSON files.
 

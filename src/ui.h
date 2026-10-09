@@ -8,6 +8,11 @@ void uiSetBrightness(uint8_t b);
 // uiScreenRestartPoll(): number of restarts done so far (+ the result of the last one).
 void uiScreenRestart();
 uint32_t uiScreenRestartPoll(bool& lcdOk, bool& touchOk);
+// Automatic screen check (setting display.screenCheck): the state now, as lines for the console
+void uiScreenCheckInfo(void (*line)(const char*));
+// Test: switches the display off (sleep) so that the check restarts it. 1 done; -1 check off;
+// -2 display status not readable; -3 no display
+int uiScreenCheckTest();
 // Touch calibration (resistive touch, CYD): 4 crosses on the screen, tapped one after the other.
 // uiTouchCalStart() returns false where there is nothing to calibrate (S3) or no display.
 // uiTouchCalPoll(): 0 = running (step = cross 1..4), 1 = done (raw range in the four values), -1 = cancelled.

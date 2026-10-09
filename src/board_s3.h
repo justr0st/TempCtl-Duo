@@ -13,7 +13,7 @@
 #define LCD_NATIVE_H 480
 #define LCD_PIN_SCK 12
 #define LCD_PIN_MOSI 11
-#define LCD_PIN_MISO -1   // GPIO13 is wired (shared with the SD card) but not read
+#define LCD_PIN_MISO 13   // shared with the SD card (kept off the bus); read for the screen check
 #define LCD_PIN_CS 10
 #define LCD_PIN_DC 9      // LCD_RS
 #define LCD_PIN_RST 14

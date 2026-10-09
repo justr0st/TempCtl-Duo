@@ -132,13 +132,13 @@ static lv_obj_t* settingRow(lv_obj_t* parent, const char* label, const char* hin
 static void saveQuiet() { saveSettingsQuiet(); }
 
 // ------------------------------------------------------------ display
-static lv_obj_t *dBright, *dDark, *dRotate, *dPeriod, *dAcc[7], *dAccIcon;  // dAcc[6]: custom colour
+static lv_obj_t *dBright, *dDark, *dRotate, *dCheck, *dPeriod, *dAcc[7], *dAccIcon;  // dAcc[6]: custom colour
 static const uint32_t ACCENTS[6] = {0x2196F3, 0xD1449B, 0x6C71C4, 0xD65D0E, 0x8839EF, 0x50A14F};
 static const char* const ACC_NAMES[6] = {"Blue", "Pink", "Violet", "Orange", "Mauve", "Green"};
 static bool dLoading = false;
 // what the screen shows: a change from the web page is picked up (displayUpdate)
 struct DShown {
-  uint8_t bright, dark, rot;
+  uint8_t bright, dark, rot, check;
   uint32_t acc;
   uint16_t liveMin;
 };
@@ -168,6 +168,15 @@ static void onRotate(lv_event_t*) {
   {
     Guard g;
     gSettings.rotate180 = lv_obj_has_state(dRotate, LV_STATE_CHECKED) ? 1 : 0;
+  }
+  saveQuiet();
+}
+
+static void onCheck(lv_event_t*) {
+  if (dLoading) return;
+  {
+    Guard g;
+    gSettings.screenCheck = lv_obj_has_state(dCheck, LV_STATE_CHECKED) ? 1 : 0;
   }
   saveQuiet();
 }
@@ -390,6 +399,8 @@ lv_obj_t* displayCreate() {
   dRotate = tSwitch(r, onRotate);
   r = settingRow(p.body, "Live chart period", "Also on the web page");
   dPeriod = tButton(r, "", onPeriod, nullptr, CW2, BH);
+  r = settingRow(p.body, "Screen check", "Restarts a hanging display or touch by itself");
+  dCheck = tSwitch(r, onCheck);
   return p.scr;
 }
 
@@ -400,6 +411,7 @@ void displayShow() {
   lv_slider_set_value(dBright, S.brightness, LV_ANIM_OFF);
   tSetChecked(dDark, S.themeDark != 0);
   tSetChecked(dRotate, S.rotate180 != 0);
+  tSetChecked(dCheck, S.screenCheck != 0);
   const uint32_t acc = S.accentColor & 0xFFFFFF;
   bool preset = false;
   for (int i = 0; i < 6; ++i) {
@@ -427,7 +439,7 @@ void displayShow() {
   }
   fmtMinutes(cur, b, sizeof(b));
   tButtonText(dPeriod, b);
-  dShown = {S.brightness, S.themeDark, S.rotate180, S.accentColor, S.liveMin};
+  dShown = {S.brightness, S.themeDark, S.rotate180, S.screenCheck, S.accentColor, S.liveMin};
   dLoading = false;
   (void)ACC_NAMES;
 }
@@ -436,7 +448,7 @@ void displayUpdate() {
   if (lv_obj_has_state(dBright, LV_STATE_PRESSED)) return;  // being moved here
   Settings S;
   settingsCopy(S);
-  if (S.brightness != dShown.bright || S.themeDark != dShown.dark || S.rotate180 != dShown.rot ||
+  if (S.brightness != dShown.bright || S.themeDark != dShown.dark || S.rotate180 != dShown.rot || S.screenCheck != dShown.check ||
       S.accentColor != dShown.acc || S.liveMin != dShown.liveMin)
     displayShow();
 }

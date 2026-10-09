@@ -69,6 +69,12 @@ String netApName() { return String("TempCtl-Duo-1A2B"); }
 static bool scrReq = false;
 static uint32_t scrN = 0;
 void uiScreenRestart() { scrReq = true; }
+int uiScreenCheckTest() { return gSettings.screenCheck ? 1 : -1; }
+void uiScreenCheckInfo(void (*line)(const char*)) {
+  line("display  OK: power 0x9C, MADCTL 0x28 (0x28 expected), pixel format 0x55");
+  line("touch    XPT2046: cannot be asked (only a press stuck in one place is noticed)");
+  line(gSettings.screenCheck ? "check    on (every second), 0 automatic restart(s) since the start" : "check    off, 0 automatic restart(s) since the start");
+}
 uint32_t uiScreenRestartPoll(bool& l, bool& t) {
   if (scrReq) { scrReq = false; ++scrN; }  // (the UI loop's part)
   l = true; t = scrN < 2;
@@ -181,6 +187,12 @@ int main() {
   // 1.0.24: screen restart, history (Up / Down), pw= masked when the line is shown again
   type("screen restart\r");
   type("screen reset\r");
+  type("screen check\r");
+  type("screen check test\r");
+  type("set display.screenCheck=off\r");
+  type("screen check test\r");
+  type("screen check\r");
+  type("get display\r");
   type("\x1b[A");          // Up: "screen reset"
   type("\x1b[A");          // Up: "screen restart"
   type("\x1b[B");          // Down: "screen reset"

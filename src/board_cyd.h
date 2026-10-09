@@ -11,7 +11,7 @@
 #define LCD_NATIVE_H 320
 #define LCD_PIN_SCK 14
 #define LCD_PIN_MOSI 13
-#define LCD_PIN_MISO -1   // GPIO12 is wired but not read
+#define LCD_PIN_MISO 12   // read for the screen check (strapping pin: input only, as wired)
 #define LCD_PIN_CS 15
 #define LCD_PIN_DC 2
 #define LCD_PIN_RST -1

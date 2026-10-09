@@ -38,9 +38,37 @@ static void touchToNative(int32_t& x, int32_t& y) {
   }
 }
 
+// A press that does not move at all for a minute is a hanging touch controller (a finger always moves
+// a little, and nothing on the screen is held that long): noticed here, handled by the screen check.
+static constexpr uint32_t STUCK_MS = 60000;
+static constexpr int STUCK_PX = 3;
+static uint32_t stillSince = 0;
+static int32_t stillX, stillY;
+static volatile bool touchStuck = false;
+static int stuckRestarts = 0;  // restarts for a stuck press since the last release (at most 3)
+
+static void stuckCheck(bool pressed, int32_t x, int32_t y) {
+  if (!pressed) {
+    stillSince = 0;
+    stuckRestarts = 0;
+    return;
+  }
+  const uint32_t now = tTickNow();
+  if (!stillSince || abs(x - stillX) > STUCK_PX || abs(y - stillY) > STUCK_PX) {
+    stillSince = now;
+    stillX = x;
+    stillY = y;
+  } else if (now - stillSince > STUCK_MS) {
+    touchStuck = true;
+    stillSince = now;
+  }
+}
+
 static void touchCb(lv_indev_t*, lv_indev_data_t* data) {
   int32_t x, y;
-  if (touchRead(&x, &y)) {
+  const bool pressed = touchRead(&x, &y);
+  stuckCheck(pressed, pressed ? x : 0, pressed ? y : 0);
+  if (pressed) {
     touchToNative(x, y);
     data->point.x = x;
     data->point.y = y;
@@ -203,7 +231,8 @@ uint32_t uiScreenRestartPoll(bool& lcdOk, bool& touchOk) {
   return scrRestarts;
 }
 
-static void screenRestartNow() {
+// what: 1 = touch controller, 2 = display controller, 3 = both
+static void screenRestartNow(int what) {
   TouchCal cal;
   uint8_t b;
   bool rot;
@@ -213,23 +242,130 @@ static void screenRestartNow() {
     b = gSettings.brightness;
     rot = gSettings.rotate180;
   }
-  LogSerial.println("[ui] screen restart: display and touch controller");
-  scrTouchOk = touchReset(cal);
-  touchSetRotation(rot);
-  lv_indev_reset(nullptr, nullptr);  // a press that got stuck is dropped
-  scrLcdOk = lcdReinit();
-  if (scrLcdOk) {
-    lv_refr_now(disp);
-    uiSetBrightness(b);
+  LogSerial.printf("[ui] screen restart: %s\n", what == 3 ? "display and touch controller" : what == 2 ? "display controller" : "touch controller");
+  if (what & 1) {
+    scrTouchOk = touchReset(cal);
+    touchSetRotation(rot);
+    lv_indev_reset(nullptr, nullptr);  // a press that got stuck is dropped
+    stillSince = 0;
+  }
+  if (what & 2) {
+    scrLcdOk = lcdReinit();
+    if (scrLcdOk) {
+      lv_refr_now(disp);
+      uiSetBrightness(b);
+    }
   }
   ++scrRestarts;
+}
+
+// ------------------------------------------------------------ automatic screen check (every second)
+// Touch controller asked (FT6336), a press stuck in one place, display status read back (lcdCheck).
+// Two failed checks in a row restart the part concerned; at most one automatic restart per 30 s, and
+// after 3 restarts that did not help (the next check fails again) it waits until a check passes.
+static uint32_t autoRestarts = 0;
+static int touchFails = 0, lcdFails = 0, autoInARow = 0;
+static uint32_t lastAuto = 0;
+static bool gaveUp = false;
+
+static void autoRestart(int what, const char* why) {
+  if (lastAuto && millis() - lastAuto < 30000) return;
+  if (autoInARow >= 3) {
+    if (!gaveUp) logEvent("Screen check: restarting did not help (%s) - no more automatic restarts for now", why);
+    gaveUp = true;
+    return;
+  }
+  lastAuto = millis();
+  if (!lastAuto) lastAuto = 1;
+  ++autoInARow;
+  ++autoRestarts;
+  logEvent("Screen restarted automatically: %s", why);
+  screenRestartNow(what);
+  touchFails = lcdFails = 0;
+}
+
+static void screenWatch() {
+  static uint32_t at = 0;
+  if (!disp || millis() - at < 1000) return;
+  at = millis();
+  bool on;
+  {
+    Guard g;
+    on = gSettings.screenCheck != 0;
+  }
+  if (!on) {
+    touchStuck = false;
+    return;
+  }
+  char info[112];
+  const int t = touchCheck(info, sizeof(info));
+  touchFails = t == 0 ? touchFails + 1 : 0;
+  const int d = lcdCheck(info, sizeof(info));
+  lcdFails = d == 0 ? lcdFails + 1 : 0;
+  if (t != 0 && d != 0) {  // all fine (or cannot tell): automatic restarts allowed again
+    autoInARow = 0;
+    gaveUp = false;
+  }
+  if (lcdFails >= 2) {
+    char why[160];
+    snprintf(why, sizeof(why), "display lost its setup (%s)", info);
+    autoRestart(touchFails >= 2 || touchStuck ? 3 : 2, why);
+  } else if (touchFails >= 2) {
+    autoRestart(1, "touch controller does not answer");
+  } else if (touchStuck) {
+    touchStuck = false;
+    if (stuckRestarts < 3) {  // (a press the hardware keeps reporting: 3 tries, then left as it is)
+      ++stuckRestarts;
+      lastAuto = 0;
+      autoInARow = 0;
+      autoRestart(1, "touch stuck pressed in one place for a minute");
+    } else if (stuckRestarts == 3) {
+      ++stuckRestarts;
+      logEvent("Screen check: touch still stuck after 3 restarts - left as it is");
+    }
+  }
+}
+
+int uiScreenCheckTest() {
+  bool on;
+  {
+    Guard g;
+    on = gSettings.screenCheck != 0;
+  }
+  char i[112];
+  if (!on) return -1;
+  if (lcdCheck(i, sizeof(i)) < 0) return -2;  // status not readable: the check cannot see it
+  lastAuto = 0;  // (no wait for an earlier automatic restart)
+  autoInARow = 0;
+  gaveUp = false;
+  return lcdTestBreak() ? 1 : -3;
+}
+
+void uiScreenCheckInfo(void (*line)(const char*)) {
+  char b[160], i[112];
+  bool on;
+  {
+    Guard g;
+    on = gSettings.screenCheck != 0;
+  }
+  const int d = lcdCheck(i, sizeof(i));
+  snprintf(b, sizeof(b), "display  %s%s", d > 0 ? "OK: " : d == 0 ? "LOST ITS SETUP: " : "", i);
+  line(b);
+  const int t = touchCheck(i, sizeof(i));
+  snprintf(b, sizeof(b), "touch    %s", i);
+  line(b);
+  snprintf(b, sizeof(b), "check    %s, %lu automatic restart(s) since the start%s", on ? "on (every second)" : "off",
+           (unsigned long)autoRestarts, gaveUp ? " - given up for now" : "");
+  line(b);
+  (void)t;
 }
 
 void uiLoop() {
   if (scrRestartReq) {
     scrRestartReq = false;
-    screenRestartNow();
+    screenRestartNow(3);
   }
+  screenWatch();
   if (disp) lv_timer_handler();
 }
 

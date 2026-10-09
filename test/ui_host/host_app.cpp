@@ -188,6 +188,8 @@ lv_display_t* lcdInit(bool) {
 }
 void lcdSetRotation(bool) {}
 bool lcdReinit() { return true; }
+int lcdCheck(char* i, size_t n) { snprintf(i, n, "host"); return 1; }
+bool lcdTestBreak() { return true; }
 void lcdSetBrightness(uint8_t) {}
 static int tx = -1, ty = -1;
 bool touchInit(const TouchCal&) { return true; }
@@ -205,6 +207,7 @@ void touchLastRaw(int32_t* x, int32_t* y) {
 }
 void touchSetCal(const TouchCal&) {}
 bool touchReset(const TouchCal&) { return true; }
+int touchCheck(char* i, size_t n) { snprintf(i, n, "host"); return -1; }
 
 // ------------------------------------------------------------ scenarios
 static void run(uint32_t ms) {

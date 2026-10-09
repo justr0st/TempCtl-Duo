@@ -343,6 +343,7 @@ static const char* const H_DEVICE[] = {
     "  reboot                         restart (not while a program runs)",
     "  screen restart                 restart only the display and the touch controller",
     "                                 (when the screen hangs or shows rubbish)",
+    "  screen check                   what the automatic screen check sees now",
     "  help [section]                 this list, or one section: help wifi",
     "  Up / Down keys                 the last commands (without passwords)",
 };
@@ -430,6 +431,7 @@ static const char* const H_SETTINGS[] = {
     "  themeDark=on|off             dark theme on the touch screen",
     "  accent=<name>|#RRGGBB        blue, pink, violet, orange, mauve, green or any colour",
     "  rotate180=on|off             turn the screen upside down",
+    "  screenCheck=on|off           restart a hanging display / touch controller by itself",
     "  liveMin=<min>                live chart period: 1 5 10 15 30 60 120 240 480 720 1440",
     "  e.g. set display.accent=orange display.brightness=180 display.liveMin=30",
 };
@@ -1196,6 +1198,7 @@ static const SKey KEYS[] = {
     {KS_DISP, K_BOOL, "themeDark", 0, 0, nullptr},
     {KS_DISP, K_ACCENT, "accent", 0, 0, nullptr},
     {KS_DISP, K_BOOL, "rotate180", 0, 0, nullptr},
+    {KS_DISP, K_BOOL, "screenCheck", 0, 0, nullptr},
     {KS_DISP, K_SET, "liveMin", 0, 0, "1|5|10|15|30|60|120|240|480|720|1440"},
 };
 static const char* const ACCENT_NAMES[] = {"blue", "pink", "violet", "orange", "mauve", "green"};
@@ -1539,8 +1542,21 @@ static void calPoll() {
 static uint32_t scrWaitN = 0, scrWaitAt = 0;
 static bool scrWaiting = false;
 
+static void sayLine(const char* t) { say("%s", t); }
+
 static void cmdScreen(const Args& a) {
-  if (strcmp(a.word(1), "restart") && strcmp(a.word(1), "reset")) return err("screen restart");
+  if (!strcmp(a.word(1), "check") && !strcmp(a.word(2), "test")) {  // (not in the help: a test of the check)
+    switch (uiScreenCheckTest()) {
+      case 1:
+        return say("test: display switched off and put to sleep - the screen check should restart it within "
+                   "a few seconds (event \"Screen restarted automatically\")");
+      case -1: return err("the screen check is off (set display.screenCheck=on)");
+      case -2: return err("the display status cannot be read back here - the check would not notice it");
+      default: return err("no display");
+    }
+  }
+  if (!strcmp(a.word(1), "check")) return uiScreenCheckInfo(sayLine);
+  if (strcmp(a.word(1), "restart") && strcmp(a.word(1), "reset")) return err("screen restart | screen check");
   bool l, t;
   scrWaitN = uiScreenRestartPoll(l, t);
   uiScreenRestart();

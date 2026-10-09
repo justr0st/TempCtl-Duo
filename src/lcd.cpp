@@ -27,6 +27,8 @@
 #endif
 
 static spi_device_handle_t spi = nullptr;
+static spi_bus_config_t busCfg;               // (bus and device set up again after a status read)
+static spi_device_interface_config_t devCfg;
 static lv_display_t* disp = nullptr;
 static int queued = 0;  // DMA colour transfers not yet collected
 
@@ -164,7 +166,8 @@ lv_display_t* lcdInit(bool rotate180) {
   resetPulse();
 
   const size_t bufBytes = (size_t)SCREEN_W * LCD_BUF_LINES * 2;
-  spi_bus_config_t bus = {};
+  spi_bus_config_t& bus = busCfg;
+  bus = {};
   bus.mosi_io_num = LCD_PIN_MOSI;
   bus.miso_io_num = LCD_PIN_MISO;
   bus.sclk_io_num = LCD_PIN_SCK;
@@ -176,7 +179,8 @@ lv_display_t* lcdInit(bool rotate180) {
     LogSerial.printf("[lcd] spi_bus_initialize failed: %s\n", esp_err_to_name(err));
     return nullptr;
   }
-  spi_device_interface_config_t dev = {};
+  spi_device_interface_config_t& dev = devCfg;
+  dev = {};
   dev.mode = 0;
   dev.clock_speed_hz = LCD_SPI_HZ;
   dev.spics_io_num = LCD_PIN_CS;
@@ -216,6 +220,9 @@ lv_display_t* lcdInit(bool rotate180) {
   lcdSetRotation(rotate180);
   LogSerial.printf("[lcd] %dx%d, SPI %d MHz, %d x %u bytes draw buffer\n", (int)lv_display_get_horizontal_resolution(disp),
                 (int)lv_display_get_vertical_resolution(disp), LCD_SPI_HZ / 1000000, LCD_DOUBLE_BUF ? 2 : 1, (unsigned)bufBytes);
+  char info[128];
+  lcdCheck(info, sizeof(info));  // the first read decides whether the status can be read back at all
+  LogSerial.printf("[lcd] status: %s\n", info);
   return disp;
 }
 
@@ -240,5 +247,152 @@ bool lcdReinit() {
   lv_obj_invalidate(lv_display_get_screen_active(disp));
   lv_obj_invalidate(lv_display_get_layer_top(disp));
   LogSerial.println("[lcd] display controller set up again");
+  return true;
+}
+
+// ------------------------------------------------------------ status read-back (automatic screen check)
+// MIPI read commands: 0Ah power mode (bit 4 sleep out, bit 2 display on), 0Bh MADCTL, 0Ch pixel format
+// (bits 2..0 = 5: 16 bit). A panel that lost its setup (reset by interference) is asleep / off or back
+// at its default MADCTL.
+// Read in software, slowly (~100 kHz): the SPI hardware sampled each bit while the line already
+// changed to the next one (S3 / ST7796 read value | value << 1: 0x28 -> 0x78). For the read the SPI bus
+// is released (device removed, bus freed), the pins driven as GPIOs, then bus and device set up again.
+// The sampling point (0: late in the clock's high phase, 1: late in its low phase) is chosen right
+// after the init: the one that reads the known setup back. ILI9341: index register D9h = 10h first
+// (as TFT_eSPI's readcommand8).
+static int8_t readable = -1;  // -1 not tried yet, 0 the status cannot be read back, 1 it can
+static uint8_t sampleAt = 0;
+
+#if LCD_PIN_MISO >= 0
+static inline void half() { delayMicroseconds(4); }
+static void bbWrite(uint8_t v) {  // mode 0: data set while SCK is low, the panel takes it on the rising edge
+  for (int i = 7; i >= 0; --i) {
+    digitalWrite(LCD_PIN_MOSI, (v >> i) & 1);
+    half();
+    digitalWrite(LCD_PIN_SCK, HIGH);
+    half();
+    digitalWrite(LCD_PIN_SCK, LOW);
+  }
+}
+static uint8_t bbRead(uint8_t at) {
+  uint8_t v = 0;
+  for (int i = 0; i < 8; ++i) {
+    half();
+    if (at == 1) v = (v << 1) | (digitalRead(LCD_PIN_MISO) ? 1 : 0);  // end of the low phase
+    digitalWrite(LCD_PIN_SCK, HIGH);
+    half();
+    if (at == 0) v = (v << 1) | (digitalRead(LCD_PIN_MISO) ? 1 : 0);  // end of the high phase
+    digitalWrite(LCD_PIN_SCK, LOW);
+  }
+  return v;
+}
+static uint8_t bbReg(uint8_t cmd, uint8_t at) {
+#if defined(LCD_CTRL_ILI9341)
+  digitalWrite(LCD_PIN_CS, LOW);
+  digitalWrite(LCD_PIN_DC, LOW);
+  bbWrite(0xD9);
+  digitalWrite(LCD_PIN_DC, HIGH);
+  bbWrite(0x10);
+  digitalWrite(LCD_PIN_CS, HIGH);
+  half();
+#endif
+  digitalWrite(LCD_PIN_CS, LOW);
+  digitalWrite(LCD_PIN_DC, LOW);
+  bbWrite(cmd);
+  digitalWrite(LCD_PIN_DC, HIGH);
+  const uint8_t v = bbRead(at);
+  digitalWrite(LCD_PIN_CS, HIGH);
+  half();
+  return v;
+}
+#endif
+
+// at: sampling point; several sets of reads (n x 3 values) in one bus release
+static bool readRegs(uint8_t* out, const uint8_t* ats, int sets) {
+#if LCD_PIN_MISO < 0
+  return false;
+#else
+  static const uint8_t CMDS[3] = {0x0A, 0x0B, 0x0C};
+  drainQueue();
+  if (spi_bus_remove_device(spi) != ESP_OK) return false;
+  spi = nullptr;
+  spi_bus_free(SPI2_HOST);
+  pinMode(LCD_PIN_CS, OUTPUT);
+  digitalWrite(LCD_PIN_CS, HIGH);
+  pinMode(LCD_PIN_SCK, OUTPUT);
+  digitalWrite(LCD_PIN_SCK, LOW);
+  pinMode(LCD_PIN_MOSI, OUTPUT);
+  pinMode(LCD_PIN_MISO, INPUT);
+  for (int k = 0; k < sets; ++k)
+    for (int i = 0; i < 3; ++i) out[k * 3 + i] = bbReg(CMDS[i], ats[k]);
+  digitalWrite(LCD_PIN_DC, HIGH);
+  bool ok = spi_bus_initialize(SPI2_HOST, &busCfg, SPI_DMA_CH_AUTO) == ESP_OK &&
+            spi_bus_add_device(SPI2_HOST, &devCfg, &spi) == ESP_OK;
+  if (!ok) {
+    LogSerial.println("[lcd] SPI could not be set up again after the status read");  // (should not happen)
+    spi = nullptr;
+  }
+  return ok;
+#endif
+}
+
+// the three values as set up?
+static bool asSetUp(const uint8_t* v, uint8_t want) {
+  const uint8_t M = 0xE8;  // MY MX MV BGR (the others may read 0)
+  return (v[0] & 0x14) == 0x14 && (v[1] & M) == (want & M) && (v[2] & 0x07) == 5;
+}
+
+int lcdCheck(char* info, size_t n) {
+  if (!disp || !spi) {
+    snprintf(info, n, "no display");
+    return -1;
+  }
+  if (readable == 0) {
+    snprintf(info, n, "not readable, check off");
+    return -1;
+  }
+  const lv_lcd_generic_mipi_driver_t* drv = (const lv_lcd_generic_mipi_driver_t*)lv_display_get_driver_data(disp);
+  const uint8_t want = drv ? drv->madctl_reg : 0;
+  uint8_t v[6] = {0};
+  if (readable < 0) {  // right after the init: try both sampling points, keep the one that reads back the setup
+    static const uint8_t ATS[2] = {0, 1};
+    if (!readRegs(v, ATS, 2)) {
+      snprintf(info, n, "not readable (SPI), check off");
+      readable = 0;
+      return -1;
+    }
+    for (int k = 0; k < 2 && readable < 0; ++k)
+      if (asSetUp(v + k * 3, want)) {
+        readable = 1;
+        sampleAt = k;
+      }
+    if (readable < 0) {
+      readable = 0;
+      snprintf(info, n, "read %02X %02X %02X / %02X %02X %02X (MADCTL %02X): not readable, check off", v[0], v[1], v[2],
+               v[3], v[4], v[5], want);  // (both sampling points, for the diagnosis)
+      return -1;
+    }
+    snprintf(info, n, "power %02X, MADCTL %02X, format %02X: OK (sample %d), check on", v[sampleAt * 3],
+             v[sampleAt * 3 + 1], v[sampleAt * 3 + 2], sampleAt);
+    return 1;
+  }
+  const uint8_t at = sampleAt;
+  if (!readRegs(v, &at, 1)) {
+    snprintf(info, n, "SPI error");
+    return -1;
+  }
+  const bool ok = asSetUp(v, want);
+  snprintf(info, n, "power %02X, MADCTL %02X (%02X), format %02X", v[0], v[1], want, v[2]);
+  return ok ? 1 : 0;
+}
+
+// Test of the screen check (hidden serial command "screen check test"): display off + sleep in, as
+// after a reset by interference. False without a display.
+bool lcdTestBreak() {
+  if (!disp || !spi) return false;
+  static const uint8_t OFF = 0x28, SLEEP = 0x10;
+  sendCmd(disp, &OFF, 1, nullptr, 0);
+  sendCmd(disp, &SLEEP, 1, nullptr, 0);
+  LogSerial.println("[lcd] test: display switched off and put to sleep");
   return true;
 }

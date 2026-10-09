@@ -15,3 +15,10 @@ void lcdSetBrightness(uint8_t b);
 // Sets the panel controller up again (reset + init sequence) and redraws; keeps the UI as it is.
 // Call from the UI task. False without a display.
 bool lcdReinit();
+// Reads the panel's state back (power mode, MADCTL, pixel format) and compares it with the setup:
+// 1 = as set up, 0 = lost its setup, -1 = cannot tell (no display; status not readable on this
+// hardware: decided by the first read right after the init). info: the values, for the log / console.
+// Call from the UI task (or the same task as lv_timer_handler()).
+int lcdCheck(char* info, size_t n);
+// Test only: switches the display off and puts it to sleep (the screen check must notice it)
+bool lcdTestBreak();

@@ -31,6 +31,11 @@ bool touchReset(const TouchCal& c) {
   return true;
 }
 
+int touchCheck(char* info, size_t n) {
+  snprintf(info, n, "XPT2046: cannot be asked (only a press stuck in one place is noticed)");
+  return -1;
+}
+
 void touchSetRotation(bool rotate180) { rotated = rotate180; }
 
 void touchSetCal(const TouchCal& c) { cal = c; }

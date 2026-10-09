@@ -21,6 +21,8 @@
 
 static const uint8_t ADDR = 0x38;
 static bool ok = false, rotated = false, wasPressed = false;
+static bool foundOnce = false;  // found since the start (else no module: nothing to check)
+static uint8_t chipId = 0;
 static int32_t lastRawX = -1, lastRawY = -1;
 
 static bool writeReg(uint8_t reg, uint8_t v) {
@@ -54,6 +56,10 @@ bool touchInit(const TouchCal&) {
   ok = readRegs(0xA3, &id, 1);
   readRegs(0xA6, &fw, 1);
   if (ok) writeReg(0xA4, 0);  // G_MODE 0: INT low while touched
+  if (ok) {
+    foundOnce = true;
+    chipId = id;
+  }
   LogSerial.printf("[touch] FT6336 %s, chip id 0x%02X, firmware 0x%02X\n", ok ? "found" : "NOT FOUND", id, fw);
   return ok;
 }
@@ -82,6 +88,18 @@ bool touchReset(const TouchCal& cal) {
   if (clocks) LogSerial.printf("[touch] I2C bus freed (%d clocks)\n", clocks);
   wasPressed = false;
   return touchInit(cal);
+}
+
+int touchCheck(char* info, size_t n) {
+  if (!foundOnce) {
+    snprintf(info, n, "FT6336 not found at the start - no check");
+    return -1;
+  }
+  uint8_t id = 0;
+  const bool answers = readRegs(0xA3, &id, 1) && id == chipId;
+  if (answers) snprintf(info, n, "FT6336 answers, chip id 0x%02X", id);
+  else snprintf(info, n, "FT6336 does NOT answer (read 0x%02X, chip id 0x%02X)", id, chipId);
+  return answers ? 1 : 0;
 }
 
 void touchSetRotation(bool rotate180) { rotated = rotate180; }

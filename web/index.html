@@ -1456,7 +1456,8 @@ function updSystem(){
       {k:'display.accent',l:'Accent colour',t:'accent',h:'Used on the touch screen and on this page; the channel colours follow from it.'},
       {k:'display.themeDark',l:'Touch screen theme',t:'theme',def:true},
       {k:'display.brightness',l:'Touch screen brightness',t:'range',min:10,max:255,w:true,fmt:v=>Math.round(v/255*100)+' %'},
-      {k:'display.rotate180',l:'Rotate the screen by 180°',t:'sw'}]}],{title:'Display',auto:true}); }
+      {k:'display.rotate180',l:'Rotate the screen by 180°',t:'sw'},
+      {k:'display.screenCheck',l:'Restart a hanging screen by itself',t:'sw',def:true,h:'Checks the display and the touch controller every second and restarts one that hangs (logged as an event).'}]}],{title:'Display',auto:true}); }
   const host=CFG.wifi.hostname;
   const kv=[['Firmware','TempCtl Duo '+live.fw],['Board',live.board+(live.variant?' · '+live.variant:'')],['Network',live.net],['Host name',`<a href="http://${esc(host)}.local/">${esc(host)}.local</a>`],['Uptime',upTxt(live.up)]]
     .map(([k,v])=>`<dt>${k}</dt><dd>${k==='Host name'?v:esc(v)}</dd>`).join('');

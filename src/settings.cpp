@@ -104,6 +104,7 @@ void settingsDefaults(Settings& s, const BoardLimits& lim) {
   s.themePalette = 0;
   s.accentColor = 0x2196F3;  // "Blue", the first accent preset
   s.liveMin = 5;
+  s.screenCheck = 1;
   s.scanFrom = 3100 + DP1;
   s.scanTo = 3199 + DP1;
   s.selProgram = 0;
@@ -198,6 +199,7 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
   }
   clampv<uint8_t>(s.brightness, 10, 255);
   s.rotate180 = s.rotate180 ? 1 : 0;
+  s.screenCheck = s.screenCheck ? 1 : 0;
   if (s.themeDark != THEME_DARK_DEFAULT) s.themeDark = s.themeDark ? 1 : 0;
   s.accentColor &= 0xFFFFFF;
   clampv<uint16_t>(s.liveMin, 1, 1440);
@@ -346,6 +348,7 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
   snprintf(hex, sizeof(hex), "#%06X", (unsigned)(s.accentColor & 0xFFFFFF));
   d["accent"] = hex;
   d["liveMin"] = s.liveMin;
+  d["screenCheck"] = s.screenCheck != 0;
   JsonArray tc = d["touchCal"].to<JsonArray>();
   tc.add(s.tsMinX); tc.add(s.tsMaxX); tc.add(s.tsMinY); tc.add(s.tsMaxY);
   JsonObject t = o["tools"].to<JsonObject>();
@@ -509,6 +512,7 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
   if (!d.isNull()) {
     R.num(d, "display.", "brightness", s.brightness);
     R.flag(d, "display.", "rotate180", s.rotate180);
+    R.flag(d, "display.", "screenCheck", s.screenCheck);
     JsonVariantConst td = d["themeDark"];
     if (td.is<bool>()) s.themeDark = td.as<bool>() ? 1 : 0;
     else if (!td.isNull()) R.fail("display.", "themeDark", "true / false expected");

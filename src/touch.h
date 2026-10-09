@@ -20,3 +20,6 @@ void touchSetCal(const TouchCal& cal);
 // Touch controller started again (FT6336: reset pin + I2C bus freed and set up again; XPT2046: its
 // SPI bus set up again). True if the controller answers (XPT2046: always, it cannot be asked).
 bool touchReset(const TouchCal& cal);
+// Asks the controller whether it is still there: 1 answers, 0 does not, -1 cannot tell (XPT2046 has
+// nothing to ask; FT6336 not found at boot). info: chip id etc. for the console.
+int touchCheck(char* info, size_t n);
