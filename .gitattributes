@@ -1,0 +1,12 @@
+# Line endings: text files are stored with LF in the repository. On checkout each git uses its own
+# setting (Git for Windows: CRLF in the working files with core.autocrlf=true, its default), so the
+# editor may keep CRLF - commits stay free of whole-file line-ending changes.
+* text=auto
+# shell scripts must keep LF (they also run on Linux / macOS)
+*.sh text eol=lf
+# never converted
+*.png binary
+*.ico binary
+*.woff2 binary
+*.ttf binary
+*.exe binary
