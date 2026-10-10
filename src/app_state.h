@@ -4,7 +4,8 @@
 #include <Arduino.h>
 #include "config.h"
 #include "channel.h"
-#include "program.h"
+#include "duo_program.h"
+#include "run_engine.h"
 #include "program_store.h"
 #include "run_engine.h"
 #include "settings.h"
@@ -250,8 +251,6 @@ struct ScratchProg {
   explicit operator bool() const { return p != nullptr; }
   DuoProgram& operator*() { return *p; }
 };
-// The bottom channel's plan of stored program idx as TempCtl steps (old UIs)
-bool loadLegacyView(int idx, Program& out);
 // "Start without saving" (web): starts program slot idx with this content instead of the stored one
 bool startDraft(int idx, const DuoProgram& p);
 // Running copy of the program as JSON (under gLock); false if there was no run

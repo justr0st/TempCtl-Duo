@@ -1,5 +1,5 @@
 // Host-side tests. Build & run on a PC (ArduinoJson 7 headers, e.g. from .pio/libdeps/<env>/ArduinoJson/src):
-//   g++ -std=c++17 -I../src -I<ArduinoJson>/src host_test.cpp ../src/program.cpp ../src/duo_program.cpp
+//   g++ -std=c++17 -I../src -I<ArduinoJson>/src host_test.cpp ../src/duo_program.cpp
 //       ../src/run_engine.cpp ../src/settings.cpp ../src/tc_sensor.cpp ../src/pid.cpp ../src/runaway.cpp
 //       ../src/autotune.cpp -o host_test
 //   ./host_test
@@ -9,7 +9,6 @@
 #include <cstring>
 #include <string>
 #include "modbus_frame.h"
-#include "program.h"
 #include "duo_program.h"
 #include "run_engine.h"
 #include "autotune.h"
@@ -198,12 +197,6 @@ static void testPreview() {
   CHECK(near(a.v[0], 150) && near(a.v[1], 25 + 125 * 0.25f));
   a = planAt(P1, 420);  // top done at 390, keeps 150; bottom idle 390..450
   CHECK(a.idle[0] && near(a.v[1], 150));
-  // legacy view (old UIs): bottom plan as TempCtl steps
-  progExample(0, P1);
-  static Program L;
-  programLegacyView(P1, L);
-  CHECK(L.count == 2 && near(L.s[0].target, 150) && L.s[0].rampSec == 60 && L.s[0].holdSec == 60);
-  CHECK(near(L.s[1].target, 160) && L.s[1].rampSec == 0 && L.s[1].holdSec == 300 && near(programTotal(L), 420));
 }
 
 static void testSeqRun() {

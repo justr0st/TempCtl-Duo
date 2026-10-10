@@ -1,7 +1,6 @@
 // Touch UI building blocks: labels, buttons, pages and the popups (number pad, keyboard, dialog,
 // choice list, toast).
 #include "tui.h"
-#ifdef UI_V2
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -499,4 +498,3 @@ void tToast(const char* text, bool bad) {
   toastTimer = lv_timer_create(toastGone, 4500, nullptr);
   lv_timer_set_repeat_count(toastTimer, 1);
 }
-#endif

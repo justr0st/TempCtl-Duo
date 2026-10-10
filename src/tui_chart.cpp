@@ -3,7 +3,6 @@
 //   dashed, a "now" line); otherwise the selected program's plan.
 //   Live view: the live history over the chosen period (display.liveMin), 0 .. highest value.
 #include "tui.h"
-#ifdef UI_V2
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -323,4 +322,3 @@ void chartUpdate(lv_obj_t* chart, bool live) {
 
 // for the header caption
 const ChartData& chartData() { return cd; }
-#endif

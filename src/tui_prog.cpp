@@ -6,7 +6,6 @@
 // Start asks to save first. During a run the running program is shown with its run edits;
 // targets and times can be changed there (run edits, spec 9.3.4), the structure is locked.
 #include "tui.h"
-#ifdef UI_V2
 #include <esp_heap_caps.h>
 #include <math.h>
 #include <stdio.h>
@@ -1063,4 +1062,3 @@ void progEditUpdate() {
   runProgramCopy(*ed);
   edRefresh();
 }
-#endif

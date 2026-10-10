@@ -2108,19 +2108,6 @@ void saveSettingsQuiet() {
   settingsSave(copy);
 }
 
-bool loadLegacyView(int idx, Program& out) {
-  char err[96];
-  ScratchProg sp;
-  if (!sp || !programLoad(idx, *sp, err, sizeof(err))) {
-    char name[PROG_NAME_LEN];
-    snprintf(name, sizeof(name), "Program %d", idx + 1);
-    programClear(out, name);
-    return false;
-  }
-  programLegacyView(*sp, out);
-  return true;
-}
-
 bool runProgramCopy(DuoProgram& out) {
   Guard g;
   if (runIdx < 0) return false;

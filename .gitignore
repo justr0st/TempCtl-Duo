@@ -3,11 +3,6 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
-# LVGL Pro Editor workspace settings
-ui/.theia/
-# LVGL Pro Editor preview builds
-ui/preview-build/
-ui/preview-bin/
 
 # generated from web/ by tools/web_embed.py before each build
 src/web_assets.h

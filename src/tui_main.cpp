@@ -4,7 +4,6 @@
 // "Save the run's changes?", messages.
 #include "tui.h"
 #include "local_ctrl.h"
-#ifdef UI_V2
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -767,4 +766,3 @@ void mainEvents(const LiveData& live, const Settings& set) {
     if (L.runMsg[0] && !strstr(L.runMsg, "Run interrupted")) tToast(L.runMsg, bad);
   }
 }
-#endif

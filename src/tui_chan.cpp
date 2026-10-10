@@ -3,7 +3,6 @@
 // stores it (the same rules as the web page). Register addresses and the two-point calibration
 // are on the web page.
 #include "tui.h"
-#ifdef UI_V2
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -425,4 +424,3 @@ void chanUpdate() {
   at = tTickNow();
   if (tab < 2 && isLoc(E, tab)) tuneUpdate();
 }
-#endif

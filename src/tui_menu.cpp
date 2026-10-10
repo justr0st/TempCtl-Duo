@@ -1,6 +1,5 @@
 // Touch UI menu and setup pages: Menu, Event log, Display, Network, System.
 #include "tui.h"
-#ifdef UI_V2
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -752,4 +751,3 @@ void systemUpdate() {
 
 // network scan + page updates that run whatever screen is shown
 void tuiBackground() { scanPoll(); }
-#endif

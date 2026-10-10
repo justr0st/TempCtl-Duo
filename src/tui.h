@@ -1,9 +1,8 @@
-// TempCtl Duo touch UI (step 6): screens written in LVGL C code (no LVGL Pro export).
-// S3 (480x320) now; the CYD (320x240) keeps the old exported UI (ui.cpp) until its set exists.
+// TempCtl Duo touch UI: screens written in LVGL C code, one code for both boards
+// (S3 480x320, CYD 320x240 with TUI_SMALL).
 // Internal header of the tui_*.cpp files.
 #pragma once
 #include "config.h"
-#ifdef UI_V2
 #include <lvgl.h>
 #include "app_state.h"
 
@@ -139,4 +138,3 @@ void chartUpdate(lv_obj_t* chart, bool live);  // reads chartSnapshot()
 void settingsCopy(Settings& out);             // gSettings under the lock
 void liveCopy(LiveData& out);                 // gLive under the lock
 void tApplyDisplaySettings();                 // brightness, rotation, theme from gSettings
-#endif

@@ -19,6 +19,3 @@ int uiScreenCheckTest();
 bool uiTouchCalStart();
 int uiTouchCalPoll(int& step, uint16_t& minX, uint16_t& maxX, uint16_t& minY, uint16_t& maxY);
 void uiTouchCalCancel();
-// colour palettes of the touch UI (names separated by '\n', index = Settings::themePalette)
-const char* uiPaletteNames();
-int uiPaletteCount();

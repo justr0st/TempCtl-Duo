@@ -40,8 +40,7 @@ start three example programs are created (Lead-free BGA, Leaded BGA, Lead-free B
     accent colour: six presets or any colour (hue / saturation / brightness), upside down, live chart
     period), System (polling interval, "bottom reached" band, info,
     restart), Event log.
-  - **CYD (320×240)**: still the TempCtl 1.2 screens (LVGL Pro Editor project in `ui/`, section 4a) until
-    its own set of the new screens exists.
+  - **CYD (320×240)**: the same screens as a compact set (section 4a).
 - Web interface (section 5a): Status, Programs, Channels (incl. controller parameters, full register
   map, calibration, PID autotune), System (Wi-Fi, display, restart) and Tools (register read/write, a
   setpoint-address finder, backup) pages; CSV log download
@@ -295,78 +294,6 @@ AddressSanitizer); `BOARD=cyd ./build.sh` does the same for the 320×240 set (`u
 `python3 sheet.py [cyd] [names]` converts the shots and puts them on one sheet, `MEM=1 BOARD=cyd ./build.sh`
 + `./uihost_mem mem` prints the heap used per screen.
 
-### The old touch UI (LVGL Pro Editor, TempCtl 1.2 screens) — no longer built since 1.0.21
-
-The screen layout lives in `ui/` as an [LVGL Pro](https://lvgl.io/pro) project (`project.xml`,
-`globals.xml`, `translations.xml`, `components/`, `screens/`, target 320×240). Open the **`ui` folder**
-(not the repository root) in LVGL Pro Editor to see and edit the screens.
-
-How it gets into the firmware: LVGL Pro Editor **exports the UI as C code** (`*_gen.c/.h` next to each
-XML file, `tempctl_ui_gen.c/.h`, `fonts/*_data.c`). PlatformIO compiles that code as the library
-`ui/library.json` (`symlink://ui` in `platformio.ini`), and the firmware calls it through
-`src/ui_gen.c`. So after editing: **save, run "Export C code" in the editor**, then build and upload with
-PlatformIO. Commit the XML and the exported files together. The firmware runs on LVGL 9.6, which has no
-XML loader any more; the editor project targets LVGL 9.5 (`project.xml`), whose exported code compiles
-with 9.6 (the deprecation warnings it causes are switched off for the `ui` library).
-
-| File | Contents |
-|---|---|
-| `ui/globals.xml` | colours (incl. theme colours and dark/light), spacing, fonts, shared styles |
-| `ui/translations.xml` | all texts of the touch UI (labels, status texts, popup titles and messages) |
-| `ui/screens/gui.xml` | the screen: the tab view with the four pages |
-| `ui/components/main_page.xml` | Main: values, manual setpoint, program selection, run buttons |
-| `ui/components/program_page.xml` | Program editor: selection, name, step table, step buttons |
-| `ui/components/chart_page.xml` | chart, axes and legend |
-| `ui/components/setup_page.xml`, `system_panel.xml`, `controller_panel.xml`, `setting_row.xml` | Setup |
-| `ui/components/popups/num_editor.xml` | number / time entry (min or s) with keypad |
-| `ui/components/popups/text_editor.xml` | text entry with on-screen keyboard (program names, Wi-Fi) |
-| `ui/components/popups/dialog.xml` | message / question box (stop, unsaved changes, saved, Wi-Fi connecting, link test) |
-| `ui/components/popups/wifi_list.xml`, `wifi_item.xml` | Wi-Fi scan result list |
-
-Rules so the firmware keeps working:
-
-- **Keep the `name` attributes** of widgets the firmware uses (e.g. `main_pv`, `main_start`,
-  `prog_table`, `chart`). `src/ui.cpp` finds them with `lv_obj_find_by_name`, updates them and attaches
-  the touch handlers to them (`UI_EVENTS` table). A missing name is reported on the serial monitor as
-  `[ui] widget '…' not found`. The XML itself contains no `event_cb`s, so the editor preview has nothing
-  unresolved.
-- The chart must keep its three series in the order PV, SP, program.
-- Dropdown options in *Controller* are matched by position (baud rates, formats, …).
-- Fonts: the editor converts the fonts in `ui/globals.xml` (from `ui/fonts/*.ttf`) into C fonts with
-  the characters in their `range`. LVGL's symbols (dropdown arrows, warning sign) come from the built-in
-  Montserrat 12/14, chained as fallback in `src/ui_gen.c`; a font added to or removed from
-  `globals.xml` needs its line there (`UI_FONT_WITH_FALLBACK`).
-- Texts: static labels use `translation_tag="…"`, the firmware uses the same tags, all defined in
-  `ui/translations.xml`. `%1`, `%2`, `%3` in a text are filled in by the firmware (numbers, names,
-  times) and must stay in the text (not `{1}`: LVGL Pro reads a value in braces as an expression).
-  An empty text must be a space (`en=" "`, see the `blank` tag): the export writes an empty text as
-  "missing", and LVGL would show the tag instead. A second language: add its code to `languages` and
-  an attribute per text; the exported code selects the first language. Tab names and dropdown options
-  are plain text in the XML files.
-- Colours: everything is in `ui/globals.xml`. `color_*` are 14 colour roles (background, panel,
-  border, text, muted, accent, accent2, row_selected, danger, pv, sp, plan, ok, warn); they are the
-  palette *Default* in dark mode and what the editor preview shows. The other palettes (Default
-  light, Dracula, Solarized, Gruvbox, Catppuccin, One — each dark and light) are constants named
-  `<palette>_<dark|light>_<role>`. *Setup → System* (and the web *System* page) selects palette and
-  dark mode at runtime; `theme_dark` is only the mode at the first start. The export turns the
-  constants into C macros (`COLOR_ACCENT`, `DRACULA_DARK_BG`, …); `src/ui_gen.c` builds the palettes
-  from them (`PALETTE_NAMES`, `paletteLoad()`) and recolours the styles (`STYLE_COLORS`), and `src/ui.cpp`
-  (`applyTheme`) the LVGL theme (accent, accent2, dark), the chart series and the program table
-  highlight. Rules:
-  - widgets get colours only through named styles in `globals.xml`, not with `style_…_color` on the
-    widget (that colour would stay the same in every palette);
-  - a style with a colour needs a line in `STYLE_COLORS` in `src/ui_gen.c` (the firmware logs a
-    warning at start-up if a line no longer matches `globals.xml`);
-  - a new palette: 14 constants in `globals.xml` for dark and 14 for light, its name in
-    `PALETTE_NAMES` and two cases in `paletteLoad()` in `src/ui_gen.c`.
-- Everything that changes at runtime (values, table rows, chart data) is done by the firmware; the XML
-  only holds placeholder values for the preview.
-- Popups are created with their exported create function each time they open (on LVGL's top layer).
-  The dialog has three footer buttons and a close button; the firmware labels the ones it needs and
-  hides the others. Keep the `num_units` buttons in the order min, s.
-- A new component or screen is picked up by the build automatically; to use it from the firmware, add
-  a wrapper for its `<name>_create()` function to `src/ui_gen.c` / `ui_gen.h`.
-
 ### Automatic screen check (setting "Screen check", `display.screenCheck`, on by default)
 
 Every second the firmware checks the screen hardware and restarts a part that hangs, without restarting
@@ -584,7 +511,6 @@ The web UI has no login. Keep it on a trusted network.
 ```
 platformio.ini            environments s3, cyd-1xlocal-1x485, cyd-2xlocal, cyd-2xlocal-2x485; libraries
 include/lv_conf.h         LVGL 9.6 configuration
-ui/                       LVGL Pro Editor project: touch UI layout (XML) + exported C code (library.json)
 src/version.h             product name, version, host / AP name
 src/config.h              selects the board header, chart size
 src/board_s3.h, board_cyd.h  pins, display, touch and LED per board
@@ -593,7 +519,6 @@ src/touch.h, touch_ft6336.cpp, touch_xpt2046.cpp  touch drivers (own FT6336U dri
 src/status_led.*          status LED (WS2812 / single LED)
 src/duo_program.*         programs (Sequence / Timeline): model, JSON, limits, examples (pure C++, unit-tested)
 src/run_engine.*          one run engine for both types and channels, run edits, plan forecast (pure C++, unit-tested)
-src/program.*             read-only TempCtl step view of a program for the old UIs (pure C++)
 src/program_store.*       20 programs as JSON files on LittleFS
 src/modbus_frame.h        Modbus RTU framing + CRC (pure C++, unit-tested)
 src/modbus_rtu.*          half-duplex Modbus master (UART1 on the S3, UART2 on the CYD)
@@ -605,10 +530,8 @@ src/local_ctrl.*          local channels: task reading the thermocouples, PID, S
 src/tc_sensor.*, pid.*, runaway.*, autotune.*  MAX31855/MAX6675 decoding, PID, runaway check, relay autotune
                           (pure C++, unit-tested)
 src/app_state.*           control task: polling both channels, run engine, manual setpoint per channel, chart history
-src/tui*.cpp, tui.h        touch UI of both boards (480×320 S3, 320×240 CYD), section 4a
+src/tui*.cpp, tui.h, ui.h touch UI of both boards (480×320 S3, 320×240 CYD), section 4a
 src/fonts/                touch UI fonts (tools/lv_font_gen.py from tools/fonts/*.ttf)
-src/ui.*                  old touch UI (TempCtl 1.2 screens), not built since 1.0.21
-src/ui_gen.*              old touch UI: bridge to the exported UI code (not built since 1.0.21)
 src/web.*                 HTTP server, JSON API
 web/, tools/web_embed.py  web page + fonts → src/web_assets.h (generated before each build)
 tools/build_site.py       the same page as static files (device URL layout), for the launcher / GitHub Pages
@@ -616,7 +539,7 @@ tools/launcher/           local app: Go launcher (build.sh → dist/tempctl-duo-
 test/ui_host/             touch UI preview on a PC (screenshots, random-tap test)
 test/console_host/        serial console on a PC (scripted commands -> output)
 src/console.*             serial console (section 4b), LogSerial (log lines that don't break typed input)
-test/host_test.cpp        g++ -std=c++17 -Isrc -I<ArduinoJson>/src test/host_test.cpp src/program.cpp src/duo_program.cpp src/run_engine.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp && ./a.out
+test/host_test.cpp        g++ -std=c++17 -Isrc -I<ArduinoJson>/src test/host_test.cpp src/duo_program.cpp src/run_engine.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp && ./a.out
 ```
 
 ## 7. Safety
@@ -625,8 +548,6 @@ A software programmer must never be the only protection against overheating. Fit
 over-temperature limiter (PMA recommends the TB 40-1 in the KS 4x-1 manual) and use the controller's own
 limit alarms and `SP.Hi` setpoint limit. Set *Highest allowed setpoint* on *Controller* to match `SP.Hi`.
 
-Status: the program engine and Modbus framing pass host unit tests. Firmware 1.2 compiles and links
-against Arduino-ESP32 2.0.17 (the `espressif32@6.9.0` platform) with LVGL 9.6 and the UI exported by
-LVGL Pro, and the touch screens were checked in an LVGL desktop simulator. The LVGL 9.4 / runtime-XML
-version ran on a CYD; the 9.6 version has not been tested on hardware yet. Expect to adjust small details
-(display variant, touch calibration, CN1 pin order) on first bring-up.
+Status: the program engine, settings, PID / autotune, runaway check and Modbus framing pass host unit
+tests; the firmware (Arduino-ESP32 2.0.17, `espressif32@6.9.0`, LVGL 9.6) runs on the S3 and the CYD
+with local channels. The Modbus channel is beta: it has not been tested with a controller yet.

@@ -67,7 +67,5 @@
 // ---- Screen used by the UI ----
 #define SCREEN_W 480
 #define SCREEN_H 320
-// The new touch UI (tui_*.cpp, step 6); the old exported 320x240 UI (ui.cpp) is not built
-#define UI_V2 1
 
 #define BOARD_HAS_LARGE_RAM 1  // 8 MB PSRAM

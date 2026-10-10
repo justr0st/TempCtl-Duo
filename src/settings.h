@@ -109,7 +109,7 @@ struct Settings {
   uint8_t rotate180;
   uint16_t tsMinX, tsMaxX, tsMinY, tsMaxY;  // XPT2046 calibration (CYD)
   uint8_t themeDark;     // 1 dark, 0 light, THEME_DARK_DEFAULT = theme_dark in ui/globals.xml
-  uint8_t themePalette;  // TempCtl 1.2 palettes (replaced by accentColor with the new UI, step 6)
+  uint8_t themePalette;  // unused (TempCtl 1.2 palettes, replaced by accentColor); kept in the JSON
   uint32_t accentColor;  // RGB 0xRRGGBB
   uint16_t liveMin;      // live chart period, minutes (at most what the live history holds)
   uint8_t screenCheck;   // 1: watch the display / touch controller, restart one that hangs (default on)

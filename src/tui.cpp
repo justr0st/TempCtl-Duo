@@ -1,9 +1,8 @@
-// Touch UI (step 6, S3): display + touch glue, screen switching, the periodic update.
+// Touch UI of both boards: display + touch glue, screen switching, the periodic update.
 // Screens: tui_main.cpp (main), tui_menu.cpp (menu, log, display, network, system), tui_chart.cpp,
 // building blocks and popups: tui_widgets.cpp, colours and styles: tui_theme.cpp.
 #include "tui.h"
 #include "console.h"
-#ifdef UI_V2
 #include "lcd.h"
 #include "touch.h"
 #include "ui.h"
@@ -17,7 +16,7 @@ static uint32_t appliedAccent = 0xFFFFFFFF;
 static int appliedDark = -1;
 
 // The touch drivers report screen coordinates; LVGL rotates pointer input by the display rotation
-// itself, so it gets the point in the panel's native orientation (see ui.cpp for the CYD).
+// itself, so it gets the point in the panel's native orientation.
 static void touchToNative(int32_t& x, int32_t& y) {
   const int32_t sx = x, sy = y;
   switch (disp ? lv_display_get_rotation(disp) : LV_DISPLAY_ROTATION_0) {
@@ -505,7 +504,3 @@ int uiTouchCalPoll(int& step, uint16_t&, uint16_t&, uint16_t&, uint16_t&) {
 void uiTouchCalCancel() {}
 #endif
 
-// old palette API (ui.h): the palettes are gone in TempCtl Duo
-const char* uiPaletteNames() { return "Default"; }
-int uiPaletteCount() { return 1; }
-#endif

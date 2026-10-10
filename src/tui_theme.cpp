@@ -1,6 +1,5 @@
 // Touch UI theme: the web page's palette (spec 6) and the named styles.
 #include "tui.h"
-#ifdef UI_V2
 #include <math.h>
 
 TStyles S_;
@@ -221,4 +220,3 @@ void themeApply(uint32_t accentRgb, bool dark) {
   ++gen_;
   lv_obj_report_style_change(nullptr);  // every object that uses the named styles
 }
-#endif
