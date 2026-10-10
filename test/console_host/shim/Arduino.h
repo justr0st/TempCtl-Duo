@@ -35,6 +35,7 @@ class Print {
   virtual ~Print() {}
   virtual size_t write(uint8_t c) = 0;
   virtual size_t write(const uint8_t* b, size_t n) { for (size_t i = 0; i < n; ++i) write(b[i]); return n; }
+  virtual int availableForWrite() { return 0; }
   size_t print(const char* s) { return write((const uint8_t*)s, strlen(s)); }
   size_t println(const char* s = "") { return print(s) + print("\r\n"); }
   size_t printf(const char* f, ...) __attribute__((format(printf, 2, 3))) {
@@ -55,6 +56,7 @@ struct SerialT : Stream {
   size_t write(uint8_t c) override { fputc(c, stdout); return 1; }
   size_t write(const uint8_t* b, size_t n) override { fwrite(b, 1, n, stdout); return n; }
   void begin(int) {}
+  int availableForWrite() override { return 300; }  // (the port takes 300 bytes per loop pass)
 };
 extern SerialT Serial;
 class HardwareSerial {};
@@ -69,3 +71,5 @@ typedef void* TaskHandle_t;
 #define pdTRUE 1
 inline int xSemaphoreTake(SemaphoreHandle_t, uint32_t) { return 1; }
 inline int xSemaphoreGive(SemaphoreHandle_t) { return 1; }
+inline SemaphoreHandle_t xSemaphoreCreateMutex() { return (SemaphoreHandle_t)1; }
+inline void feedLoopWDT() {}

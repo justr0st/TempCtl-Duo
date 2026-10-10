@@ -35,6 +35,12 @@ static void memLog(const char* where) {
 
 void setup() {
   localCtrlEarlyInit();  // SSR outputs low (off) before anything else
+#if !(defined(BOARD_S3) && ARDUINO_USB_MODE == 0)
+  // CYD: the console shares this port; the api mode (Web Serial page) sends whole programs in one line
+  // and gets answers of several kB: larger buffers, so neither side waits on the 115200 baud line
+  Serial.setRxBufferSize(4096);
+  Serial.setTxBufferSize(2048);
+#endif
   Serial.begin(115200);
   LogSerial.printf("\n[boot] " PRODUCT_NAME " %s (%s%s%s), free heap %u bytes", FW_VERSION, BOARD_NAME,
                 BOARD_VARIANT[0] ? ", " : "", BOARD_VARIANT, ESP.getFreeHeap());

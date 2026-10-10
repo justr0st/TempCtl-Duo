@@ -66,6 +66,22 @@ int uiTouchCalPoll(int& step, uint16_t& a, uint16_t& b, uint16_t& c, uint16_t& d
 }
 void uiTouchCalCancel() { calState = -1; }
 String netApName() { return String("TempCtl-Duo-1A2B"); }
+// web API stand-in for the api mode: echoes the request, "/big" answers 20 kB in pieces
+void webApiRequest(const char* line) {
+  if (strstr(line, "/big")) {
+    for (int i = 0; i < 20; ++i) {
+      char b[1100];
+      memset(b, 'x', 1000);
+      int k = snprintf(b + 1000, 100, "%d\n", i);
+      apiOut(b, 1000 + k);
+      apiFlush(4096);
+    }
+    return;
+  }
+  char b[300];
+  int k = snprintf(b, sizeof(b), "{\"echo\":%s}\n", line);
+  apiOut(b, k);
+}
 static bool scrReq = false;
 static uint32_t scrN = 0;
 void uiScreenRestart() { scrReq = true; }
@@ -209,6 +225,19 @@ int main() {
   run(1100);
   type("\x1b[A");          // an arrow key stops watch, its "[A" is not typed
   type("status\r");
+  // 1.0.26: api mode (JSON lines)
+  type("api on\r\n");
+  Serial.feed("{\"id\":1,\"m\":\"GET\",\"p\":\"/api/live\"}\n"); run(300);
+  logEvent("a log line in api mode, with \"quotes\"");
+  run(300);
+  Serial.feed("hello\n"); run(300);
+  Serial.feed("{\"id\":2,\"p\":\"/big\"}\n"); run(300);
+  printf("\n[test] (20 kB answer above)\n");
+  Serial.feed("api off\n"); run(300);
+  type("status\r");
+  type("api on\r");
+  run(16000);  // no request for 15 s: back to the console
+  type("help api\r");
   type("wifi forget\r");
   type("factory reset\r");
   type("factory reset yes\r");

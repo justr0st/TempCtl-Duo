@@ -19,6 +19,116 @@
 
 static WebServer server(80);
 
+// ------------------------------------------------------------ request source: HTTP or the serial api mode
+// The handlers read their parameters with reqHas() / reqArg() / parseBody() and answer with sendBody()
+// / sendStream(): from and to the HTTP client, or (while webApiRequest() runs a request from the
+// serial api mode, spec 7b) from the request line and as JSON lines (console.cpp queues them).
+struct SerialReq {
+  uint32_t id;
+  const char* path;
+  const char* query;  // "a=1&b=2" (or "")
+  String body;        // the request's "b" as JSON text
+  bool answered;
+};
+static SerialReq* sreq = nullptr;
+
+static int hexVal(char c) { return c >= '0' && c <= '9' ? c - '0' : (c | 32) >= 'a' && (c | 32) <= 'f' ? (c | 32) - 'a' + 10 : -1; }
+
+// query parameter of the serial request (URL-decoded)
+static bool queryArg(const char* key, String* out) {
+  const size_t kl = strlen(key);
+  for (const char* p = sreq->query; *p;) {
+    const char* e = strchr(p, '&');
+    const size_t n = e ? (size_t)(e - p) : strlen(p);
+    if (n > kl && !strncmp(p, key, kl) && p[kl] == '=') {
+      if (out) {
+        *out = "";
+        for (size_t i = kl + 1; i < n; ++i) {
+          if (p[i] == '+') *out += ' ';
+          else if (p[i] == '%' && i + 2 < n + 1 && hexVal(p[i + 1]) >= 0 && hexVal(p[i + 2]) >= 0) {
+            *out += (char)(hexVal(p[i + 1]) * 16 + hexVal(p[i + 2]));
+            i += 2;
+          } else *out += p[i];
+        }
+      }
+      return true;
+    }
+    if (n == kl && !strncmp(p, key, kl)) {  // "key" without a value
+      if (out) *out = "";
+      return true;
+    }
+    p += n + (e ? 1 : 0);
+  }
+  return false;
+}
+static bool reqHas(const char* k) { return sreq ? queryArg(k, nullptr) : server.hasArg(k); }
+static String reqArg(const char* k) {
+  if (!sreq) return server.arg(k);
+  String v;
+  queryArg(k, &v);
+  return v;
+}
+static String reqUri() { return sreq ? String(sreq->path) : server.uri(); }
+
+// JSON string content (no quotes), appended
+static void jsonEscape(String& o, const char* s, size_t n) {
+  for (size_t i = 0; i < n; ++i) {
+    const uint8_t c = (uint8_t)s[i];
+    if (c == '"' || c == '\\') {
+      o += '\\';
+      o += (char)c;
+    } else if (c == '\n') {
+      o += "\\n";
+    } else if (c == '\r') {
+      o += "\\r";
+    } else if (c == '\t') {
+      o += "\\t";
+    } else if (c < 0x20) {
+      char u[8];
+      snprintf(u, sizeof(u), "\\u%04x", c);
+      o += u;
+    } else {
+      o += (char)c;
+    }
+  }
+}
+
+// serial answer: JSON as {"id":..,"code":..,"body":...}; other types as chunks + {"id":..,"end":true}
+static void serialChunk(int code, const char* type, const char* data, size_t n) {
+  String line;
+  line.reserve(n + n / 8 + 96);
+  line = "{\"id\":";
+  line += sreq->id;
+  line += ",\"code\":";
+  line += code;
+  line += ",\"type\":\"";
+  line += type;
+  line += "\",\"chunk\":\"";
+  jsonEscape(line, data, n);
+  line += "\"}\n";
+  apiOut(line.c_str(), line.length());
+  apiFlush(8192);  // long text: sent piece by piece
+}
+static void serialEnd() {
+  char b[48];
+  const int k = snprintf(b, sizeof(b), "{\"id\":%lu,\"end\":true}\n", (unsigned long)sreq->id);
+  apiOut(b, k);
+}
+static void serialAnswer(int code, const char* type, const uint8_t* data, size_t len) {
+  sreq->answered = true;
+  if (!strncmp(type, "application/json", 16)) {
+    char h[64];
+    const int k = snprintf(h, sizeof(h), "{\"id\":%lu,\"code\":%d,\"body\":", (unsigned long)sreq->id, code);
+    apiOut(h, k);
+    if (len) apiOut((const char*)data, len);
+    else apiOut("null", 4);
+    apiOut("}\n", 2);
+    return;
+  }
+  for (size_t off = 0; off < len; off += 1024) serialChunk(code, type, (const char*)data + off, len - off < 1024 ? len - off : 1024);
+  serialEnd();
+}
+
 // ------------------------------------------------------------ helpers
 // Every response (status line, headers and body) is written straight on the socket, non-blocking,
 // in TCP-sized pieces. WiFiClient::write retries a stuck connection for 10 s per call and blocks the
@@ -45,6 +155,10 @@ static bool sendRaw(int fd, const uint8_t* data, size_t len, size_t& sent, uint3
 }
 
 static void sendBody(int code, const char* type, const uint8_t* data, size_t len, const char* what) {
+  if (sreq) {
+    extraHeaders = "";
+    return serialAnswer(code, type, data, len);
+  }
   WiFiClient c = server.client();
   const int fd = c.fd();
   String head;
@@ -78,6 +192,13 @@ static void sendBody(int code, const char* type, const uint8_t* data, size_t len
 // (returns 0 when done) into a buffer on the stack
 template <typename F>
 static void sendStream(const char* type, const char* what, F next) {
+  if (sreq) {
+    extraHeaders = "";
+    sreq->answered = true;
+    char buf[1024];
+    for (size_t n; (n = next(buf, sizeof(buf))) > 0;) serialChunk(200, type, buf, n);
+    return serialEnd();
+  }
   WiFiClient c = server.client();
   const int fd = c.fd();
   String head = "HTTP/1.1 200 OK\r\nContent-Type: ";
@@ -101,7 +222,7 @@ static void sendStream(const char* type, const char* what, F next) {
 }
 
 static void sendText(int code, const char* type, const String& body) {
-  sendBody(code, type, (const uint8_t*)body.c_str(), body.length(), server.uri().c_str());
+  sendBody(code, type, (const uint8_t*)body.c_str(), body.length(), reqUri().c_str());
 }
 
 static void sendJson(JsonDocument& d, int code = 200) {
@@ -118,6 +239,7 @@ static void sendError(const char* msg, int code = 400) {
 }
 
 static bool parseBody(JsonDocument& d) {
+  if (sreq) return sreq->body.length() && deserializeJson(d, sreq->body) == DeserializationError::Ok;
   if (!server.hasArg("plain")) return false;
   return deserializeJson(d, server.arg("plain")) == DeserializationError::Ok;
 }
@@ -283,8 +405,8 @@ static void handleStatus() {
 // The whole live history (one row per slot), streamed. ?pv=3&sp=3: channels (bit 0 bottom, bit 1
 // top) whose PV (+ lowest, highest) / setpoint columns are included (default all)
 static void handleHistCsv() {
-  const uint8_t pvMask = server.hasArg("pv") ? (uint8_t)(server.arg("pv").toInt() & 3) : 3;
-  const uint8_t spMask = server.hasArg("sp") ? (uint8_t)(server.arg("sp").toInt() & 3) : 3;
+  const uint8_t pvMask = reqHas("pv") ? (uint8_t)(reqArg("pv").toInt() & 3) : 3;
+  const uint8_t spMask = reqHas("sp") ? (uint8_t)(reqArg("sp").toInt() & 3) : 3;
   extraHeaders = "Content-Disposition: attachment; filename=tempctl-duo-history.csv\r\nCache-Control: no-store\r\n";
   uint32_t from = 0;
   bool head = true;
@@ -381,7 +503,7 @@ static void handleGetPrograms() {
 
 static int progIndexArg(JsonVariantConst v) {
   if (!v.isNull()) return v.as<int>();
-  if (server.hasArg("i")) return server.arg("i").toInt();
+  if (reqHas("i")) return reqArg("i").toInt();
   Guard g;
   return gSettings.selProgram;
 }
@@ -676,7 +798,7 @@ static void handleWifi() {
 static void handleWifiScan() {
   static String last;     // names of the last scan, '\n'-separated
   static bool have = false;
-  if (server.hasArg("start") && !netScanBusy()) {
+  if (reqHas("start") && !netScanBusy()) {
     netScanStart();
     have = false;
   }
@@ -751,7 +873,7 @@ static void handleScreenRestart() {
 // ------------------------------------------------------------ bus tools
 // Optional "ch" (query or JSON body): channel whose controller is used, 0 = bottom (default), 1 = top
 static uint8_t argCh() {
-  const long c = server.hasArg("ch") ? server.arg("ch").toInt() : 0;
+  const long c = reqHas("ch") ? reqArg("ch").toInt() : 0;
   return (c >= 0 && c < NUM_CHANNELS) ? (uint8_t)c : 0;
 }
 static uint8_t bodyCh(const JsonDocument& b) {
@@ -763,9 +885,9 @@ static void handleMbRead() {
   BusRequest r{};
   r.ch = argCh();
   r.op = BUS_READ;
-  r.addr = server.arg("addr").toInt();
-  r.count = server.hasArg("n") ? server.arg("n").toInt() : 1;
-  r.fn = server.hasArg("fn") ? server.arg("fn").toInt() : 0;
+  r.addr = reqArg("addr").toInt();
+  r.count = reqHas("n") ? reqArg("n").toInt() : 1;
+  r.fn = reqHas("fn") ? reqArg("fn").toInt() : 0;
   if (r.fn != 0 && r.fn != 3 && r.fn != 4) r.fn = 0;
   const bool ok = busRequest(r);
   JsonDocument d;
@@ -1014,7 +1136,7 @@ static void handleLive() {
 // ?v=run: current / last run (history, lanes, events, forecast); ?v=live: rolling window
 static void handleChart() {
   String out;
-  chartJson(out, server.arg("v") != "live");
+  chartJson(out, reqArg("v") != "live");
   extraHeaders = "Cache-Control: no-store\r\n";
   sendText(200, "application/json", out);
 }
@@ -1023,7 +1145,7 @@ static void handleChart() {
 static void handleLog() {
   LogEntry* e = (LogEntry*)malloc(sizeof(LogEntry) * LOG_N);  // 5 kB, only while answering
   if (!e) return sendError("Out of memory", 500);
-  const uint32_t since = server.hasArg("since") ? (uint32_t)server.arg("since").toInt() : 0;
+  const uint32_t since = reqHas("since") ? (uint32_t)reqArg("since").toInt() : 0;
   const int n = logSince(since, e, LOG_N);
   JsonDocument d;
   d["seq"] = logSeq();
@@ -1042,6 +1164,44 @@ static void handleLog() {
 }
 
 // ------------------------------------------------------------ setup
+// the web API: the same handlers for HTTP and for the serial api mode
+struct Route {
+  const char* path;
+  HTTPMethod method;
+  void (*fn)();
+};
+static const Route ROUTES[] = {
+    {"/api/live", HTTP_GET, handleLive},
+    {"/api/chart", HTTP_GET, handleChart},
+    {"/api/log", HTTP_GET, handleLog},
+    {"/api/status", HTTP_GET, handleStatus},
+    {"/api/log.csv", HTTP_GET, handleCsv},
+    {"/api/history.csv", HTTP_GET, handleHistCsv},
+    {"/api/programs", HTTP_GET, handleGetPrograms},
+    {"/api/program", HTTP_GET, handleGetProgram},
+    {"/api/program", HTTP_POST, handlePostProgram},
+    {"/api/select", HTTP_POST, handleSelect},
+    {"/api/run", HTTP_GET, handleGetRun},
+    {"/api/run", HTTP_POST, handlePostRun},
+    {"/api/manual", HTTP_POST, handleManual},
+    {"/api/cmd", HTTP_POST, handleCmd},
+    {"/api/ack", HTTP_POST, handleAck},
+    {"/api/autotune", HTTP_POST, handleAutotune},
+    {"/api/wifi", HTTP_POST, handleWifi},
+    {"/api/wifiscan", HTTP_GET, handleWifiScan},
+    {"/api/restart", HTTP_POST, handleRestart},
+    {"/api/screen/restart", HTTP_POST, handleScreenRestart},
+    {"/api/brightness", HTTP_POST, handleBrightness},
+    {"/api/config", HTTP_GET, handleGetConfig},
+    {"/api/config", HTTP_POST, handlePostConfig},
+    {"/api/mb/read", HTTP_GET, handleMbRead},
+    {"/api/mb/write", HTTP_POST, handleMbWrite},
+    {"/api/mb/findsp", HTTP_POST, handleFindSp},
+    {"/api/params", HTTP_GET, handleGetParams},
+    {"/api/params", HTTP_POST, handlePostParam},
+    {"/api/action", HTTP_POST, handleAction},
+};
+
 void webBegin() {
 #ifdef BOARD_HAS_PSRAM
   server.on("/", HTTP_GET, [] { sendAsset(WEB_ASSETS[0]); });
@@ -1060,35 +1220,7 @@ void webBegin() {
 #endif
     server.on(a->path, HTTP_GET, [a] { sendAsset(*a); });
   }
-  server.on("/api/live", HTTP_GET, handleLive);
-  server.on("/api/chart", HTTP_GET, handleChart);
-  server.on("/api/log", HTTP_GET, handleLog);
-  server.on("/api/status", HTTP_GET, handleStatus);
-  server.on("/api/log.csv", HTTP_GET, handleCsv);
-  server.on("/api/history.csv", HTTP_GET, handleHistCsv);
-  server.on("/api/programs", HTTP_GET, handleGetPrograms);
-  server.on("/api/program", HTTP_GET, handleGetProgram);
-  server.on("/api/program", HTTP_POST, handlePostProgram);
-  server.on("/api/select", HTTP_POST, handleSelect);
-  server.on("/api/run", HTTP_GET, handleGetRun);
-  server.on("/api/run", HTTP_POST, handlePostRun);
-  server.on("/api/manual", HTTP_POST, handleManual);
-  server.on("/api/cmd", HTTP_POST, handleCmd);
-  server.on("/api/ack", HTTP_POST, handleAck);
-  server.on("/api/autotune", HTTP_POST, handleAutotune);
-  server.on("/api/wifi", HTTP_POST, handleWifi);
-  server.on("/api/wifiscan", HTTP_GET, handleWifiScan);
-  server.on("/api/restart", HTTP_POST, handleRestart);
-  server.on("/api/screen/restart", HTTP_POST, handleScreenRestart);
-  server.on("/api/brightness", HTTP_POST, handleBrightness);
-  server.on("/api/config", HTTP_GET, handleGetConfig);
-  server.on("/api/config", HTTP_POST, handlePostConfig);
-  server.on("/api/mb/read", HTTP_GET, handleMbRead);
-  server.on("/api/mb/write", HTTP_POST, handleMbWrite);
-  server.on("/api/mb/findsp", HTTP_POST, handleFindSp);
-  server.on("/api/params", HTTP_GET, handleGetParams);
-  server.on("/api/params", HTTP_POST, handlePostParam);
-  server.on("/api/action", HTTP_POST, handleAction);
+  for (const Route& r : ROUTES) server.on(r.path, r.method, r.fn);
   server.onNotFound([] { sendBody(404, "text/plain", (const uint8_t*)"Not found", 9, "404"); });
   server.begin();
 }
@@ -1099,4 +1231,46 @@ void webLoop() {
     restartAt = 0;
     appRequestRestart("from the web page");
   }
+}
+
+// A request line of the serial api mode: {"id":7,"m":"GET","p":"/api/live?x=1","b":{...}}
+// ("m": GET (default) / POST / PING). Answered through the same handlers as HTTP (see SerialReq).
+void webApiRequest(const char* line) {
+  uint32_t id = 0;
+  char path[48], query[192];
+  String body;
+  bool post = false, ping = false;
+  {
+    JsonDocument q;
+    if (deserializeJson(q, line) != DeserializationError::Ok) {
+      static const char E[] = "{\"t\":\"error\",\"err\":\"bad JSON\"}\n";
+      return apiOut(E, sizeof(E) - 1);
+    }
+    id = q["id"] | 0u;
+    const char* m = q["m"] | "GET";
+    post = !strcasecmp(m, "POST");
+    ping = !strcasecmp(m, "PING");
+    const char* p = q["p"] | "";
+    const char* qm = strchr(p, '?');
+    snprintf(path, sizeof(path), "%.*s", (int)(qm ? qm - p : (long)strlen(p)), p);
+    strlcpy(query, qm ? qm + 1 : "", sizeof(query));
+    if (!q["b"].isNull()) serializeJson(q["b"], body);
+  }  // (the request document is freed before the handler runs)
+  SerialReq r{id, path, query, String(), false};
+  r.body = body;
+  body = String();
+  sreq = &r;
+  if (ping) {
+    JsonDocument d;
+    d["ok"] = true;
+    sendJson(d);
+  } else {
+    const Route* hit = nullptr;
+    for (const Route& x : ROUTES)
+      if (!strcmp(x.path, path) && x.method == (post ? HTTP_POST : HTTP_GET)) hit = &x;
+    if (hit) hit->fn();
+    else sendError("Not found", 404);
+    if (!r.answered) sendError("No answer", 500);
+  }
+  sreq = nullptr;
 }

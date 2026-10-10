@@ -15,3 +15,10 @@ extern LogPort LogSerial;
 
 void consoleBegin();  // after the network and the web server
 void consoleLoop();   // loop task: reads commands, prints results and run events (never blocks)
+
+// api mode (spec 7b), for the web API's serial answers (web.cpp): queue output lines; apiFlush() writes
+// until at most `keep` bytes are queued (waits for the port, feeds the loop watchdog; for long
+// answers sent piece by piece)
+void apiOut(const char* s, size_t n);
+void apiFlush(size_t keep);
+size_t apiQueued();

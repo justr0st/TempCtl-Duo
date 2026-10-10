@@ -17,6 +17,7 @@
 #include "settings_store.h"
 #include "touch.h"
 #include "ui.h"
+#include "web.h"
 
 #if defined(BOARD_S3) && ARDUINO_USB_MODE == 0
 #include "USB.h"
@@ -41,6 +42,7 @@ static int len = 0;
 static volatile bool promptShown = false;  // "> " + the typed text is on the screen
 static volatile bool reprompt = false;     // a log line removed it: show it again
 static bool lastCr = false;                // CR LF counts as one line end
+static bool apiMode = false;               // machine mode for the Web Serial page (api on, spec 7b)
 static uint8_t esc = 0;                    // skipping an escape sequence (arrow keys ...)
 static bool escUsed = false;               // ... whose key already stopped "watch" etc.: no Up / Down
 // password entry: masked, then `pwDone` runs with the text
@@ -165,7 +167,10 @@ static void breakLine() {
   reprompt = true;
 }
 
+static bool apiLogWrite(const uint8_t* b, size_t n);  // api mode: log lines as {"t":"log"} (below)
+
 size_t LogPort::write(const uint8_t* b, size_t n) {
+  if (SHARED && apiLogWrite(b, n)) return n;
   if (SHARED && promptShown) {  // the typed line goes away, comes back after the log line
     Serial.write((const uint8_t*)"\r\x1b[K", 4);
     promptShown = false;
@@ -346,6 +351,27 @@ static const char* const H_DEVICE[] = {
     "  screen check                   what the automatic screen check sees now",
     "  help [section]                 this list, or one section: help wifi",
     "  Up / Down keys                 the last commands (without passwords)",
+    "  api on | api off               machine mode (JSON lines) for programs and the",
+    "                                 Web Serial page (help api: how it works)",
+};
+static const char* const H_API[] = {
+    "API MODE - JSON lines for programs (the Web Serial page / local app uses it)",
+    "  api on                       start; the device answers with a hello line:",
+    "                               {\"t\":\"hello\",\"api\":1,\"fw\":\"...\",\"board\":\"...\",...}",
+    "  then one JSON object per line, answered with the same \"id\":",
+    "  GET   {\"id\":1,\"p\":\"/api/live\"}",
+    "  POST  {\"id\":2,\"m\":\"POST\",\"p\":\"/api/select\",\"b\":{\"i\":0}}   (b: the JSON body)",
+    "  PING  {\"id\":3,\"m\":\"PING\"}   (keep-alive; any request counts)",
+    "  answer: {\"id\":1,\"code\":200,\"body\":{...}}  (code 400 / 404: body {\"ok\":false,\"err\":...})",
+    "  text (CSV) in pieces: {\"id\":4,\"code\":200,\"type\":\"text/csv\",\"chunk\":\"...\"}",
+    "                        ... then {\"id\":4,\"end\":true}",
+    "  paths, parameters and JSON as the HTTP API (README section 5), e.g. /api/status,",
+    "  /api/chart?v=live, /api/programs, /api/program?i=0, /api/config, /api/log?since=0,",
+    "  /api/history.csv, /api/manual, /api/run, /api/cmd",
+    "  CYD: log lines come as {\"t\":\"log\",\"m\":\"...\"} (the S3 logs on its UART port)",
+    "  api off                      back to this console ({\"t\":\"bye\"}); also after 15 s",
+    "                               without a request",
+    "  e.g. api on, then {\"id\":1,\"p\":\"/api/live\"}",
 };
 static const char* const H_SETTINGS[] = {
     "SETTINGS - all settings, changed with set, shown with get",
@@ -472,9 +498,11 @@ static void help(const char* section = nullptr) {
   if (section && *section) {
     if (!strcasecmp(section, "settings") || !strcasecmp(section, "set") || !strcasecmp(section, "get"))
       return printLines(H_SETTINGS, sizeof(H_SETTINGS) / sizeof(H_SETTINGS[0]));
+    if (!strcasecmp(section, "api") || !strcasecmp(section, "json"))
+      return printLines(H_API, sizeof(H_API) / sizeof(H_API[0]));
     for (const HelpSec& h : HELP)
       if (nameIn(h.names, section)) return printLines(h.lines, h.n);
-    return err("no help section \"%s\" (status, manual, programs, autotune, wifi, settings, device)", section);
+    return err("no help section \"%s\" (status, manual, programs, autotune, wifi, settings, device, api)", section);
   }
   banner();
   for (const HelpSec& h : HELP) {
@@ -1582,6 +1610,7 @@ static void screenPoll() {
 
 // ------------------------------------------------------------ dispatch
 static void dispatch(const Args& a);
+static void cmdApi(const Args& a);  // (api mode, below)
 static void execute(char* text) {
   Args a;
   parse(text, a);
@@ -1622,6 +1651,7 @@ static void dispatch(const Args& a) {
   if (!strcmp(c, "factory")) return cmdFactory(a);
   if (!strcmp(c, "touch")) return cmdTouchCal(a);
   if (!strcmp(c, "screen")) return cmdScreen(a);
+  if (!strcmp(c, "api")) return cmdApi(a);
   if (!strcmp(c, "reboot") || !strcmp(c, "restart")) {  // same rules as the touch / web restart
     if (runActive()) return err("a program is running - stop it first");
     say("restarting...");
@@ -1657,7 +1687,7 @@ static void enterLine() {
     memset(cmd, 0, sizeof(cmd));  // may hold a pw=
   }
   memset(line, 0, sizeof(line));
-  if (!watching) showPrompt();
+  if (!watching && !apiMode) showPrompt();
 }
 
 static void input(char c) {
@@ -1794,6 +1824,287 @@ static void events() {
   if (!E.intrValid) intrShown = false;
 }
 
+// ------------------------------------------------------------ api mode (spec 7b)
+// JSON lines for the Web Serial page: a request per line {"id":7,"m":"GET","p":"/api/live","b":{...}},
+// answered by the web API's own handlers (webApiRequest) with {"id":7,"code":200,"body":{...}} or, for
+// text (CSV), {"id":7,"code":200,"type":"text/csv","chunk":"..."} lines and {"id":7,"end":true}.
+// {"t":"hello"} after "api on", {"t":"bye"} at the end; on a shared port (CYD) log lines come as
+// {"t":"log","m":"..."}. "api off", or no request for 15 s, ends it (back to this console). Output is
+// queued and written as the port takes it, so the loop never waits for the port.
+static uint32_t apiLastReq = 0;
+static constexpr uint32_t API_IDLE_MS = 15000;
+static constexpr size_t API_LINE_MAX = 16384;  // longest request (a program of 100 phases)
+static constexpr size_t API_LOG_KEEP = 8192;   // log lines are dropped while more than this is queued
+static char* apiIn = nullptr;
+static size_t apiInLen = 0, apiInCap = 0;
+static bool apiInOver = false;
+static char* apiQ = nullptr;  // output queue
+static size_t apiQLen = 0, apiQPos = 0, apiQCap = 0;
+static SemaphoreHandle_t apiMux = nullptr;
+static char apiLog[192];  // log line being put together
+static size_t apiLogLen = 0;
+static uint32_t apiLogDropped = 0;
+
+struct ApiLock {
+  ApiLock() {
+    if (apiMux) xSemaphoreTake(apiMux, portMAX_DELAY);
+  }
+  ~ApiLock() {
+    if (apiMux) xSemaphoreGive(apiMux);
+  }
+};
+
+static bool qAppend(const char* s, size_t n) {  // (lock held)
+  if (apiQPos && apiQPos == apiQLen) apiQPos = apiQLen = 0;
+  if (apiQLen + n > apiQCap) {
+    if (apiQPos) {
+      memmove(apiQ, apiQ + apiQPos, apiQLen - apiQPos);
+      apiQLen -= apiQPos;
+      apiQPos = 0;
+    }
+    if (apiQLen + n > apiQCap) {
+      size_t c = apiQCap ? apiQCap * 2 : 1024;
+      if (c < apiQLen + n + 64) c = apiQLen + n + 64;
+      char* p = (char*)realloc(apiQ, c);
+      if (!p) return false;
+      apiQ = p;
+      apiQCap = c;
+    }
+  }
+  memcpy(apiQ + apiQLen, s, n);
+  apiQLen += n;
+  return true;
+}
+
+size_t apiQueued() {
+  ApiLock l;
+  return apiQLen - apiQPos;
+}
+
+void apiOut(const char* s, size_t n) {
+  if (!apiMode) return;
+  ApiLock l;
+  qAppend(s, n);
+}
+
+// JSON string content (without quotes)
+static void jsonEsc(const char* s, size_t n, char* out, size_t cap) {
+  size_t o = 0;
+  for (size_t i = 0; i < n && o + 7 < cap; ++i) {
+    const uint8_t c = (uint8_t)s[i];
+    if (c == '"' || c == '\\') {
+      out[o++] = '\\';
+      out[o++] = c;
+    } else if (c == '\n') {
+      out[o++] = '\\';
+      out[o++] = 'n';
+    } else if (c == '\r') {
+      out[o++] = '\\';
+      out[o++] = 'r';
+    } else if (c == '\t') {
+      out[o++] = '\\';
+      out[o++] = 't';
+    } else if (c < 0x20) {
+      o += snprintf(out + o, cap - o, "\\u%04x", c);
+    } else {
+      out[o++] = c;
+    }
+  }
+  out[o] = 0;
+}
+
+static void apiLogFlushLine() {  // (lock held)
+  if (!apiLogLen) return;
+  if (apiQLen - apiQPos > API_LOG_KEEP) {
+    ++apiLogDropped;
+  } else {
+    char e[sizeof(apiLog) * 2 + 48];
+    char m[sizeof(apiLog) * 2 + 8];
+    if (apiLogDropped) {
+      snprintf(e, sizeof(e), "{\"t\":\"log\",\"m\":\"(%lu log lines dropped)\"}\n", (unsigned long)apiLogDropped);
+      qAppend(e, strlen(e));
+      apiLogDropped = 0;
+    }
+    jsonEsc(apiLog, apiLogLen, m, sizeof(m));
+    const int k = snprintf(e, sizeof(e), "{\"t\":\"log\",\"m\":\"%s\"}\n", m);
+    qAppend(e, k);
+  }
+  apiLogLen = 0;
+}
+
+static bool apiLogWrite(const uint8_t* b, size_t n) {
+  if (!apiMode) return false;
+  ApiLock l;
+  for (size_t i = 0; i < n; ++i) {
+    if (b[i] == '\r') continue;
+    if (b[i] == '\n' || apiLogLen >= sizeof(apiLog) - 1) apiLogFlushLine();
+    if (b[i] != '\n') apiLog[apiLogLen++] = b[i];
+  }
+  return true;
+}
+
+// writes what the port takes now; nobody listening (S3: port closed): the output is dropped
+static bool apiPump() {
+  ApiLock l;
+  const size_t q = apiQLen - apiQPos;
+  if (!q) return false;
+  if (!portReady()) {
+    apiQPos = apiQLen = 0;
+    return false;
+  }
+  const int room = port().availableForWrite();
+  if (room <= 0) return false;
+  const size_t n = q < (size_t)room ? q : (size_t)room;
+  port().write((const uint8_t*)apiQ + apiQPos, n);
+  apiQPos += n;
+  if (apiQPos == apiQLen) {
+    apiQPos = apiQLen = 0;
+    if (apiQCap > 8192) {  // a big answer was sent: give the RAM back
+      free(apiQ);
+      apiQ = nullptr;
+      apiQCap = 0;
+    }
+  }
+  return true;
+}
+
+void apiFlush(size_t keep) {
+  uint32_t last = millis();
+  while (apiMode && apiQueued() > keep) {
+    if (apiPump()) {
+      last = millis();
+    } else if (millis() - last > 5000) {  // the other side stopped reading: drop it
+      ApiLock l;
+      apiQPos = apiQLen = 0;
+      break;
+    } else {
+      delay(1);
+    }
+    feedLoopWDT();
+  }
+}
+
+static void apiHello() {
+  char h[256], host[24];
+  {
+    Guard g;
+    strlcpy(host, gSettings.hostname, sizeof(host));
+  }
+  const int k = snprintf(h, sizeof(h),
+                         "{\"t\":\"hello\",\"api\":%d,\"fw\":\"%s\",\"name\":\"%s\",\"board\":\"%s\",\"variant\":\"%s\","
+                         "\"host\":\"%s\"}\n",
+                         API_VERSION, FW_VERSION, PRODUCT_NAME, BOARD_NAME, BOARD_VARIANT, host);
+  ApiLock l;
+  qAppend(h, k);
+}
+
+static void apiEnter() {
+  if (!apiMux) apiMux = xSemaphoreCreateMutex();
+  watching = false;
+  if (calRunning) uiTouchCalCancel();
+  promptShown = false;
+  len = 0;
+  apiInLen = 0;
+  apiInOver = false;
+  apiLastReq = millis();
+  apiMode = true;
+  apiHello();
+}
+
+static void apiExit(const char* why) {
+  {
+    char b[64];
+    const int k = snprintf(b, sizeof(b), "{\"t\":\"bye\",\"why\":\"%s\"}\n", why);
+    ApiLock l;
+    apiLogFlushLine();
+    qAppend(b, k);
+  }
+  apiFlush(0);
+  apiMode = false;
+  {
+    ApiLock l;
+    free(apiQ);
+    apiQ = nullptr;
+    apiQLen = apiQPos = apiQCap = 0;
+    apiLogLen = 0;
+  }
+  free(apiIn);
+  apiIn = nullptr;
+  apiInLen = apiInCap = 0;
+  if (portReady()) {
+    raw("\r\n");
+    say("(api mode ended: %s - serial console; help lists the commands)", why);
+    showPrompt();
+  }
+}
+
+static void apiError(const char* what) {
+  char b[128];
+  const int k = snprintf(b, sizeof(b), "{\"t\":\"error\",\"err\":\"%s\"}\n", what);
+  apiOut(b, k);
+}
+
+static void apiLine(char* t) {
+  apiLastReq = millis();
+  while (*t == ' ' || *t == '\t') ++t;
+  if (*t == '{') return webApiRequest(t);
+  for (char* p = t; *p; ++p) *p = tolower(*p);
+  while (*t && t[strlen(t) - 1] == ' ') t[strlen(t) - 1] = 0;
+  if (!strcmp(t, "api off")) return apiExit("api off");
+  if (!strcmp(t, "api on")) return apiHello();  // a new session (page reloaded)
+  if (*t) apiError("not a JSON request (api off: back to the console)");
+}
+
+static void apiInput(char c) {
+  if (c == '\r') return;
+  if (c == '\n') {
+    if (apiInOver) apiError("request too long");
+    else if (apiInLen) {
+      apiIn[apiInLen] = 0;
+      apiLine(apiIn);
+    }
+    apiInLen = 0;
+    apiInOver = false;
+    if (apiMode && apiInCap > 2048) {  // a big request (program) was handled: give the RAM back
+      free(apiIn);
+      apiIn = nullptr;
+      apiInCap = 0;
+    }
+    return;
+  }
+  if (apiInOver) return;
+  if (apiInLen + 2 > apiInCap) {
+    size_t c2 = apiInCap ? apiInCap * 2 : 512;
+    if (c2 > API_LINE_MAX + 2) c2 = API_LINE_MAX + 2;
+    char* p = apiInLen + 2 > c2 ? nullptr : (char*)realloc(apiIn, c2);
+    if (!p) {
+      apiInOver = true;
+      return;
+    }
+    apiIn = p;
+    apiInCap = c2;
+  }
+  apiIn[apiInLen++] = c;
+}
+
+static void apiLoop() {
+  int budget = 4096;
+  while (apiMode && budget-- > 0 && port().available() > 0) apiInput((char)port().read());
+  if (!apiMode) return;
+  {
+    ApiLock l;
+    if (apiLogLen && !SHARED) apiLogLen = 0;
+  }
+  apiPump();
+  if (millis() - apiLastReq > API_IDLE_MS) apiExit("no request for 15 s");
+}
+
+static void cmdApi(const Args& a) {
+  if (!strcmp(a.word(1), "on")) return apiEnter();
+  if (!strcmp(a.word(1), "off")) return say("api mode is not on");
+  err("api on | api off");
+}
+
 // ------------------------------------------------------------ begin / loop
 static void greet() {
   raw("\r\n");
@@ -1812,6 +2123,7 @@ void consoleBegin() {
     conDtr = dtr;
   });
   conUsb.setTxTimeoutMs(20);  // never stall the loop when nobody reads
+  conUsb.setRxBufferSize(4096);  // api mode: a request line (a whole program) must not overflow it
   conUsb.begin(115200);
   USB.productName(PRODUCT_NAME);
   USB.manufacturerName("TempCtl");
@@ -1823,6 +2135,12 @@ void consoleBegin() {
 }
 
 void consoleLoop() {
+  if (apiMode) {
+#ifdef CON_USB
+    conOpened = false;  // (a page that opens the port again just sends "api on" again)
+#endif
+    return apiLoop();
+  }
 #ifdef CON_USB
   if (conOpened) {
     conOpened = false;
