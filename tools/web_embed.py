@@ -63,6 +63,8 @@ def build():
     for n, (url, rel, ctype, gz, imm) in enumerate(ASSETS):
         with open(os.path.join(WEB, rel), "rb") as f:
             data = f.read()
+        if rel == "index.html":  # the device's copy: the page knows it is served by a device (spec 7b)
+            data = data.replace(b'<html lang="en">', b'<html lang="en" data-device>', 1)
         if url == "/nofonts":
             data = b"\n".join(l for l in data.split(b"\n") if not l.lstrip().startswith(b"@font-face"))
         if gz:
@@ -91,4 +93,5 @@ def build():
         print("web_embed: wrote %s (%d bytes of assets)" % (os.path.relpath(OUT, ROOT), total))
 
 
-build()
+if not os.environ.get("WEB_EMBED_NO_BUILD"):  # (tools/build_site.py only borrows the asset list)
+    build()

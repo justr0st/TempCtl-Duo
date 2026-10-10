@@ -420,6 +420,18 @@ their ranges and an example per section.
 | `screen restart` | set only the display and the touch controller up again (S3: reset pins + I2C bus freed; CYD: software reset + SPI) and redraw; prints whether the touch controller answers |
 | `screen check` | what the automatic screen check sees now: display status read back, touch controller, number of automatic restarts |
 | Up / Down keys | the last 20 commands (lines with `pw=` and password entries are not kept) |
+| `api on` · `api off` | machine mode for the Web Serial page (JSON lines, below) |
+
+**api mode** (`api on`, spec 7b): one JSON object per line, for the Web Serial page. Requests
+`{"id":7,"m":"GET","p":"/api/live"}` or `{"id":8,"m":"POST","p":"/api/manual","b":{...}}` (`m`: GET,
+POST, PING) go through the same handlers as the HTTP API (section 5), with the same paths, query
+parameters and JSON. Answers: `{"id":7,"code":200,"body":{...}}`; text (CSV) in pieces
+`{"id":9,"code":200,"type":"text/csv","chunk":"..."}` … `{"id":9,"end":true}`. Also `{"t":"hello",
+"api":1,"fw":…,"board":…,"variant":…,"host":…}` after `api on`, `{"t":"bye","why":…}` at the end, and
+on the CYD (shared port) the log as `{"t":"log","m":"..."}`. `api off`, or no request for 15 s, returns
+to the console. Output is queued and written as the port takes it (the loop never waits for the
+port); a request line may be up to 16 kB (a whole program). Try it in a terminal: `api on`, then
+`{"id":1,"p":"/api/live"}`. `help api` shows a short description on the device.
 
 Passwords are never shown (also not a `pw=` typed on the command line: shown as `*`). Run events
 (phases, messages, faults, the end) are printed as they happen; "Action required" as a highlighted block,
@@ -485,6 +497,41 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
     a preset or "Custom" with the browser's colour picker; theme, brightness, rotation, screen check).
   - **Tools**: Modbus tools for a Modbus channel (find the setpoint address, read registers, write one
     register); backup / restore of the settings and of all programs as JSON files.
+
+## 5b. The page over USB (Web Serial) and the local app
+
+The same page also works **without Wi-Fi, over the USB cable** (spec 7b): it then talks to the device
+through the serial `api` mode (section 4b) instead of HTTP — same screens, same functions. This needs
+**Chrome or Edge** on a computer (the Web Serial API), and the page must come from `localhost` or https,
+so it is not opened from the device but from the **local app**:
+
+- **`tempctl-duo-<version>.exe`** — one portable file, nothing to install. It serves the page on
+  `http://localhost:8765` (fixed port: the browser remembers the USB permission for it) and opens it
+  in Chrome or Edge as an app window; a second start only opens another window; it ends by itself
+  30 s after the last window was closed. Built with `tools/launcher/build.sh` (Go 1.21+; `all` also
+  builds macOS and Linux versions). Windows may warn about an unknown publisher the first time.
+- The page starts with a **connect screen**: **USB cable** → "Connect…" → choose the port (S3: the port
+  of the "USB" connector; CYD: its only port). The page sends `api on`, checks the API version from the
+  device's hello and then works as usual (`Connected over USB` at the bottom left, **Disconnect USB**
+  next to it). Or **Wi-Fi**: the local app lists the devices it finds on the network (click one), or
+  enter the address (`tempctl-duo.local` or the IP) → the device's own page.
+- **Device search** (local app): mDNS queries for `_tempctl._tcp` (announced since 1.0.27 with fw /
+  board / api) and `_http._tcp` (older firmware) on every network of the computer, each answer checked
+  by reading its `/api/live`; the list refreshes every 3 s while the connect screen is shown. Windows
+  asks once whether the app may use the network ("Allow access", private networks) — without it the
+  list stays empty and the address field still works.
+- **Tabs** (like Windows Terminal): one device per tab — "+" opens a new tab with the connect screen,
+  × (or a middle click) closes one; the icon shows how it is connected (USB / Wi-Fi), the dot whether
+  the device answers. A device opened over Wi-Fi shows **Disconnect** at the bottom left (back to the
+  connect screen in that tab). The tabs come back at the next start (USB tabs connect again to their
+  port). The window is `shell.html` (served at `/`), the page in each tab `/app?tab=<n>`.
+- Close a serial monitor (PlatformIO, Arduino) first: only one program can use the port.
+- The connection comes back by itself: when the page is opened again (the last port is remembered
+  until "Disconnect USB") and when the cable is plugged in again or the device restarted. A lost
+  connection never touches a running program; after 15 s without the page the device returns to the
+  human console. CSV downloads work over USB too.
+- The device's own copy of the page is marked (`data-device`, by `tools/web_embed.py`), the launcher's
+  copy `data-launcher`; without a mark (GitHub Pages, planned) the page shows the connect screen.
 
 ## 5. Web API
 
@@ -564,6 +611,8 @@ src/ui.*                  old touch UI (TempCtl 1.2 screens), not built since 1.
 src/ui_gen.*              old touch UI: bridge to the exported UI code (not built since 1.0.21)
 src/web.*                 HTTP server, JSON API
 web/, tools/web_embed.py  web page + fonts → src/web_assets.h (generated before each build)
+tools/build_site.py       the same page as static files (device URL layout), for the launcher / GitHub Pages
+tools/launcher/           local app: Go launcher (build.sh → dist/tempctl-duo-<version>.exe), section 5b
 test/ui_host/             touch UI preview on a PC (screenshots, random-tap test)
 test/console_host/        serial console on a PC (scripted commands -> output)
 src/console.*             serial console (section 4b), LogSerial (log lines that don't break typed input)

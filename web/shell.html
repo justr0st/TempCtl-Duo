@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TempCtl Duo</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<!-- The local app's window (tools/launcher, spec 7b): tabs like Windows Terminal, one device per tab.
+     Each tab is a frame with the page (/app?tab=<id>): its connect screen, a USB session of its own, or
+     a device's own page over Wi-Fi. The pages tell the shell what they show (postMessage {tcd:1,...}). -->
+<style>
+@font-face{font-family:"Barlow";font-weight:500;font-display:swap;src:url(/f/barlow-500.woff2) format("woff2")}
+:root{--bar:#DDE2E5;--bg:#EDF0F1;--text:#172024;--muted:#5B6970;--hover:rgba(0,0,0,.06);--hover2:rgba(0,0,0,.1);--line:#C5CDD1;--ok:#2E7D32;--bad:#B3261E;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bar:#0B0F12;--bg:#11161A;--text:#E3E9EB;--muted:#8D9BA2;--hover:rgba(255,255,255,.06);--hover2:rgba(255,255,255,.12);--line:#2B353B;--ok:#7BC47F;--bad:#F2867E;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{display:flex;flex-direction:column;background:var(--bar);color:var(--text);font:13px/1.3 "Barlow",system-ui,"Segoe UI",sans-serif}
+.tabs{display:flex;align-items:flex-end;gap:0;padding:6px 6px 0;min-height:42px;overflow-x:auto;scrollbar-width:none;user-select:none}
+.tab{position:relative;display:flex;align-items:center;gap:8px;height:36px;padding:0 4px 0 12px;width:220px;min-width:110px;flex:0 1 220px;
+  border-radius:8px 8px 0 0;color:var(--muted);cursor:default}
+.tab:hover:not(.on){background:var(--hover)}
+.tab.on{background:var(--bg);color:var(--text)}
+/* the thin separators between inactive tabs */
+.tab:not(.on)+.tab:not(.on)::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:1px;background:var(--line)}
+.tab .ic{position:relative;width:16px;height:16px;flex:none}
+.tab .ic svg,.tab .ic img{width:16px;height:16px;display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tab .st{position:absolute;right:-3px;bottom:-3px;width:8px;height:8px;border-radius:50%;border:1.5px solid var(--bar)}
+.tab.on .st{border-color:var(--bg)}
+.tab .st.ok{background:var(--ok)}.tab .st.lost{background:var(--bad)}
+.tab .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tab .x{width:26px;height:26px;flex:none;border:0;border-radius:5px;background:none;color:inherit;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
+.tab .x:hover{background:var(--hover2)}
+.tab .x svg{width:10px;height:10px;stroke:currentColor;stroke-width:1.6}
+.add{flex:none;width:34px;height:30px;margin:0 0 3px 4px;border:0;border-radius:6px;background:none;color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center}
+.add:hover{background:var(--hover)}
+.add svg{width:14px;height:14px;stroke:currentColor;stroke-width:1.6}
+.frames{position:relative;flex:1;background:var(--bg)}
+.frames iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--bg)}
+.frames iframe:not(.on){visibility:hidden}
+.down{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;background:var(--bg);font-size:15px}
+.down small{color:var(--muted)}
+.down button{font:inherit;padding:6px 14px;border-radius:6px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer}
+:focus-visible{outline:2px solid #1F6FB2;outline-offset:1px}
+</style>
+</head>
+<body>
+<div class="tabs" id="tabs" role="tablist" aria-label="Devices"><button class="add" id="add" title="New tab" aria-label="New tab"><svg viewBox="0 0 14 14"><path d="M7 1v12M1 7h12"/></svg></button></div>
+<div class="frames" id="frames"></div>
+<script>
+const $=id=>document.getElementById(id);
+const ICON={new:'<img src="/favicon.svg" alt="">',
+  usb:'<svg viewBox="0 0 24 24"><path d="M12 2v15"/><path d="M9 5l3-3 3 3"/><path d="M12 13l-5-3V7"/><path d="M12 11l5-3V5.5"/><rect x="15.5" y="3" width="3" height="3"/><circle cx="7" cy="6" r="1.5"/><circle cx="12" cy="19" r="2.5"/></svg>',
+  net:'<svg viewBox="0 0 24 24"><path d="M2 9a15 15 0 0 1 20 0"/><path d="M5.5 12.5a10 10 0 0 1 13 0"/><path d="M9 16a5 5 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1"/></svg>'};
+const store=(k,v)=>{ try{ if(v===undefined) return localStorage.getItem(k); localStorage.setItem(k,v); }catch(e){ return null; } };
+const TABS=[]; let cur=null, seq=+(store('tcd.seq')||0);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function save(){
+  store('tcd.tabs',JSON.stringify(TABS.map(t=>({id:t.id,kind:t.kind,url:t.url,title:t.title}))));
+  store('tcd.cur',cur?String(cur.id):''); store('tcd.seq',String(seq));
+}
+function paint(t){
+  t.el.querySelector('.ic').innerHTML=ICON[t.kind]+(t.kind==='new'?'':`<i class="st ${t.state||''}"></i>`);
+  t.el.querySelector('.t').textContent=t.title; t.el.title=t.kind==='net'?`${t.title} - Wi-Fi (${t.url})`:t.kind==='usb'?`${t.title} - USB`:'Connect to a device';
+  if(t===cur) document.title=(t.kind==='new'?'':t.title+' - ')+'TempCtl Duo';
+}
+function pageUrl(t){ return '/app?tab='+t.id; }
+// a Wi-Fi tab: the device's page, if it answers (else a note in the tab, tried again every 5 s)
+async function loadNet(t){
+  t.down&&t.down.remove(); t.down=null;
+  const ok=await fetch(t.url+'api/live',{mode:'no-cors',cache:'no-store',signal:AbortSignal.timeout(4000)}).then(()=>true,()=>false);
+  if(!TABS.includes(t)||t.kind!=='net') return;
+  if(ok){ t.fr.src=t.url; return; }
+  t.state='lost'; paint(t);
+  t.down=document.createElement('div'); t.down.className='down';
+  t.down.innerHTML=`<div>${esc(t.title)} does not answer</div><small>${esc(t.url)} - trying again every 5 s</small><button>Close tab</button>`;
+  t.down.querySelector('button').onclick=()=>close(t);
+  t.down.hidden=t!==cur; $('frames').appendChild(t.down);
+  t.retry=setTimeout(()=>loadNet(t),5000);
+}
+function add(o,activate){
+  const t={id:o.id||++seq,kind:o.kind||'new',url:o.url||'',title:o.title||'New tab',state:''};
+  if(t.id>seq) seq=t.id;
+  t.el=document.createElement('div'); t.el.className='tab'; t.el.setAttribute('role','tab');
+  t.el.innerHTML='<span class="ic"></span><span class="t"></span><button class="x" aria-label="Close tab" title="Close tab (also: middle click)"><svg viewBox="0 0 10 10"><path d="M1 1l8 8M9 1L1 9"/></svg></button>';
+  t.el.onmousedown=e=>{ if(e.button===1){ e.preventDefault(); close(t); } else if(!e.target.closest('.x')) select(t); };
+  t.el.querySelector('.x').onclick=()=>close(t);
+  $('tabs').insertBefore(t.el,$('add'));
+  t.fr=document.createElement('iframe'); t.fr.allow='serial'; t.fr.title=t.title;
+  $('frames').appendChild(t.fr);
+  if(t.kind==='net') loadNet(t); else t.fr.src=pageUrl(t);
+  TABS.push(t); paint(t);
+  if(activate||!cur) select(t);
+  save(); return t;
+}
+function select(t){
+  cur=t; for(const x of TABS){ x.el.classList.toggle('on',x===t); x.el.setAttribute('aria-selected',x===t); x.fr.classList.toggle('on',x===t); if(x.down) x.down.hidden=x!==t; }
+  paint(t); save(); try{ t.fr.focus(); }catch(e){}
+}
+function close(t){
+  const i=TABS.indexOf(t); if(i<0) return;
+  clearTimeout(t.retry);
+  try{ t.fr.contentWindow.postMessage({tcd:1,close:true},'*'); }catch(e){}  // a USB tab says "api off"
+  TABS.splice(i,1); t.el.remove(); t.down&&t.down.remove();
+  setTimeout(()=>t.fr.remove(),300);
+  if(!TABS.length) add({},true); else if(cur===t) select(TABS[Math.min(i,TABS.length-1)]);
+  save();
+}
+function toNew(t){  // back to the connect screen in this tab
+  clearTimeout(t.retry); t.down&&t.down.remove(); t.down=null;
+  t.kind='new'; t.url=''; t.title='New tab'; t.state=''; t.fr.src=pageUrl(t); paint(t); save();
+}
+// what the pages in the tabs report
+window.addEventListener('message',e=>{
+  const t=TABS.find(x=>x.fr.contentWindow===e.source), m=e.data;
+  if(!t||!m||!m.tcd) return;
+  if(m.open){ t.kind='net'; t.url=m.open.endsWith('/')?m.open:m.open+'/'; t.title=m.host||m.open; t.state=''; loadNet(t); }
+  if(m.usb===true){ t.kind='usb'; t.title=m.host||'USB'; }
+  if(m.usb===false){ t.kind='new'; t.title='New tab'; t.state=''; }
+  if(m.disconnect) return toNew(t);
+  if(m.state&&t.kind!=='new') t.state=m.state;
+  paint(t); save();
+});
+$('add').onclick=()=>add({},true);
+// the local app: tell it the window is open (it ends 30 s after the last one)
+if(document.documentElement.hasAttribute('data-launcher')){ const alive=()=>fetch('/launcher/alive',{cache:'no-store'}).catch(()=>{}); alive(); setInterval(alive,5000); }
+// the tabs of last time
+let saved=[]; try{ saved=JSON.parse(store('tcd.tabs')||'[]'); }catch(e){}
+const want=store('tcd.cur');
+for(const o of saved) add(o,false);
+if(!TABS.length) add({},true);
+select(TABS.find(t=>String(t.id)===want)||TABS[0]);
+</script>
+</body>
+</html>

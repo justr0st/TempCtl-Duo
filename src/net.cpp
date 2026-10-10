@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include "app_state.h"
 #include "config.h"
+#include "version.h"
 
 static bool apStarted = false, mdnsStarted = false, haveSta = false;
 static uint32_t t0 = 0;
@@ -139,6 +140,11 @@ void netLoop() {
     }
     if (MDNS.begin(host)) {
       MDNS.addService("http", "tcp", 80);
+      // found by the local app's device search (tools/launcher): _tempctl._tcp with what it is
+      MDNS.addService("tempctl", "tcp", 80);
+      MDNS.addServiceTxt("tempctl", "tcp", "fw", FW_VERSION);
+      MDNS.addServiceTxt("tempctl", "tcp", "board", BOARD_NAME);
+      MDNS.addServiceTxt("tempctl", "tcp", "api", String(API_VERSION));
       mdnsStarted = true;
     }
   }
