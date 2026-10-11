@@ -3,6 +3,8 @@
 #include "web.h"
 #include "console.h"
 #include "ui.h"
+#include "syslog.h"
+#include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <WebServer.h>
 #include <WiFi.h>
@@ -864,7 +866,7 @@ static void handleRestart() {
 // POST /api/screen/restart: display and touch controller set up again (not the device); the result
 // is in the serial log ("[ui] screen restart", "[touch] ...", "[lcd] ...")
 static void handleScreenRestart() {
-  uiScreenRestart();
+  uiScreenRestart("from the web page");
   JsonDocument r;
   r["ok"] = true;
   sendJson(r);
@@ -1054,6 +1056,9 @@ static void handleLive() {
   d["sel"] = S.selProgram;
   d["progGen"] = programStoreGen();
   d["logSeq"] = logSeq();
+  d["sysSeq"] = syslogSeq();   // newest system log line (System page)
+  d["boot"] = syslogBoot();
+  d["time"] = syslogEpoch();   // device clock (UTC s), 0 = not known: the page sets it (POST /api/time)
   d["cfgGen"] = settingsGen();
   char hex[8];
   snprintf(hex, sizeof(hex), "#%06X", (unsigned)(S.accentColor & 0xFFFFFF));
@@ -1158,9 +1163,58 @@ static void handleLog() {
     if (isnan(e[i].runT)) x.add(nullptr);
     else x.add((int)e[i].runT);
     x.add(e[i].msg);
+    x.add(e[i].kind);   // LogKind: 1 event, 2 run, 3 warning, 4 error
+    x.add(e[i].epoch);  // UTC s (0: the clock was not known)
   }
   free(e);
   sendJson(d);
+}
+
+// System log (System page): ?since=n -> the lines after n, oldest first, about 12 kB at a time
+// ({"more":true}: ask again); lines [seq, uptime s, epoch (0 = unknown), kind, text]
+static void addSysLine(const SysLine& l, void* u) {
+  JsonArray x = ((JsonArray*)u)->add<JsonArray>();
+  x.add(l.seq);
+  x.add(l.up);
+  x.add(l.epoch);
+  x.add((int)l.kind);
+  x.add(JsonString(l.text));  // copied: a plain const char[] would be kept as a pointer to the reused buffer
+}
+static void handleSysLog() {
+  const uint32_t since = reqHas("since") ? (uint32_t)reqArg("since").toInt() : 0;
+  JsonDocument d;
+  JsonArray a = d["lines"].to<JsonArray>();
+  syslogRead(since, 12000, addSysLine, &a);
+  const uint32_t last = a.size() ? (uint32_t)a[a.size() - 1][0] : since;
+  d["seq"] = syslogSeq();
+  d["first"] = syslogFirst();
+  d["more"] = last < syslogSeq();
+  d["boot"] = syslogBoot();
+  d["up"] = millis() / 1000;
+  d["time"] = syslogEpoch();
+  extraHeaders = "Cache-Control: no-store\r\n";
+  sendJson(d);
+}
+
+// Events saved in flash (all starts): lines "boot\tepoch\tuptime\tkind\ttext"
+static void handleEventFile() {
+  syslogFlush();  // the newest ones too
+  File f = LittleFS.open(syslogFile(), "r");
+  if (!f) return sendText(200, "text/plain", "");
+  extraHeaders = "Cache-Control: no-store\r\n";
+  sendStream("text/plain", "events.txt", [&](char* b, size_t n) -> size_t { return f.read((uint8_t*)b, n); });
+  f.close();
+}
+
+// POST /api/time {"t":<UTC s>}: the page sets the device clock when it has no NTP time (for the log)
+static void handleTime() {
+  JsonDocument b;
+  if (!parseBody(b)) return sendError("Invalid JSON");
+  syslogSetEpoch(b["t"] | 0u);
+  JsonDocument r;
+  r["ok"] = true;
+  r["time"] = syslogEpoch();
+  sendJson(r);
 }
 
 // ------------------------------------------------------------ setup
@@ -1174,6 +1228,9 @@ static const Route ROUTES[] = {
     {"/api/live", HTTP_GET, handleLive},
     {"/api/chart", HTTP_GET, handleChart},
     {"/api/log", HTTP_GET, handleLog},
+    {"/api/syslog", HTTP_GET, handleSysLog},
+    {"/api/eventlog.txt", HTTP_GET, handleEventFile},
+    {"/api/time", HTTP_POST, handleTime},
     {"/api/status", HTTP_GET, handleStatus},
     {"/api/log.csv", HTTP_GET, handleCsv},
     {"/api/history.csv", HTTP_GET, handleHistCsv},

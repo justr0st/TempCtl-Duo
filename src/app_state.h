@@ -79,20 +79,25 @@ struct LiveData {
 
 constexpr int RUN_EV_MAX = 400;
 
-// Event log (web, serial; later touch): the last LOG_N messages
+// Event log (web, serial, touch): the last LOG_N messages; also in the system log (syslog.h) and saved
+// to flash from there
 #ifdef BOARD_HAS_PSRAM
 constexpr int LOG_N = 48;
 #else
 constexpr int LOG_N = 32;  // CYD: DRAM is short
 #endif
-constexpr size_t LOG_LEN = 96;
+constexpr size_t LOG_LEN = 120;
 struct LogEntry {
   uint32_t seq;
   uint32_t upSec;   // uptime
+  uint32_t epoch;   // UTC seconds, 0 = the clock was not known yet
   float runT;       // run time, NaN outside a run
+  uint8_t kind;     // LogKind (syslog.h): event, run, warning, error
   char msg[LOG_LEN];
 };
-void logEvent(const char* fmt, ...) __attribute__((format(printf, 1, 2)));  // any task
+// any task; the kind comes from the words (errors, warnings), else "event" / "run"
+void logEvent(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+void logRun(const char* fmt, ...) __attribute__((format(printf, 1, 2)));  // run records (start, phases, end)
 uint32_t logSeq();                                        // newest entry
 int logSince(uint32_t seq, LogEntry* out, int max);       // entries after seq, oldest first
 

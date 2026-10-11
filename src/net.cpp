@@ -5,6 +5,7 @@
 #include "app_state.h"
 #include "config.h"
 #include "version.h"
+#include "syslog.h"
 
 static bool apStarted = false, mdnsStarted = false, haveSta = false;
 static uint32_t t0 = 0;
@@ -29,6 +30,8 @@ static void ipConfig(const Settings& s) {
   if (!WiFi.config(A(s.ip), A(s.gateway), A(s.subnet), d1 ? A(s.dns1) : A(s.gateway), d2 ? A(s.dns2) : IPAddress((uint32_t)0)))
     LogSerial.println("[wifi] fixed IP address not accepted - check the settings");
 }
+
+static volatile bool ntpWanted = false;  // connected: get the time (NTP) for the log, once
 
 static void staBegin() {
   Settings s;
@@ -78,6 +81,7 @@ void netBegin() {
   WiFi.onEvent([](arduino_event_id_t e, arduino_event_info_t info) {
     switch (e) {
       case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+        ntpWanted = true;
         LogSerial.printf("[wifi] connected to %s, IP %s, RSSI %d dBm\n", WiFi.SSID().c_str(),
                       WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
         break;
@@ -117,6 +121,11 @@ void netBegin() {
 }
 
 void netLoop() {
+  static bool ntpStarted = false;
+  if (ntpWanted && !ntpStarted) {
+    ntpStarted = true;
+    syslogStartNtp();
+  }
   if (beginAt && (int32_t)(millis() - beginAt) >= 0 && !scanBusyNow()) staBegin();
   if (haveSta && !beginAt && !scanBusyNow() && WiFi.status() != WL_CONNECTED && millis() - lastBegin > STA_RETRY_MS) {
     LogSerial.printf("[wifi] not connected (status %d) - trying again\n", (int)WiFi.status());

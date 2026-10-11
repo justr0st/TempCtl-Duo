@@ -6,7 +6,7 @@ void uiSetBrightness(uint8_t b);
 // Restart of the screen hardware without restarting the device: touch controller and display
 // controller set up again, everything redrawn. Asked from any task, done in the next uiLoop().
 // uiScreenRestartPoll(): number of restarts done so far (+ the result of the last one).
-void uiScreenRestart();
+void uiScreenRestart(const char* from);  // from: "from the web page" ... (a static text, for the event log)
 uint32_t uiScreenRestartPoll(bool& lcdOk, bool& touchOk);
 // Automatic screen check (setting display.screenCheck): the state now, as lines for the console
 void uiScreenCheckInfo(void (*line)(const char*));

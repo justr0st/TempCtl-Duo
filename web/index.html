@@ -102,6 +102,25 @@ button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
 .log{font-size:13.5px;max-height:320px;overflow:auto;margin:0;padding:0;list-style:none}
 .log li{display:grid;grid-template-columns:58px minmax(0,1fr);gap:8px;padding:3px 0;border-bottom:1px dashed var(--line)}
 .log li span{color:var(--muted)}
+.log li.k4{color:var(--danger)}.log li.k3{color:var(--amber)}.log li.k2{color:var(--acc)}
+/* system log (System page): colour per kind - 0 info (technical), 1 event, 2 run, 3 warning, 4 error */
+.slbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
+.slbar .kf{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:3px 10px;border-radius:999px;font-size:13.5px}
+.slbar .kf i{width:9px;height:9px;border-radius:50%;display:block}
+.slbar .kf[aria-pressed=false]{opacity:.45;border-style:dashed}
+.slbar input[type=search]{font:inherit;color:var(--text);background:var(--sunk);border:1px solid var(--line);border-radius:6px;padding:5px 8px;min-height:32px;flex:1;min-width:140px;max-width:280px}
+.slog{height:min(62vh,600px);overflow:auto;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:4px 0;
+  font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.slog .l{display:grid;grid-template-columns:max-content 7.5ch minmax(0,1fr);gap:10px;padding:1px 10px 1px 8px;border-left:3px solid transparent}
+.slog .l .m{white-space:pre-wrap;overflow-wrap:anywhere}
+.slog .l .t{color:var(--muted)}
+.slog .k0 .m,.slog .k0 .k{color:var(--muted)}
+.slog .k2{border-left-color:var(--acc)}.slog .k2 .k,.slog .k2 .m{color:var(--acc)}
+.slog .k3{border-left-color:var(--amber);background:color-mix(in srgb,var(--amber) 8%,transparent)}.slog .k3 .k,.slog .k3 .m{color:var(--amber)}
+.slog .k4{border-left-color:var(--danger);background:color-mix(in srgb,var(--danger) 9%,transparent)}.slog .k4 .k,.slog .k4 .m{color:var(--danger)}
+.slog .bt{margin:6px 10px;padding-top:4px;border-top:1px dashed var(--line);color:var(--muted);font-family:var(--sans);font-size:12.5px}
+.slog.h0 .k0,.slog.h1 .k1,.slog.h2 .k2,.slog.h3 .k3,.slog.h4 .k4,.slog .nf{display:none}
+.slog .none{padding:6px 10px;color:var(--muted)}
 .halt{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:24px}
 .halt[hidden]{display:none}
 .intr{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin:0 0 12px;padding:12px 14px;border:2px solid var(--danger);border-radius:10px;background:var(--sunk)}
@@ -390,6 +409,11 @@ table.t input{width:90px}
   <div class="fbar"><button class="pri" id="bWifi">Save and connect</button><span class="msg" id="wMsg"></span></div></section>
 <section class="panel" id="sDisp" data-form="disp"></section>
 </div>
+<section class="panel mt" id="sLogP" aria-label="Log"><h2>Log</h2>
+  <div class="slbar" id="slBar"><input type="search" id="slFind" placeholder="Search" aria-label="Search the log">
+    <button id="slDl" title="All lines as a text file">Download</button><span class="msg" id="slMsg"></span></div>
+  <div class="slog" id="slog" role="log" aria-live="off"><div class="none">Loading…</div></div>
+</section>
 </div>
 
 <div class="pg" id="pg-tools" hidden>
@@ -1282,10 +1306,10 @@ async function updateLog(){
   if(live.logSeq===logSeq) return;
   const d=await api('/api/log?since='+logSeq); logSeq=d.seq;
   const base=Date.now()/1000-d.up;
-  for(const [seq,up,rt,msg] of d.log) logList.push({seq,wall:base+up,rt,msg});
+  for(const [seq,up,rt,msg,kind] of d.log) logList.push({seq,wall:base+up,rt,msg,kind});
   logList=logList.slice(-100);
   $('log').innerHTML=logList.slice().reverse().map(l=>{ const w=new Date(l.wall*1000);
-    return `<li><span title="${w.toLocaleString()}">${l.rt!=null?fmt(l.rt):w.toTimeString().slice(0,5)}</span>${esc(l.msg)}</li>`; }).join('')||'<li><span></span>No events yet.</li>';
+    return `<li class="k${l.kind||1}"><span title="${w.toLocaleString()}">${l.rt!=null?fmt(l.rt):w.toTimeString().slice(0,5)}</span>${esc(l.msg)}</li>`; }).join('')||'<li><span></span>No events yet.</li>';
 }
 
 /* ---------- pages (hash routes: #/programs, #/channels, #/system, #/tools; anything else = Status) ---------- */
@@ -1316,7 +1340,7 @@ async function pageUpdate(force){
   if((page==='channels'||page==='system'||page==='tools')&&(!CFG||cfgGen!==live.cfgGen)) await loadCfg();
   if(page==='programs') renderProgs(force);
   else if(page==='channels') updChanPage();
-  else if(page==='system') updSystem();
+  else if(page==='system'){ updSystem(); slUpdate(); }
   else if(page==='tools') updTools();
   masonry();
 }
@@ -1719,14 +1743,67 @@ $('bPrUp').onclick=async()=>{ const t=await pickFile(); if(t==null) return; cons
     try{ const r=await api('/api/program',{i:x.i,program:x.program}); if(r.err) bad.push(`slot ${x.i+1}: ${r.err}`); else { n++; delete DRAFT[x.i]; delete SAVED[x.i]; savedGen[x.i]=-1; } }catch(e){ bad.push(`slot ${x.i+1}: no answer`); } }
   await loadPrograms(); setMsg('prMsg',`${n} program(s) restored.${bad.length?' Not restored: '+bad.join('; '):''}`,bad.length>0); };
 
+/* ---------- system log (System page): saved events of earlier starts + everything of this start ---------- */
+const SLK=['Tech','Event','Run','Warning','Error'], SLC=['var(--muted)','var(--text)','var(--acc)','var(--amber)','var(--danger)'];
+const SL={seq:0,boot:-1,lastBoot:-1,busy:false,at:0,n:0,find:''};
+async function apiText(path){ if(SER.on) return serReq(path,undefined,30000); const r=await fetch(path,{cache:'no-store'}); return r.ok?r.text():''; }
+function slTime(l){ if(l.epoch){ const d=new Date(l.epoch*1000), t=d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    return d.toDateString()===new Date().toDateString()?t:d.toLocaleDateString([], {day:'2-digit',month:'2-digit'})+' '+t; }
+  return '+'+fmt(l.up); }  // (the clock was not set yet: time since the start)
+function slAdd(l,box){
+  if(l.boot!==SL.lastBoot){ SL.lastBoot=l.boot; const b=document.createElement('div'); b.className='bt';
+    b.textContent=`Start ${l.boot}${l.boot===SL.boot?' (now)':''}`; box.appendChild(b); }
+  const d=document.createElement('div'); d.className='l k'+l.kind;
+  d.innerHTML=`<span class="t">${esc(slTime(l))}</span><span class="k">${SLK[l.kind]||''}</span><span class="m">${esc(l.text)}</span>`;
+  d._t=(l.text+' '+(SLK[l.kind]||'')).toLowerCase(); if(SL.find&&!d._t.includes(SL.find)) d.classList.add('nf');
+  box.appendChild(d); ++SL.n;
+}
+async function slLoad(){  // (again after a device restart)
+  const box=$('slog'); box.innerHTML=''; SL.seq=0; SL.lastBoot=-1; SL.n=0; SL.boot=live.boot;
+  try{ const t=await apiText('/api/eventlog.txt');  // events of earlier starts (saved in flash)
+    for(const ln of t.split('\n')){ const p=ln.split('\t'); if(p.length<5) continue; const b=+p[0]; if(b>=SL.boot) continue;
+      slAdd({boot:b,epoch:+p[1],up:+p[2],kind:+p[3],text:p.slice(4).join('\t')},box); } }catch(e){}
+  await slMore(true);
+}
+async function slMore(first){
+  const box=$('slog'), stick=box.scrollHeight-box.scrollTop-box.clientHeight<40;
+  for(let k=0;k<40;k++){  // pieces of about 12 kB
+    const d=await api('/api/syslog?since='+SL.seq); if(!d||!d.lines) break;
+    if(first&&!SL.seq&&d.first>1){ const n=document.createElement('div'); n.className='bt'; n.textContent=`Start ${d.boot}: the ${d.first-1} oldest lines of this start were dropped (the device keeps the newest)`; box.appendChild(n); SL.lastBoot=d.boot; }
+    for(const [seq,up,epoch,kind,text] of d.lines) slAdd({boot:d.boot,seq,up,epoch,kind,text},box);
+    SL.seq=d.lines.length?d.lines[d.lines.length-1][0]:d.seq; if(!d.more) break; }
+  while(SL.n>12000&&box.firstChild){ if(box.firstChild.classList.contains('l')) --SL.n; box.firstChild.remove(); }
+  if(!SL.n) box.innerHTML='<div class="none">No log lines yet.</div>';
+  if(stick||first) box.scrollTop=box.scrollHeight;
+}
+async function slUpdate(){
+  if(SL.busy||!live) return;
+  if(live.boot!==SL.boot){ SL.busy=true; try{ await slLoad(); }finally{ SL.busy=false; } return; }
+  if(live.sysSeq>SL.seq&&Date.now()-SL.at>1500){ SL.busy=true; SL.at=Date.now(); try{ await slMore(false); }finally{ SL.busy=false; } }
+}
+(function(){ const bar=$('slBar'), box=$('slog');
+  [4,3,2,1,0].forEach(k=>{ const b=document.createElement('button'); b.className='kf'; b.setAttribute('aria-pressed','true');
+    b.innerHTML=`<i style="background:${SLC[k]}"></i>${['Technical','Events','Runs','Warnings','Errors'][k]}`;
+    b.title=['Technical lines of the serial log ([wifi], [lcd], [mem] ...)','Events','Program runs','Warnings','Errors'][k];
+    b.onclick=()=>{ const on=b.getAttribute('aria-pressed')!=='true'; b.setAttribute('aria-pressed',on); box.classList.toggle('h'+k,!on); };
+    bar.insertBefore(b,$('slFind')); });
+  $('slFind').oninput=e=>{ SL.find=e.target.value.trim().toLowerCase();
+    for(const d of box.querySelectorAll('.l')) d.classList.toggle('nf',!!SL.find&&!d._t.includes(SL.find)); };
+  $('slDl').onclick=()=>{ const out=[...box.children].map(d=>d.classList.contains('bt')?'\n== '+d.textContent+' ==':
+      d.classList.contains('l')?[...d.children].map(x=>x.textContent).join('  '):'').join('\n');
+    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([out+'\n'],{type:'text/plain'}));
+    a.download='tempctl-duo-log.txt'; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },500); };
+})();
+
 /* ---------- polling ---------- */
-let polling=false, pollTimer=0;
+let polling=false, pollTimer=0, clockSent=false;
 async function poll(){
   if(polling) return; polling=true; clearTimeout(pollTimer);
   try{
     live=await api('/api/live');
     $('linkDot').className='dot ok'; $('linkTxt').textContent=SER.on?'Connected over USB':'Device connected';
     toShell({state:'ok'});
+    if(live.time===0&&!clockSent){ clockSent=true; api('/api/time',{t:Math.floor(Date.now()/1000)}).catch(()=>{}); }  // (for the log times)
     $('net').textContent=live.net; $('fw').textContent=`v${live.fw} · ${live.board}${live.variant?' '+live.variant:''}`;
     applyPalette();
     if(!progs||progsGen!==live.progGen) await loadPrograms(); else fillProgSelect();

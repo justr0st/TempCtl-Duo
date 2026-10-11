@@ -1,4 +1,5 @@
 // Touch UI menu and setup pages: Menu, Event log, Display, Network, System.
+#include "syslog.h"
 #include "tui.h"
 #include <math.h>
 #include <stdio.h>
@@ -97,6 +98,10 @@ void logUpdate() {
     lv_obj_set_width(tl, TUI_SMALL ? 54 : 70);
     lv_obj_t* m = tLabel(row, TUI_SMALL ? &tfont_12 : &tfont_14, e[i].msg);
     lv_obj_set_flex_grow(m, 1);
+    // colours as on the web page: errors, warnings, run records
+    if (e[i].kind == LK_ERROR) lv_obj_add_style(m, &S_.danger, 0);
+    else if (e[i].kind == LK_WARN) lv_obj_add_style(m, &S_.amber, 0);
+    else if (e[i].kind == LK_RUN) lv_obj_add_style(m, &S_.acc, 0);
     lv_label_set_long_mode(m, LV_LABEL_LONG_MODE_WRAP);
   }
 }

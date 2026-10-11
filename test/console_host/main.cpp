@@ -33,7 +33,7 @@ static LogEntry lg[8];
 uint32_t logSeq() { return lseq; }
 int logSince(uint32_t s, LogEntry* o, int m) { int n = 0; for (uint32_t q = s + 1; q <= lseq && n < m; ++q) o[n++] = lg[q % 8]; return n; }
 void logEvent(const char* f, ...) {
-  LogEntry& e = lg[++lseq % 8]; e.seq = lseq; e.runT = NAN; va_list ap; va_start(ap, f); vsnprintf(e.msg, sizeof(e.msg), f, ap); va_end(ap);
+  LogEntry& e = lg[++lseq % 8]; e.seq = lseq; e.runT = NAN; e.kind = strstr(f, "fault") ? 4 : 1; e.epoch = 0; va_list ap; va_start(ap, f); vsnprintf(e.msg, sizeof(e.msg), f, ap); va_end(ap);
   LogSerial.printf("[event] %s\n", e.msg);
 }
 // net
@@ -66,6 +66,7 @@ int uiTouchCalPoll(int& step, uint16_t& a, uint16_t& b, uint16_t& c, uint16_t& d
 }
 void uiTouchCalCancel() { calState = -1; }
 String netApName() { return String("TempCtl-Duo-1A2B"); }
+void syslogTee(const uint8_t*, size_t) {}
 // web API stand-in for the api mode: echoes the request, "/big" answers 20 kB in pieces
 void webApiRequest(const char* line) {
   if (strstr(line, "/big")) {
@@ -84,7 +85,7 @@ void webApiRequest(const char* line) {
 }
 static bool scrReq = false;
 static uint32_t scrN = 0;
-void uiScreenRestart() { scrReq = true; }
+void uiScreenRestart(const char*) { scrReq = true; }
 int uiScreenCheckTest() { return gSettings.screenCheck ? 1 : -1; }
 void uiScreenCheckInfo(void (*line)(const char*)) {
   line("display  OK: power 0x9C, MADCTL 0x28 (0x28 expected), pixel format 0x55");
@@ -170,6 +171,7 @@ int main() {
   type("help bogus\r");
   type("help settings\r");
   type("info\r");
+  logEvent("Bottom fault: test");
   type("log 3\r");
   type("watch\r\n");                       // CR LF (PlatformIO monitor): the LF must not stop it
   run(2100);

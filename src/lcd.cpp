@@ -262,6 +262,10 @@ bool lcdReinit() {
 // (as TFT_eSPI's readcommand8).
 static int8_t readable = -1;  // -1 not tried yet, 0 the status cannot be read back, 1 it can
 static uint8_t sampleAt = 0;
+// The values right after the init: later reads must match them (0Ah all mode bits incl. the booster,
+// 0Ch, 0Dh image mode: inversion, all pixels on / off, gamma), MADCTL the driver's current value.
+static constexpr int NREG = 4;
+static uint8_t base[NREG];
 
 #if LCD_PIN_MISO >= 0
 static inline void half() { delayMicroseconds(4); }
@@ -307,12 +311,12 @@ static uint8_t bbReg(uint8_t cmd, uint8_t at) {
 }
 #endif
 
-// at: sampling point; several sets of reads (n x 3 values) in one bus release
+// at: sampling point; several sets of reads (n x NREG values) in one bus release
 static bool readRegs(uint8_t* out, const uint8_t* ats, int sets) {
 #if LCD_PIN_MISO < 0
   return false;
 #else
-  static const uint8_t CMDS[3] = {0x0A, 0x0B, 0x0C};
+  static const uint8_t CMDS[NREG] = {0x0A, 0x0B, 0x0C, 0x0D};
   drainQueue();
   if (spi_bus_remove_device(spi) != ESP_OK) return false;
   spi = nullptr;
@@ -324,7 +328,7 @@ static bool readRegs(uint8_t* out, const uint8_t* ats, int sets) {
   pinMode(LCD_PIN_MOSI, OUTPUT);
   pinMode(LCD_PIN_MISO, INPUT);
   for (int k = 0; k < sets; ++k)
-    for (int i = 0; i < 3; ++i) out[k * 3 + i] = bbReg(CMDS[i], ats[k]);
+    for (int i = 0; i < NREG; ++i) out[k * NREG + i] = bbReg(CMDS[i], ats[k]);
   digitalWrite(LCD_PIN_DC, HIGH);
   bool ok = spi_bus_initialize(SPI2_HOST, &busCfg, SPI_DMA_CH_AUTO) == ESP_OK &&
             spi_bus_add_device(SPI2_HOST, &devCfg, &spi) == ESP_OK;
@@ -336,10 +340,11 @@ static bool readRegs(uint8_t* out, const uint8_t* ats, int sets) {
 #endif
 }
 
-// the three values as set up?
-static bool asSetUp(const uint8_t* v, uint8_t want) {
+// the values as set up? (base: also equal to the values read right after the init)
+static bool asSetUp(const uint8_t* v, uint8_t want, const uint8_t* b) {
   const uint8_t M = 0xE8;  // MY MX MV BGR (the others may read 0)
-  return (v[0] & 0x14) == 0x14 && (v[1] & M) == (want & M) && (v[2] & 0x07) == 5;
+  if ((v[0] & 0x14) != 0x14 || (v[1] & M) != (want & M) || (v[2] & 0x07) != 5) return false;
+  return !b || ((v[0] & 0xFC) == (b[0] & 0xFC) && (v[2] & 0x77) == (b[2] & 0x77) && (v[3] & 0x3F) == (b[3] & 0x3F));
 }
 
 int lcdCheck(char* info, size_t n) {
@@ -353,7 +358,7 @@ int lcdCheck(char* info, size_t n) {
   }
   const lv_lcd_generic_mipi_driver_t* drv = (const lv_lcd_generic_mipi_driver_t*)lv_display_get_driver_data(disp);
   const uint8_t want = drv ? drv->madctl_reg : 0;
-  uint8_t v[6] = {0};
+  uint8_t v[2 * NREG] = {0};
   if (readable < 0) {  // right after the init: try both sampling points, keep the one that reads back the setup
     static const uint8_t ATS[2] = {0, 1};
     if (!readRegs(v, ATS, 2)) {
@@ -362,18 +367,19 @@ int lcdCheck(char* info, size_t n) {
       return -1;
     }
     for (int k = 0; k < 2 && readable < 0; ++k)
-      if (asSetUp(v + k * 3, want)) {
+      if (asSetUp(v + k * NREG, want, nullptr)) {
         readable = 1;
         sampleAt = k;
+        memcpy(base, v + k * NREG, NREG);
       }
     if (readable < 0) {
       readable = 0;
-      snprintf(info, n, "read %02X %02X %02X / %02X %02X %02X (MADCTL %02X): not readable, check off", v[0], v[1], v[2],
-               v[3], v[4], v[5], want);  // (both sampling points, for the diagnosis)
+      snprintf(info, n, "read %02X %02X %02X %02X / %02X %02X %02X %02X (MADCTL %02X): not readable, check off", v[0],
+               v[1], v[2], v[3], v[4], v[5], v[6], v[7], want);  // (both sampling points, for the diagnosis)
       return -1;
     }
-    snprintf(info, n, "power %02X, MADCTL %02X, format %02X: OK (sample %d), check on", v[sampleAt * 3],
-             v[sampleAt * 3 + 1], v[sampleAt * 3 + 2], sampleAt);
+    snprintf(info, n, "power %02X, MADCTL %02X, format %02X, mode %02X: OK (sample %d), check on", base[0], base[1],
+             base[2], base[3], sampleAt);
     return 1;
   }
   const uint8_t at = sampleAt;
@@ -381,8 +387,12 @@ int lcdCheck(char* info, size_t n) {
     snprintf(info, n, "SPI error");
     return -1;
   }
-  const bool ok = asSetUp(v, want);
-  snprintf(info, n, "power %02X, MADCTL %02X (%02X), format %02X", v[0], v[1], want, v[2]);
+  const bool ok = asSetUp(v, want, base);
+  // registers 0A (power), 0B (MADCTL), 0C (format), 0D (image mode); short: it goes into event texts
+  if (ok) snprintf(info, n, "regs %02X %02X %02X %02X", v[0], v[1], v[2], v[3]);
+  else
+    snprintf(info, n, "regs %02X %02X %02X %02X, set %02X %02X %02X %02X", v[0], v[1], v[2], v[3], base[0], want, base[2],
+             base[3]);
   return ok ? 1 : 0;
 }
 

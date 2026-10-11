@@ -300,10 +300,13 @@ Every second the firmware checks the screen hardware and restarts a part that ha
 the device; each automatic restart is an event in the log ("Screen restarted automatically: …").
 
 - **Display** (both boards): its state is read back over the display's MISO line (S3 GPIO13, CYD
-  GPIO12): power mode (sleep out, display on), MADCTL (orientation) and pixel format. A panel reset by
-  interference wakes up asleep / with its defaults (white or garbled screen) → set up again. Whether the
-  state can be read at all is decided right after the start (`[lcd] status: …` in the log); if it does
-  not read back as set up, this part of the check stays off.
+  GPIO12): registers 0Ah power mode, 0Bh MADCTL (orientation), 0Ch pixel format and 0Dh image mode,
+  compared with the values read right after the start (incl. the booster bit that keeps the panel
+  driven, inversion, all-pixels on / off). A panel reset by interference wakes up asleep / with its
+  defaults (white or garbled screen) → set up again. Whether the state can be read at all is decided
+  right after the start (`[lcd] status: …` in the log); if it does not read back as set up, this part
+  of the check stays off. A restart by hand (web, `screen restart`) is an event too, with what the check
+  saw just before (`regs 9C 28 55 00` = the four registers; `set …` = the values they should have).
 - **Touch, S3 (FT6336)**: its chip id is read; no answer twice in a row → reset pin, I2C bus freed,
   set up again. The CYD's XPT2046 cannot be asked.
 - **Touch stuck** (both): a press that does not move at all for a minute → touch controller restarted
@@ -421,7 +424,14 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
     and touch controller set up again, the device keeps running), Wi-Fi (with network scan, show / hide
     password, optional fixed IP address), touch display (light / dark switch, brightness slider;
     applied at once, no Save button — the screen follows the slider while it is dragged) (accent colour:
-    a preset or "Custom" with the browser's colour picker; theme, brightness, rotation, screen check).
+    a preset or "Custom" with the browser's colour picker; theme, brightness, rotation, screen check),
+    **Log**: everything the device logs, colour-coded — errors (red), warnings (amber), program runs
+    (accent), events, technical lines of the serial log ([wifi], [lcd], [mem] …, grey); filters per kind,
+    search, download as text. The events of earlier starts come from flash (each start is a section);
+    times are the real time when the device knows it (NTP on Wi-Fi, or the page sets the clock), else
+    the time since the start. The device keeps about 7000 lines on the S3 (256 kB PSRAM), about 50 on
+    the CYD (4 kB); the last 300 events (not the technical lines) survive restarts (`/duo/events.txt`,
+    saved at most every 30 s and before a requested restart).
   - **Tools**: Modbus tools for a Modbus channel (find the setpoint address, read registers, write one
     register); backup / restore of the settings and of all programs as JSON files.
 
@@ -475,10 +485,13 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 
 | Method | Path | Body / query |
 |---|---|---|
-| GET | `/api/live` | web page, polled every second: both channels (pv, sp, out, state, target, kept, canExtend, manual, fault, autotune, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg; `intr` while a run interrupted by a reset can be resumed: reason, exact, el, i / st / left per channel), `sel`, `accent`, `progGen`, `cfgGen` (changes with every settings save), `logSeq` |
+| GET | `/api/live` | web page, polled every second: both channels (pv, sp, out, state, target, kept, canExtend, manual, fault, autotune, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg; `intr` while a run interrupted by a reset can be resumed: reason, exact, el, i / st / left per channel), `sel`, `accent`, `progGen`, `cfgGen` (changes with every settings save), `logSeq`, `sysSeq` (newest system log line), `boot` (start number), `time` (device clock, UTC s; 0 = unknown) |
 | GET | `/api/chart?v=run` | current / last run: 300 bins of `pv`, `sp` and state lanes `st` per channel, past events `ev` [t, type, ch, idx], forecast `fc` (`seg` [t0, t1, v0, v1, src, flags] per channel, `ev`; times from now) |
 | GET | `/api/chart?v=live` | the live period (`display.liveMin`) in 300 points of `pv` / `sp` / `dlo` / `dhi` per channel; `bin` s per point, `span`, `sh` (the points before the newest end `sh` s later than whole bins before now), `have` / `cap` (s recorded / s the history holds) |
-| GET | `/api/log?since=n` | event log entries after n: [seq, uptime s, run time s or null, text] |
+| GET | `/api/log?since=n` | event log entries after n: [seq, uptime s, run time s or null, text, kind, epoch] (kind 1 event, 2 run, 3 warning, 4 error; epoch UTC s, 0 = clock unknown) |
+| GET | `/api/syslog?since=n` | system log lines after n (about 12 kB per answer, `more`: ask again): [seq, uptime s, epoch, kind (0 technical … 4 error), text]; also `first`, `boot` |
+| GET | `/api/eventlog.txt` | the events saved in flash, all starts: lines `boot \t epoch \t uptime \t kind \t text` |
+| POST | `/api/time` | `{"t":<UTC s>}`: sets the device clock if it has no NTP time (the page does it; for the log) |
 | GET | `/api/status` | live values (bottom), manual setpoint, selected program; `channels`: both channels (name, type, ok, err, pv, sp, out, mode, manual); `run`: state, `type` (`seq`/`tl`), `seq` (phase `idx`, `stage`, `el`, `dur`), `waiting`, `progPause`, `actionRequired`, `pauseText`, `elapsed`, `remaining`, `edited`, `channels[]` (inProgram, idle, sp, target, moving, Timeline `lane`) |
 | GET/POST | `/api/config` | the whole settings document (= `/duo/settings.json` without passwords) + `limits` (`rs485`, `localMax` of this board variant). POST changes only the keys given, e.g. `{"channels":[null,{"type":"modbus","modbus":{"addr":2}}]}`; `"modbus":{"loadDefaults":true}` loads the register map of the channel's controller type; errors come back as `{"ok":false,"err":"channels[1].type: one of …"}` |
 | GET | `/api/log.csv` | last program run (or, without one, the live history) as CSV, both channels |

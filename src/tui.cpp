@@ -219,10 +219,28 @@ void uiInit() {
 
 // Screen restart (serial "screen restart", web): asked from any task, done here in the UI task
 static volatile bool scrRestartReq = false;
+static const char* volatile scrFrom = "";
 static volatile uint32_t scrRestarts = 0;
 static volatile bool scrLcdOk = false, scrTouchOk = false;
 
-void uiScreenRestart() { scrRestartReq = true; }
+void uiScreenRestart(const char* from) {
+  scrFrom = from;
+  scrRestartReq = true;
+}
+
+static void screenRestartNow(int what);
+
+// a restart asked for by hand: an event with what the check saw just before (to learn what hung)
+static void screenRestartAsked() {
+  char d[80], t[80];
+  const int dl = lcdCheck(d, sizeof(d)), tc = touchCheck(t, sizeof(t));
+  char ds[96];
+  if (dl > 0) snprintf(ds, sizeof(ds), "display OK (%s)", d);
+  else if (dl == 0) snprintf(ds, sizeof(ds), "display LOST (%s)", d);
+  else snprintf(ds, sizeof(ds), "display not readable");
+  logEvent("Screen restarted %s - before: %s, touch %s", scrFrom, ds, tc > 0 ? "OK" : tc == 0 ? "NO ANSWER" : "?");
+  screenRestartNow(3);
+}
 
 uint32_t uiScreenRestartPoll(bool& lcdOk, bool& touchOk) {
   lcdOk = scrLcdOk;
@@ -362,7 +380,7 @@ void uiScreenCheckInfo(void (*line)(const char*)) {
 void uiLoop() {
   if (scrRestartReq) {
     scrRestartReq = false;
-    screenRestartNow(3);
+    screenRestartAsked();
   }
   screenWatch();
   if (disp) lv_timer_handler();

@@ -18,6 +18,7 @@
 #include "touch.h"
 #include "ui.h"
 #include "web.h"
+#include "syslog.h"
 
 #if defined(BOARD_S3) && ARDUINO_USB_MODE == 0
 #include "USB.h"
@@ -170,6 +171,7 @@ static void breakLine() {
 static bool apiLogWrite(const uint8_t* b, size_t n);  // api mode: log lines as {"t":"log"} (below)
 
 size_t LogPort::write(const uint8_t* b, size_t n) {
+  syslogTee(b, n);  // every log line also into the system log (web System page)
   if (SHARED && apiLogWrite(b, n)) return n;
   if (SHARED && promptShown) {  // the typed line goes away, comes back after the log line
     Serial.write((const uint8_t*)"\r\x1b[K", 4);
@@ -1092,7 +1094,8 @@ static void cmdLog(const Args& a) {
       fmtT(e[i].upSec, u, sizeof(u));
       snprintf(t, sizeof(t), "up %s", u);
     }
-    say("[%10s] %s", t, e[i].msg);
+    const char* tag = e[i].kind == LK_ERROR ? "ERROR: " : e[i].kind == LK_WARN ? "warning: " : "";
+    say("[%10s] %s%s", t, tag, e[i].msg);
   }
   free(e);
 }
@@ -1587,7 +1590,7 @@ static void cmdScreen(const Args& a) {
   if (strcmp(a.word(1), "restart") && strcmp(a.word(1), "reset")) return err("screen restart | screen check");
   bool l, t;
   scrWaitN = uiScreenRestartPoll(l, t);
-  uiScreenRestart();
+  uiScreenRestart("from the serial console");
   scrWaiting = true;
   scrWaitAt = millis();
   say("restarting the display and the touch controller...");

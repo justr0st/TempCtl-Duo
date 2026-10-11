@@ -2,6 +2,7 @@
 // heater of a BGA rework station) for PMA KS 4x-1 / generic Modbus RTU
 // controllers. Boards: ESP32-S3-DevKitC-1 + 4.0" ST7796 (env s3) and the
 // ESP32-2432S028R "CYD" (env cyd), see src/board_*.h.
+#include "syslog.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
@@ -42,6 +43,7 @@ void setup() {
   Serial.setTxBufferSize(2048);
 #endif
   Serial.begin(115200);
+  syslogBegin();      // system log: boot number, RAM ring (before the first log line)
   LogSerial.printf("\n[boot] " PRODUCT_NAME " %s (%s%s%s), free heap %u bytes", FW_VERSION, BOARD_NAME,
                 BOARD_VARIANT[0] ? ", " : "", BOARD_VARIANT, ESP.getFreeHeap());
 #ifdef BOARD_HAS_LARGE_RAM
@@ -71,6 +73,7 @@ void setup() {
 }
 
 void loop() {
+  syslogLoop();  // new events to flash (at most every 30 s)
   // heap check once a minute (internal RAM: free, largest block, lowest so far)
   {
     static uint32_t memAt = 0;
@@ -93,6 +96,7 @@ void loop() {
       uiSetBrightness(0);
     }
     if (millis() - at > 400) {
+      syslogFlush();  // the last events to flash
       Serial.flush();
       ESP.restart();
     }

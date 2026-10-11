@@ -1,4 +1,5 @@
 #include "app_state.h"
+#include "syslog.h"
 #include "console.h"
 #include <esp_heap_caps.h>
 #include <math.h>
@@ -105,7 +106,13 @@ static void say(const char* fmt, ...) {
   va_start(ap, fmt);
   vsnprintf(runMsg, sizeof(runMsg), fmt, ap);
   va_end(ap);
-  logEvent("%s", runMsg);
+  // run records (start, pauses, run edits, end) get the run colour in the log, the rest are events
+  static const char* const RUN_WORDS[] = {"Program", "program", "phase", "Phase", "Run ", "run ", "Stopped", "Paused",
+                                          "resumed", "Action required", nullptr};
+  bool run = false;
+  for (const char* const* w = RUN_WORDS; *w && !run; ++w) run = strstr(runMsg, *w) != nullptr;
+  if (run) logRun("%s", runMsg);
+  else logEvent("%s", runMsg);
 }
 static void setMsg(const char* m) { say("%s", m); }
 
@@ -447,9 +454,9 @@ static void flushRunEvents() {
   for (int i = 0; i < pendN; ++i) {
     const PlanEv& e = pendEv[i];
     if (e.type == EV_PHASE && e.idx < runProg->nPh)
-      logEvent("Phase %d (%s)", e.idx + 1, phaseKindName(runProg->ph[e.idx].kind));
+      logRun("Phase %d (%s)", e.idx + 1, phaseKindName(runProg->ph[e.idx].kind));
     else if (e.type == EV_STEP && e.ch < NUM_CHANNELS)
-      logEvent("%s step %d", s.ch[e.ch].name, e.idx + 1);
+      logRun("%s step %d", s.ch[e.ch].name, e.idx + 1);
   }
   Guard g;
   for (int i = 0; i < pendN; ++i) {
@@ -467,21 +474,36 @@ static uint32_t logNext = 1;
 static portMUX_TYPE logMux = portMUX_INITIALIZER_UNLOCKED;
 static volatile float logRunT = NAN;
 
-void logEvent(const char* fmt, ...) {
+static void logAddV(LogKind def, const char* fmt, va_list ap) {
   char m[LOG_LEN];
-  va_list ap;
-  va_start(ap, fmt);
-  vsnprintf(m, sizeof(m), fmt, ap);
-  va_end(ap);
+  if (vsnprintf(m, sizeof(m), fmt, ap) >= (int)sizeof(m)) m[utf8Fit(m, sizeof(m) - 1)] = 0;
   const float rt = logRunT;
+  const LogKind k = logClassify(m, def);
   LogSerial.printf("[event] %s\n", m);
+  syslogAdd(k, m, strlen(m));
   portENTER_CRITICAL(&logMux);
   LogEntry& e = logBuf[logNext % LOG_N];
   e.seq = logNext++;
   e.upSec = millis() / 1000;
+  e.epoch = syslogEpoch();
   e.runT = rt;
+  e.kind = k;
   memcpy(e.msg, m, sizeof(e.msg));
   portEXIT_CRITICAL(&logMux);
+}
+
+void logEvent(const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  logAddV(LK_EVENT, fmt, ap);
+  va_end(ap);
+}
+
+void logRun(const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  logAddV(LK_RUN, fmt, ap);
+  va_end(ap);
 }
 
 uint32_t logSeq() { return logNext - 1; }
@@ -1677,7 +1699,7 @@ static void cycle(float dt) {
   if (wasActive && (st == RunState::Finished || st == RunState::Aborted)) {
     for (int i = 0; i < NUM_CHANNELS; ++i) drv[i].endPending = eng.out(i).inProgram;
     runForget();
-    logEvent("\"%s\" %s after %d:%02d", runProg->name, st == RunState::Finished ? "finished" : "stopped",
+    logRun("\"%s\" %s after %d:%02d", runProg->name, st == RunState::Finished ? "finished" : "stopped",
              (int)eng.elapsed() / 60, (int)eng.elapsed() % 60);
   }
   bool endOpen = false, endDone = false;
@@ -1699,7 +1721,7 @@ static void cycle(float dt) {
         m.on = true;
         m.sp = kept;
         m.pending = m.offPending = false;
-        logEvent("%s: manual setpoint %.1f \xC2\xB0" "C after the program", s.ch[i].name, kept);
+        logRun("%s: manual setpoint %.1f \xC2\xB0" "C after the program", s.ch[i].name, kept);
       }
     }
     endOpen |= d.endPending;
