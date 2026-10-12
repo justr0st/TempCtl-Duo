@@ -28,7 +28,8 @@ start three example programs are created (Lead-free BGA, Leaded BGA, Lead-free B
     a target stepper (− value +, tap the value for the number pad; during a run it changes the current or
     kept target, otherwise the manual setpoint), the manual on / off button (filled in the channel colour
     while on), "+ Hold" (extend the running hold),
-    Acknowledge for a fault. Overlays: "Action required" (Continue / Stop), "Run interrupted by a reset"
+    Acknowledge for a fault. While a channel's outputs are on (run, manual, autotune) its tile gets a 4 px
+    border in the channel colour and a 20 % tint of it. Overlays: "Action required" (Continue / Stop), "Run interrupted by a reset"
     (Resume / Later / Dismiss; the red "Interrupted" badge opens it again), "Save the run's changes?",
     messages at the bottom.
   - **Menu**: Programs (list; editor: Sequence as one table, Timeline as two tables side by side; tap a
@@ -384,7 +385,7 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
   pauses, the forecast of the rest of the run dashed; zoom − / + / Fit, Ctrl + wheel, drag, pinch;
   "Live" shows the live history over a chosen period, see below), channel cards (PV, SP, output, what the channel does, target
   −5 / −1 / +1 / +5 / Set and Extend hold during a run, manual switch + setpoint otherwise, fault +
-  Acknowledge), the "Action required" overlay, "Save the run's changes?" after a run with run edits, and
+  Acknowledge; outputs on: 4 px border and 20 % tint in the channel colour, like the touch tiles), the "Action required" overlay, "Save the run's changes?" after a run with run edits, and
   the event log. Channel colours come from the device's accent colour (spec 6); dark mode switch in the
   sidebar (follows the system until switched; remembered by the browser; colours fade over).
 - Program editor (under the channel cards): the selected program as tables (Sequence: one row per
@@ -485,7 +486,7 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 
 | Method | Path | Body / query |
 |---|---|---|
-| GET | `/api/live` | web page, polled every second: both channels (pv, sp, out, state, target, kept, canExtend, manual, fault, autotune, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg; `intr` while a run interrupted by a reset can be resumed: reason, exact, el, i / st / left per channel), `sel`, `accent`, `progGen`, `cfgGen` (changes with every settings save), `logSeq`, `sysSeq` (newest system log line), `boot` (start number), `time` (device clock, UTC s; 0 = unknown) |
+| GET | `/api/live` | web page, polled every second: both channels (pv, sp, out, outOn (outputs on), state, target, kept, canExtend, manual, fault, autotune, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg; `intr` while a run interrupted by a reset can be resumed: reason, exact, el, i / st / left per channel), `sel`, `accent`, `progGen`, `cfgGen` (changes with every settings save), `logSeq`, `sysSeq` (newest system log line), `boot` (start number), `time` (device clock, UTC s; 0 = unknown) |
 | GET | `/api/chart?v=run` | current / last run: 300 bins of `pv`, `sp` and state lanes `st` per channel, past events `ev` [t, type, ch, idx], forecast `fc` (`seg` [t0, t1, v0, v1, src, flags] per channel, `ev`; times from now) |
 | GET | `/api/chart?v=live` | the live period (`display.liveMin`) in 300 points of `pv` / `sp` / `dlo` / `dhi` per channel; `bin` s per point, `span`, `sh` (the points before the newest end `sh` s later than whole bins before now), `have` / `cap` (s recorded / s the history holds) |
 | GET | `/api/log?since=n` | event log entries after n: [seq, uptime s, run time s or null, text, kind, epoch] (kind 1 event, 2 run, 3 warning, 4 error; epoch UTC s, 0 = clock unknown) |

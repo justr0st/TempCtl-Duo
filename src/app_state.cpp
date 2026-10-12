@@ -1475,6 +1475,7 @@ static void pollChannel(int i) {
     L.statusValid = v.statusValid; L.status = v.status;
     L.alarmValid = v.alarmValid; L.alarm = v.alarm;
     L.coldC = v.coldC;
+    L.outOn = v.outOn;
   }
   if (changed && c.type() != CH_OFF) {  // log link changes, not every failed poll
     if (ok) logEvent("%s (%s): link ok", s.ch[i].name, channelTypeName(c.type()));

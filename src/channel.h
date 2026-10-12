@@ -26,6 +26,7 @@ struct ChannelLive {
   bool statusValid; uint16_t status;
   bool alarmValid; uint16_t alarm;
   bool manualOn; float manualSp; bool manualSynced;
+  bool outOn;               // outputs on (control active, autotune too): main screen tile highlighted
   uint8_t fault;            // ChannelFault, latched until acknowledged
   char faultText[64];
   float coldC;              // local: cold-junction temperature (MAX31855)

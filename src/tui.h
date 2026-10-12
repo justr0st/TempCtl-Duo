@@ -38,7 +38,7 @@ extern const lv_font_t tfont_12, tfont_14, tfont_16b, tfont_20c, tfont_28c, tfon
 // Named styles (colours come only from these; themeApply() recolours them)
 struct TStyles {
   lv_style_t scr, panel, sunk, btn, btnPressed, btnPri, btnDanger, btnDis, btnChecked, muted, small, title, danger,
-      amber, ok, acc, ring, cell, btnOn[2], pv[2], sp[2], barBg, bar[2], overlay, dialog, listRow, sep;
+      amber, ok, acc, ring, cell, btnOn[2], tileOn[2], pv[2], sp[2], barBg, bar[2], overlay, dialog, listRow, sep;
 };
 extern TStyles S_;
 

@@ -289,6 +289,8 @@ static void baseState() {
     gLive.kept[i] = -1;
   }
   gLive.ch[1].manualOn = true;
+  gLive.ch[1].outOn = true;
+  gLive.ch[0].outOn = false;
   gLive.ch[1].manualSp = 150;
   gLive.ch[1].spEffValid = true;
   gLive.ch[1].spEff = 150;
@@ -313,6 +315,7 @@ static void runningState() {
   gLive.remaining = 140;
   gLive.ch[1].manualOn = false;
   for (int i = 0; i < 2; ++i) {
+    gLive.ch[i].outOn = true;
     gLive.run[i].inProgram = true;
     gLive.run[i].idle = false;
   }

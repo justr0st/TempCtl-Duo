@@ -390,6 +390,7 @@ static void handleStatus() {
     o["pvFlag"] = Controller::flagName(C.pvFlag);
     setNum(o["sp"], C.spEffValid ? C.spEff : NAN);
     setNum(o["out"], C.outValid ? C.out : NAN);
+    o["outOn"] = C.outOn;
     if (C.statusValid && C.type == CH_MODBUS && S.ch[i].mb.profile == PROFILE_PMA_KS4X) o["mode"] = pmaModeText(C.status);
     if (C.type == CH_LOCAL) {
       setNum(o["cold"], C.coldC);
@@ -1111,6 +1112,7 @@ static void handleLive() {
     c["pvFlag"] = Controller::flagName(C.pvFlag);
     setNum(c["sp"], C.spEffValid ? C.spEff : NAN);
     setNum(c["out"], C.outValid ? C.out : NAN);
+    c["outOn"] = C.outOn;
     if (C.statusValid && C.type == CH_MODBUS && cs.mb.profile == PROFILE_PMA_KS4X) c["mode"] = pmaModeText(C.status);
     if (C.type == CH_LOCAL) setNum(c["cold"], C.coldC);
     c["fault"] = C.fault ? C.faultText : "";

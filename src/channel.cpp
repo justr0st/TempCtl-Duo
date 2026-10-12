@@ -72,6 +72,7 @@ bool ModbusChannel::poll(ChannelLive& L, char* err, size_t n) {
       outputsOn_ = false;
     }
   }
+  L.outOn = outputsOn_;
   return ok;
 }
 
@@ -130,6 +131,7 @@ bool LocalChannel::poll(ChannelLive& L, char* err, size_t n) {
   L.out = st.out;
   L.statusValid = L.alarmValid = false;
   L.coldC = st.coldC;
+  L.outOn = st.on || st.tuning;
   if (!st.enabled) {
     snprintf(err, n, "no thermocouple pins for this channel on this board");
     return false;

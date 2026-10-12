@@ -95,7 +95,8 @@ button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
 .row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
 .row .lbl{color:var(--muted);font-size:13.5px;min-width:86px}
 .row.flt{color:var(--danger);font-weight:600}
-.chan.man{box-shadow:inset 0 0 0 2px var(--manual)}
+/* outputs on: 4 px border and a 20 % background in the channel colour (padding 3 px less: content stays in place) */
+.chan.on{border:4px solid var(--c);padding:14px 11px 11px;background:color-mix(in srgb,var(--c) 20%,var(--panel))}
 .switch{appearance:none;-webkit-appearance:none;width:44px;height:24px;border-radius:12px;background:var(--line);position:relative;cursor:pointer;margin:0;flex:none;transition:background .15s}
 .switch::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--panel);transition:left .15s}
 .switch:checked{background:var(--manual)}.switch:checked::after{left:23px}
@@ -967,8 +968,7 @@ function buildChans(){
   for(const i of CH){
     $('man'+i).onchange=async e=>{ const on=e.target.checked; e.target.busy=Date.now();
       if(on) await api('/api/manual',{ch:i,sp:+$('manSp'+i).value,on:true});
-      else if(await ask(`Switch manual mode of ${chName(i)} off? Its outputs are switched off.`,'Switch off')) await api('/api/manual',{ch:i,on:false});
-      else e.target.checked=true;
+      else await api('/api/manual',{ch:i,on:false});  // off at once (no question)
       poll(); };
     $('manSp'+i).onkeydown=e=>{ if(e.key==='Enter') document.querySelector(`[data-mset="${i}"]`).click(); };
     $('tg'+i).onkeydown=e=>{ if(e.key==='Enter') document.querySelector(`[data-set="${i}"]`).click(); };
@@ -1023,7 +1023,7 @@ function updateChans(){
     $('out'+i).style.width=(c.out!=null?Math.max(0,Math.min(100,c.out)):0)+'%'; $('ov'+i).textContent=c.out!=null?Math.round(c.out)+' %':'';
     let st=c.fault?'Fault':active&&c.inProgram?ST_TXT[c.state]||c.state:c.manual.on?'Manual':c.type==='off'?'Off':c.ok?'Idle':'No link';
     $('st'+i).textContent=st; $('st'+i).className='state '+(c.fault||(!c.ok&&c.type!=='off')?'fault':active&&c.inProgram?(c.state==='halt'||c.state==='pause'||c.state==='wait'?'pause':'run'):c.manual.on?'man':'');
-    $('card'+i).classList.toggle('man',c.manual.on);
+    $('card'+i).classList.toggle('on',!!c.outOn);
     $('why'+i).textContent=whyText(c,i,r,active);
     $('flt'+i).hidden=!c.fault; $('fltT'+i).textContent=c.fault?'Fault: '+c.fault:'';
     $('runRows'+i).hidden=!(active&&c.inProgram);

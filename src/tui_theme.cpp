@@ -87,7 +87,7 @@ static void initStyles() {
   if (done) return;
   done = true;
   lv_style_t* all[] = {&S_.scr, &S_.panel, &S_.sunk, &S_.btn, &S_.btnPressed, &S_.btnPri, &S_.btnDanger, &S_.btnDis,
-                       &S_.btnChecked, &S_.muted, &S_.small, &S_.title, &S_.danger, &S_.amber, &S_.ok, &S_.acc, &S_.ring, &S_.cell, &S_.btnOn[0], &S_.btnOn[1],
+                       &S_.btnChecked, &S_.muted, &S_.small, &S_.title, &S_.danger, &S_.amber, &S_.ok, &S_.acc, &S_.ring, &S_.cell, &S_.btnOn[0], &S_.btnOn[1], &S_.tileOn[0], &S_.tileOn[1],
                        &S_.pv[0], &S_.pv[1], &S_.sp[0], &S_.sp[1], &S_.barBg, &S_.bar[0], &S_.bar[1], &S_.overlay,
                        &S_.dialog, &S_.listRow, &S_.sep};
   for (lv_style_t* st : all) lv_style_init(st);
@@ -123,6 +123,10 @@ static void initStyles() {
   lv_style_set_radius(&S_.barBg, 3);
   lv_style_set_border_width(&S_.barBg, 1);
   for (int i = 0; i < 2; ++i) {
+    // main screen tile of a channel with its outputs on: 4 px border (the padding 3 px less, so the
+    // content stays in place)
+    lv_style_set_border_width(&S_.tileOn[i], 4);
+    lv_style_set_pad_all(&S_.tileOn[i], (TUI_SMALL ? 6 : 8) - 3);
     lv_style_set_bg_opa(&S_.bar[i], LV_OPA_COVER);
     lv_style_set_radius(&S_.bar[i], 3);
   }
@@ -191,6 +195,9 @@ static void recolour() {
     lv_style_set_text_color(&S_.pv[i], tcPv(i));
     lv_style_set_text_color(&S_.sp[i], tcSp(i));
     lv_style_set_bg_color(&S_.bar[i], tcPv(i));
+    // tile with the outputs on: border in the channel colour, background 20 % of it over the panel
+    lv_style_set_border_color(&S_.tileOn[i], tcPv(i));
+    lv_style_set_bg_color(&S_.tileOn[i], lv_color_mix(tcPv(i), col[C_PANEL], LV_OPA_20));
   }
   lv_style_set_bg_color(&S_.barBg, col[C_SUNK]);
   lv_style_set_border_color(&S_.barBg, col[C_LINE]);

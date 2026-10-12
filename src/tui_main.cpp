@@ -24,6 +24,7 @@ struct Tile {
   uint32_t downAt;     // - / + pressed down (held > 3 s: steps of 5 degC)
   bool repeated;       // the press repeated (no extra step on release)
   int8_t spStyled;
+  int8_t onStyled;     // the tile shows "outputs on" (-1 unknown)
   bool faultStyled;    // the status text shows the fault colour     // 320x240: the SP button shows the SP colour (-1 unknown)
   bool runTarget;      // the stepper edits the run's target (else the manual setpoint)
   float lo, hi;        // setpoint limits
@@ -181,6 +182,7 @@ static void tileCreate(int ch, lv_obj_t* parent, int x, int y, int w, int h) {
   Tile& t = tiles[ch];
   t.pend = NAN;
   t.shown = NAN;
+  t.onStyled = -1;
   t.box = tPanel(parent);
   lv_obj_set_pos(t.box, x, y);
   lv_obj_set_size(t.box, w, h);
@@ -258,10 +260,10 @@ static void tileCreateSmall(int ch, lv_obj_t* parent, int x, int y, int w, int h
   t.pend = NAN;
   t.shown = NAN;
   t.spStyled = -1;
+  t.onStyled = -1;
   t.box = tPanel(parent);
   lv_obj_set_pos(t.box, x, y);
   lv_obj_set_size(t.box, w, h);
-  lv_obj_set_style_pad_all(t.box, 6, 0);
   const int iw = w - 12;
   t.name = tLabel(t.box, &tfont_14, "");
   lv_obj_add_style(t.name, &S_.pv[ch], 0);
@@ -362,6 +364,11 @@ static void tileUpdate(int ch) {
   char b[96];
   tSetText(t.name, C.name);
   tSetText(t.status, chStateText(ch, b, sizeof(b)));
+  if (t.onStyled != (int8_t)C.outOn) {  // outputs on: border and background in the channel colour
+    t.onStyled = (int8_t)C.outOn;
+    if (C.outOn) lv_obj_add_style(t.box, &S_.tileOn[ch], 0);
+    else lv_obj_remove_style(t.box, &S_.tileOn[ch], 0);
+  }
   if ((C.fault != 0) != t.faultStyled) {
     t.faultStyled = C.fault != 0;
     if (t.faultStyled) lv_obj_add_style(t.status, &S_.danger, 0);
