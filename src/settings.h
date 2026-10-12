@@ -114,6 +114,10 @@ struct Settings {
   uint16_t liveMin;      // live chart period, minutes (at most what the live history holds)
   uint8_t screenCheck;   // 1: watch the display / touch controller, restart one that hangs (default on)
 
+  // Time zone (local time in the SD run logs): "Europe/Berlin", "UTC+02:00" (its rule: tzLookup); empty =
+  // not set yet (UTC; the web page sets it from the browser once)
+  char tzName[32];
+
   // Tools: setpoint-address finder range
   uint16_t scanFrom, scanTo;
 
@@ -146,3 +150,9 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi);
 // Merges the keys present in `o` into `s` (missing keys keep their values,
 // unknown keys are ignored). Returns false + message on a wrong value type.
 bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n);
+
+// Time zones: a name from the list ("Europe/Berlin") or "UTC", "UTC+02:00", "UTC-03:30" -> its POSIX rule.
+// False if unknown. tzCount / tzName(i): the list (for the web page, the touch screen, serial).
+bool tzLookup(const char* name, char* tz, size_t n);
+int tzCount();
+const char* tzListName(int i);

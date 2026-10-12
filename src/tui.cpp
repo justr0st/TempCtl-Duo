@@ -2,6 +2,7 @@
 // Screens: tui_main.cpp (main), tui_menu.cpp (menu, log, display, network, system), tui_chart.cpp,
 // building blocks and popups: tui_widgets.cpp, colours and styles: tui_theme.cpp.
 #include "tui.h"
+#include "crumbs.h"
 #include "console.h"
 #include "lcd.h"
 #include "touch.h"
@@ -382,7 +383,9 @@ void uiLoop() {
     scrRestartReq = false;
     screenRestartAsked();
   }
+  crumb(CR_LOOP, L_SCREENCHECK);
   screenWatch();
+  crumb(CR_LOOP, L_LVGL);
   if (disp) lv_timer_handler();
 }
 

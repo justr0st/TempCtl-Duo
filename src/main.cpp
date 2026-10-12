@@ -3,6 +3,8 @@
 // controllers. Boards: ESP32-S3-DevKitC-1 + 4.0" ST7796 (env s3) and the
 // ESP32-2432S028R "CYD" (env cyd), see src/board_*.h.
 #include "syslog.h"
+#include "sdlog.h"
+#include "crumbs.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
@@ -58,6 +60,7 @@ void setup() {
   memLog("after settings/programs/control");
   LogSerial.println("[boot] ui");
   uiInit();           // display, touch, LVGL screens
+  sdlogBegin();       // run logs on the SD card (S3; shares the display's SPI bus)
   memLog("after ui");
   netBegin();         // Wi-Fi STA (or AP fallback)
   memLog("after wifi");
@@ -73,6 +76,7 @@ void setup() {
 }
 
 void loop() {
+  crumb(CR_LOOP, L_SYSLOG);
   syslogLoop();  // new events to flash (at most every 30 s)
   // heap check once a minute (internal RAM: free, largest block, lowest so far)
   {
@@ -103,9 +107,13 @@ void loop() {
     delay(10);
     return;
   }
+  crumb(CR_LOOP, L_UI);
   uiLoop();
+  crumb(CR_LOOP, L_CONSOLE);
   consoleLoop();
+  crumb(CR_LOOP, L_WEB);
   webLoop();
+  crumb(CR_LOOP, L_END);
   netLoop();
   delay(2);
 }

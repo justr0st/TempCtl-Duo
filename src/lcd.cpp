@@ -12,7 +12,9 @@
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
 #include <esp_heap_caps.h>
+#include <freertos/semphr.h>
 #include "config.h"
+#include "crumbs.h"
 
 #if defined(LCD_CTRL_ST7796)
 #define LCD_CREATE lv_st7796_create
@@ -37,11 +39,15 @@ static int queued = 0;  // DMA colour transfers not yet collected
 // lv_display_flush_ready() before it flushes again, so this does not block
 // in practice.
 static void drainQueue() {
+  if (queued <= 0) return;
+  const CrumbCode was = crumbGet(CR_LOOP);
+  crumb(CR_LOOP, L_LCD_WAIT);
   while (queued > 0) {
     spi_transaction_t* r = nullptr;
     if (spi_device_get_trans_result(spi, &r, portMAX_DELAY) != ESP_OK) break;
     --queued;
   }
+  crumb(CR_LOOP, was);
 }
 
 static void sendPolling(const uint8_t* data, size_t len, bool dc) {
@@ -311,16 +317,36 @@ static uint8_t bbReg(uint8_t cmd, uint8_t at) {
 }
 #endif
 
-// at: sampling point; several sets of reads (n x NREG values) in one bus release
-static bool readRegs(uint8_t* out, const uint8_t* ats, int sets) {
+static SemaphoreHandle_t busMutex() {
+  static StaticSemaphore_t buf;
+  static SemaphoreHandle_t m = xSemaphoreCreateMutexStatic(&buf);  // (C++ static: created once, thread-safe)
+  return m;
+}
+bool lcdBusLock(uint32_t waitMs) { return xSemaphoreTake(busMutex(), pdMS_TO_TICKS(waitMs)) == pdTRUE; }
+void lcdBusUnlock() { xSemaphoreGive(busMutex()); }
+
+// at: sampling point; several sets of reads (n x NREG values) in one bus release.
+// 1: read, 0: SPI error, -1: busy (the SD card uses the bus)
+static int readRegs(uint8_t* out, const uint8_t* ats, int sets) {
 #if LCD_PIN_MISO < 0
-  return false;
+  return 0;
 #else
   static const uint8_t CMDS[NREG] = {0x0A, 0x0B, 0x0C, 0x0D};
+  if (!lcdBusLock(0)) return -1;
+  struct Unlock {
+    ~Unlock() { lcdBusUnlock(); }
+  } unlock;
   drainQueue();
-  if (spi_bus_remove_device(spi) != ESP_OK) return false;
+  if (spi_bus_remove_device(spi) != ESP_OK) return 0;
   spi = nullptr;
-  spi_bus_free(SPI2_HOST);
+  if (spi_bus_free(SPI2_HOST) != ESP_OK) {  // another device is still on the bus: no read, display stays as it is
+    if (spi_bus_add_device(SPI2_HOST, &devCfg, &spi) != ESP_OK) {
+      spi = nullptr;
+      LogSerial.println("[lcd] SPI device could not be added again");  // (should not happen)
+      return 0;
+    }
+    return -1;
+  }
   pinMode(LCD_PIN_CS, OUTPUT);
   digitalWrite(LCD_PIN_CS, HIGH);
   pinMode(LCD_PIN_SCK, OUTPUT);
@@ -336,7 +362,7 @@ static bool readRegs(uint8_t* out, const uint8_t* ats, int sets) {
     LogSerial.println("[lcd] SPI could not be set up again after the status read");  // (should not happen)
     spi = nullptr;
   }
-  return ok;
+  return ok ? 1 : 0;
 #endif
 }
 
@@ -361,7 +387,12 @@ int lcdCheck(char* info, size_t n) {
   uint8_t v[2 * NREG] = {0};
   if (readable < 0) {  // right after the init: try both sampling points, keep the one that reads back the setup
     static const uint8_t ATS[2] = {0, 1};
-    if (!readRegs(v, ATS, 2)) {
+    const int r = readRegs(v, ATS, 2);
+    if (r < 0) {
+      snprintf(info, n, "busy (SD card), tried again");
+      return -1;
+    }
+    if (!r) {
       snprintf(info, n, "not readable (SPI), check off");
       readable = 0;
       return -1;
@@ -383,8 +414,9 @@ int lcdCheck(char* info, size_t n) {
     return 1;
   }
   const uint8_t at = sampleAt;
-  if (!readRegs(v, &at, 1)) {
-    snprintf(info, n, "SPI error");
+  const int r = readRegs(v, &at, 1);
+  if (r <= 0) {
+    snprintf(info, n, r < 0 ? "busy (SD card)" : "SPI error");
     return -1;
   }
   const bool ok = asSetUp(v, want, base);

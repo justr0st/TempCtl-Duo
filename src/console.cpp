@@ -462,6 +462,12 @@ static const char* const H_SETTINGS[] = {
     "  screenCheck=on|off           restart a hanging display / touch controller by itself",
     "  liveMin=<min>                live chart period: 1 5 10 15 30 60 120 240 480 720 1440",
     "  e.g. set display.accent=orange display.brightness=180 display.liveMin=30",
+    "",
+    "TIME (time.*)",
+    "  zone=<zone>                  time zone for the SD run logs (local time): a name from",
+    "                               \"help time\", UTC+hh:mm (no summer time), or empty (UTC);",
+    "                               set from the web browser the first time",
+    "  e.g. set time.zone=Europe/Berlin",
 };
 
 struct HelpSec {
@@ -502,9 +508,28 @@ static void help(const char* section = nullptr) {
       return printLines(H_SETTINGS, sizeof(H_SETTINGS) / sizeof(H_SETTINGS[0]));
     if (!strcasecmp(section, "api") || !strcasecmp(section, "json"))
       return printLines(H_API, sizeof(H_API) / sizeof(H_API[0]));
+    if (!strcasecmp(section, "time") || !strcasecmp(section, "timezone") || !strcasecmp(section, "zones")) {
+      char now[48] = "", line[120] = "";
+      {
+        Guard g;
+        strlcpy(now, gSettings.tzName, sizeof(now));
+      }
+      say("time zone now: %s   (set time.zone=<zone>; UTC+hh:mm for a fixed offset; empty = UTC)", now[0] ? now : "not set (UTC)");
+      for (int i = 0; i < tzCount(); ++i) {  // several names per line
+        const char* z = tzListName(i);
+        if (strlen(line) + strlen(z) + 2 > 96) {
+          say("  %s", line);
+          line[0] = 0;
+        }
+        if (line[0]) strlcat(line, "  ", sizeof(line));
+        strlcat(line, z, sizeof(line));
+      }
+      if (line[0]) say("  %s", line);
+      return;
+    }
     for (const HelpSec& h : HELP)
       if (nameIn(h.names, section)) return printLines(h.lines, h.n);
-    return err("no help section \"%s\" (status, manual, programs, autotune, wifi, settings, device, api)", section);
+    return err("no help section \"%s\" (status, manual, programs, autotune, wifi, settings, time, device, api)", section);
   }
   banner();
   for (const HelpSec& h : HELP) {
@@ -985,6 +1010,7 @@ static void runCmd(const Args& a) {
       sendCmd(CMD_SAVE_RUN);
       return say("saving the run's changes into \"%s\"", L.runName);
     }
+    sendCmd(CMD_DISCARD_RUN);
     return say("the run's changes are dropped");
   }
 }
@@ -1159,9 +1185,9 @@ static void cmdTune(const Args& a) {
 // ------------------------------------------------------------ settings: get / set
 // One table: the keys of the settings API (channels[i]. -> b. / t.), what values they take (checked
 // before anything is changed) and how get shows them.
-enum KType : uint8_t { K_NUM, K_INT, K_BOOL, K_CHOICE, K_SET, K_STR, K_IP, K_ADDR, K_ACCENT, K_PARITY, K_HOST };
-enum KSec : uint8_t { KS_CH, KS_BUS, KS_RUN, KS_WIFI, KS_DISP };
-static const char* const KSEC_NAME[] = {"", "bus", "run", "wifi", "display"};
+enum KType : uint8_t { K_NUM, K_INT, K_BOOL, K_CHOICE, K_SET, K_STR, K_IP, K_ADDR, K_ACCENT, K_PARITY, K_HOST, K_TZ };
+enum KSec : uint8_t { KS_CH, KS_BUS, KS_RUN, KS_WIFI, KS_DISP, KS_TIME };
+static const char* const KSEC_NAME[] = {"", "bus", "run", "wifi", "display", "time"};
 struct SKey {
   uint8_t sec, t;
   const char* key;  // path below the section (channels: below channels[i])
@@ -1231,6 +1257,7 @@ static const SKey KEYS[] = {
     {KS_DISP, K_BOOL, "rotate180", 0, 0, nullptr},
     {KS_DISP, K_BOOL, "screenCheck", 0, 0, nullptr},
     {KS_DISP, K_SET, "liveMin", 0, 0, "1|5|10|15|30|60|120|240|480|720|1440"},
+    {KS_TIME, K_TZ, "zone", 0, 0, nullptr},
 };
 static const char* const ACCENT_NAMES[] = {"blue", "pink", "violet", "orange", "mauve", "green"};
 static const uint32_t ACCENT_RGB[] = {0x2196F3, 0xD1449B, 0x6C71C4, 0xD65D0E, 0x8839EF, 0x50A14F};
@@ -1449,6 +1476,14 @@ static void cmdSet(const Args& a) {
         strlcpy(m.val, v, sizeof(m.val));
         dobj[dkey] = m.val;
         break;
+      case K_TZ: {
+        char rule[48];
+        if (*v && !tzLookup(v, rule, sizeof(rule)))
+          return err("%s=%s: a zone from \"help time\" (e.g. Europe/Berlin), UTC+hh:mm, or empty (UTC)", m.name, v);
+        strlcpy(m.val, v, sizeof(m.val));
+        dobj[dkey] = m.val;
+        break;
+      }
       case K_HOST:
         if (!validHost(v)) return err("%s=%s: letters, digits and '-', 1 ... 23 characters, not starting or ending with '-'", m.name, v);
         strlcpy(m.val, v, sizeof(m.val));
@@ -1816,7 +1851,7 @@ static void events() {
     breakLine();
     say("run changed the program \"%s\" - type \"save\" or \"discard\"", E.runName);
   }
-  if (active) savePending = false;
+  if (active || !E.runEdited) savePending = false;  // (answered on the touch screen or the web page)
   prevState = E.state;
   // run interrupted by a reset: once
   if (E.intrValid && !intrShown) {

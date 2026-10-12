@@ -662,7 +662,109 @@ void networkUpdate() {
 }
 
 // ------------------------------------------------------------ system
-static lv_obj_t *sInfo, *sPoll, *sBand;
+static lv_obj_t *sInfo, *sPoll, *sBand, *sTz;
+
+// ------------------------------------------------------------ time zone (two steps: region, then the place)
+static const char* const TZ_OFFSETS[] = {"UTC-12:00", "UTC-11:00", "UTC-10:00", "UTC-09:30", "UTC-09:00", "UTC-08:00",
+                                         "UTC-07:00", "UTC-06:00", "UTC-05:00", "UTC-04:00", "UTC-03:30", "UTC-03:00",
+                                         "UTC-02:00", "UTC-01:00", "UTC+01:00", "UTC+02:00", "UTC+03:00", "UTC+03:30",
+                                         "UTC+04:00", "UTC+04:30", "UTC+05:00", "UTC+05:30", "UTC+05:45", "UTC+06:00",
+                                         "UTC+06:30", "UTC+07:00", "UTC+08:00", "UTC+09:00", "UTC+09:30", "UTC+10:00",
+                                         "UTC+11:00", "UTC+12:00", "UTC+13:00", "UTC+14:00"};
+static constexpr int TZ_NOFF = sizeof(TZ_OFFSETS) / sizeof(TZ_OFFSETS[0]);
+static char tzRegions[10][16];  // the list's regions ("Europe", ...); [0] "UTC", last: fixed offsets
+static int tzNReg = 0;
+static int16_t tzPick[40];      // the list index of each place in the last region list
+
+static void tzSet(const char* name) {
+  char rule[48];
+  if (*name && !tzLookup(name, rule, sizeof(rule))) return;
+  {
+    Guard g;
+    strlcpy(gSettings.tzName, name, sizeof(gSettings.tzName));
+  }
+  saveQuiet();
+  logEvent("Time zone: %s", *name ? name : "not set (UTC)");
+  systemShow();
+}
+
+static void onTzPlace(int i, int) {
+  if (i >= 0 && i < 40 && tzPick[i] >= 0) tzSet(tzListName(tzPick[i]));
+}
+static void onTzOffset(int i, int) {
+  if (i >= 0 && i < TZ_NOFF) tzSet(TZ_OFFSETS[i]);
+}
+
+static void onTzRegion(int r, int) {
+  if (r < 0) return;
+  char cur[sizeof(gSettings.tzName)];
+  {
+    Guard g;
+    strlcpy(cur, gSettings.tzName, sizeof(cur));
+  }
+  if (r == 0) return tzSet("UTC");
+  constexpr size_t ISZ = 1400;
+  char* items = (char*)malloc(ISZ);  // (only while the popup is built: its labels copy the text)
+  if (!items) return;
+  items[0] = 0;
+  int n = 0, sel = -1;
+  if (r == tzNReg - 1) {  // fixed offsets
+    for (int i = 0; i < TZ_NOFF; ++i) {
+      if (i) strlcat(items, "\n", ISZ);
+      strlcat(items, TZ_OFFSETS[i], ISZ);
+      if (!strcmp(cur, TZ_OFFSETS[i])) sel = i;
+    }
+    tChoice("UTC offset (no summer time)", items, sel, onTzOffset, 0);
+    free(items);
+    return;
+  }
+  const size_t rl = strlen(tzRegions[r]);
+  for (int i = 0; i < tzCount() && n < 40; ++i) {
+    const char* z = tzListName(i);
+    if (strncmp(z, tzRegions[r], rl) || z[rl] != '/') continue;
+    char place[40];
+    strlcpy(place, z + rl + 1, sizeof(place));
+    for (char* c = place; *c; ++c)
+      if (*c == '_') *c = ' ';
+    if (n) strlcat(items, "\n", ISZ);
+    strlcat(items, place, ISZ);
+    if (!strcmp(cur, z)) sel = n;
+    tzPick[n++] = (int16_t)i;
+  }
+  tChoice(tzRegions[r], items, sel, onTzPlace, 0);
+  free(items);
+}
+
+static void onTz(lv_event_t*) {
+  tzNReg = 0;
+  strlcpy(tzRegions[tzNReg++], "UTC", sizeof(tzRegions[0]));
+  for (int i = 0; i < tzCount(); ++i) {
+    const char* z = tzListName(i);
+    const char* s = strchr(z, '/');
+    if (!s) continue;
+    char reg[16];
+    snprintf(reg, sizeof(reg), "%.*s", (int)(s - z), z);
+    bool have = false;
+    for (int k = 0; k < tzNReg; ++k) have |= !strcmp(tzRegions[k], reg);
+    if (!have && tzNReg < 9) strlcpy(tzRegions[tzNReg++], reg, sizeof(tzRegions[0]));
+  }
+  strlcpy(tzRegions[tzNReg++], "UTC offset", sizeof(tzRegions[0]));
+  char cur[sizeof(gSettings.tzName)];
+  {
+    Guard g;
+    strlcpy(cur, gSettings.tzName, sizeof(cur));
+  }
+  char items[200] = "";
+  int sel = -1;
+  for (int k = 0; k < tzNReg; ++k) {
+    if (k) strlcat(items, "\n", sizeof(items));
+    strlcat(items, k == tzNReg - 1 ? "UTC offset (no summer time)" : tzRegions[k], sizeof(items));
+    const size_t rl = strlen(tzRegions[k]);
+    if (k == 0 ? !strcmp(cur, "UTC") : k == tzNReg - 1 ? !strncmp(cur, "UTC", 3) && cur[3] : !strncmp(cur, tzRegions[k], rl) && cur[rl] == '/')
+      sel = k;
+  }
+  tChoice("Time zone", items, sel, onTzRegion, 0);
+}
 
 static void onPollNum(float v, int) {
   {
@@ -711,6 +813,8 @@ lv_obj_t* systemCreate() {
   sPoll = tButton(r, "", onPoll, nullptr, CW2, BH);
   r = settingRow(p.body, "\"Bottom reached\" band", "\"Wait for bottom\" goes on within \xC2\xB1 this");
   sBand = tButton(r, "", onBand, nullptr, CW2, BH);
+  r = settingRow(p.body, "Time zone", "Local time in the SD run logs");
+  sTz = tButton(r, "", onTz, nullptr, CW2, BH);
   lv_obj_t* info = tPanel(p.body);
   lv_obj_set_size(info, LV_PCT(100), LV_SIZE_CONTENT);
   sInfo = tLabel(info, &tfont_14, "");
@@ -729,6 +833,12 @@ void systemShow() {
   tButtonText(sPoll, b);
   snprintf(b, sizeof(b), "%.1f \xC2\xB0" "C", s.bottomBand);
   tButtonText(sBand, b);
+  const char* tz = s.tzName[0] ? (strchr(s.tzName, '/') ? strrchr(s.tzName, '/') + 1 : s.tzName) : "Not set (UTC)";
+  char tzb[32];
+  strlcpy(tzb, tz, sizeof(tzb));
+  for (char* c = tzb; *c; ++c)
+    if (*c == '_') *c = ' ';
+  tButtonText(sTz, tzb);
   systemUpdate();
 }
 

@@ -188,6 +188,7 @@ enum CmdType : uint8_t {
   CMD_TUNE_STOP,    // arg = channel
   CMD_RUN_EDIT,     // sub = RunEdit, arg = channel, idx = phase/step (-1 current), value
   CMD_SAVE_RUN,     // store the running copy (with its run edits) into its slot
+  CMD_DISCARD_RUN,  // keep the stored program (the run edits are dropped): the question is answered
   CMD_RUN_RECOVER,  // "Resume from the interrupted phase" (run interrupted by a reset)
   CMD_RUN_DISMISS,  // dismiss the interrupted run
 };

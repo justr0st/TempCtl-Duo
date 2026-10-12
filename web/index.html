@@ -106,6 +106,13 @@ button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
 .log li.k4{color:var(--danger)}.log li.k3{color:var(--amber)}.log li.k2{color:var(--acc)}
 /* system log (System page): colour per kind - 0 info (technical), 1 event, 2 run, 3 warning, 4 error */
 .slbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
+/* SD run logs (System page, S3) */
+.sdrow{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) auto;gap:4px 12px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--line)}
+.sdrow:last-child{border-bottom:0}
+.sdrow .pn{font-weight:600;min-width:0;overflow-wrap:anywhere}.sdrow .pn .state{margin-left:6px;font-size:12px;padding:0 7px}
+.sdrow .pm{color:var(--muted);font-size:13.5px;display:flex;flex-wrap:wrap;gap:2px 10px}
+.sdrow .pa{display:flex;gap:6px;justify-content:flex-end}
+@media (max-width:640px){.sdrow{grid-template-columns:minmax(0,1fr) auto}.sdrow .pm{grid-column:1;grid-row:2}.sdrow .pa{grid-row:1/3;grid-column:2}}
 .slbar .kf{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:3px 10px;border-radius:999px;font-size:13.5px}
 .slbar .kf i{width:9px;height:9px;border-radius:50%;display:block}
 .slbar .kf[aria-pressed=false]{opacity:.45;border-style:dashed}
@@ -362,7 +369,7 @@ table.t input{width:90px}
 <section class="panel mt" id="edP" aria-label="Program editor">
   <div class="edhead"><h2 id="edTitle">Program</h2><span class="unsaved" id="unsaved"></span>
     <span class="tools"><button data-act="undo" title="Ctrl+Z">Undo</button><button data-act="redo" title="Ctrl+Y">Redo</button><button data-act="save" class="pri">Save program</button><button data-act="discard">Discard changes</button></span></div>
-  <div class="bar"><label class="f">Name <input type="text" id="pName" maxlength="31" style="width:260px"></label></div>
+  <div class="bar"><label class="f">Name <input type="text" id="pName" maxlength="31" style="width:260px"></label><button id="toTl" hidden title="Make a Timeline with the same temperatures and times">Convert to Timeline</button></div>
   <p class="edhint" id="edHint"></p>
   <div id="editor"></div>
   <div class="msg" id="edMsg"></div>
@@ -409,7 +416,11 @@ table.t input{width:90px}
   </div>
   <div class="fbar"><button class="pri" id="bWifi">Save and connect</button><span class="msg" id="wMsg"></span></div></section>
 <section class="panel" id="sDisp" data-form="disp"></section>
+<section class="panel" id="sTime" data-form="time"></section>
 </div>
+<section class="panel mt" id="sdP" aria-label="Run logs on the SD card" hidden>
+  <div class="edhead"><h2>Run logs (SD card)</h2><span class="tools"><button id="sdRef">Refresh</button></span></div>
+  <p class="hint" id="sdSt"></p><div class="plist" id="sdList"></div><div class="msg" id="sdMsg"></div></section>
 <section class="panel mt" id="sLogP" aria-label="Log"><h2>Log</h2>
   <div class="slbar" id="slBar"><input type="search" id="slFind" placeholder="Search" aria-label="Search the log">
     <button id="slDl" title="All lines as a text file">Download</button><span class="msg" id="slMsg"></span></div>
@@ -457,7 +468,7 @@ table.t input{width:90px}
   <p>This run changed the program (targets, ramps or holds). Save them into the stored program, or keep the program as it was.</p>
   <div class="btns"><button id="dSave" class="pri">Save to program</button><button id="dDiscard">Keep the stored program</button></div>
 </dialog>
-<dialog id="chDlg"><p id="chTxt"></p><div class="btns" id="chBtns"></div></dialog>
+<dialog id="chDlg"><p id="chTxt" style="white-space:pre-line"></p><div class="btns" id="chBtns"></div></dialog>
 <input type="file" id="fileIn" accept=".json,application/json" hidden>
 <dialog id="askDlg"><p id="askTxt"></p><div class="btns"><button id="askOk" class="pri">OK</button><button id="askNo">Cancel</button></div></dialog>
 
@@ -742,7 +753,7 @@ function pvPts(d,i,tOf,out){ const pv=d.pv[i], lo=d.dlo&&d.dlo[i], hi=d.dhi&&d.d
     out.push([t,aFirst?a:b],[t,aFirst?b:a]); prev=aFirst?b:a; }
   return out; }
 function modelFromRun(d){
-  const M={kind:d.mode,now:d.el,prog:runProg,hist:[],lanes:[],segs:[[],[]],ev:[]};
+  const M={kind:d.mode,now:d.el,prog:runProg,hist:[],lanes:[],segs:[[],[]],ev:[],bin:d.bin};
   let lastT=0;
   for(const i of CH){ const pv=[],sp=[],ln=[]; const st=d.st[i]||'';
     pvPts(d,i,k=>k*d.bin,pv);
@@ -790,12 +801,17 @@ async function refreshChart(){
   if(live) await loadSaved(live.sel);
   previewDraft();
 }
-// latest values from /api/live onto the chart (each poll; the history comes every 2 s)
+// latest values from /api/live onto the chart (each poll; the history comes every 2 s): PV and the active
+// setpoint (as the device records it: the controller's SP, else the program's / the manual one while the
+// outputs are on)
+function headSp(c,run){ if(c.sp!=null) return c.sp; if(!c.outOn) return null;
+  if(run&&c.inProgram&&!c.idle&&c.runSp!=null) return c.runSp; return c.manual&&c.manual.on&&c.manual.sp!=null?c.manual.sp:null; }
 function chartHead(){
   if(!M||!live||drag) return;
-  const v=CH.map(i=>live.ch[i].pv!=null?live.ch[i].pv:null);
-  if(M.kind==='live'){ M.head={t:Math.min(Math.max(5,M.bin),(Date.now()-M.at)/1000),v}; lastChart=0; }
-  else if(M.kind==='run'&&live.run.state==='running'&&live.run.el!=null&&live.run.el>=M.now){ M.now=live.run.el; M.head={t:live.run.el,v}; lastChart=0; }
+  const run=live.run.state==='running'||live.run.state==='paused';
+  const v=CH.map(i=>live.ch[i].pv!=null?live.ch[i].pv:null), sp=CH.map(i=>headSp(live.ch[i],run));
+  if(M.kind==='live'){ M.head={t:Math.min(Math.max(5,M.bin),(Date.now()-M.at)/1000),v,sp}; lastChart=0; }
+  else if(M.kind==='run'&&live.run.state==='running'&&live.run.el!=null&&live.run.el>=M.now){ M.now=live.run.el; M.head={t:live.run.el,v,sp}; lastChart=0; }
 }
 function previewDraft(){ const p=live?DRAFT[live.sel]:null; M=p&&progItems(p)?modelPreview(p):null; lastChart=0; }
 async function ensureRunProg(running){ const now=Date.now(); if(!runProg||(running&&now-runProgAt>5000)){ const r=await api('/api/run'); runProg=normProg(r.program); runProgAt=now; } }
@@ -878,16 +894,20 @@ function renderChart(){
         const x=(M.prog[KEY[e.ch]]||[])[e.idx]; if(!x||x.kind==='pause') continue; const v=x.kind==='idle'?YMIN+5:x.t;
         s+=`<text x="${X(e.t)+6}" y="${Y(v)-11}" style="fill:var(--text);font-size:11.5px;paint-order:stroke;stroke:var(--panel);stroke-width:3px">${fmt(e.t)}</text>`; } }
   }
+  const near=Math.max(8,(M.bin||0)*2.5);  // the newest reading joins the history's last point when that is this close
   for(const i of CH){
     const shSp=!lv||LVIS.sp[i], shPv=!lv||LVIS.pv[i];
-    // SP: half strength with the area under it lightly filled (the temperature line stays on top)
-    if(shSp) s+=`<path d="${areaOf(M.hist[i].sp)}" style="fill:${SP[i]};opacity:.2;stroke:none"/>`;
-    if(shSp) s+=`<path d="${pathOf(M.hist[i].sp)}" style="fill:none;stroke:${SP[i]};stroke-width:1.8;stroke-linejoin:round;opacity:.5"/>`;
+    // SP: half strength with the area under it lightly filled (the temperature line stays on top); the
+    // newest setpoint from the last poll extends it, so a ramp moves on every poll, not only with the history
+    let sp=M.hist[i].sp; const hs=M.head&&M.head.sp?M.head.sp[i]:null;
+    if(hs!=null&&sp.length){ const L=sp[sp.length-1]; if(M.head.t>L[0]&&M.head.t-L[0]<near) sp=sp.concat([[M.head.t,hs]]); }
+    if(shSp) s+=`<path d="${areaOf(sp)}" style="fill:${SP[i]};opacity:.2;stroke:none"/>`;
+    if(shSp) s+=`<path d="${pathOf(sp)}" style="fill:none;stroke:${SP[i]};stroke-width:1.8;stroke-linejoin:round;opacity:.5"/>`;
     if(shPv) s+=`<path d="${pathOf(M.hist[i].pv)}" style="fill:none;stroke:${PV[i]};stroke-width:2.5;stroke-linejoin:round"/>`;
     // newest reading (polled faster than the chart history is fetched): line from the last point + dot
     const hp=M.hist[i].pv, hv=shPv&&M.head?M.head.v[i]:null;
     if(hv!=null){ const L=hp.length?hp[hp.length-1]:null;
-      if(L&&M.head.t-L[0]<8) s+=`<path d="M${X(L[0]).toFixed(1)} ${Y(L[1]).toFixed(1)}L${X(M.head.t).toFixed(1)} ${Y(hv).toFixed(1)}" style="fill:none;stroke:${PV[i]};stroke-width:2.5"/>`;
+      if(L&&M.head.t-L[0]<near) s+=`<path d="M${X(L[0]).toFixed(1)} ${Y(L[1]).toFixed(1)}L${X(M.head.t).toFixed(1)} ${Y(hv).toFixed(1)}" style="fill:none;stroke:${PV[i]};stroke-width:2.5"/>`;
       s+=`<circle cx="${X(M.head.t).toFixed(1)}" cy="${Y(hv).toFixed(1)}" r="3.5" style="fill:${PV[i]}"/>`; }
     s+=`<path d="${segPath(M.segs[i])}" style="fill:none;stroke:${SP[i]};stroke-width:2;stroke-dasharray:6 4;opacity:.95"/>`;
   }
@@ -1051,8 +1071,49 @@ const clampS=v=>Math.max(0,Math.min(MAXSEC,Math.round(v)));
 const clampT=(ch,v)=>{ const c=live&&live.ch[ch]; return Math.round(Math.max(c?c.spMin:0,Math.min(c?c.spMax:500,v))*10)/10; };
 function newPhase(kind){ return {kind,wait:false,msg:kind==='P',text:'',b:{t:150,r:60,h:60,idle:false},t:{t:200,r:30,h:20}}; }
 function newStep(){ return {kind:'step',t:180,r:30,h:30,msg:false,text:''}; }
-function newDraft(i,type){ UNDO[i]=UNDO[i]||[]; REDO[i]=[]; UNDO[i].push(clone(DRAFT[i]===undefined?null:DRAFT[i]));
-  DRAFT[i]=type==='seq'?{name:`Program ${i+1}`,type:'seq',phases:[newPhase('B')]}:{name:`Program ${i+1}`,type:'tl',B:[newStep()],T:[]}; }
+function newDraft(i,type,prog){ UNDO[i]=UNDO[i]||[]; REDO[i]=[]; UNDO[i].push(clone(DRAFT[i]===undefined?null:DRAFT[i]));
+  DRAFT[i]=prog?clone(prog):type==='seq'?{name:`Program ${i+1}`,type:'seq',phases:[newPhase('B')]}:{name:`Program ${i+1}`,type:'tl',B:[newStep()],T:[]}; }
+
+/* Sequence -> Timeline (spec 9.3.3): the same temperatures and times on two step lists. Phase by phase on
+   one clock; a channel that "keeps its previous state" gets its last hold (or Idle) lengthened up to the
+   next phase that gives it a target; Bottom jumps (Both) become ramp-0 steps; a Pause phase becomes a
+   pause step (bottom list, or top if the bottom is not used: a pause step stops the whole run). "Wait for
+   bottom" is dropped (the Timeline uses the programmed times, as the preview does). Returns {prog} or {err}. */
+function seqToTl(p,name){
+  const L=[[],[]], E=[0,0], used=[progUses(p,0),progUses(p,1)];
+  const add=(c,x)=>{ while(x.h>MAXSEC){ L[c].push(Object.assign({},x,{h:MAXSEC})); x=Object.assign({},x,{r:0,h:x.h-MAXSEC}); } L[c].push(x); };
+  const pad=(c,T)=>{ const gap=T-E[c]; E[c]=Math.max(E[c],T); if(gap<=0||!used[c]) return;
+    let k=L[c].length-1; while(k>=0&&L[c][k].kind==='pause') --k;
+    const last=L[c][k];
+    if(k===L[c].length-1&&last&&last.h+gap<=MAXSEC){ last.h+=gap; return; }  // the last step holds longer
+    add(c,last&&last.kind==='step'?{kind:'step',t:last.t,r:0,h:gap,msg:false,text:''}:{kind:'idle',t:0,r:0,h:gap,msg:false,text:''}); };
+  const step=(c,s,T)=>{ pad(c,T); add(c,{kind:'step',t:s.t,r:s.r,h:s.h,msg:false,text:''}); E[c]=T+s.r+s.h; };
+  let T=0;
+  for(const x of p.phases){
+    if(x.kind==='B'){ step(0,x.b,T); T+=x.b.r+x.b.h; }
+    else if(x.kind==='T'){ step(1,x.t,T); T+=x.t.r+x.t.h; }
+    else if(x.kind==='BT'){ pad(0,T); L[0].push(x.b.idle?{kind:'idle',t:0,r:0,h:0,msg:false,text:''}:{kind:'step',t:x.b.t,r:0,h:0,msg:false,text:''}); E[0]=T;
+      step(1,x.t,T); T+=x.t.r+x.t.h; }
+    else { const c=used[0]||!used[1]?0:1; pad(c,T); L[c].push({kind:'pause',t:0,r:0,h:0,msg:!!x.msg,text:x.text||''}); }
+  }
+  const over=CH.filter(c=>L[c].length>MAXN);
+  if(over.length) return {err:`The Timeline would need more than ${MAXN} steps for ${over.map(chName).join(' and ')}.`};
+  return {prog:{name:(name||p.name).slice(0,31),type:'tl',B:L[0],T:L[1]}};
+}
+async function convertToTl(){
+  if(running()||!live) return; const i=live.sel, p=DRAFT[i]; if(!p||p.type!=='seq') return;
+  const waits=p.phases.map((x,k)=>x.wait&&(x.kind==='B'||(x.kind==='BT'&&!x.b.idle))?k+1:0).filter(Boolean);
+  const free=progs?progs.programs.findIndex((q,k)=>!q.used&&!DRAFT[k]):-1;
+  const a=await choose(`Convert “${p.name}” to a Timeline?\nA Timeline can't be turned back into a Sequence.`+
+    (waits.length?`\n“Wait for ${chName(0)}” is dropped (phase${waits.length>1?'s':''} ${waits.join(', ')}): the Timeline runs on the programmed times.`:'')+
+    `\n\nReplace this program: Undo brings the Sequence back until you save.\n`+(free<0?'No empty slot left for a new program.':`Create a new program: the Sequence stays, the Timeline goes to slot ${free+1}.`),
+    [['replace','Replace this program',true],...(free<0?[]:[['new','Create a new program']]),['cancel','Cancel']]);
+  if(a==='replace'){ const r=seqToTl(p); if(r.err){ edNote(r.err,true); return; }
+    const q=beginEdit(); if(!q) return; DRAFT[i]=r.prog; afterEdit(); edNote('Converted to a Timeline - not saved yet (Undo brings the Sequence back).'); }
+  else if(a==='new'){ const r=seqToTl(p,p.name+' (Timeline)'); if(r.err){ edNote(r.err,true); return; }
+    await openProg(free,'tl',r.prog); edNote(`The Timeline is in slot ${free+1} - not saved yet.`); }
+}
+$('toTl').onclick=()=>convertToTl();
 
 function beginEdit(){ if(running()||!live) return null; const i=live.sel; if(!DRAFT[i]) return null;
   UNDO[i].push(clone(DRAFT[i])); if(UNDO[i].length>200) UNDO[i].shift(); REDO[i]=[]; return DRAFT[i]; }
@@ -1154,6 +1215,7 @@ function updateEditor(){
   document.querySelectorAll('button[data-act]').forEach(b=>{ const a=b.dataset.act;
     b.disabled=run||!UNDO[i]||(a==='undo'&&!UNDO[i].length)||(a==='redo'&&!REDO[i].length)||((a==='save'||a==='discard')&&!d); });
   $('unsaved').textContent=d?'Unsaved changes':'';
+  const cp=!run&&DRAFT[i]; $('toTl').hidden=!(cp&&cp.type==='seq'&&cp.phases.length);
 }
 $('pName').onchange=e=>{ const v=e.target.value.trim().slice(0,31); if(!v){ e.target.value=DRAFT[live.sel]?DRAFT[live.sel].name:''; return; }
   const q=beginEdit(); if(!q) return; q.name=v; afterEdit(); };
@@ -1275,6 +1337,7 @@ function updateRun(){
   const ended=(prevState==='running'||prevState==='paused')&&(r.state==='finished'||r.state==='stopped');
   if(ended){ showLast=true; askedSave=false; chartAt=0; }
   if((r.state==='finished'||r.state==='stopped')&&r.edited&&!askedSave){ askedSave=true; if(!$('saveDlg').open) $('saveDlg').showModal(); }
+  if($('saveDlg').open&&!r.edited) $('saveDlg').close();  // answered on the touch screen or over serial
   if(r.state==='running'&&prevState!=='running'&&prevState!=='paused'){ runProg=null; zv.fit=true; showLast=true; }
   prevState=r.state;
 }
@@ -1295,7 +1358,7 @@ $('bRecover').onclick=async()=>{ const r=await api('/api/run',{cmd:'recover'}); 
 $('bDismiss').onclick=async()=>{ if(await ask('Dismiss the interrupted run? Its channels stay off; it cannot be resumed afterwards.','Dismiss')){ await api('/api/run',{cmd:'dismiss'}); poll(); } };
 $('hStop').onclick=async()=>{ if(await ask('Stop the program? Each channel applies its end action.','Stop')) cmd('stop'); };
 $('dSave').onclick=async()=>{ $('saveDlg').close(); await api('/api/run',{cmd:'save'}); if(live){ savedGen[live.run.prog]=-1; delete DRAFT[live.run.prog]; } poll(); };
-$('dDiscard').onclick=()=>$('saveDlg').close();
+$('dDiscard').onclick=async()=>{ $('saveDlg').close(); await api('/api/run',{cmd:'discard'}).catch(()=>{}); poll(); };
 
 /* ---------- event log ---------- */
 let logUp=0;
@@ -1340,7 +1403,7 @@ async function pageUpdate(force){
   if((page==='channels'||page==='system'||page==='tools')&&(!CFG||cfgGen!==live.cfgGen)) await loadCfg();
   if(page==='programs') renderProgs(force);
   else if(page==='channels') updChanPage();
-  else if(page==='system'){ updSystem(); slUpdate(); }
+  else if(page==='system'){ updSystem(); sdUpdate(); slUpdate(); }
   else if(page==='tools') updTools();
   masonry();
 }
@@ -1470,9 +1533,9 @@ function renderProgs(force){
       <span class="pa"><button data-pa="open" ${act&&!runI?'disabled':''}>${runI?'Show':'Open'}</button>${newD?`<button data-pa="discard">Discard</button>`:`<button data-pa="dup">Duplicate</button><button data-pa="export">Export</button><button data-pa="del" class="danger" ${runI?'disabled':''}>Delete</button>`}</span></div>`;
   }).join('')+emptyRow+(plAll&&empty.length?`<div class="row"><button data-pa="few">Hide the empty slots</button></div>`:'');
 }
-async function openProg(i,type){
+async function openProg(i,type,prog){
   if(!runActive()&&live.sel!==i){ await api('/api/select',{i}); live.sel=i; showLast=false; }
-  await loadSaved(i); if(type){ newDraft(i,type); }
+  await loadSaved(i); if(type){ newDraft(i,type,prog); }
   previewDraft(); edKey=''; chartAt=0; fillProgSelect(); location.hash='#/';
   setTimeout(()=>{ updateEditor(); $('edP').scrollIntoView({block:'start'}); if(type) $('pName').focus(); },60); poll(); }
 async function storedProg(i){ const r=await api('/api/program?i='+i); return r.used?r.program:null; }
@@ -1638,11 +1701,19 @@ function updChanPage(){
 }
 
 /* ---------- System page ---------- */
+// time zone (the device's local time: SD run logs): the device's list, the browser's offset and the current value
+async function buildTimeForm(){
+  let zones=[]; try{ zones=(await api('/api/timezones')).zones||[]; }catch(e){}
+  const b=browserTz(), cur=CFG&&CFG.time?CFG.time.zone:'';
+  const o=[['','Not set (UTC)'],...zones.map(z=>[z,z.replace(/_/g,' ')])];
+  for(const extra of [b.fixed,cur]) if(extra&&!o.some(x=>x[0]===extra)) o.push([extra,extra+' (no summer time)']);
+  mkForm('time',$('sTime'),[{h:'',fields:[
+    {k:'time.zone',l:'Time zone',t:'sel',o,h:`For the times in the SD run logs (local time). This browser: ${esc(b.zone||b.fixed)}.`}]}],{title:'Clock',auto:true}); }
 let sysBuilt=false, wDirty=false;
 const upTxt=s=>{ const d=Math.floor(s/86400); return (d?d+' d ':'')+fmt(s%86400); };
 function updSystem(){
   if(!CFG||!live) return;
-  if(!sysBuilt){ sysBuilt=true;
+  if(!sysBuilt){ sysBuilt=true; buildTimeForm();
     mkForm('disp',$('sDisp'),[{h:'',fields:[
       {k:'display.accent',l:'Accent colour',t:'accent',h:'Used on the touch screen and on this page; the channel colours follow from it.'},
       {k:'display.themeDark',l:'Touch screen theme',t:'theme',def:true},
@@ -1746,6 +1817,52 @@ $('bPrUp').onclick=async()=>{ const t=await pickFile(); if(t==null) return; cons
 /* ---------- system log (System page): saved events of earlier starts + everything of this start ---------- */
 const SLK=['Tech','Event','Run','Warning','Error'], SLC=['var(--muted)','var(--text)','var(--acc)','var(--amber)','var(--danger)'];
 const SL={seq:0,boot:-1,lastBoot:-1,busy:false,at:0,n:0,find:''};
+/* ---------- SD run logs (System page, S3: one CSV per run, spec 9.9) ---------- */
+const SD={list:null,key:'',busy:false};
+function sdName(n){  // "2026-10-12_143205_Lead-free_BGA.csv" (the device's local time) / "start12_run3_x.csv"
+  let m=/^(\d{4})-(\d\d)-(\d\d)_(\d\d)(\d\d)(\d\d)_(.*?)(?:_(\d+))?\.csv$/.exec(n);
+  if(m){ const d=new Date(+m[1],m[2]-1,+m[3],+m[4],+m[5],+m[6]);  // (shown as written: no conversion)
+    return {prog:m[7].replace(/_/g,' '),when:d.toLocaleString([], {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}; }
+  m=/^start(\d+)_run(\d+)_(.*?)\.csv$/.exec(n);
+  if(m) return {prog:m[3].replace(/_/g,' '),when:`start ${m[1]}, run ${m[2]} (clock not set)`};
+  return {prog:n,when:''}; }
+const kB=k=>k>=1048576?(k/1048576).toFixed(1)+' GB':k>=1024?(k/1024).toFixed(1)+' MB':k+' kB';
+const fsize=b=>b>=1048576?(b/1048576).toFixed(1)+' MB':b>=1024?Math.round(b/1024)+' kB':b+' B';
+async function sdLoad(){
+  if(SD.busy) return; SD.busy=true; $('sdRef').disabled=true; setMsg('sdMsg','');
+  try{ SD.list=await api('/api/sd',undefined,20000); }catch(e){ SD.list={err:'No answer from the device'}; }
+  SD.busy=false; $('sdRef').disabled=false; sdRender(); }
+function sdRender(){
+  const L=SD.list, sd=live&&live.sd; if(!sd) return;
+  const files=L&&L.files||[], rec=sd.logging?sd.file.replace(/^runs\//,''):'';
+  const why=(L&&L.err)||sd.err||'';
+  let st=sd.card===0||(L&&L.card===false)?(/^no card/.test(why)||!why?'No card found':esc(why))+' - insert a FAT32 card: the next run is logged.'
+    :L&&L.card?`${files.length} run log${files.length===1?'':'s'} · ${L.freeKb?kB(L.freeKb)+' free of '+kB(L.totalKb):''}`:'Card not read yet.';
+  if(rec) st+=` · Recording “${esc(sdName(rec).prog)}”.`;
+  else if(sd.err&&L&&L.card) st+=` · Last problem: ${esc(sd.err)}`;
+  $('sdSt').innerHTML=st+' A file per program run, a row every second, readable in a spreadsheet; times are the device\'s local time (Clock).';
+  $('sdList').innerHTML=files.map(([n,size])=>{ const x=sdName(n), now=n===rec;
+    return `<div class="sdrow"><span class="pn">${esc(x.prog)}${now?'<span class="state run">Recording</span>':''}</span>
+      <span class="pm"><span>${esc(x.when)}</span><span>${fsize(size)}</span></span>
+      <span class="pa"><button data-sd="get" data-n="${esc(n)}">Download</button><button data-sd="del" data-n="${esc(n)}" class="danger" ${now?'disabled':''}>Delete</button></span></div>`; }).join('');
+}
+function sdUpdate(){
+  const sd=live&&live.sd; $('sdP').hidden=!sd; if(!sd) return;
+  const key=sd.logging+'|'+sd.file;  // a run started / ended: read the list again
+  if(SD.list===null||key!==SD.key){ SD.key=key; sdLoad(); } else sdRender(); }
+$('sdRef').onclick=()=>sdLoad();
+$('sdList').addEventListener('click',async e=>{ const b=e.target.closest('button[data-sd]'); if(!b) return; const n=b.dataset.n;
+  if(b.dataset.sd==='del'){ if(!await ask(`Delete the run log “${sdName(n).prog}” (${sdName(n).when}) from the SD card?`,'Delete')) return;
+    const r=await api('/api/sd/delete',{name:n},20000).catch(()=>({err:'No answer from the device'})); if(r.err){ setMsg('sdMsg',r.err,true); return; } sdLoad(); return; }
+  b.disabled=true; setMsg('sdMsg','Reading the file…');
+  try{ const path='/api/sd/file?name='+encodeURIComponent(n); let t;
+    if(SER.on){ t=await serReq(path,undefined,120000); if(typeof t!=='string') throw new Error(t&&t.err||'not readable'); }
+    else { const r=await fetch(path,{cache:'no-store'}); if(!r.ok){ let m='not readable'; try{ m=(await r.json()).err||m; }catch(x){} throw new Error(m); } t=await r.text(); }
+    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([t],{type:'text/csv'})); a.download='tempctl-duo-'+n;
+    document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },500); setMsg('sdMsg','');
+  }catch(err){ setMsg('sdMsg','Download failed: '+err.message,true); }
+  b.disabled=false; });
+
 async function apiText(path){ if(SER.on) return serReq(path,undefined,30000); const r=await fetch(path,{cache:'no-store'}); return r.ok?r.text():''; }
 function slTime(l){ if(l.epoch){ const d=new Date(l.epoch*1000), t=d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
     return d.toDateString()===new Date().toDateString()?t:d.toLocaleDateString([], {day:'2-digit',month:'2-digit'})+' '+t; }
@@ -1796,7 +1913,12 @@ async function slUpdate(){
 })();
 
 /* ---------- polling ---------- */
-let polling=false, pollTimer=0, clockSent=false;
+let polling=false, pollTimer=0, clockSent=false, tzSent=false;
+// the browser's time zone (for the device's local time in the SD run logs): its name, and its current offset
+// as "UTC+02:00" for a zone the device's list does not have
+function browserTz(){ let zone=''; try{ zone=Intl.DateTimeFormat().resolvedOptions().timeZone||''; }catch(e){}
+  const m=-new Date().getTimezoneOffset(), a=Math.abs(m);
+  return {zone,fixed:`UTC${m<0?'-':'+'}${String(Math.floor(a/60)).padStart(2,'0')}:${String(a%60).padStart(2,'0')}`}; }
 async function poll(){
   if(polling) return; polling=true; clearTimeout(pollTimer);
   try{
@@ -1804,6 +1926,7 @@ async function poll(){
     $('linkDot').className='dot ok'; $('linkTxt').textContent=SER.on?'Connected over USB':'Device connected';
     toShell({state:'ok'});
     if(live.time===0&&!clockSent){ clockSent=true; api('/api/time',{t:Math.floor(Date.now()/1000)}).catch(()=>{}); }  // (for the log times)
+    if(live.tz===''&&!tzSent){ tzSent=true; api('/api/time',browserTz()).catch(()=>{}); }  // time zone: once, while none is set
     $('net').textContent=live.net; $('fw').textContent=`v${live.fw} · ${live.board}${live.variant?' '+live.variant:''}`;
     applyPalette();
     if(!progs||progsGen!==live.progGen) await loadPrograms(); else fillProgSelect();

@@ -278,7 +278,27 @@ void syslogFlush() {
   if (!savedAt) savedAt = 1;
 }
 
+// the time zone setting for localtime() (SD run logs): applied when it changes (checked every second)
+static void tzApply() {
+  static uint32_t at = 0;
+  static char now[sizeof(gSettings.tzName)] = "\x01";  // (nothing applied yet)
+  if (now[0] != 1 && millis() - at < 1000) return;
+  at = millis();
+  char name[sizeof(gSettings.tzName)];
+  {
+    Guard g;
+    strlcpy(name, gSettings.tzName, sizeof(name));
+  }
+  if (!strcmp(name, now)) return;
+  strlcpy(now, name, sizeof(now));
+  char rule[48];
+  if (!tzLookup(name, rule, sizeof(rule))) strlcpy(rule, "UTC0", sizeof(rule));
+  setenv("TZ", rule, 1);
+  tzset();
+}
+
 void syslogLoop() {
+  tzApply();
   if (!fsOk || logSeq() <= savedSeq) return;
   if (savedAt && millis() - savedAt < 30000) return;
   syslogFlush();

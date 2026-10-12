@@ -393,6 +393,11 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
   down = target, diamonds = ramp end, circles = hold end; whole seconds and °C). Outside a run edits go
   to a draft in the browser (Save / Discard / Undo / Redo, Ctrl+Z / Ctrl+Y; the program list marks
   unsaved programs; drafts are lost when the page is reloaded). Empty slot: New sequence / New timeline.
+  **Convert to Timeline** (Sequence, outside a run): the same temperatures and times as a Timeline — a
+  channel that keeps its target gets its hold lengthened, a Both phase's bottom jump becomes a ramp-0
+  step, a Pause phase a pause step; "wait for bottom" is dropped (the warning lists the phases). It asks
+  whether to replace the program (a draft: Undo brings the Sequence back until it is saved) or to create
+  a new program in the first empty slot. A Timeline can't be turned back into a Sequence.
   Start with unsaved changes asks: Save and start / Start without saving / Cancel. During a run the same
   tables and handles edit the running copy (targets, later ramps, holds; finished phases and the running
   ramp are locked) and the changes are sent to the device at once.
@@ -433,6 +438,19 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
     the time since the start. The device keeps about 7000 lines on the S3 (256 kB PSRAM), about 50 on
     the CYD (4 kB); the last 300 events (not the technical lines) survive restarts (`/duo/events.txt`,
     saved at most every 30 s and before a requested restart).
+    **Run logs (SD card)**, S3 only: one CSV file per program run on the display's micro-SD card
+    (FAT32, folder `runs`, name = start time (local) + program, or start / run number when the clock is
+    not set): a row every second — `time` (local, `2026-10-13 01:05:35`), `run_s, where` (phase / steps),
+    per channel `pv, sp` (active setpoint), `prog` (program setpoint), `out` (%), `state` — and a row for
+    each event during the run (`kind, event`). Written every 30 s and at the end of the run (a failed
+    write is tried again every 5 s; nothing is lost while the rows fit into 192 kB); list with Download /
+    Delete on the page, or read the card in a PC. Without a card the run is simply not logged. All card
+    work runs in its own task; the card shares the SPI bus with the display: it is mounted only while it
+    is written or read, and the screen check skips that second.
+    **Clock**: the time zone for local times (SD run logs): set from the browser the first time the
+    page is opened (its zone if the device's list has it, else its current offset as `UTC+hh:mm`),
+    changeable here, on the touch screen (System › Time zone: region, then place) and over serial
+    (`set time.zone=Europe/Berlin`, `help time` lists the zones). Summer time follows the zone's rules.
   - **Tools**: Modbus tools for a Modbus channel (find the setpoint address, read registers, write one
     register); backup / restore of the settings and of all programs as JSON files.
 
@@ -486,13 +504,17 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 
 | Method | Path | Body / query |
 |---|---|---|
-| GET | `/api/live` | web page, polled every second: both channels (pv, sp, out, outOn (outputs on), state, target, kept, canExtend, manual, fault, autotune, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg; `intr` while a run interrupted by a reset can be resumed: reason, exact, el, i / st / left per channel), `sel`, `accent`, `progGen`, `cfgGen` (changes with every settings save), `logSeq`, `sysSeq` (newest system log line), `boot` (start number), `time` (device clock, UTC s; 0 = unknown) |
+| GET | `/api/live` | web page, polled every second: both channels (pv, sp, out, outOn (outputs on), state, target, kept, canExtend, manual, fault, autotune, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg; `intr` while a run interrupted by a reset can be resumed: reason, exact, el, i / st / left per channel), `sel`, `accent`, `progGen`, `cfgGen` (changes with every settings save), `logSeq`, `sysSeq` (newest system log line), `boot` (start number), `time` (device clock, UTC s; 0 = unknown), `tz` (time zone, "" = not set), `sd` (S3: card, logging, file, err) |
 | GET | `/api/chart?v=run` | current / last run: 300 bins of `pv`, `sp` and state lanes `st` per channel, past events `ev` [t, type, ch, idx], forecast `fc` (`seg` [t0, t1, v0, v1, src, flags] per channel, `ev`; times from now) |
 | GET | `/api/chart?v=live` | the live period (`display.liveMin`) in 300 points of `pv` / `sp` / `dlo` / `dhi` per channel; `bin` s per point, `span`, `sh` (the points before the newest end `sh` s later than whole bins before now), `have` / `cap` (s recorded / s the history holds) |
 | GET | `/api/log?since=n` | event log entries after n: [seq, uptime s, run time s or null, text, kind, epoch] (kind 1 event, 2 run, 3 warning, 4 error; epoch UTC s, 0 = clock unknown) |
 | GET | `/api/syslog?since=n` | system log lines after n (about 12 kB per answer, `more`: ask again): [seq, uptime s, epoch, kind (0 technical … 4 error), text]; also `first`, `boot` |
+| GET | `/api/sd` | SD run logs (S3): `slot`, `card`, `logging`, `file`, `err`, `totalKb`, `freeKb`, `files` [[name, bytes, mtime], …] newest first |
+| GET | `/api/sd/file?name=` | one run log (CSV; up to 4 MB through the web) |
+| POST | `/api/sd/delete` | `{"name":…}` deletes a run log (not the one being written) |
 | GET | `/api/eventlog.txt` | the events saved in flash, all starts: lines `boot \t epoch \t uptime \t kind \t text` |
-| POST | `/api/time` | `{"t":<UTC s>}`: sets the device clock if it has no NTP time (the page does it; for the log) |
+| POST | `/api/time` | `{"t":<UTC s>}`: sets the device clock if it has no NTP time (the page does it; for the log); `{"zone":…, "fixed":"UTC+02:00"}`: the time zone, only while none is set |
+| GET | `/api/timezones` | `{"zones":[…]}`: the names `time.zone` takes (besides `UTC+hh:mm`) |
 | GET | `/api/status` | live values (bottom), manual setpoint, selected program; `channels`: both channels (name, type, ok, err, pv, sp, out, mode, manual); `run`: state, `type` (`seq`/`tl`), `seq` (phase `idx`, `stage`, `el`, `dur`), `waiting`, `progPause`, `actionRequired`, `pauseText`, `elapsed`, `remaining`, `edited`, `channels[]` (inProgram, idle, sp, target, moving, Timeline `lane`) |
 | GET/POST | `/api/config` | the whole settings document (= `/duo/settings.json` without passwords) + `limits` (`rs485`, `localMax` of this board variant). POST changes only the keys given, e.g. `{"channels":[null,{"type":"modbus","modbus":{"addr":2}}]}`; `"modbus":{"loadDefaults":true}` loads the register map of the channel's controller type; errors come back as `{"ok":false,"err":"channels[1].type: one of …"}` |
 | GET | `/api/log.csv` | last program run (or, without one, the live history) as CSV, both channels |

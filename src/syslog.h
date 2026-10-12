@@ -34,7 +34,8 @@ uint32_t syslogEpoch();
 void syslogSetEpoch(uint32_t t);
 void syslogStartNtp();
 
-// events to flash (loop task): saves new ones at most every 30 s; syslogFlush() at once (restart)
+// events to flash (loop task): saves new ones at most every 30 s; syslogFlush() at once (restart). Also
+// applies the time zone setting (localtime(): the SD run logs).
 void syslogLoop();
 void syslogFlush();
 // the saved events file (all starts): lines "boot\tepoch\tuptime\tkind\ttext"

@@ -29,6 +29,11 @@ LiveData gLive;
 History* gHist = nullptr;
 SemaphoreHandle_t gLock = nullptr;
 
+// breadcrumbs (crumbs.h): nothing to keep on a PC
+#include "crumbs.h"
+void crumb(CrumbSlot, CrumbCode, int16_t) {}
+CrumbCode crumbGet(CrumbSlot) { return L_END; }
+
 bool sendCmd(CmdType c, int arg, float value, int idx, uint8_t sub) {
   printf("[host] cmd %d arg %d value %.1f idx %d sub %d\n", (int)c, arg, value, idx, sub);
   return true;
@@ -511,8 +516,16 @@ int main(int argc, char** argv) {
   }
   tShow(SCR_NETWORK);
   shot("13-network");
+  strcpy(gSettings.tzName, "Europe/Berlin");
   tShow(SCR_SYSTEM);
   shot("14-system");
+  tap(SMALL ? 270 : 400, SMALL ? 150 : 175);  // time zone -> regions
+  run(300);
+  shot("14b-tz-regions");
+  tap(SMALL ? 120 : 200, SMALL ? 100 : 128);  // the second row: Europe
+  run(300);
+  shot("14c-tz-europe");
+  tModalClose();
   tShow(SCR_LOG);
   run(400);
   shot("15-log");

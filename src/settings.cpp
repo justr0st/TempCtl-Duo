@@ -4,6 +4,7 @@
 #include "duo_program.h"  // PROG_MAX
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "version.h"
 
@@ -108,6 +109,7 @@ void settingsDefaults(Settings& s, const BoardLimits& lim) {
   s.scanFrom = 3100 + DP1;
   s.scanTo = 3199 + DP1;
   s.selProgram = 0;
+  s.tzName[0] = 0;
   // bottom = Modbus, top = Off; without RS485 both local (as many as the board wires)
   const uint8_t t0 = lim.rs485 ? CH_MODBUS : (lim.localMax >= 1 ? CH_LOCAL : CH_OFF);
   const uint8_t t1 = lim.rs485 ? CH_OFF : (lim.localMax >= 2 ? CH_LOCAL : CH_OFF);
@@ -265,7 +267,128 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
     ok = false;
   }
   if (s.selProgram >= PROG_MAX) s.selProgram = 0;
+  s.tzName[sizeof(s.tzName) - 1] = 0;
+  char rule[48];
+  if (s.tzName[0] && !tzLookup(s.tzName, rule, sizeof(rule))) s.tzName[0] = 0;
   return ok;
+}
+
+// ------------------------------------------------------------ time zones
+// Common zones with their summer time rules (POSIX TZ: name, offset west of UTC, DST name, start, end)
+namespace {
+struct Tz {
+  const char* name;
+  const char* rule;
+};
+const Tz TZS[] = {
+    {"UTC", "UTC0"},
+    {"Europe/London", "GMT0BST,M3.5.0/1,M10.5.0"},
+    {"Europe/Dublin", "GMT0IST,M3.5.0/1,M10.5.0"},
+    {"Europe/Lisbon", "WET0WEST,M3.5.0/1,M10.5.0"},
+    {"Europe/Berlin", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Amsterdam", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Brussels", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Paris", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Madrid", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Rome", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Zurich", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Vienna", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Prague", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Bratislava", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Budapest", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Warsaw", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Copenhagen", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Stockholm", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Oslo", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Ljubljana", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Zagreb", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Belgrade", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Helsinki", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
+    {"Europe/Tallinn", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
+    {"Europe/Riga", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
+    {"Europe/Vilnius", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
+    {"Europe/Kyiv", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
+    {"Europe/Kiev", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
+    {"Europe/Chisinau", "EET-2EEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Bucharest", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
+    {"Europe/Sofia", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
+    {"Europe/Athens", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
+    {"Europe/Istanbul", "<+03>-3"},
+    {"Europe/Minsk", "<+03>-3"},
+    {"Europe/Moscow", "MSK-3"},
+    {"Asia/Jerusalem", "IST-2IDT,M3.4.4/26,M10.5.0"},
+    {"Asia/Tbilisi", "<+04>-4"},
+    {"Asia/Yerevan", "<+04>-4"},
+    {"Asia/Dubai", "<+04>-4"},
+    {"Asia/Tashkent", "<+05>-5"},
+    {"Asia/Almaty", "<+05>-5"},
+    {"Asia/Kolkata", "IST-5:30"},
+    {"Asia/Bangkok", "<+07>-7"},
+    {"Asia/Singapore", "<+08>-8"},
+    {"Asia/Shanghai", "CST-8"},
+    {"Asia/Hong_Kong", "HKT-8"},
+    {"Asia/Taipei", "CST-8"},
+    {"Asia/Seoul", "KST-9"},
+    {"Asia/Tokyo", "JST-9"},
+    {"Australia/Perth", "AWST-8"},
+    {"Australia/Adelaide", "ACST-9:30ACDT,M10.1.0,M4.1.0/3"},
+    {"Australia/Brisbane", "AEST-10"},
+    {"Australia/Sydney", "AEST-10AEDT,M10.1.0,M4.1.0/3"},
+    {"Australia/Melbourne", "AEST-10AEDT,M10.1.0,M4.1.0/3"},
+    {"Pacific/Auckland", "NZST-12NZDT,M9.5.0,M4.1.0/3"},
+    {"Africa/Cairo", "EET-2EEST,M4.5.5/0,M10.5.4/24"},
+    {"Africa/Johannesburg", "SAST-2"},
+    {"Africa/Lagos", "WAT-1"},
+    {"Africa/Nairobi", "EAT-3"},
+    {"Atlantic/Reykjavik", "GMT0"},
+    {"America/Sao_Paulo", "<-03>3"},
+    {"America/Argentina/Buenos_Aires", "<-03>3"},
+    {"America/Halifax", "AST4ADT,M3.2.0,M11.1.0"},
+    {"America/New_York", "EST5EDT,M3.2.0,M11.1.0"},
+    {"America/Toronto", "EST5EDT,M3.2.0,M11.1.0"},
+    {"America/Chicago", "CST6CDT,M3.2.0,M11.1.0"},
+    {"America/Mexico_City", "CST6"},
+    {"America/Denver", "MST7MDT,M3.2.0,M11.1.0"},
+    {"America/Phoenix", "MST7"},
+    {"America/Los_Angeles", "PST8PDT,M3.2.0,M11.1.0"},
+    {"America/Vancouver", "PST8PDT,M3.2.0,M11.1.0"},
+    {"America/Anchorage", "AKST9AKDT,M3.2.0,M11.1.0"},
+    {"Pacific/Honolulu", "HST10"},
+};
+constexpr int TZ_N = sizeof(TZS) / sizeof(TZS[0]);
+}  // namespace
+
+int tzCount() { return TZ_N; }
+const char* tzListName(int i) { return i >= 0 && i < TZ_N ? TZS[i].name : ""; }
+
+bool tzLookup(const char* name, char* tz, size_t n) {
+  if (!name || !*name) return false;
+  for (const Tz& z : TZS)
+    if (!strcmp(z.name, name)) {
+      snprintf(tz, n, "%s", z.rule);
+      return true;
+    }
+  // "UTC+02:00" / "UTC-3" / "UTC+05:30": a fixed offset (no summer time)
+  int h = 0, m = 0;
+  char sign = 0;
+  if (!strncmp(name, "UTC", 3) && (name[3] == '+' || name[3] == '-')) {
+    sign = name[3];
+    const char* p = name + 4;
+    char* e;
+    h = (int)strtol(p, &e, 10);
+    if (e == p || h > 14) return false;
+    if (*e == ':') {
+      const char* q = e + 1;
+      m = (int)strtol(q, &e, 10);
+      if (e == q || (m != 0 && m != 30 && m != 45)) return false;
+    }
+    if (*e) return false;
+    // POSIX counts west of UTC: UTC+2 -> "<+0200>-2"
+    if (m) snprintf(tz, n, "<%c%02d%02d>%c%d:%02d", sign, h, m, sign == '+' ? '-' : '+', h, m);
+    else snprintf(tz, n, "<%c%02d>%c%d", sign, h, sign == '+' ? '-' : '+', h);
+    return true;
+  }
+  return false;
 }
 
 // ------------------------------------------------------------------ JSON
@@ -351,6 +474,8 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
   d["screenCheck"] = s.screenCheck != 0;
   JsonArray tc = d["touchCal"].to<JsonArray>();
   tc.add(s.tsMinX); tc.add(s.tsMaxX); tc.add(s.tsMinY); tc.add(s.tsMaxY);
+  JsonObject tz = o["time"].to<JsonObject>();
+  tz["zone"] = s.tzName;
   JsonObject t = o["tools"].to<JsonObject>();
   t["scanFrom"] = s.scanFrom;
   t["scanTo"] = s.scanTo;
@@ -534,6 +659,18 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
         s.tsMinX = a[0] | s.tsMinX; s.tsMaxX = a[1] | s.tsMaxX;
         s.tsMinY = a[2] | s.tsMinY; s.tsMaxY = a[3] | s.tsMaxY;
       }
+    }
+  }
+  JsonObjectConst tm = R.obj(o, "", "time");
+  if (!tm.isNull()) {  // {"zone":"Europe/Berlin"} / "UTC+02:00" / "" (not set: UTC)
+    JsonVariantConst z = tm["zone"];
+    if (!z.isNull()) {
+      const char* name = z.as<const char*>();
+      char rule[48];
+      if (!name || !*name) s.tzName[0] = 0;
+      else if (strlen(name) >= sizeof(s.tzName) || !tzLookup(name, rule, sizeof(rule)))
+        R.fail("time.", "zone", "unknown time zone (a name from the list, or UTC+hh:mm)");
+      else copyStr(s.tzName, sizeof(s.tzName), name);
     }
   }
   JsonObjectConst t = R.obj(o, "", "tools");

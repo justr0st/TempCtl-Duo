@@ -22,3 +22,7 @@ bool lcdReinit();
 int lcdCheck(char* info, size_t n);
 // Test only: switches the display off and puts it to sleep (the screen check must notice it)
 bool lcdTestBreak();
+// The SPI bus shared with the SD card (S3): the screen check frees the bus for its status read, so the SD
+// card is only mounted while this lock is held (sdlog.cpp); the check skips a turn ("busy") meanwhile.
+bool lcdBusLock(uint32_t waitMs);
+void lcdBusUnlock();

@@ -441,7 +441,7 @@ void tChoice(const char* title, const char* items, int sel, TChoiceCb cb, int ar
   int i = 0;
   const char* p = items;
   lv_obj_t* selRow = nullptr;
-  while (p && *p && i < 32) {
+  while (p && *p && i < 40) {  // (time zones: up to 40 per region)
     const char* e = strchr(p, '\n');
     const size_t len = e ? (size_t)(e - p) : strlen(p);
     char text[96];

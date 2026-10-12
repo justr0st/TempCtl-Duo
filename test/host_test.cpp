@@ -875,6 +875,54 @@ static void testAutotune() {
   CHECK(at.state() == TuneState::Failed);
 }
 
+
+// time zones: list rules and fixed offsets give the right local time (glibc reads the same POSIX rules)
+static int localOffsetMin(const char* rule, time_t t) {
+  setenv("TZ", rule, 1);
+  tzset();
+  struct tm lt, gt;
+  localtime_r(&t, &lt);
+  gmtime_r(&t, &gt);
+  lt.tm_isdst = 0;
+  return (int)((timegm(&lt) - timegm(&gt)) / 60);
+}
+static void testTimeZones() {
+  char tz[48];
+  const time_t oct12 = 1791846335;  // 2026-10-12 23:05:35 UTC (summer time in Europe)
+  const time_t jan = 1768478400;    // 2026-01-15 12:00 UTC
+  CHECK(tzLookup("Europe/Berlin", tz, sizeof(tz)) && localOffsetMin(tz, oct12) == 120 && localOffsetMin(tz, jan) == 60);
+  CHECK(tzLookup("Europe/London", tz, sizeof(tz)) && localOffsetMin(tz, oct12) == 60 && localOffsetMin(tz, jan) == 0);
+  CHECK(tzLookup("Europe/Kyiv", tz, sizeof(tz)) && localOffsetMin(tz, oct12) == 180 && localOffsetMin(tz, jan) == 120);
+  CHECK(tzLookup("America/New_York", tz, sizeof(tz)) && localOffsetMin(tz, oct12) == -240 && localOffsetMin(tz, jan) == -300);
+  CHECK(tzLookup("Australia/Sydney", tz, sizeof(tz)) && localOffsetMin(tz, oct12) == 660 && localOffsetMin(tz, jan) == 660);
+  CHECK(tzLookup("Asia/Kolkata", tz, sizeof(tz)) && localOffsetMin(tz, jan) == 330);
+  CHECK(tzLookup("UTC", tz, sizeof(tz)) && localOffsetMin(tz, oct12) == 0);
+  CHECK(tzLookup("UTC+02:00", tz, sizeof(tz)) && !strcmp(tz, "<+02>-2") && localOffsetMin(tz, jan) == 120);
+  CHECK(tzLookup("UTC-03:30", tz, sizeof(tz)) && localOffsetMin(tz, jan) == -210);
+  CHECK(tzLookup("UTC+5:45", tz, sizeof(tz)) && localOffsetMin(tz, jan) == 345);
+  CHECK(!tzLookup("Mars/Base", tz, sizeof(tz)) && !tzLookup("UTC+2:15", tz, sizeof(tz)) && !tzLookup("UTC+20", tz, sizeof(tz)));
+  // the end of summer time in Berlin (25.10.2026 03:00 CEST -> 02:00 CET = 01:00 UTC)
+  tzLookup("Europe/Berlin", tz, sizeof(tz));
+  CHECK(localOffsetMin(tz, 1792890000 - 1) == 120 && localOffsetMin(tz, 1792890000) == 60);
+  // every list entry is a rule glibc understands (its offset is within -12 ... +14 h)
+  for (int i = 0; i < tzCount(); ++i) {
+    CHECK(tzLookup(tzListName(i), tz, sizeof(tz)));
+    const int o = localOffsetMin(tz, jan);
+    if (o < -720 || o > 840) printf("bad zone %s %s %d\n", tzListName(i), tz, o);
+  }
+  // settings JSON: name only -> rule from the list; unknown -> error, nothing changed
+  Settings s;
+  settingsDefaults(s, S3);
+  JsonDocument d;
+  deserializeJson(d, "{\"time\":{\"zone\":\"Europe/Berlin\"}}");
+  char msg[96];
+  CHECK(settingsFromJson(d.as<JsonObjectConst>(), s, msg, sizeof(msg)) && !strcmp(s.tzName, "Europe/Berlin"));
+  deserializeJson(d, "{\"time\":{\"zone\":\"Mars/Base\"}}");
+  CHECK(!settingsFromJson(d.as<JsonObjectConst>(), s, msg, sizeof(msg)));
+  setenv("TZ", "UTC0", 1);
+  tzset();
+}
+
 int main() {
   testCrc();
   testParse();
@@ -896,6 +944,7 @@ int main() {
   testPid();
   testRunaway();
   testAutotune();
+  testTimeZones();
   printf(fails ? "%d FAILED\n" : "all tests passed\n", fails);
   return fails ? 1 : 0;
 }

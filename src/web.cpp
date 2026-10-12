@@ -4,6 +4,8 @@
 #include "console.h"
 #include "ui.h"
 #include "syslog.h"
+#include "sdlog.h"
+#include "crumbs.h"
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <WebServer.h>
@@ -596,6 +598,7 @@ static void handleGetRun() {
 //   {"cmd":"ramp","ch":1,"idx":5,"sec":40}      later ramps only
 //   {"cmd":"target","ch":0,"idx":-1,"t":170}    current / kept target (or a later one)
 //   {"cmd":"save"}                              store the run edits into the program
+//   {"cmd":"discard"}                           keep the stored program (answers the question)
 //   {"cmd":"next"} / {"cmd":"continue"}
 //   {"cmd":"start","i":0,"program":{...}}      start slot 0 with this (unsaved) content
 static void handlePostRun() {
@@ -612,6 +615,7 @@ static void handlePostRun() {
     if (!d["t"].is<float>()) return sendError("t (target) missing");
     ok = sendCmd(CMD_RUN_EDIT, ch, d["t"].as<float>(), idx, EDIT_TARGET);
   } else if (!strcmp(c, "save")) ok = sendCmd(CMD_SAVE_RUN);
+  else if (!strcmp(c, "discard")) ok = sendCmd(CMD_DISCARD_RUN);
   else if (!strcmp(c, "start")) {  // "Start without saving": {"cmd":"start","i":n,"program":{...}}
     const int i = d["i"] | -1;
     if (i < 0 || i >= PROG_MAX) return sendError("Program index out of range");
@@ -1060,6 +1064,19 @@ static void handleLive() {
   d["sysSeq"] = syslogSeq();   // newest system log line (System page)
   d["boot"] = syslogBoot();
   d["time"] = syslogEpoch();   // device clock (UTC s), 0 = not known: the page sets it (POST /api/time)
+  {
+    Guard g;
+    d["tz"] = JsonString(gSettings.tzName);  // time zone ("" = not set: the page sends the browser's)
+  }
+  if (sdlogSlot()) {  // SD run log (S3): the System page shows the card's run files
+    SdState sd;
+    sdlogState(sd);
+    JsonObject o = d["sd"].to<JsonObject>();
+    o["card"] = sd.card;  // 1 found, 0 not found (at the last access), -1 not tried yet
+    o["logging"] = sd.logging;
+    o["file"] = JsonString(sd.file);
+    o["err"] = JsonString(sd.err);
+  }
   d["cfgGen"] = settingsGen();
   char hex[8];
   snprintf(hex, sizeof(hex), "#%06X", (unsigned)(S.accentColor & 0xFFFFFF));
@@ -1208,14 +1225,106 @@ static void handleEventFile() {
   f.close();
 }
 
-// POST /api/time {"t":<UTC s>}: the page sets the device clock when it has no NTP time (for the log)
+// POST /api/time {"t":<UTC s>, "zone":"Europe/Berlin", "fixed":"UTC+02:00"}: the page sets the device clock
+// when it has no NTP time (for the log), and the time zone while none is set (the browser's zone if the
+// list has it, else its current offset)
 static void handleTime() {
   JsonDocument b;
   if (!parseBody(b)) return sendError("Invalid JSON");
-  syslogSetEpoch(b["t"] | 0u);
+  if (b["t"].is<uint32_t>()) syslogSetEpoch(b["t"] | 0u);
+  const char* zone = b["zone"] | "";
+  const char* fixed = b["fixed"] | "";
+  char rule[48];
+  const char* use = tzLookup(zone, rule, sizeof(rule)) ? zone : tzLookup(fixed, rule, sizeof(rule)) ? fixed : nullptr;
+  bool set = false;
+  if (use) {
+    Guard g;
+    if (!gSettings.tzName[0] && strlen(use) < sizeof(gSettings.tzName)) {
+      strlcpy(gSettings.tzName, use, sizeof(gSettings.tzName));
+      set = true;
+    }
+  }
+  if (set) {
+    saveSettingsQuiet();
+    logEvent("Time zone set from the browser: %s", use);
+  }
   JsonDocument r;
   r["ok"] = true;
   r["time"] = syslogEpoch();
+  {
+    Guard g;
+    r["zone"] = JsonString(gSettings.tzName);
+  }
+  sendJson(r);
+}
+
+// GET /api/timezones: the names the time zone setting takes (besides "UTC+hh:mm")
+static void handleTimezones() {
+  JsonDocument d;
+  JsonArray a = d["zones"].to<JsonArray>();
+  for (int i = 0; i < tzCount(); ++i) a.add(tzListName(i));  // (string literals: kept as pointers)
+  sendJson(d);
+}
+
+// ------------------------------------------------------------ SD run logs (S3)
+// GET /api/sd: {"slot","card","logging","file","err","totalKb","freeKb","files":[[name, size, mtime], ...]}
+static void handleSdList() {
+  JsonDocument d;
+  d["slot"] = sdlogSlot();
+  if (sdlogSlot()) {
+    constexpr int MAXF = 200;
+    SdFile* files = (SdFile*)heap_caps_malloc(sizeof(SdFile) * MAXF, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!files) return sendError("Out of memory", 500);
+    char err[64] = "";
+    uint32_t total = 0, freeKb = 0;
+    const int n = sdlogList(files, MAXF, total, freeKb, err, sizeof(err));
+    SdState sd;
+    sdlogState(sd);
+    d["card"] = n >= 0;
+    d["logging"] = sd.logging;
+    d["file"] = JsonString(sd.file);
+    d["err"] = JsonString(n < 0 ? err : sd.err);
+    d["totalKb"] = total;
+    d["freeKb"] = freeKb;
+    JsonArray a = d["files"].to<JsonArray>();
+    for (int i = 0; i < n; ++i) {
+      JsonArray x = a.add<JsonArray>();
+      x.add(JsonString(files[i].name));
+      x.add(files[i].size);
+      x.add(files[i].mtime);
+    }
+    free(files);
+  }
+  extraHeaders = "Cache-Control: no-store\r\n";
+  sendJson(d);
+}
+
+// GET /api/sd/file?name=<file>: one run log (CSV)
+static void handleSdFile() {
+  const String name = reqArg("name");
+  char err[96];
+  size_t len = 0;
+  char* data = sdlogLoad(name.c_str(), len, err, sizeof(err));
+  if (!data) return sendError(err, 404);
+  extraHeaders = String("Content-Disposition: attachment; filename=\"") + name + "\"\r\nCache-Control: no-store\r\n";
+  size_t at = 0;
+  sendStream("text/csv", "run log", [&](char* b, size_t n) -> size_t {
+    const size_t k = len - at < n ? len - at : n;
+    memcpy(b, data + at, k);
+    at += k;
+    return k;
+  });
+  free(data);
+}
+
+// POST /api/sd/delete {"name":<file>}
+static void handleSdDelete() {
+  JsonDocument b;
+  if (!parseBody(b)) return sendError("Invalid JSON");
+  char err[64];
+  if (!sdlogDelete(b["name"] | "", err, sizeof(err))) return sendError(err);
+  JsonDocument r;
+  r["ok"] = true;
   sendJson(r);
 }
 
@@ -1233,6 +1342,10 @@ static const Route ROUTES[] = {
     {"/api/syslog", HTTP_GET, handleSysLog},
     {"/api/eventlog.txt", HTTP_GET, handleEventFile},
     {"/api/time", HTTP_POST, handleTime},
+    {"/api/timezones", HTTP_GET, handleTimezones},
+    {"/api/sd", HTTP_GET, handleSdList},
+    {"/api/sd/file", HTTP_GET, handleSdFile},
+    {"/api/sd/delete", HTTP_POST, handleSdDelete},
     {"/api/status", HTTP_GET, handleStatus},
     {"/api/log.csv", HTTP_GET, handleCsv},
     {"/api/history.csv", HTTP_GET, handleHistCsv},
@@ -1279,7 +1392,12 @@ void webBegin() {
 #endif
     server.on(a->path, HTTP_GET, [a] { sendAsset(*a); });
   }
-  for (const Route& r : ROUTES) server.on(r.path, r.method, r.fn);
+  for (const Route& r : ROUTES)
+    server.on(r.path, r.method, [&r] {
+      crumbWeb(r.path);  // (watchdog diagnosis: which request)
+      r.fn();
+      crumb(CR_LOOP, L_WEB);
+    });
   server.onNotFound([] { sendBody(404, "text/plain", (const uint8_t*)"Not found", 9, "404"); });
   server.begin();
 }
@@ -1327,8 +1445,12 @@ void webApiRequest(const char* line) {
     const Route* hit = nullptr;
     for (const Route& x : ROUTES)
       if (!strcmp(x.path, path) && x.method == (post ? HTTP_POST : HTTP_GET)) hit = &x;
-    if (hit) hit->fn();
-    else sendError("Not found", 404);
+    if (hit) {
+      crumbWeb(hit->path);
+      hit->fn();
+    } else {
+      sendError("Not found", 404);
+    }
     if (!r.answered) sendError("No answer", 500);
   }
   sreq = nullptr;

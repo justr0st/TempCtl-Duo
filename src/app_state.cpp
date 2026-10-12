@@ -1,5 +1,7 @@
 #include "app_state.h"
 #include "syslog.h"
+#include "sdlog.h"
+#include "crumbs.h"
 #include "console.h"
 #include <esp_heap_caps.h>
 #include <math.h>
@@ -481,6 +483,7 @@ static void logAddV(LogKind def, const char* fmt, va_list ap) {
   const LogKind k = logClassify(m, def);
   LogSerial.printf("[event] %s\n", m);
   syslogAdd(k, m, strlen(m));
+  sdlogEvent(k, m);  // (a row in the SD run log while a run is logged)
   portENTER_CRITICAL(&logMux);
   LogEntry& e = logBuf[logNext % LOG_N];
   e.seq = logNext++;
@@ -981,6 +984,46 @@ static bool runChecks(const DuoProgram& p, float* pv, bool* ok, const char* verb
 static void takeChannels(const DuoProgram& p, const RunFileInfo* ri);
 static void dismissInterrupted();
 
+// ------------------------------------------------------------ SD run log (S3, sdlog.h)
+static void sdlogStart(const DuoProgram& p, bool resumed) {
+  if (!sdlogSlot()) return;
+  sdlogRunStart(p.name, p.type == PROG_TL, resumed);
+  char b[96];
+  snprintf(b, sizeof(b), "bottom = %s, top = %s", s.ch[CH_BOTTOM].name, s.ch[CH_TOP].name);
+  sdlogEvent(LK_INFO, b);
+}
+
+// one row a second while a run is active (control task, under gLock)
+static void sdRow(const float* pv, const bool* pvOk, const float* spNow, const ChOut* out) {
+  static uint32_t at = 0;
+  if (!sdlogSlot() || (at && millis() - at < 1000)) return;
+  at = millis();
+  SdRow r;
+  r.runS = eng.elapsed();
+  if (runProg && runProg->type == PROG_TL) {
+    char a[2][18];
+    for (int i = 0; i < NUM_CHANNELS; ++i) {
+      const StageInfo si = eng.lane(i);
+      if (progUses(*runProg, i)) snprintf(a[i], sizeof(a[i]), "%c%d %s", i ? 'T' : 'B', si.idx + 1, stageName(si.st));
+      else a[i][0] = 0;
+    }
+    snprintf(r.where, sizeof(r.where), "%s%s%s", a[0], a[0][0] && a[1][0] ? " / " : "", a[1]);
+  } else {
+    const StageInfo si = eng.seq();
+    snprintf(r.where, sizeof(r.where), "P%d %s", si.idx + 1, stageName(si.st));
+  }
+  for (int i = 0; i < NUM_CHANNELS; ++i) {
+    const ChannelLive& C = gLive.ch[i];
+    r.pv[i] = pvOk[i] ? pv[i] : NAN;
+    r.sp[i] = spNow[i];
+    r.prog[i] = out[i].inProgram && !out[i].idle ? out[i].sp : NAN;
+    r.out[i] = C.outValid ? C.out : NAN;
+    const ChState cs = eng.chState(i);
+    r.state[i] = cs != ChState::None ? chStateName(cs) : man[i].on ? "manual" : C.type == CH_OFF ? "" : "-";
+  }
+  sdlogRow(r);
+}
+
 static void startProgram(int idx, bool draft) {
   if (eng.active()) return;
   if (anyFault()) {
@@ -1044,6 +1087,7 @@ static void startProgram(int idx, bool draft) {
   runInfo.id = esp_random() | 1;
   saveRunFile();
   runTrack(true);
+  sdlogStart(p, false);
   say("Program \"%s\" started%s", p.name, draft ? " (unsaved changes)" : "");
 }
 
@@ -1166,6 +1210,7 @@ static void resumeInterrupted() {
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) intrOff[ch] = false;
   saveRunFile();
   runTrack(true);
+  sdlogStart(p, true);
   const int t = (int)eng.elapsed();
   if (p.type == PROG_SEQ) say("Program \"%s\" resumed: phase %d again (run time %d:%02d)", p.name, eng.seq().idx + 1, t / 60, t % 60);
   else say("Program \"%s\" resumed at run time %d:%02d", p.name, t / 60, t % 60);
@@ -1324,6 +1369,14 @@ static void saveRun() {
   }
 }
 
+// "Keep the stored program" after a run with edits: the question is answered (touch, web and serial close it)
+static void discardRun() {
+  if (editCount == savedCount) return;
+  savedCount = editCount;
+  runInfo.edited = 0;
+  logRun("Run changes not saved - \"%s\" stays as stored", runProg ? runProg->name : "");
+}
+
 static void handleCmd(const Cmd& c) {
   switch (c.type) {
     case CMD_START: startProgram(c.arg, c.sub == 1); break;
@@ -1346,6 +1399,7 @@ static void handleCmd(const Cmd& c) {
       break;
     case CMD_RUN_EDIT: runEdit(c); break;
     case CMD_SAVE_RUN: saveRun(); break;
+    case CMD_DISCARD_RUN: discardRun(); break;
     case CMD_RUN_RECOVER: resumeInterrupted(); break;
     case CMD_RUN_DISMISS: dismissInterrupted(); break;
     case CMD_SETTINGS_CHANGED: {
@@ -1649,6 +1703,7 @@ static void driveManual(int ch) {
 
 static void cycle(float dt) {
   pollChannels();
+  crumb(CR_CONTROL, C_CYCLE);
 
   float pv[NUM_CHANNELS], spEff[NUM_CHANNELS];
   bool pvOk[NUM_CHANNELS], spEffOk[NUM_CHANNELS], commOk[NUM_CHANNELS];
@@ -1702,6 +1757,7 @@ static void cycle(float dt) {
     runForget();
     logRun("\"%s\" %s after %d:%02d", runProg->name, st == RunState::Finished ? "finished" : "stopped",
              (int)eng.elapsed() / 60, (int)eng.elapsed() % 60);
+    sdlogRunEnd();
   }
   bool endOpen = false, endDone = false;
   for (int i = 0; i < NUM_CHANNELS; ++i) {
@@ -1780,6 +1836,7 @@ static void cycle(float dt) {
     }
     gHist->runStLast = (int16_t)idx;
   }
+  if (eng.active()) sdRow(pv, pvOk, spNow, out);
   // live history: one slot per LIVE_SAMPLE_SEC even if polling is slower (the same reading fills
   // the slots in between; after a longer stall they stay empty)
   const uint32_t slotMs = LIVE_SAMPLE_SEC * 1000UL;
@@ -1889,8 +1946,12 @@ static void controlTask(void*) {
   uint32_t lastPoll = 0, lastTick = millis();
   for (;;) {
     Cmd c;
-    while (xQueueReceive(cmdQ, &c, 0) == pdTRUE) handleCmd(c);
+    while (xQueueReceive(cmdQ, &c, 0) == pdTRUE) {
+      crumb(CR_CONTROL, C_CMD, c.type);
+      handleCmd(c);
+    }
     if (reqPending) {
+      crumb(CR_CONTROL, C_REQUEST);
       processRequest(reqSlot);
       reqPending = false;
       xSemaphoreGive(reqDone);
@@ -1900,8 +1961,10 @@ static void controlTask(void*) {
       lastPoll = now;
       const float dt = (now - lastTick) / 1000.0f;
       lastTick = now;
+      crumb(CR_CONTROL, C_POLL);
       cycle(dt);
     }
+    crumb(CR_CONTROL, C_WAIT);
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
@@ -1944,8 +2007,8 @@ static const char* resetReasonFind() {
       // the ROM's reset code helps telling a real crash from a restart (serial log has the details)
       snprintf(b, sizeof(b), "%s, rst %d", asked ? "crash while restarting" : "crash", (int)esp_rom_get_reset_reason(0));
       return b;
-    case ESP_RST_INT_WDT:
-    case ESP_RST_TASK_WDT:
+    case ESP_RST_INT_WDT: return "interrupt watchdog";
+    case ESP_RST_TASK_WDT: return "task watchdog";
     case ESP_RST_WDT: return "watchdog";
     case ESP_RST_DEEPSLEEP: return "deep sleep";
     case ESP_RST_BROWNOUT: return "brown-out";
@@ -2074,7 +2137,16 @@ void appInit() {
     LogSerial.printf("[settings] channel %d: %s, %s\n", i + 1, gSettings.ch[i].name, channelTypeName(gSettings.ch[i].type));
   }
   programStoreBegin();
-  logEvent("%s %s started (%s)", PRODUCT_NAME, FW_VERSION, resetReasonText());
+  const char* why = resetReasonText();
+  logEvent("%s %s started (%s)", PRODUCT_NAME, FW_VERSION, why);
+  {  // after a watchdog / crash: what the loop, the control task and the SD card were doing
+    char b[160];
+    const bool bad = strstr(why, "watchdog") || strstr(why, "crash");
+    if (crumbReport(b, sizeof(b)) && bad && b[0]) {
+      LogSerial.printf("[boot] %s - %s\n", why, b);
+      logEvent("%s - %s", why, b);
+    }
+  }
   checkInterrupted();
   gLive.manualSp = gSettings.ch[ENGINE_CH].manualSp;
   histResetLive();

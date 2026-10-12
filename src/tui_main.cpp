@@ -533,8 +533,11 @@ static void onBadge(lv_event_t*) {
   if (L.intrValid) intrOpen();
 }
 
+static uint32_t saveDlg = 0;  // the "Run changed" dialog (closed when answered elsewhere)
 static void onSaveAnswer(int b, int) {
+  saveDlg = 0;
   if (b == 2) sendCmd(CMD_SAVE_RUN);
+  else if (b == 1) sendCmd(CMD_DISCARD_RUN);
 }
 
 // ------------------------------------------------------------ header
@@ -763,6 +766,11 @@ void mainEvents(const LiveData& live, const Settings& set) {
     char b[120];
     snprintf(b, sizeof(b), "Save the changes made during the run into \"%s\"?", L.runName);
     tDialog("Run changed", b, "Discard", "Save", "", onSaveAnswer, 0);
+    saveDlg = tModalId();
+  }
+  if (saveDlg && (!L.runEdited || active(L.state))) {  // answered on the web page / serial, or a new run
+    if (tModalId() == saveDlg) tModalClose();
+    saveDlg = 0;
   }
   if (active(L.state) && !active(prevState)) chartLive = false;
   prevState = L.state;
