@@ -6,6 +6,7 @@
 #include "console.h"
 #include "lcd.h"
 #include "touch.h"
+#include "safety.h"
 #include "ui.h"
 
 void tuiBackground();
@@ -69,6 +70,7 @@ static void touchCb(lv_indev_t*, lv_indev_data_t* data) {
   const bool pressed = touchRead(&x, &y);
   stuckCheck(pressed, pressed ? x : 0, pressed ? y : 0);
   if (pressed) {
+    safetyActivity();
     touchToNative(x, y);
     data->point.x = x;
     data->point.y = y;

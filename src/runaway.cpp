@@ -8,6 +8,9 @@ const char* faultName(uint8_t f) {
     case FAULT_OVERTEMP: return "over temperature";
     case FAULT_HEATING: return "heating failed";
     case FAULT_HOLD: return "temperature left the setpoint band";
+    case FAULT_OFFHEAT: return "heating while the outputs are off";
+    case FAULT_FROZEN: return "reading did not change";
+    case FAULT_CJHOT: return "converter too hot";
   }
   return "fault";
 }
@@ -61,4 +64,47 @@ uint8_t RunawayMonitor::update(const Runaway& c, float dt, bool active, float sp
     outsideT_ = 0;
   }
   return FAULT_NONE;
+}
+
+void GuardMonitor::reset() {
+  settleT_ = offT_ = 0;
+  offRef_ = NAN;
+  frozenT_ = 0;
+  lastRaw_ = NAN;
+}
+
+uint8_t GuardMonitor::update(const Runaway& c, float dt, bool on, bool otherOn, float pv, float raw) {
+  if (!(dt > 0)) dt = 0;
+  uint8_t f = FAULT_NONE;
+  // heating while off
+  if (on || otherOn || !c.offEnable) {
+    settleT_ = 0;
+    offRef_ = NAN;
+  } else if (settleT_ < OFF_SETTLE_SEC) {
+    settleT_ += dt;
+  } else if (!isnan(pv)) {
+    if (isnan(offRef_)) {
+      offRef_ = pv;
+      offT_ = 0;
+    }
+    if (pv < offRef_) offRef_ = pv;  // cooling: the rise counts from the lowest reading
+    offT_ += dt;
+    if (pv - offRef_ >= c.offRise) f = FAULT_OFFHEAT;
+    else if (offT_ >= c.offSec) {  // next window from here
+      offRef_ = pv;
+      offT_ = 0;
+    }
+  }
+  // reading frozen
+  if (!on || !c.frozenEnable || isnan(raw)) {
+    frozenT_ = 0;
+    lastRaw_ = raw;
+  } else if (isnan(lastRaw_) || raw != lastRaw_) {
+    lastRaw_ = raw;
+    frozenT_ = 0;
+  } else {
+    frozenT_ += dt;
+    if (frozenT_ >= c.frozenSec && !f) f = FAULT_FROZEN;
+  }
+  return f;
 }

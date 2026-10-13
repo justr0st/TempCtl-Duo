@@ -36,14 +36,14 @@ start three example programs are created (Lead-free BGA, Leaded BGA, Lead-free B
     value to change it, tap # / Type for type, wait, pause text, insert, move, delete; Undo, Save, Start,
     Rename, Discard, Delete; during a run the running program with run edits of targets and times),
     Channels (name, type, limits, end action, Modbus controller, thermocouple, PID + autotune, runaway
-    protection, RS485 bus; register addresses and the two-point calibration on the web page), Network
+    protection, heating while off, frozen reading, converter temperature, RS485 bus; register addresses and the two-point calibration on the web page), Network
     (Wi-Fi with scan and password, AP password, host name, fixed IP), Display (brightness, dark mode,
     accent colour: six presets or any colour (hue / saturation / brightness), upside down, live chart
-    period), System (polling interval, "bottom reached" band, info,
-    restart), Event log.
+    period), System (polling interval, "bottom reached" band, time zone, manual mode
+    timeout, E-stop input, alarm sound, chip temperature warning, info, restart), Event log.
   - **CYD (320×240)**: the same screens as a compact set (section 4a).
-- Web interface (section 5a): Status, Programs, Channels (incl. controller parameters, full register
-  map, calibration, PID autotune), System (Wi-Fi, display, restart) and Tools (register read/write, a
+- Web interface (section 5a): Dashboard, Programs, Channels (incl. controller parameters, full register
+  map, calibration, PID autotune, protection), Log, Settings (Wi-Fi, safety, display, clock, restart) and Tools (register read/write, a
   setpoint-address finder, backup) pages; CSV log download
 - The controller keeps doing the PID control; the ESP32 only feeds it setpoints
 
@@ -165,7 +165,9 @@ Two supported boards, selected by the PlatformIO environment; all pins are in `s
 | 4.0" SPI module **MSP4031** | ST7796S 320×480 (used as 480×320 landscape), FT6336U capacitive touch (I²C 0x38). VCC 5 V recommended |
 | **3.3 V** RS485 transceiver | on UART1 |
 
-Wiring picture: `claude/wiring/s3-wiring.png` (display on J1, RS485 / thermocouples / SSR drivers on J3).
+Wiring pictures: `claude/wiring/s3-wiring.png` (display on J1, RS485 / thermocouples / SSR drivers on J3,
+relay / E-stop / buzzer on J1-4/5/6). Schematic of the whole device: `hardware/s3-schematic/`
+(KiCad 7 project + PDF / PNG, A3).
 
 | Function | GPIO | | Function | GPIO |
 |---|---|---|---|---|
@@ -176,6 +178,14 @@ Wiring picture: `claude/wiring/s3-wiring.png` (display on J1, RS485 / thermocoup
 | CTP_SDA / CTP_SCL | 16 / 15 | | TC CS bottom / top (later) | 39 / 38 |
 | CTP_RST / CTP_INT | 17 / 7 | | SSR bottom / top (later) | 21 / 47 |
 | | | | SSR supply relay (+5 V common of both SSRs) | 4 |
+| | | | E-stop input (NC contact to GND) | 5 |
+| | | | Alarm buzzer (2.7 kHz square wave) | 6 |
+
+SSR supply relay: an **active-high DC solid-state relay** (input 3–32 V DC, at most 20 mA at 3.3 V;
+output at least 0.5 A DC). Input + = GPIO4, input − = GND (driven directly by the pin, no module power);
+output: 5 V (J1-21) → OUT+, OUT− → the "+" inputs of both SSRs. GPIO4 is driven low (off) from the first
+line of `setup()`. The relay covers a stuck SSR input or driver transistor; an SSR whose output is shorted
+keeps heating — that needs a contactor in the heater supply (and the independent limiter of section 7).
 
 Flash and watch the log through the USB port labelled **"UART"**. The native **"USB"** port is the serial
 console (section 4b; later also the Web Serial page): open it with any terminal at 115200 baud, opening it
@@ -237,6 +247,8 @@ set `PIN_RS485_DE` to `-1` in `src/board_cyd.h` / `src/board_s3.h`.
 - Free CYD pins: only IO22 (P3-2 and CN1-3), IO27 (CN1-2, 10 k pull-up) and IO35 (P3-3, input only) are
   on connectors. The SD slot pins (IO5, IO18, IO19, IO23) are reached with a micro-SD breakout adapter
   (no SD card in the slot). IO6–IO11 are the module's flash and not usable.
+- CYD alarm sound: the speaker connector P4 (IO26, on-board amplifier); IO35 can't drive a buzzer (input
+  only). No E-stop input and no chip temperature on the CYD (no free pin / sensor).
 
 ## 3. Can the LCTC M226-TE (from the screenshot) work the same way?
 
@@ -381,7 +393,7 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
 - Icons: `web/icons/` (`logo.svg` = favicon and sidebar logo, `favicon.ico` 16/32/48 px,
   `apple-touch-icon.png` 180 px), made from the logo in `logo/` (SVG cleaned up for size, PNGs rendered
   from it); served at `/favicon.svg`, `/favicon.ico`, `/apple-touch-icon.png` (≈ 10 kB in all).
-- Status page: run panel (program, Start / Pause / Continue / Stop / Next phase, state, run time,
+- **Dashboard** (was "Status"): run panel (program, Start / Pause / Continue / Stop / Next phase, state, run time,
   remaining time), chart (both channels: temperatures, setpoints, state lanes, phase lines with times,
   pauses, the forecast of the rest of the run dashed; zoom − / + / Fit, Ctrl + wheel, drag, pinch;
   "Live" shows the live history over a chosen period, see below), channel cards (PV, SP, output, what the channel does, target
@@ -425,26 +437,29 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
   the newest temperature at the end of the chart; the chart history comes every 2 s.
 - Pages (sidebar; addresses `#/programs`, `#/channels`, `#/log`, `#/settings` (old `#/system` too), `#/tools`, so a page can be
   bookmarked; all on the one page file, the drafts stay while switching pages):
-  - **Programs**: the 20 slots with type, channels, phases / steps and time; Open (in the Status page
+  - **Programs**: the 20 slots with type, channels, phases / steps and time; Open (in the Dashboard
     editor), Duplicate (into the first empty slot), Export (the program's JSON file), Delete; empty
     slots: New sequence / New timeline / Import (a program JSON file).
-  - **Channels**: polling interval, link-loss pause, "bottom reached" band, SSR supply relay (S3: GPIO 4
-    switches a relay in the common +5 V supply of both SSRs — on while a local channel's outputs are on
-    or autotune runs, off when none is and at once on any local fault, event "SSR supply relay off: …";
-    level selectable: on when the pin is high / low; until the settings are read the pin stays an input,
-    so the relay module's own pull-up / pull-down keeps it off), RS485 bus (beta); per channel (tabs):
+  - **Channels**: "All channels" tile: polling interval, link-loss pause, "bottom reached" band, SSR supply relay (S3: GPIO 4
+    drives an active-high DC solid-state relay in the common +5 V supply of both SSR inputs — on while a
+    local channel's outputs are on or autotune runs, off when none is and at once on any local fault or
+    E-stop, event "SSR supply relay off: …"; a note only, nothing to set). Below it the channel tile with one tab
+    per channel (name, colour dot, type), its subsections apart with a thin line:
     name, type, end action, setpoint limits; Modbus: address, controller type (+ load register defaults),
-    setpoint ramps, front lock, register map, PMA parameters and actions; local: converter, calibration
-    (with a two-point helper), PID, SSR window, max. output / temperature, PID autotune; runaway limits
-    of the selected type. Changed fields are marked; Save sends only the changed values
+    setpoint ramps, front lock, RS485 bus (beta; one bus, shown in the tile of each Modbus channel),
+    register map, PMA parameters and actions; local: converter, calibration (with a two-point helper),
+    PID, SSR window, max. output / temperature and the PID autotune; Protection: runaway limits, heating
+    while off, frozen reading (of the selected type) and, local, converter too hot. Changed fields are marked; Save sends only the changed values
     (`POST /api/config`) and lists values the device had to adjust to the allowed range.
   - **Log**: the SD run logs (S3, below) and the system log (below).
-  - **Settings** (tiles fill the free space): device info, restart, restart of the screen only (display
+  - **Settings** (tiles fill the free space; jump buttons Device / Wi-Fi / Safety / Display / Clock in the
+    title bar when it is one column): device info, restart, restart of the screen only (display
     and touch controller set up again, the device keeps running), Wi-Fi (with network scan, show / hide
     password, optional fixed IP address), touch display (light / dark switch, brightness slider;
     applied at once, no Save button — the screen follows the slider while it is dragged) (accent colour:
     a preset or "Custom" with the browser's colour picker; theme, brightness, rotation, screen check),
-    the clock (time zone, below).
+    safety (section 7a: manual-mode timeout, E-stop input, alarm sound with a test beep, chip
+    temperature warning, with the E-stop contact and chip temperature live), the clock (time zone, below).
     **System log** (Log page): everything the device logs, colour-coded — errors (red), warnings (amber), program runs
     (accent), events, technical lines of the serial log ([wifi], [lcd], [mem] …, grey); filters per kind,
     search, download as text. The events of earlier starts come from flash (each start is a section);
@@ -541,7 +556,8 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 | POST | `/api/select` | `{"i":index}` select the program for Main / Chart |
 | POST | `/api/manual` | `{"sp":150}` and/or `{"on":true}`, optional `"ch":1` (top; default 0 = bottom) |
 | POST | `/api/autotune` | local channels: `{"ch":1,"cmd":"start","sp":200}`, `"stop"`, `"accept"` (proposed kp/ki/kd → settings), `"discard"`; progress and result in `/api/status` → `channels[].autotune` |
-| POST | `/api/ack` | `{"ch":0}` acknowledge a channel fault (runaway, sensor, over temperature); refused while the cause is still there. The outputs stay off until switched on again |
+| POST | `/api/ack` | `{"ch":0}` acknowledge a channel fault (runaway, sensor, over temperature, heating while off, frozen reading, converter too hot); refused while the cause is still there. The outputs stay off until switched on again |
+| POST | `/api/beep` | `{}` one short test beep (Settings › Safety). `/api/live` → `safety`: `estop`, `contact` (open / closed, S3), `chipC`, `chipHot`, `muted`; `/api/config` → `limits.estop / sound / chipTemp` |
 | POST | `/api/cmd` | `{"cmd":"start"|"pause"|"resume"|"stop"|"next"|"continue", "prog":index}` (`skip` = `next`) |
 | POST | `/api/wifi` | `{"ssid","pass","apPass"}`, reconnects without restart |
 | GET | `/api/wifiscan` | `?start=1` starts a network scan; then `{"busy":true}` until `{"networks":[…]}` (strongest first) |
@@ -597,6 +613,32 @@ test/host_test.cpp        g++ -std=c++17 -Isrc -I<ArduinoJson>/src test/host_tes
 A software programmer must never be the only protection against overheating. Fit an independent
 over-temperature limiter (PMA recommends the TB 40-1 in the KS 4x-1 manual) and use the controller's own
 limit alarms and `SP.Hi` setpoint limit. Set *Highest allowed setpoint* on *Controller* to match `SP.Hi`.
+
+### 7a. Protections in the firmware (spec 9.2a)
+
+Per channel (Channels page › Protection, touch Channels, `b.local.runaway.*` / `b.modbus.runaway.*` /
+`b.local.cj*`); a tripped check switches the outputs off (local: also the SSR supply relay), stops a run
+and waits for Acknowledge:
+
+| Check | Default | |
+|---|---|---|
+| Runaway: heating failed / left the setpoint band | on | output ≥ 80 % for 300 s (top 120 s) with < 5 °C rise; ±15 °C for 60 s after the SP was reached |
+| Heating while off (stuck SSR / controller) | on, 10 °C in 60 s | outputs off but the PV rises; from 2 min after off, not while the other channel heats (its heat reaches the sensor). Modbus: only after an "outputs off" was written |
+| Reading frozen | on, 120 s | outputs on, the unfiltered reading did not change at all |
+| Converter too hot (local, MAX31855) | on, 70 °C | cold-junction temperature; outputs can't be switched on above it |
+| Over temperature, sensor fault | always | as before |
+
+General (Settings › Safety, touch System, `safety.*`):
+
+| Setting | Default | |
+|---|---|---|
+| Manual mode timeout (`manualIdle`, `manualIdleMin`) | off, 30 min | manual mode ends after this long without a touch, a web action or a serial command; message + beeps 1 min before |
+| E-stop input (`estop`, S3 GPIO5) | off | NC contact to GND, pull-up; open or a broken wire: SSRs and relay off at once (SSR timer / local task), run stopped, manual and autotune off, Modbus outputs off; nothing can be switched on while it is open |
+| Alarm sound (`sound`, S3 GPIO6, CYD speaker P4) | on | fault / E-stop: 3 long beeps every 3 s; "Action required" and the timeout warning: 2 short beeps every 10 s; run finished: 3 short beeps. Any touch / web action / serial command silences the current alarm |
+| Chip temperature warning (`chipWarn`, `chipMaxC`, S3) | on, 80 °C | read every 30 s; a warning event above the limit (5 °C hysteresis) |
+
+Start warning: a channel that already is within 10 °C of (or above) its first target when a program
+starts gets a warning message (the run starts anyway).
 
 Status: the program engine, settings, PID / autotune, runaway check and Modbus framing pass host unit
 tests; the firmware (Arduino-ESP32 2.0.17, `espressif32@6.9.0`, LVGL 9.6) runs on the S3 and the CYD

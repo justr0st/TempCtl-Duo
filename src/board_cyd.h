@@ -120,8 +120,10 @@
 #define STATUS_LED_LEVEL 120  // brightness of a full colour channel (0..255)
 #endif
 
-// ---- Other on-board parts (not used yet) ----
-#define PIN_SPEAKER 26     // SC8002B amplifier input (P4 speaker connector) - e.g. alarm beeps
+// ---- Other on-board parts ----
+#define PIN_SPEAKER 26     // SC8002B amplifier input (P4 speaker connector)
+// Alarm sound (safety.sound) on the speaker connector P4. (IO35 can't drive a buzzer: input only.)
+#define PIN_BUZZER PIN_SPEAKER
 #define PIN_LDR 34         // light sensor (input only) - e.g. automatic backlight
 #define PIN_BOOT_BUTTON 0  // BOOT button, 10 k pull-up (strapping pin)
 

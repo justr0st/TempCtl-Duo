@@ -15,6 +15,7 @@
 #include <lwip/sockets.h>
 #include <math.h>
 #include "app_state.h"
+#include "safety.h"
 #include "controller.h"
 #include "local_ctrl.h"
 #include "net.h"
@@ -754,6 +755,9 @@ static void handleGetConfig() {
   l["rs485"] = lim.rs485;
   l["localMax"] = lim.localMax;
   l["relay"] = localCtrlRelayWired();
+  l["estop"] = safetyEstopWired();
+  l["sound"] = safetySoundWired();
+  l["chipTemp"] = safetyChipTempWired();
   sendJson(d);
 }
 
@@ -1015,6 +1019,15 @@ static void handlePostParam() {
   sendJson(d);
 }
 
+// POST /api/beep: one short test beep (Settings page)
+static void handleBeep() {
+  safetyBeepTest();
+  JsonDocument d;
+  d["ok"] = safetySoundWired();
+  if (!safetySoundWired()) d["err"] = "no buzzer on this board";
+  sendJson(d);
+}
+
 static void handleAction() {
   JsonDocument b;
   if (!parseBody(b)) return sendError("Invalid JSON");
@@ -1070,6 +1083,14 @@ static void handleLive() {
     d["tz"] = JsonString(gSettings.tzName);  // time zone ("" = not set: the page sends the browser's)
   }
   if (localCtrlRelayWired()) d["relay"] = localCtrlRelayOn();  // SSR supply relay (S3)
+  {  // safety (spec 9.2a)
+    JsonObject o = d["safety"].to<JsonObject>();
+    o["estop"] = L.estop;           // active: all outputs forced off
+    if (safetyEstopWired()) o["contact"] = L.estopRaw ? "open" : "closed";
+    if (!isnan(L.chipC)) o["chipC"] = roundf(L.chipC * 10) / 10;
+    o["chipHot"] = L.chipHot;
+    o["muted"] = L.soundMuted;
+  }
   if (sdlogSlot()) {  // SD run log (S3): the System page shows the card's run files
     SdState sd;
     sdlogState(sd);
@@ -1374,6 +1395,7 @@ static const Route ROUTES[] = {
     {"/api/params", HTTP_GET, handleGetParams},
     {"/api/params", HTTP_POST, handlePostParam},
     {"/api/action", HTTP_POST, handleAction},
+    {"/api/beep", HTTP_POST, handleBeep},
 };
 
 void webBegin() {
@@ -1397,6 +1419,7 @@ void webBegin() {
   for (const Route& r : ROUTES)
     server.on(r.path, r.method, [&r] {
       crumbWeb(r.path);  // (watchdog diagnosis: which request)
+      if (r.method == HTTP_POST) safetyActivity();
       r.fn();
       crumb(CR_LOOP, L_WEB);
     });
@@ -1449,6 +1472,7 @@ void webApiRequest(const char* line) {
       if (!strcmp(x.path, path) && x.method == (post ? HTTP_POST : HTTP_GET)) hit = &x;
     if (hit) {
       crumbWeb(hit->path);
+      if (post) safetyActivity();
       hit->fn();
     } else {
       sendError("Not found", 404);

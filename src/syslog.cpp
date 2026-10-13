@@ -18,7 +18,7 @@ static bool hasWord(const char* t, const char* const* words) {
 LogKind logClassify(const char* t, LogKind def) {
   static const char* const ERR[] = {"error",   "failed", "fault",      "crash",          "panic",       "assert",
                                     "watchdog", "brown-out", "no reading", "out of memory", "not found",
-                                    "does not answer", "does NOT answer", "runaway", nullptr};
+                                    "does not answer", "does NOT answer", "runaway", "E-stop", nullptr};
   static const char* const WARN[] = {"warn",       "lost",        "timeout",     "timed out", "disconnected",
                                      "not connected", "trying again", "retry",    "dropped",   "interrupted",
                                      "did not help", "stuck",       "restarted automatically", "cannot",

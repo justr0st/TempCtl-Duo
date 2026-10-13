@@ -75,7 +75,16 @@ struct LiveData {
   bool intrExact;     // exact position (RTC memory) - else as of the last phase / step change or minute
   RunPos intrPos;
   char intrReason[20];
+
+  // safety (spec 9.2a)
+  bool estop;         // E-stop active (outputs forced off)
+  bool estopRaw;      // E-stop contact open (also when the input is not enabled)
+  float chipC;        // S3 chip temperature, NAN unknown
+  bool chipHot;       // above the warning limit
+  bool soundMuted;    // the current alarm was silenced
 };
+
+constexpr float START_WARN_BAND = 10;  // start warning: PV within this of (or above) the first target
 
 constexpr int RUN_EV_MAX = 400;
 

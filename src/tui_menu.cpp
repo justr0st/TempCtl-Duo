@@ -1,6 +1,7 @@
 // Touch UI menu and setup pages: Menu, Event log, Display, Network, System.
 #include "syslog.h"
 #include "tui.h"
+#include "safety.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -663,7 +664,7 @@ void networkUpdate() {
 }
 
 // ------------------------------------------------------------ system
-static lv_obj_t *sInfo, *sPoll, *sBand, *sTz, *sRelay;
+static lv_obj_t *sInfo, *sPoll, *sBand, *sTz, *sIdle, *sEstop, *sSound, *sChip;
 
 // ------------------------------------------------------------ time zone (two steps: region, then the place)
 static const char* const TZ_OFFSETS[] = {"UTC-12:00", "UTC-11:00", "UTC-10:00", "UTC-09:30", "UTC-09:00", "UTC-08:00",
@@ -808,12 +809,56 @@ static void onRestart(lv_event_t*) {
           "", onRestartAnswer, 0, true);
 }
 
-static void onRelayLevel(lv_event_t*) {
+// ---- safety (spec 9.2a)
+static const uint16_t IDLE_MIN[] = {10, 15, 30, 60, 120, 240};
+static const uint8_t CHIP_C[] = {60, 70, 80, 90, 100};
+static void onIdlePick(int i, int) {
+  if (i < 0) return;
   {
     Guard g;
-    gSettings.relayActiveLow = lv_obj_has_state(sRelay, LV_STATE_CHECKED) ? 1 : 0;
+    gSettings.manualIdle = i > 0;
+    if (i > 0) gSettings.manualIdleMin = IDLE_MIN[i - 1];
   }
-  saveSettingsAndNotify();  // (the control task applies the level)
+  saveSettingsAndNotify();
+  systemShow();
+}
+static void onIdle(lv_event_t*) {
+  Settings s;
+  settingsCopy(s);
+  int sel = 0;
+  for (int i = 0; i < 6; ++i)
+    if (s.manualIdle && s.manualIdleMin == IDLE_MIN[i]) sel = i + 1;
+  tChoice("Manual mode ends without activity after", "Never\n10 min\n15 min\n30 min\n1 h\n2 h\n4 h", sel, onIdlePick, 0);
+}
+static void onChipPick(int i, int) {
+  if (i < 0) return;
+  {
+    Guard g;
+    gSettings.chipWarn = i > 0;
+    if (i > 0) gSettings.chipMaxC = CHIP_C[i - 1];
+  }
+  saveSettingsAndNotify();
+  systemShow();
+}
+static void onChip(lv_event_t*) {
+  Settings s;
+  settingsCopy(s);
+  int sel = 0;
+  for (int i = 0; i < 5; ++i)
+    if (s.chipWarn && (int)s.chipMaxC == CHIP_C[i]) sel = i + 1;
+  tChoice("Chip temperature warning above", "Off\n60 \xC2\xB0" "C\n70 \xC2\xB0" "C\n80 \xC2\xB0" "C\n90 \xC2\xB0" "C\n100 \xC2\xB0" "C", sel,
+          onChipPick, 0);
+}
+static void onSafetySw(lv_event_t* e) {
+  lv_obj_t* o = (lv_obj_t*)lv_event_get_target(e);
+  const bool on = lv_obj_has_state(o, LV_STATE_CHECKED);
+  {
+    Guard g;
+    if (o == sEstop) gSettings.estop = on;
+    if (o == sSound) gSettings.sound = on;
+  }
+  saveSettingsAndNotify();
+  if (o == sSound && on) safetyBeepTest();
 }
 
 lv_obj_t* systemCreate() {
@@ -824,10 +869,20 @@ lv_obj_t* systemCreate() {
   sBand = tButton(r, "", onBand, nullptr, CW2, BH);
   r = settingRow(p.body, "Time zone", "Local time in the SD run logs");
   sTz = tButton(r, "", onTz, nullptr, CW2, BH);
-  sRelay = nullptr;
-  if (localCtrlRelayWired()) {
-    r = settingRow(p.body, "SSR relay active low", "On: the supply relay is on while GPIO 4 is low");
-    sRelay = tSwitch(r, onRelayLevel);
+  r = settingRow(p.body, "Manual mode timeout", "Manual mode ends after this long without a touch, web or serial action (a beep 1 min before)");
+  sIdle = tButton(r, "", onIdle, nullptr, CW2, BH);
+  sEstop = sSound = sChip = nullptr;
+  if (safetyEstopWired()) {
+    r = settingRow(p.body, "E-stop input", "GPIO 5, NC contact to GND. Open: all outputs off, run stopped");
+    sEstop = tSwitch(r, onSafetySw);
+  }
+  if (safetySoundWired()) {
+    r = settingRow(p.body, "Alarm sound", "Faults, E-stop, \"Action required\", run finished. A touch silences it");
+    sSound = tSwitch(r, onSafetySw);
+  }
+  if (safetyChipTempWired()) {
+    r = settingRow(p.body, "Chip temperature warning", "ESP32-S3 internal sensor");
+    sChip = tButton(r, "", onChip, nullptr, CW2, BH);
   }
   lv_obj_t* info = tPanel(p.body);
   lv_obj_set_size(info, LV_PCT(100), LV_SIZE_CONTENT);
@@ -853,7 +908,20 @@ void systemShow() {
   for (char* c = tzb; *c; ++c)
     if (*c == '_') *c = ' ';
   tButtonText(sTz, tzb);
-  if (sRelay) tSetChecked(sRelay, s.relayActiveLow != 0);
+  if (s.manualIdle) {
+    if (s.manualIdleMin % 60) snprintf(b, sizeof(b), "%u min", s.manualIdleMin);
+    else snprintf(b, sizeof(b), "%u h", s.manualIdleMin / 60);
+  } else {
+    strlcpy(b, "Never", sizeof(b));
+  }
+  tButtonText(sIdle, b);
+  if (sEstop) tSetChecked(sEstop, s.estop != 0);
+  if (sSound) tSetChecked(sSound, s.sound != 0);
+  if (sChip) {
+    if (s.chipWarn) snprintf(b, sizeof(b), "%.0f \xC2\xB0" "C", s.chipMaxC);
+    else strlcpy(b, "Off", sizeof(b));
+    tButtonText(sChip, b);
+  }
   systemUpdate();
 }
 
@@ -874,9 +942,23 @@ void systemUpdate() {
   snprintf(ps, sizeof(ps), " \xC2\xB7 PSRAM %u kB free", (unsigned)(ESP.getFreePsram() / 1024));
   strlcat(ram, ps, sizeof(ram));
 #endif
-  snprintf(b, sizeof(b), PRODUCT_NAME " " FW_VERSION " \xC2\xB7 " BOARD_NAME "%s%s\n%s\nUp %s \xC2\xB7 %s\nLive history in memory: %s%s",
+  LiveData* L = (LiveData*)malloc(sizeof(LiveData));
+  char sf[96] = "";
+  if (L) {
+    liveCopy(*L);
+    char t[40] = "";
+    if (safetyEstopWired())
+      snprintf(sf, sizeof(sf), "\nE-stop: %s (contact %s)", L->estop ? "ACTIVE" : gSettings.estop ? "ok" : "not watched",
+               L->estopRaw ? "open" : "closed");
+    if (!isnan(L->chipC)) {
+      snprintf(t, sizeof(t), "%sChip %.0f \xC2\xB0" "C%s", sf[0] ? " \xC2\xB7 " : "\n", L->chipC, L->chipHot ? " (hot)" : "");
+      strlcat(sf, t, sizeof(sf));
+    }
+    free(L);
+  }
+  snprintf(b, sizeof(b), PRODUCT_NAME " " FW_VERSION " \xC2\xB7 " BOARD_NAME "%s%s\n%s\nUp %s \xC2\xB7 %s\nLive history in memory: %s%s%s",
            BOARD_VARIANT[0] ? " " : "", BOARD_VARIANT, netInfo().c_str(), up, ram, hist,
-           !localCtrlRelayWired() ? "" : localCtrlRelayOn() ? "\nSSR supply relay: on" : "\nSSR supply relay: off");
+           !localCtrlRelayWired() ? "" : localCtrlRelayOn() ? "\nSSR supply relay: on" : "\nSSR supply relay: off", sf);
   tSetText(sInfo, b);
 }
 

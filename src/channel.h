@@ -58,6 +58,8 @@ class Channel {
     (void)n;
     return true;
   }
+  // another channel heats: no "heating while off" check (its heat can reach this sensor)
+  virtual void setOtherHeating(bool on) { (void)on; }
 };
 
 // Runaway check (spec 9.2) with the controller's output (Ypid) and PV while
@@ -67,6 +69,7 @@ class ModbusChannel : public Channel {
   void configure(ModbusMaster* bus, const ModbusChannelSettings& m) {
     ctl_.attach(bus, m);
     runaway_.reset();
+    guard_.reset();
   }
   uint8_t type() const override { return CH_MODBUS; }
   bool onBus() const override { return true; }
@@ -78,10 +81,15 @@ class ModbusChannel : public Channel {
   Controller* modbus() override { return &ctl_; }
   uint8_t fault(char* text, size_t n) override;
   bool ack(char* err, size_t n) override;
+  void setOtherHeating(bool on) override { otherHeat_ = on; }
 
  private:
+  void trip(uint8_t f);
   Controller ctl_;
   RunawayMonitor runaway_;
+  GuardMonitor guard_;
+  bool otherHeat_ = false;
+  bool offKnown_ = false;  // "outputs off" was written (the controller may control on its own before)
   bool outputsOn_ = false;
   float lastSp_ = NAN;
   uint32_t lastPollMs_ = 0;
@@ -100,6 +108,7 @@ class LocalChannel : public Channel {
   bool setOutputs(bool on, char* err, size_t n) override;
   uint8_t fault(char* text, size_t n) override;
   bool ack(char* err, size_t n) override;
+  void setOtherHeating(bool on) override;
 
  private:
   int ch_ = 0;

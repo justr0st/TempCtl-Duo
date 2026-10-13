@@ -31,7 +31,6 @@ SemaphoreHandle_t gLock = nullptr;
 
 // SSR supply relay (local_ctrl.h): the S3 has one, on while the bottom is in manual
 bool localCtrlRelayWired() { return SCREEN_W > 400; }
-void localCtrlRelayLevel(bool) {}
 bool localCtrlRelayOn() { return gLive.ch[1].outOn; }
 
 // breadcrumbs (crumbs.h): nothing to keep on a PC
@@ -537,6 +536,13 @@ int main(int argc, char** argv) {
   run(300);
   shot("14c-tz-europe");
   tModalClose();
+  gLive.estopRaw = true;
+  gLive.chipC = 47.3f;
+  tShow(SCR_SYSTEM);
+  run(2100);
+  lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 400, LV_ANIM_OFF);
+  shot("14d-system-safety");
+  gLive.estopRaw = false;
   tShow(SCR_LOG);
   run(400);
   shot("15-log");
@@ -585,6 +591,8 @@ int main(int argc, char** argv) {
   shot("27-chan-pid");
   lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 1100, LV_ANIM_OFF);
   shot("28-chan-runaway");
+  lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 3000, LV_ANIM_OFF);
+  shot("28b-chan-guard");
 #if defined(TOUCH_XPT2046)
   tShow(SCR_MAIN);
   if (uiTouchCalStart()) {  // touch calibration: the 4 crosses (24 px from the edges)
@@ -602,3 +610,11 @@ int main(int argc, char** argv) {
 #endif
   return 0;
 }
+
+// safety (spec 9.2a)
+#include "safety.h"
+void safetyActivity() {}
+bool safetyEstopWired() { return SCREEN_W > 400; }
+bool safetySoundWired() { return true; }
+bool safetyChipTempWired() { return SCREEN_W > 400; }
+void safetyBeepTest() {}

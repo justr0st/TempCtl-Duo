@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <math.h>
 #include "local_ctrl.h"
+#include "safety.h"
 #include "tc_sensor.h"
 #include <stdio.h>
 #include <string.h>
@@ -62,18 +63,26 @@ bool ModbusChannel::poll(ChannelLive& L, char* err, size_t n) {
   const float dt = lastPollMs_ ? (now - lastPollMs_) / 1000.0f : 0;
   lastPollMs_ = now;
   if (ok && !fault_) {
+    const Runaway& rc = ctl_.settings().runaway;
     const float sp = spOk ? spEff : lastSp_;
-    const uint8_t f = runaway_.update(ctl_.settings().runaway, dt, outputsOn_, sp, pvOk ? pv : NAN, outOk ? out : NAN);
-    if (f) {
-      fault_ = f;
-      char e[64];
-      const bool off = ctl_.reg().ctrlOff != REG_UNSET && setOutputs(false, e, sizeof(e));
-      snprintf(faultText_, sizeof(faultText_), "%s%s", faultName(f), off ? "" : " (outputs could NOT be switched off)");
-      outputsOn_ = false;
-    }
+    uint8_t f = runaway_.update(rc, dt, outputsOn_, sp, pvOk ? pv : NAN, outOk ? out : NAN);
+    // guard: "heating while off" only once our "outputs off" reached the controller
+    const uint8_t g = guard_.update(rc, dt, outputsOn_, otherHeat_ || !offKnown_, pvOk ? pv : NAN, pvOk ? pv : NAN);
+    if (!f) f = g;
+    if (f) trip(f);
   }
   L.outOn = outputsOn_;
   return ok;
+}
+
+void ModbusChannel::trip(uint8_t f) {
+  fault_ = f;
+  char e[64];
+  const bool off = ctl_.reg().ctrlOff != REG_UNSET && setOutputs(false, e, sizeof(e));
+  const bool stuck = f == FAULT_OFFHEAT || f == FAULT_FROZEN;  // outputs were off / the reading can't be trusted
+  snprintf(faultText_, sizeof(faultText_), "%s%s", faultName(f),
+           off ? "" : stuck ? "" : " (outputs could NOT be switched off)");
+  outputsOn_ = false;
 }
 
 uint8_t ModbusChannel::fault(char* text, size_t n) {
@@ -85,6 +94,7 @@ bool ModbusChannel::ack(char*, size_t) {
   fault_ = FAULT_NONE;
   faultText_[0] = 0;
   runaway_.reset();
+  guard_.reset();
   return true;
 }
 
@@ -111,6 +121,7 @@ bool ModbusChannel::setOutputs(bool on, char* err, size_t n) {
   if (r == MbResult::Ok) {
     if (outputsOn_ != on) runaway_.reset();
     outputsOn_ = on;
+    if (!on) offKnown_ = true;
     return true;
   }
   mbDescribe(r, ctl_.lastException(), on ? "Outputs-on write" : "Outputs-off write", err, n);
@@ -154,9 +165,13 @@ bool LocalChannel::setOutputs(bool on, char* err, size_t n) {
   localCtrlGet(ch_, st);
   if (st.fault) snprintf(err, n, "acknowledge the fault first (%s)", st.faultText);
   else if (!st.enabled) snprintf(err, n, "no thermocouple pins for this channel on this board");
-  else snprintf(err, n, "%.1f C is above the cut-off", st.pv);
+  else if (safetyEstop()) snprintf(err, n, "E-stop active");
+  else if (st.pv > st.maxTemp) snprintf(err, n, "%.1f C is above the cut-off", st.pv);
+  else snprintf(err, n, "converter too hot (%.1f C)", st.coldC);
   return false;
 }
+
+void LocalChannel::setOtherHeating(bool on) { localCtrlOtherHeating(ch_, on); }
 
 uint8_t LocalChannel::fault(char* text, size_t n) {
   LocalStatus st;

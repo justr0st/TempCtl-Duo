@@ -6,6 +6,7 @@
 #include "config.h"
 #include "pid.h"
 #include "runaway.h"
+#include "safety.h"
 #include "tc_sensor.h"
 
 #if defined(PIN_TC_SCK) && (defined(PIN_TC_CS_LOCAL) || defined(PIN_TC_CS_BOTTOM))
@@ -42,6 +43,8 @@ struct Local {
   char faultText[64] = "";
   Pid pid;
   RunawayMonitor runaway;
+  GuardMonitor guard;
+  volatile bool otherHeat = false;  // another channel (also a Modbus one) has its outputs on
   RelayAutotune tune;
   bool tuning = false;
   float tuneSp = NAN;
@@ -98,6 +101,10 @@ void localCtrlEarlyInit() {
     digitalWrite(p, HIGH);
     pinMode(p, OUTPUT);
   }
+#if defined(PIN_SSR_RELAY)
+  digitalWrite(PIN_SSR_RELAY, LOW);  // SSR supply relay off (active high, driven directly by the pin)
+  pinMode(PIN_SSR_RELAY, OUTPUT);
+#endif
   pinMode(PIN_TC_SCK, OUTPUT);
   digitalWrite(PIN_TC_SCK, LOW);
   pinMode(PIN_TC_SO, INPUT_PULLUP);  // no converter: all ones = "no device"
@@ -119,7 +126,7 @@ static void ssrTick(void*) {
     if (pin < 0) continue;
     bool on = false;
     const float d = ssrDuty[i];
-    if (d > 0 && now - ssrSetMs[i] < SSR_TIMEOUT_MS) {
+    if (d > 0 && !safetyEstop() && now - ssrSetMs[i] < SSR_TIMEOUT_MS) {
       const uint32_t w = ssrWindowMs[i] ? ssrWindowMs[i] : 1000;
       on = (now % w) < (uint32_t)(d * w);
     }
@@ -221,6 +228,15 @@ static void step(int ch, float dt) {
     }
     const bool fresh = l.everGood && millis() - l.lastGoodMs < FRESH_MS && l.badReads == 0;
     char t[64];
+    if (safetyEstop() && (l.on || l.tuning)) {  // E-stop: outputs off (not a fault; the control task tells)
+      l.on = false;
+      if (l.tuning) {
+        l.tune.stop();
+        l.tuning = false;
+      }
+      l.pid.reset();
+      l.runaway.reset();
+    }
     // faults are latched only while the outputs are on; when off the channel just shows "no reading"
     const bool heating = l.on || l.tuning;
     if (l.badReads >= BAD_READS_FAULT && heating) {
@@ -230,6 +246,20 @@ static void step(int ch, float dt) {
     if (fresh && heating && l.pv > c.maxTemp) {
       snprintf(t, sizeof(t), "%.1f C above the cut-off %.0f C", l.pv, c.maxTemp);
       latch(l, FAULT_OVERTEMP, t);
+    }
+    if (heating && c.cjEnable && r.fault == TC_OK && !isnan(r.coldC) && r.coldC > c.cjMax) {
+      snprintf(t, sizeof(t), "converter %.1f C (max %.0f C)", r.coldC, c.cjMax);
+      latch(l, FAULT_CJHOT, t);
+    }
+    if (!l.fault) {  // heating while off / reading frozen
+      const Local& o = loc[ch ^ 1];
+      const bool other = l.otherHeat || (o.enabled && (o.on || o.tuning));
+      const uint8_t gf = l.guard.update(c.runaway, dt, heating, other, fresh ? l.pv : NAN,
+                                        r.fault == TC_OK ? r.tempC : NAN);
+      if (gf) {
+        snprintf(t, sizeof(t), "%s (%.1f C)", faultName(gf), l.pv);
+        latch(l, gf, t);
+      }
     }
     if (!l.fault && l.tuning) {
       // autotune drives the output; runaway: "heating failed" only (the PV swings around the test SP)
@@ -269,21 +299,9 @@ static void step(int ch, float dt) {
 
 // ------------------------------------------------------------------ SSR supply relay
 #if defined(PIN_SSR_RELAY) && HAVE_LOCAL
-static volatile int8_t relayLow = -1;  // -1: level not known yet (pin left an input)
 static volatile bool relayOn = false;
-static void relayWrite(bool on) {
-  if (relayLow < 0) return;
-  digitalWrite(PIN_SSR_RELAY, (on != (relayLow == 1)) ? HIGH : LOW);
-}
+static void relayWrite(bool on) { digitalWrite(PIN_SSR_RELAY, on ? HIGH : LOW); }  // active high
 bool localCtrlRelayWired() { return true; }
-void localCtrlRelayLevel(bool activeLow) {
-  const int8_t want = activeLow ? 1 : 0;
-  if (relayLow == want) return;
-  relayLow = want;
-  relayWrite(relayOn);  // (first time: the level first, then the pin an output, so it never glitches on)
-  pinMode(PIN_SSR_RELAY, OUTPUT);
-  relayWrite(relayOn);
-}
 bool localCtrlRelayOn() { return relayOn; }
 
 // after each control step: on while outputs are wanted, off at once on any local fault
@@ -302,15 +320,15 @@ static void relayUpdate() {
       want |= l.on || l.tuning;
     }
   }
-  const bool on = want && !fault;
+  const bool estop = safetyEstop();
+  const bool on = want && !fault && !estop;
   if (on == relayOn) return;
   relayOn = on;
   relayWrite(on);
-  if (!on && fault) logEvent("SSR supply relay off: %s", why && *why ? why : "fault");
+  if (!on && (fault || estop)) logEvent("SSR supply relay off: %s", estop ? "E-stop" : why && *why ? why : "fault");
 }
 #else
 bool localCtrlRelayWired() { return false; }
-void localCtrlRelayLevel(bool) {}
 bool localCtrlRelayOn() { return false; }
 static void relayUpdate() {}
 #endif
@@ -362,6 +380,7 @@ void localCtrlConfigure(int ch, bool enabled, const LocalChannelSettings& c) {
     l.everGood = false;
     l.pid.reset();
     l.runaway.reset();
+    l.guard.reset();
   }
   if (!enabled) {
     l.on = false;
@@ -385,7 +404,8 @@ bool localCtrlSetOutputs(int ch, bool on) {
   if (ch < 0 || ch >= NUM_CHANNELS || !mtx) return !on;
   LockL g;
   Local& l = loc[ch];
-  if (on && (!l.enabled || l.fault)) return false;
+  if (on && (!l.enabled || l.fault || safetyEstop())) return false;
+  if (on && l.cfg.cjEnable && l.everGood && !isnan(l.coldC) && l.coldC > l.cfg.cjMax) return false;
   if (on && l.everGood && l.pv > l.cfg.maxTemp) return false;  // already above the cut-off
   if (on && l.tuning) return false;
   if (!on && l.tuning) {  // "outputs off" also ends an autotune
@@ -417,6 +437,7 @@ void localCtrlGet(int ch, LocalStatus& st) {
   st.fault = l.fault;
   snprintf(st.faultText, sizeof(st.faultText), "%s", l.faultText);
   st.tuning = l.tuning;
+  st.maxTemp = l.cfg.maxTemp;
 }
 
 bool localCtrlAck(int ch, char* err, size_t n) {
@@ -433,12 +454,22 @@ bool localCtrlAck(int ch, char* err, size_t n) {
     snprintf(err, n, "still too hot (%.1f C, cut-off %.0f C)", l.pv, l.cfg.maxTemp);
     return false;
   }
+  if (l.fault == FAULT_CJHOT && !isnan(l.coldC) && l.coldC > l.cfg.cjMax - 5) {
+    snprintf(err, n, "converter still too hot (%.1f C, max %.0f C)", l.coldC, l.cfg.cjMax);
+    return false;
+  }
   l.fault = FAULT_NONE;
   l.faultText[0] = 0;
   l.on = false;
   l.pid.reset();
   l.runaway.reset();
+  l.guard.reset();
   return true;
+}
+
+void localCtrlOtherHeating(int ch, bool on) {
+  if (ch < 0 || ch >= NUM_CHANNELS) return;
+  loc[ch].otherHeat = on;
 }
 
 // ------------------------------------------------------------------ autotune
@@ -449,6 +480,7 @@ bool localCtrlTuneStart(int ch, float sp, char* err, size_t n) {
   Local& l = loc[ch];
   const bool fresh = l.everGood && millis() - l.lastGoodMs < FRESH_MS && l.badReads == 0;
   if (!l.enabled) return snprintf(err, n, "not a local channel"), false;
+  if (safetyEstop()) return snprintf(err, n, "E-stop active"), false;
   if (l.fault) return snprintf(err, n, "acknowledge the fault first (%s)", l.faultText), false;
   if (!fresh) return snprintf(err, n, "no temperature reading"), false;
   if (l.tuning) return snprintf(err, n, "autotune already running"), false;

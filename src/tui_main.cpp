@@ -347,6 +347,7 @@ static const char* chStateText(int ch, char* b, size_t n) {
   else fmtTemp(o.target, tv, sizeof(tv));
   if (C.type == CH_OFF) return "Off (settings)";
   if (C.fault) return C.faultText[0] ? C.faultText : "Fault";
+  if (L.estop) return "E-stop: outputs off";
   if (!C.commOk) return C.lastErr[0] ? C.lastErr : "No connection";
   switch ((ChState)L.chSt[ch]) {
     case ChState::Off: return "Off";
@@ -451,7 +452,7 @@ static void tileUpdate(int ch) {
 
   // right-hand control: acknowledge (fault) / extend hold (run) / manual switch
   const bool fault = C.fault != 0;
-  tSetHidden(t.warn, !fault || ((lv_tick_get() / 500) & 1));  // blinks (the UI updates every 250 ms)
+  tSetHidden(t.warn, !(fault || L.estop) || ((lv_tick_get() / 500) & 1));  // blinks (the UI updates every 250 ms)
   tSetHidden(t.ack, !fault);
   tSetHidden(t.minus, fault);
   tSetHidden(t.value, fault);
@@ -803,7 +804,8 @@ void mainEvents(const LiveData& live, const Settings& set) {
   if (strcmp(L.runMsg, lastMsg) != 0) {
     strlcpy(lastMsg, L.runMsg, sizeof(lastMsg));
     const bool bad = strstr(L.runMsg, "Cannot") || strstr(L.runMsg, "fault") || strstr(L.runMsg, "failed") ||
-                     strstr(L.runMsg, "not possible") || strstr(L.runMsg, "No answer") || strstr(L.runMsg, "no answer");
+                     strstr(L.runMsg, "not possible") || strstr(L.runMsg, "No answer") || strstr(L.runMsg, "no answer") ||
+                     strstr(L.runMsg, "E-stop") || strstr(L.runMsg, "Warning");
     if (L.runMsg[0] && !strstr(L.runMsg, "Run interrupted")) tToast(L.runMsg, bad);
   }
 }

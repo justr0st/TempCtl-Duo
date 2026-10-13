@@ -12,6 +12,7 @@
 #include "app_state.h"
 #include "config.h"
 #include "local_ctrl.h"
+#include "safety.h"
 #include "net.h"
 #include "ui.h"
 #include "web.h"
@@ -38,6 +39,7 @@ static void memLog(const char* where) {
 
 void setup() {
   localCtrlEarlyInit();  // SSR outputs low (off) before anything else
+  safetyBegin();         // E-stop input, buzzer (spec 9.2a)
 #if !(defined(BOARD_S3) && ARDUINO_USB_MODE == 0)
   // CYD: the console shares this port; the api mode (Web Serial page) sends whole programs in one line
   // and gets answers of several kB: larger buffers, so neither side waits on the 115200 baud line

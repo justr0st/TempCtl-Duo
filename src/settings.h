@@ -47,6 +47,14 @@ struct Runaway {
   float minRise;      // ... but PV rose less than minRise degC
   float holdBand;     // "runaway while holding": |PV - SP| > holdBand ...
   uint16_t holdSec;   // ... for longer than holdSec seconds (after SP was reached)
+  // "heating while off" (stuck SSR / controller): outputs off, but the PV rises offRise degC within
+  // offSec seconds (checked from 2 min after the outputs went off, not while the other channel heats)
+  uint8_t offEnable;
+  float offRise;
+  uint16_t offSec;
+  // "reading frozen": outputs on, the reading did not change at all for frozenSec seconds
+  uint8_t frozenEnable;
+  uint16_t frozenSec;
 };
 
 struct ModbusChannelSettings {
@@ -68,6 +76,8 @@ struct LocalChannelSettings {
   float windowSec;      // SSR time-proportioning window
   float maxOut;         // output limit %
   float maxTemp;        // SSR cut-off degC
+  uint8_t cjEnable;     // converter too hot: cold junction (MAX31855) above cjMax degC
+  float cjMax;
   Runaway runaway;
 };
 
@@ -118,8 +128,13 @@ struct Settings {
   // not set yet (UTC; the web page sets it from the browser once)
   char tzName[32];
 
-  // SSR supply relay (boards with PIN_SSR_RELAY): 1 = the relay is on while the pin is low
-  uint8_t relayActiveLow;
+  // Safety (spec 9.2a)
+  uint8_t manualIdle;     // 1: manual mode ends after manualIdleMin minutes without user activity
+  uint16_t manualIdleMin;
+  uint8_t estop;          // 1: E-stop input watched (PIN_ESTOP, NC contact to GND)
+  uint8_t sound;          // 1: alarm beeps (PIN_BUZZER)
+  uint8_t chipWarn;       // 1: warning above chipMaxC (S3 chip temperature)
+  float chipMaxC;
 
   // Tools: setpoint-address finder range
   uint16_t scanFrom, scanTo;

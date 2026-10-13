@@ -9,6 +9,7 @@
 #include <string.h>
 #include "controller.h"
 #include "local_ctrl.h"
+#include "safety.h"
 #include "net.h"
 #include "program_store.h"
 #include "settings_store.h"
@@ -62,6 +63,8 @@ struct Manual {
   float sp = NAN;
   bool pending = false;     // SP (+ outputs on) still to be written
   bool offPending = false;  // outputs off still to be written
+  uint32_t onMs = 0;        // switched on (manual idle timeout: activity counts from here at the earliest)
+  bool idleWarned = false;  // "manual mode ends in 1 min" said
 };
 static Manual man[NUM_CHANNELS];
 // Modbus: the controller's setpoint counts as active (chart, history) while the run or the manual
@@ -981,6 +984,7 @@ bool startDraft(int idx, const DuoProgram& p) {
 }
 
 static bool runChecks(const DuoProgram& p, float* pv, bool* ok, const char* verb);
+static void startTempWarning(const DuoProgram& p, const float* pv, const bool* ok);
 static void takeChannels(const DuoProgram& p, const RunFileInfo* ri);
 static void dismissInterrupted();
 
@@ -1026,6 +1030,10 @@ static void sdRow(const float* pv, const bool* pvOk, const float* spNow, const C
 
 static void startProgram(int idx, bool draft) {
   if (eng.active()) return;
+  if (safetyEstop()) {
+    setMsg("Cannot start: E-stop active");
+    return;
+  }
   if (anyFault()) {
     setMsg("Cannot start: acknowledge the channel fault first");
     return;
@@ -1089,6 +1097,24 @@ static void startProgram(int idx, bool draft) {
   runTrack(true);
   sdlogStart(p, false);
   say("Program \"%s\" started%s", p.name, draft ? " (unsaved changes)" : "");
+  startTempWarning(p, pv, ok);
+}
+
+// The first target of each channel: a channel that already is near or above it starts "hot" (a profile
+// expects a cooler start) - only a warning (spec 9.2a)
+static void startTempWarning(const DuoProgram& p, const float* pv, const bool* ok) {
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    if (!progUses(p, ch) || !ok[ch]) continue;
+    const int n = p.type == PROG_TL ? p.nSt[ch] : p.nPh;
+    for (int i = 0; i < n; ++i) {
+      const Seg* g = progSeg(p, ch, i);
+      if (!g) continue;
+      if (pv[ch] >= g->t - START_WARN_BAND)
+        say("Warning: %s starts at %.0f \xC2\xB0" "C, near or above its first target %.0f \xC2\xB0" "C", s.ch[ch].name,
+            pv[ch], g->t);
+      break;
+    }
+  }
 }
 
 // Start / resume conditions (channels on, setpoint registers, temperatures, limits); pv / ok = the
@@ -1178,6 +1204,10 @@ static void takeChannels(const DuoProgram& p, const RunFileInfo* ri) {
 // "Resume from the interrupted phase" (spec 9.3.5)
 static void resumeInterrupted() {
   if (eng.active()) return;
+  if (safetyEstop()) {
+    setMsg("Cannot resume: E-stop active");
+    return;
+  }
   if (!intr.valid) {
     setMsg("No interrupted run to resume");
     return;
@@ -1253,6 +1283,10 @@ static void manualSwitch(int ch, bool on) {
       say("%s is off (Settings: channel type)", name);
       return;
     }
+    if (safetyEstop()) {
+      say("%s: E-stop active", name);
+      return;
+    }
     char ft[64];
     if (c.fault(ft, sizeof(ft))) {
       say("%s: acknowledge the fault first (%s)", name, ft);
@@ -1269,6 +1303,8 @@ static void manualSwitch(int ch, bool on) {
     m.on = true;
     m.pending = true;
     m.offPending = false;
+    m.onMs = millis();
+    m.idleWarned = false;
     say("%s: manual setpoint on", name);
   } else {
     if (!m.on) return;
@@ -1284,7 +1320,7 @@ static void manualSwitch(int ch, bool on) {
 
 // (Re)opens the bus and selects the channel backends after a settings change
 static void applySettings(const Settings& prev, bool first) {
-  localCtrlRelayLevel(s.relayActiveLow != 0);  // (first: the relay pin becomes an output, off)
+  safetyConfigure(s.estop != 0, s.sound != 0);  // (first: the relay pin becomes an output, off)
   modbusBusBegin(bus, s);
   eng.setBand(s.bottomBand);
   for (int i = 0; i < NUM_CHANNELS; ++i) {
@@ -1434,6 +1470,10 @@ static void handleCmd(const Cmd& c) {
       }
       if (inRun(c.arg)) {
         say("%s: stop the program before the autotune", name);
+        break;
+      }
+      if (safetyEstop()) {
+        say("%s: autotune not started: E-stop active", name);
         break;
       }
       Manual& m = man[c.arg];  // the tune takes over the channel
@@ -1702,6 +1742,95 @@ static void driveManual(int ch) {
   }
 }
 
+// E-stop, manual idle timeout, other-channel heating, alarm sound, chip temperature (spec 9.2a)
+static void safetyCycle(const bool* commOk) {
+  const uint32_t now = millis();
+  // the "heating while off" check of a channel pauses while the other one heats
+  bool on[NUM_CHANNELS];
+  {
+    Guard g;
+    for (int i = 0; i < NUM_CHANNELS; ++i) on[i] = gLive.ch[i].type != CH_OFF && gLive.ch[i].outOn;
+  }
+  for (int i = 0; i < NUM_CHANNELS; ++i) {
+    bool other = false;
+    for (int j = 0; j < NUM_CHANNELS; ++j) other |= j != i && on[j];
+    chan(i).setOtherHeating(other);
+  }
+  // E-stop: the SSRs and the relay are already off (local task); here the run, manual mode, autotune
+  // and the Modbus outputs
+  static bool wasEstop = false;
+  const bool es = safetyEstop();
+  if (es) {
+    if (!wasEstop && eng.active()) eng.stop();
+    for (int i = 0; i < NUM_CHANNELS; ++i) {
+      Manual& m = man[i];
+      m.on = m.pending = m.offPending = false;
+      spHeld[i] = false;
+      if (tuning(i)) localCtrlTuneStop(i);
+      Channel& c = chan(i);
+      if (c.type() == CH_MODBUS && commOk[i] && c.canSwitchOff() && on[i]) c.setOutputs(false, lastErr[i], sizeof(lastErr[0]));
+    }
+  }
+  if (es != wasEstop) {
+    if (es) say("E-stop: all outputs off%s", eng.active() || prevState == RunState::Running || prevState == RunState::Paused ? ", program stopped" : "");
+    else say("Emergency stop released: switch on again when ready");
+    wasEstop = es;
+  }
+  // manual mode without user activity
+  bool idleWarn = false;
+  if (s.manualIdle) {
+    const uint32_t limit = (uint32_t)s.manualIdleMin * 60000UL;
+    const uint32_t act = safetyLastActivityMs();
+    for (int i = 0; i < NUM_CHANNELS; ++i) {
+      Manual& m = man[i];
+      if (!m.on || inRun(i)) {
+        m.idleWarned = false;
+        continue;
+      }
+      const uint32_t from = (int32_t)(act - m.onMs) > 0 ? act : m.onMs;
+      const uint32_t idle = now - from;
+      if (idle >= limit) {
+        manualSwitch(i, false);
+        say("%s: manual mode ended after %u min without activity", s.ch[i].name, (unsigned)s.manualIdleMin);
+      } else if (idle + 60000UL >= limit) {
+        if (!m.idleWarned) say("%s: manual mode ends in 1 min (no activity) - touch the screen to keep it", s.ch[i].name);
+        m.idleWarned = idleWarn = true;
+      } else {
+        m.idleWarned = false;
+      }
+    }
+  }
+  // alarm sound
+  bool fault = es;
+  {
+    Guard g;
+    for (int i = 0; i < NUM_CHANNELS; ++i) fault |= gLive.ch[i].fault != 0;
+  }
+  const bool action = (eng.progPaused() && eng.pauseMsg()) || idleWarn;
+  safetySound(fault ? SOUND_ALARM : action ? SOUND_ACTION : SOUND_NONE);
+  // chip temperature (S3), every 30 s
+  static uint32_t chipAt = 0;
+  static bool chipHot = false;
+  if (safetyChipTempWired() && s.chipWarn && (!chipAt || now - chipAt >= 30000)) {
+    chipAt = now;
+    safetyChipTempPoll();
+    const float t = safetyChipTemp();
+    if (!isnan(t) && !chipHot && t > s.chipMaxC) {
+      chipHot = true;
+      logEvent("Warning: chip temperature %.0f \xC2\xB0" "C (limit %.0f \xC2\xB0" "C) - check the cooling", t, s.chipMaxC);
+    } else if (!isnan(t) && chipHot && t < s.chipMaxC - 5) {
+      chipHot = false;
+      logEvent("Chip temperature back to %.0f \xC2\xB0" "C", t);
+    }
+  }
+  Guard g;
+  gLive.estop = es;
+  gLive.estopRaw = safetyEstopRaw();
+  gLive.chipC = safetyChipTemp();
+  gLive.chipHot = chipHot;
+  gLive.soundMuted = safetySoundMuted();
+}
+
 static void cycle(float dt) {
   pollChannels();
   crumb(CR_CONTROL, C_CYCLE);
@@ -1750,11 +1879,14 @@ static void cycle(float dt) {
     if (intrCleanup[i] && cleanupChannel(i)) intrCleanup[i] = false;
   }
 
+  safetyCycle(commOk);
+
   // end of program (finished or aborted): end action per channel of the program
   const RunState st = eng.state();
   const bool wasActive = prevState == RunState::Running || prevState == RunState::Paused;
   if (wasActive && (st == RunState::Finished || st == RunState::Aborted)) {
-    for (int i = 0; i < NUM_CHANNELS; ++i) drv[i].endPending = eng.out(i).inProgram;
+    for (int i = 0; i < NUM_CHANNELS; ++i) drv[i].endPending = eng.out(i).inProgram && !safetyEstop();
+    if (st == RunState::Finished) safetySoundFinished();
     runForget();
     logRun("\"%s\" %s after %d:%02d", runProg->name, st == RunState::Finished ? "finished" : "stopped",
              (int)eng.elapsed() / 60, (int)eng.elapsed() % 60);
@@ -1779,6 +1911,8 @@ static void cycle(float dt) {
         m.on = true;
         m.sp = kept;
         m.pending = m.offPending = false;
+        m.onMs = millis();
+        m.idleWarned = false;
         logRun("%s: manual setpoint %.1f \xC2\xB0" "C after the program", s.ch[i].name, kept);
       }
     }
@@ -2166,6 +2300,7 @@ void controlTaskStart() {
 unsigned controlTaskStackFree() { return controlHandle ? (unsigned)uxTaskGetStackHighWaterMark(controlHandle) : 0; }
 
 bool sendCmd(CmdType c, int arg, float value, int idx, uint8_t sub) {
+  if (c != CMD_SETTINGS_CHANGED) safetyActivity();  // (the commands come from the user interfaces)
   Cmd m{c, sub, (int16_t)arg, (int16_t)idx, value};
   return xQueueSend(cmdQ, &m, pdMS_TO_TICKS(50)) == pdTRUE;
 }

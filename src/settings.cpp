@@ -50,6 +50,11 @@ static void runawayDefaults(Runaway& r, int ch) {
   r.minRise = 5;
   r.holdBand = 15;
   r.holdSec = 60;
+  r.offEnable = 1;
+  r.offRise = 10;
+  r.offSec = 60;
+  r.frozenEnable = 1;
+  r.frozenSec = 120;
 }
 
 static void channelDefaults(ChannelSettings& c, int ch, uint8_t type) {
@@ -79,6 +84,8 @@ static void channelDefaults(ChannelSettings& c, int ch, uint8_t type) {
   c.loc.windowSec = 1;
   c.loc.maxOut = 100;
   c.loc.maxTemp = 400;
+  c.loc.cjEnable = 1;
+  c.loc.cjMax = 70;
   runawayDefaults(c.loc.runaway, ch);
 }
 
@@ -110,7 +117,12 @@ void settingsDefaults(Settings& s, const BoardLimits& lim) {
   s.scanTo = 3199 + DP1;
   s.selProgram = 0;
   s.tzName[0] = 0;
-  s.relayActiveLow = 0;
+  s.manualIdle = 0;
+  s.manualIdleMin = 30;
+  s.estop = 0;
+  s.sound = 1;
+  s.chipWarn = 1;
+  s.chipMaxC = 80;
   // bottom = Modbus, top = Off; without RS485 both local (as many as the board wires)
   const uint8_t t0 = lim.rs485 ? CH_MODBUS : (lim.localMax >= 1 ? CH_LOCAL : CH_OFF);
   const uint8_t t1 = lim.rs485 ? CH_OFF : (lim.localMax >= 2 ? CH_LOCAL : CH_OFF);
@@ -148,6 +160,11 @@ static void validRunaway(Runaway& r) {
   clampv(r.minRise, 0.5f, 100.0f);
   clampv(r.holdBand, 1.0f, 200.0f);
   clampv<uint16_t>(r.holdSec, 5, 3600);
+  r.offEnable = r.offEnable ? 1 : 0;
+  clampv(r.offRise, 2.0f, 100.0f);
+  clampv<uint16_t>(r.offSec, 10, 3600);
+  r.frozenEnable = r.frozenEnable ? 1 : 0;
+  clampv<uint16_t>(r.frozenSec, 10, 3600);
 }
 
 static uint32_t ip32(const uint8_t a[4]) {
@@ -203,6 +220,12 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
   clampv<uint8_t>(s.brightness, 10, 255);
   s.rotate180 = s.rotate180 ? 1 : 0;
   s.screenCheck = s.screenCheck ? 1 : 0;
+  s.manualIdle = s.manualIdle ? 1 : 0;
+  clampv<uint16_t>(s.manualIdleMin, 2, 1440);
+  s.estop = s.estop ? 1 : 0;
+  s.sound = s.sound ? 1 : 0;
+  s.chipWarn = s.chipWarn ? 1 : 0;
+  clampv(s.chipMaxC, 40.0f, 120.0f);
   if (s.themeDark != THEME_DARK_DEFAULT) s.themeDark = s.themeDark ? 1 : 0;
   s.accentColor &= 0xFFFFFF;
   clampv<uint16_t>(s.liveMin, 1, 1440);
@@ -254,6 +277,8 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
     clampv(c.loc.windowSec, 0.2f, 10.0f);
     clampv(c.loc.maxOut, 0.0f, 100.0f);
     clampv(c.loc.maxTemp, 50.0f, 600.0f);
+    c.loc.cjEnable = c.loc.cjEnable ? 1 : 0;
+    clampv(c.loc.cjMax, 30.0f, 125.0f);
     validRunaway(c.loc.runaway);
     // the setpoint limit stays at least 10 degC below the local cut-off (spec 9.2)
     if (c.type == CH_LOCAL && c.spMax > c.loc.maxTemp - 10) c.spMax = c.loc.maxTemp - 10;
@@ -427,6 +452,11 @@ static void runawayToJson(const Runaway& r, JsonObject o) {
   o["minRise"] = r.minRise;
   o["holdBand"] = r.holdBand;
   o["holdSec"] = r.holdSec;
+  o["offEnable"] = r.offEnable != 0;
+  o["offRise"] = r.offRise;
+  o["offSec"] = r.offSec;
+  o["frozenEnable"] = r.frozenEnable != 0;
+  o["frozenSec"] = r.frozenSec;
 }
 
 void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
@@ -477,7 +507,13 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
   tc.add(s.tsMinX); tc.add(s.tsMaxX); tc.add(s.tsMinY); tc.add(s.tsMaxY);
   JsonObject tz = o["time"].to<JsonObject>();
   tz["zone"] = s.tzName;
-  o["relay"].to<JsonObject>()["activeLow"] = s.relayActiveLow != 0;
+  JsonObject sf = o["safety"].to<JsonObject>();
+  sf["manualIdle"] = s.manualIdle != 0;
+  sf["manualIdleMin"] = s.manualIdleMin;
+  sf["estop"] = s.estop != 0;
+  sf["sound"] = s.sound != 0;
+  sf["chipWarn"] = s.chipWarn != 0;
+  sf["chipMaxC"] = s.chipMaxC;
   JsonObject t = o["tools"].to<JsonObject>();
   t["scanFrom"] = s.scanFrom;
   t["scanTo"] = s.scanTo;
@@ -512,6 +548,8 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
     l["windowSec"] = c.loc.windowSec;
     l["maxOut"] = c.loc.maxOut;
     l["maxTemp"] = c.loc.maxTemp;
+    l["cjEnable"] = c.loc.cjEnable != 0;
+    l["cjMax"] = c.loc.cjMax;
     runawayToJson(c.loc.runaway, l["runaway"].to<JsonObject>());
   }
 }
@@ -599,6 +637,11 @@ struct Reader {
     num(o, p, "minRise", r.minRise);
     num(o, p, "holdBand", r.holdBand);
     num(o, p, "holdSec", r.holdSec);
+    flag(o, p, "offEnable", r.offEnable);
+    num(o, p, "offRise", r.offRise);
+    num(o, p, "offSec", r.offSec);
+    flag(o, p, "frozenEnable", r.frozenEnable);
+    num(o, p, "frozenSec", r.frozenSec);
   }
 };
 
@@ -675,8 +718,15 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
       else copyStr(s.tzName, sizeof(s.tzName), name);
     }
   }
-  JsonObjectConst rl = R.obj(o, "", "relay");
-  if (!rl.isNull()) R.flag(rl, "relay.", "activeLow", s.relayActiveLow);
+  JsonObjectConst sf = R.obj(o, "", "safety");
+  if (!sf.isNull()) {
+    R.flag(sf, "safety.", "manualIdle", s.manualIdle);
+    R.num(sf, "safety.", "manualIdleMin", s.manualIdleMin);
+    R.flag(sf, "safety.", "estop", s.estop);
+    R.flag(sf, "safety.", "sound", s.sound);
+    R.flag(sf, "safety.", "chipWarn", s.chipWarn);
+    R.num(sf, "safety.", "chipMaxC", s.chipMaxC);
+  }
   JsonObjectConst t = R.obj(o, "", "tools");
   if (!t.isNull()) {
     R.num(t, "tools.", "scanFrom", s.scanFrom);
@@ -751,6 +801,8 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
         R.num(l, pl, "windowSec", c.loc.windowSec);
         R.num(l, pl, "maxOut", c.loc.maxOut);
         R.num(l, pl, "maxTemp", c.loc.maxTemp);
+        R.flag(l, pl, "cjEnable", c.loc.cjEnable);
+        R.num(l, pl, "cjMax", c.loc.cjMax);
         R.runaway(R.obj(l, pl, "runaway"), pl, c.loc.runaway);
       }
     }

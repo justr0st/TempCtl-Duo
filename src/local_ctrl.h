@@ -39,9 +39,12 @@ struct LocalStatus {
   uint8_t fault;     // ChannelFault (latched)
   char faultText[64];
   bool tuning;       // autotune running (drives the SSR instead of the PID)
+  float maxTemp;     // the cut-off (settings)
 };
 void localCtrlGet(int ch, LocalStatus& st);
 bool localCtrlAck(int ch, char* err, size_t n);
+// another channel (local or Modbus) has its outputs on: no "heating while off" check on ch (control task)
+void localCtrlOtherHeating(int ch, bool on);
 
 // ---- PID autotune (relay method, autotune.h) ----
 // Starts at test temperature sp; refused on a fault, without a fresh reading or
@@ -62,7 +65,7 @@ void localCtrlTuneClear(int ch);  // after accept / discard: back to Idle
 
 // SSR supply relay (PIN_SSR_RELAY, S3): on while a local channel's outputs are on (or autotune runs) and
 // no local channel has a fault; off otherwise, switched by the local task every 250 ms (a fault: in the
-// same step). The level is set from the settings (until then the pin stays an input).
+// same step; E-stop too). Active high: the pin drives the input of a DC solid-state relay directly; it is
+// low (off) from localCtrlEarlyInit().
 bool localCtrlRelayWired();
-void localCtrlRelayLevel(bool activeLow);
 bool localCtrlRelayOn();

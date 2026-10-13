@@ -39,6 +39,9 @@ static bool isMb(const Settings& s, int c) { return s.ch[c].type == CH_MODBUS; }
 static bool isLoc(const Settings& s, int c) { return s.ch[c].type == CH_LOCAL; }
 static bool isHostRamp(const Settings& s, int c) { return isMb(s, c) && s.ch[c].mb.rampMode == RAMP_HOST; }
 static bool raOn(const Settings& s, int c) { return isOn(s, c) && ra(s, c).enable; }
+static bool offOn(const Settings& s, int c) { return isOn(s, c) && ra(s, c).offEnable; }
+static bool frozenOn(const Settings& s, int c) { return isOn(s, c) && ra(s, c).frozenEnable; }
+static bool cjOn(const Settings& s, int c) { return isLoc(s, c) && s.ch[c].loc.cjEnable; }
 
 #define G(expr) [](const Settings& s, int c) -> float { (void)c; return (float)(expr); }
 #define S(lhs, type) [](Settings& s, int c, float v) { (void)c; lhs = (type)v; }
@@ -89,6 +92,9 @@ static const Field CH_FIELDS[] = {
     {F_NUM, "Max. output", nullptr, 0, 100, 0, "%", nullptr, G(s.ch[c].loc.maxOut), S(s.ch[c].loc.maxOut, float), isLoc},
     {F_NUM, "Cut-off temperature", "Outputs off above", 50, 600, 0, "\xC2\xB0" "C", nullptr, G(s.ch[c].loc.maxTemp),
      S(s.ch[c].loc.maxTemp, float), isLoc},
+    {F_SW, "Converter too hot: fault", "MAX31855 cold junction (the converter's own temperature)", 0, 0, 0, nullptr, nullptr,
+     G(s.ch[c].loc.cjEnable), S(s.ch[c].loc.cjEnable, uint8_t), isLoc},
+    {F_NUM, "\xE2\x80\xA6 above", nullptr, 30, 125, 0, "\xC2\xB0" "C", nullptr, G(s.ch[c].loc.cjMax), S(s.ch[c].loc.cjMax, float), cjOn},
     // runaway (values of the channel's type)
     {F_HEAD, "Thermal runaway protection", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, isOn},
     {F_SW, "Runaway detection", nullptr, 0, 0, 0, nullptr, nullptr, G(ra(s, c).enable), S(ra(s, c).enable, uint8_t), isOn},
@@ -99,6 +105,13 @@ static const Field CH_FIELDS[] = {
     {F_NUM, "Holding: PV off the setpoint by more than \xC2\xB1", nullptr, 1, 200, 0, "\xC2\xB0" "C", nullptr,
      G(ra(s, c).holdBand), S(ra(s, c).holdBand, float), raOn},
     {F_NUM, "\xE2\x80\xA6 for longer than", nullptr, 5, 3600, 0, "s", nullptr, G(ra(s, c).holdSec), S(ra(s, c).holdSec, uint16_t), raOn},
+    {F_SW, "Heating while off (stuck SSR)", "Checked from 2 min after off, not while the other channel heats", 0, 0, 0,
+     nullptr, nullptr, G(ra(s, c).offEnable), S(ra(s, c).offEnable, uint8_t), isOn},
+    {F_NUM, "\xE2\x80\xA6 PV rises by", nullptr, 2, 100, 1, "\xC2\xB0" "C", nullptr, G(ra(s, c).offRise), S(ra(s, c).offRise, float), offOn},
+    {F_NUM, "\xE2\x80\xA6 within", nullptr, 10, 3600, 0, "s", nullptr, G(ra(s, c).offSec), S(ra(s, c).offSec, uint16_t), offOn},
+    {F_SW, "Reading frozen", "Outputs on, but the reading does not change at all", 0, 0, 0, nullptr, nullptr,
+     G(ra(s, c).frozenEnable), S(ra(s, c).frozenEnable, uint8_t), isOn},
+    {F_NUM, "\xE2\x80\xA6 for", nullptr, 10, 3600, 0, "s", nullptr, G(ra(s, c).frozenSec), S(ra(s, c).frozenSec, uint16_t), frozenOn},
 };
 
 static const uint32_t BAUDS[] = {2400, 4800, 9600, 19200, 38400};

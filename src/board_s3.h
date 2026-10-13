@@ -58,10 +58,17 @@
 #define PIN_TC_CS_TOP 38  // v1.1 board (WS2812 on GPIO38): swap 38 <-> 48
 #define PIN_SSR_BOTTOM 21
 #define PIN_SSR_TOP 47
-// Relay in the common +5 V supply of both SSRs (high side): on only while a local channel's outputs are
-// on, off at once on a fault (a shorted SSR can't be switched off by its control pin, the relay can).
-// Level selectable (relay.activeLow); until the settings are loaded the pin stays an input.
+// SSR supply relay in the common +5 V supply of both SSR inputs (high side): on only while a local channel's
+// outputs are on, off at once on a fault or E-stop (a stuck driver transistor / SSR input can't be switched
+// off by its control pin, the relay can; a shorted SSR output needs a contactor in the heater supply).
+// An active-high DC solid-state relay (input 3-32 V) driven directly by the pin; low from the first line
+// of setup().
 #define PIN_SSR_RELAY 4
+// E-stop input (safety.estop): NC contact to GND, internal pull-up; open = E-stop (also a broken wire)
+#define PIN_ESTOP 5
+// Alarm buzzer (safety.sound): LEDC square wave 2.7 kHz; a passive piezo directly or a buzzer / small
+// speaker through a transistor (claude/wiring/s3-wiring.png)
+#define PIN_BUZZER 6
 
 // ---- Status LED: on-board WS2812 (v1.0: GPIO48, v1.1: GPIO38) ----
 #define STATUS_LED_WS2812 1

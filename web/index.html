@@ -63,7 +63,7 @@ nav small{color:var(--muted);font-weight:400;margin-left:auto;font-size:12px}
 .foot select{min-height:30px;padding:2px 6px}
 main{min-width:0;padding:0 16px 40px}
 .top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;padding:12px 0;background:var(--bg);min-height:60px}
-.top .jump{margin-left:auto;display:none;gap:6px}  /* only where the Status page is one column (below) */
+.top .jump{margin-left:auto;display:none;gap:6px}  /* only where the Dashboard / Settings page is one column (below) */
 #menu{display:none}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
 .mt{margin-top:12px}
@@ -209,6 +209,19 @@ button.x{min-width:32px;padding:3px 8px;min-height:30px;color:var(--muted)}
 .sub{min-width:0}
 h3{font-family:var(--cond);font-weight:600;font-size:16.5px;margin:16px 0 8px}
 .sub>h3:first-child,.panel>h3:first-child{margin-top:0}
+/* channel tile: subsections separated by a subtle line */
+.seps>[data-g]+[data-g]:not([hidden]),.seps>.live1+[data-g]{border-top:1px solid var(--line);margin-top:16px;padding-top:2px}
+.seps>[data-g]>h3{margin-top:12px}
+.seps details.grp{padding-top:10px}
+.seps h4{font-family:var(--cond);font-weight:600;font-size:15px;margin:14px 0 6px;color:var(--muted)}
+/* channel tabs: page tabs on top of the channel tile */
+.ctabs{display:flex;gap:4px;align-items:flex-end;margin-top:12px;padding-left:10px;position:relative;z-index:1}
+.ctabs button{border:1px solid var(--line);border-bottom:0;border-radius:9px 9px 0 0;background:var(--sunk);min-height:36px;padding:6px 16px;margin-bottom:-1px;color:var(--muted);display:inline-flex;align-items:center;gap:8px;font-weight:600}
+.ctabs button i{width:9px;height:9px;border-radius:50%;background:var(--c);display:block}
+.ctabs button small{font-weight:400;color:var(--muted)}
+.ctabs button[aria-pressed=true]{background:var(--panel);color:var(--text);min-height:40px;box-shadow:inset 0 3px 0 var(--c)}
+.ctabs button:hover:not([aria-pressed=true]){color:var(--text)}
+.ctab-panel{border-top-left-radius:0}
 .hint{color:var(--muted);font-size:13.5px;margin:0 0 10px}
 .edhead .hint{margin:0}
 .form{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr));gap:10px 16px}
@@ -306,7 +319,9 @@ table.t input{width:90px}
  .clock{margin-left:0;width:100%}
  .top .jump a{padding:6px 8px}
 }
-@media (max-width:520px){.top .jump a[href="#runP"]{display:none}.top h1{font-size:20px}}
+@media (max-width:520px){.top .jump a[href="#runP"]{display:none}.top h1{font-size:20px}
+ .top:has(#jumpS:not([hidden])){flex-wrap:wrap}.top #jumpS{order:3;width:100%;margin:0 0 4px;overflow-x:auto}}
+.top .jump a{white-space:nowrap}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 /* connect screen (the page off the device: launcher / GitHub Pages, spec 7b) */
 .conn{position:fixed;inset:0;z-index:50;background:var(--bg);display:flex;padding:16px;overflow:auto}
@@ -340,7 +355,7 @@ table.t input{width:90px}
 <aside id="side" aria-label="Pages">
   <div class="brand"><img src="/favicon.svg" alt=""><span><b>TempCtl Duo</b><small id="fw"></small></span></div>
   <nav>
-    <a href="#/" data-pg="status" class="on" aria-current="page"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 4-7 5 9"/><path d="M3 21h18"/></svg>Status</a>
+    <a href="#/" data-pg="status" class="on" aria-current="page"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 4-7 5 9"/><path d="M3 21h18"/></svg>Dashboard</a>
     <a href="#/programs" data-pg="programs"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Programs</a>
     <a href="#/channels" data-pg="channels"><svg viewBox="0 0 24 24"><path d="M10 13.5V5a2 2 0 0 1 4 0v8.5a4 4 0 1 1-4 0z"/><path d="M12 9v6"/></svg>Channels</a>
     <a href="#/log" data-pg="log"><svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>Log</a>
@@ -365,8 +380,9 @@ table.t input{width:90px}
 <main>
 <div class="top">
   <button id="menu" aria-label="Menu" aria-expanded="false">☰</button>
-  <h1 id="title">Status</h1>
+  <h1 id="title">Dashboard</h1>
   <span class="jump" id="jump"><a class="btn" href="#runP">Run</a><a class="btn" href="#chans">Channels</a><a class="btn" href="#edP">Program</a><a class="btn" href="#logP">Log</a></span>
+  <span class="jump" id="jumpS" hidden><a class="btn" href="#setDev" data-jump="setDev">Device</a><a class="btn" href="#setWifi" data-jump="setWifi">Wi-Fi</a><a class="btn" href="#sSafe" data-jump="sSafe">Safety</a><a class="btn" href="#sDisp" data-jump="sDisp">Display</a><a class="btn" href="#sTime" data-jump="sTime">Clock</a></span>
 </div>
 
 <div class="pg" id="pg-status">
@@ -380,6 +396,7 @@ table.t input{width:90px}
     <button id="bNext" title="Sequence: ramp → hold → next phase; a wait for the bottom is skipped">Next phase</button>
     <span class="clock"><span id="badge" class="state">Ready</span><span id="clock">0:00</span><small id="remain"></small></span>
   </div>
+  <div class="intr" id="estopBar" hidden role="alert"><div class="t"><b>E-stop</b> All outputs are off and a running program was stopped.<small>Close the E-stop contact, then switch the outputs on again (manual or a new run).</small></div></div>
   <div class="intr" id="intr" hidden role="alert"><div class="t"><b>Run interrupted by a reset</b> <span id="intrTxt"></span><small id="intrNote"></small></div>
     <span class="btns"><button class="pri" id="bRecover">Resume</button><button id="bDismiss">Dismiss</button></span></div>
   <div class="bar" style="margin-bottom:6px">
@@ -420,17 +437,17 @@ table.t input{width:90px}
 </div>
 
 <div class="pg" id="pg-channels" hidden>
-<section class="panel" id="cCommon" data-form="common"></section>
-<div class="bar mt" style="margin-bottom:0"><span class="seg" role="group" aria-label="Channel" id="chTabs"></span></div>
-<div id="cChan"><div data-chp="0"><section class="panel mt" id="cf0"></section><div class="cards mt" id="cx0"></div></div>
-<div data-chp="1" hidden><section class="panel mt" id="cf1"></section><div class="cards mt" id="cx1"></div></div></div>
+<section class="panel seps" id="cCommon" data-form="common"></section>
+<div class="ctabs" role="tablist" aria-label="Channel" id="chTabs"></div>
+<div id="cChan"><div data-chp="0"><section class="panel ctab-panel seps" id="cf0" role="tabpanel"></section><div class="cards mt" id="cx0"></div></div>
+<div data-chp="1" hidden><section class="panel ctab-panel seps" id="cf1" role="tabpanel"></section><div class="cards mt" id="cx1"></div></div></div>
 </div>
 
 <div class="pg" id="pg-settings" hidden>
 <div class="cards">
-<section class="panel" aria-label="Device"><h2>Device</h2><dl class="kv" id="devInfo"></dl>
+<section class="panel" id="setDev" aria-label="Device"><h2>Device</h2><dl class="kv" id="devInfo"></dl>
   <div class="fbar"><button id="bRestart">Restart device</button><button id="bScrRst" title="Sets the display and the touch controller up again (when the screen hangs or shows rubbish); the device keeps running">Restart screen</button><span class="msg" id="rsMsg"></span></div></section>
-<section class="panel" aria-label="Wi-Fi"><h2>Wi-Fi</h2>
+<section class="panel" id="setWifi" aria-label="Wi-Fi"><h2>Wi-Fi</h2>
   <p class="hint">Leave the network name empty to run as an access point only. If the device cannot join the network within 20 s it also opens its own access point. A new host name takes effect after a restart.</p>
   <div class="form">
     <label class="fld wide"><span>Network name</span><span class="in"><input type="text" id="wSsid" maxlength="32" autocomplete="off"><button id="bScan" type="button">Scan</button></span></label>
@@ -448,6 +465,7 @@ table.t input{width:90px}
     </div>
   </div>
   <div class="fbar"><button class="pri" id="bWifi">Save and connect</button><span class="msg" id="wMsg"></span></div></section>
+<section class="panel" id="sSafe" data-form="safe"></section>
 <section class="panel" id="sDisp" data-form="disp"></section>
 <section class="panel" id="sTime" data-form="time"></section>
 </div>
@@ -1048,6 +1066,7 @@ function whyText(c,i,r,active){
   const T=c.target!=null?f1(c.target)+' °C':'';
   if(c.type==='off') return 'Channel off (Settings).';
   if(c.fault) return '';
+  if(estopOn()) return 'E-stop: outputs off.';
   if(c.autotune) return `Autotune ${c.autotune.state}: ${c.autotune.msg}`;
   if(!active||!c.inProgram){
     if(active) return `No ${r.type==='tl'?'steps':'phases'} for this channel in “${r.name}”: controlled manually.`;
@@ -1083,7 +1102,7 @@ function updateChans(){
     $('st'+i).textContent=st; $('st'+i).className='state '+(c.fault||(!c.ok&&c.type!=='off')?'fault':active&&c.inProgram?(c.state==='halt'||c.state==='pause'||c.state==='wait'?'pause':'run'):c.manual.on?'man':'');
     $('card'+i).classList.toggle('on',!!c.outOn);
     $('why'+i).textContent=whyText(c,i,r,active);
-    $('flt'+i).hidden=!c.fault; $('fltT'+i).textContent=c.fault?'Fault: '+c.fault:''; $('fwn'+i).hidden=!c.fault;
+    $('flt'+i).hidden=!c.fault; $('fltT'+i).textContent=c.fault?'Fault: '+c.fault:''; $('fwn'+i).hidden=!c.fault&&!(estopOn()&&c.type!=='off');
     $('runRows'+i).hidden=!(active&&c.inProgram);
     const canT=active&&c.inProgram&&c.kept>=0&&c.target!=null;
     document.querySelectorAll(`[data-dt="${i}"],[data-set="${i}"]`).forEach(b=>b.disabled=!canT);
@@ -1114,7 +1133,7 @@ function updSide(){
       <button class="ib" data-sman="${i}"><svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.3 7.3a8 8 0 1 0 11.4 0"/></svg></button>
       <span class="v" id="sv${i}"></span></div>`).join(''); }
   for(const i of CH){ const c=live.ch[i], inRun=active&&c.inProgram;
-    const st=c.fault?'Fault':!c.ok&&c.type!=='off'?'No link':c.type==='off'?'Off':inRun?(SIDE_ST[c.state]||c.state):c.autotune?'Autotune':c.manual.on?'Manual':'Idle';
+    const st=c.fault?'Fault':estopOn()&&c.type!=='off'?'E-stop':!c.ok&&c.type!=='off'?'No link':c.type==='off'?'Off':inRun?(SIDE_ST[c.state]||c.state):c.autotune?'Autotune':c.manual.on?'Manual':'Idle';
     const v=$('sv'+i); v.textContent=(c.pv!=null?f1(c.pv)+' °C':'–')+' · '+st; v.classList.toggle('bad',!!c.fault);
     const b=document.querySelector(`[data-sman="${i}"]`); if(!b) continue;
     b.classList.toggle('on',!!c.manual.on); b.disabled=inRun||c.type==='off'||!!c.fault||!!c.autotune;
@@ -1397,7 +1416,8 @@ function updateRun(){
   $('bStop').disabled=!active;
   $('bNext').disabled=!active||r.type!=='seq'||r.progPause||r.state==='paused';
   $('prog').disabled=active;
-  note(r.intr&&/^Run interrupted/.test(r.msg||'')?'':r.msg,/cannot|fault|failed|not possible|no answer/i.test(r.msg||''));
+  note(r.intr&&/^Run interrupted/.test(r.msg||'')?'':r.msg,/cannot|fault|failed|not possible|no answer|e-stop|warning/i.test(r.msg||''));
+  $('estopBar').hidden=!estopOn();
   // run interrupted by a reset: resume (never automatic) or dismiss
   const x=r.intr, ib=$('intr'); ib.hidden=!x;
   if(x){ const st=k=>({ramp:'ramp',hold:'hold',idle:'off',wait:'waiting',pause:'pause',done:'done'})[x.st[k]]||x.st[k];
@@ -1452,19 +1472,20 @@ async function updateLog(){
 }
 
 /* ---------- pages (hash routes: #/programs, #/channels, #/log, #/settings, #/tools; anything else = Status) ---------- */
-const PAGES={status:'Status',programs:'Programs',channels:'Channels',log:'Log',settings:'Settings',tools:'Tools'};
-const PAGE_ALIAS={system:'settings'};  // (old links)
+const PAGES={status:'Dashboard',programs:'Programs',channels:'Channels',log:'Log',settings:'Settings',tools:'Tools'};
+const PAGE_ALIAS={system:'settings',dashboard:'status'};  // (old links)
 let page='';
 function route(){
   const h=location.hash, m0=h.startsWith('#/')?h.slice(2):'', m=PAGE_ALIAS[m0]||m0, pg=PAGES[m]?m:'status', changed=pg!==page;
   page=pg;
   for(const k in PAGES) $('pg-'+k).hidden=k!==pg;
   document.querySelectorAll('nav a[data-pg]').forEach(a=>{ const on=a.dataset.pg===pg; a.classList.toggle('on',on); if(on) a.setAttribute('aria-current','page'); else a.removeAttribute('aria-current'); });
-  $('title').textContent=PAGES[pg]; $('jump').hidden=pg!=='status'; document.title=pg==='status'?'TempCtl Duo':PAGES[pg]+' – TempCtl Duo';
+  $('title').textContent=PAGES[pg]; $('jump').hidden=pg!=='status'; $('jumpS').hidden=pg!=='settings'; document.title=pg==='status'?'TempCtl Duo':PAGES[pg]+' – TempCtl Duo';
   $('side').classList.remove('open'); $('menu').setAttribute('aria-expanded','false');
   if(changed){ window.scrollTo(0,0); if(pg==='status'){ lastChart=0; chartAt=0; } pageUpdate(true); }
 }
 window.addEventListener('hashchange',route);
+document.addEventListener('click',e=>{ const a=e.target.closest('a[data-jump]'); if(!a) return; e.preventDefault(); const t=$(a.dataset.jump); if(t) t.scrollIntoView({behavior:'smooth',block:'start'}); });
 // Masonry: each tile spans as many 4 px rows as it is tall (+ the 12 px gap), so a short tile
 // moves up into the space next to a tall one. One column: normal flow.
 const masRO=new ResizeObserver(()=>requestAnimationFrame(masonry));
@@ -1590,13 +1611,14 @@ window.addEventListener('beforeunload',e=>{ if(Object.values(FORMS).some(F=>F.di
 
 /* ---------- Programs page ---------- */
 let plKey='', plAll=false;
+const estopOn=()=>!!(live&&live.safety&&live.safety.estop);
 const runActive=()=>!!live&&(live.run.state==='running'||live.run.state==='paused');
 function renderProgs(force){
   if(!progs||!live) return;
   const act=runActive(), dirty=progs.programs.map((p,i)=>isDirty(i)), key=J([progs,live.sel,act,live.run.prog,dirty,chName(0),chName(1),Object.entries(DRAFT).map(([k,d])=>k+(d?d.name:''))]);
   if(!force&&key===plKey+plAll) return; plKey=key+plAll;
   const empty=progs.programs.map((p,i)=>!p.used&&!DRAFT[i]?i:-1).filter(i=>i>=0);
-  $('plHint').textContent=`${progs.max-empty.length} of ${progs.max} slots used · Start on the Status page runs the selected program`;
+  $('plHint').textContent=`${progs.max-empty.length} of ${progs.max} slots used · Start on the Dashboard runs the selected program`;
   const emptyRow=empty.length&&!plAll?`<div class="prow empty" data-i="${empty[0]}"><span class="no"></span><span class="pn">${empty.length} empty slot${empty.length>1?'s':''}</span>
     <span class="pm">New programs go to slot ${empty[0]+1}. <button data-pa="all">Show all slots</button></span><span class="pa"><button data-pa="new-seq" ${act?'disabled':''}>New sequence</button><button data-pa="new-tl" ${act?'disabled':''}>New timeline</button><button data-pa="import">Import…</button></span></div>`:'';
   $('plist').innerHTML=progs.programs.map((p,i)=>{
@@ -1647,7 +1669,8 @@ $('plist').addEventListener('click',async e=>{
 
 /* ---------- Channels page ---------- */
 let chSel=0, chBuilt=false, chNamesKey='', xKey=['',''];
-function chTabs(){ if(!CFG) return; const h=CH.map(i=>`<button data-cht="${i}" aria-pressed="${i===chSel}">${esc(CFG.channels[i].name)}</button>`).join('');
+const TYPE_TXT={off:'off',modbus:'Modbus',local:'local'};
+function chTabs(){ if(!CFG) return; const h=CH.map(i=>`<button role="tab" data-cht="${i}" aria-pressed="${i===chSel}" aria-selected="${i===chSel}" style="--c:${PV[i]}"><i></i>${esc(CFG.channels[i].name)} <small>${TYPE_TXT[CFG.channels[i].type]||''}</small></button>`).join('');
   if($('chTabs').innerHTML!==h) $('chTabs').innerHTML=h; document.querySelectorAll('[data-chp]').forEach(d=>d.hidden=+d.dataset.chp!==chSel); }
 $('chTabs').onclick=e=>{ const b=e.target.closest('button[data-cht]'); if(!b) return; chSel=+b.dataset.cht; chTabs(); updChanPage(); };
 function commonGroups(){ const bn=CFG.channels[0].name;
@@ -1655,13 +1678,14 @@ function commonGroups(){ const bn=CFG.channels[0].name;
     {k:'bus.pollMs',l:'Polling interval',t:'num',min:250,max:10000,step:50,u:'ms',h:'How often PV, SP and output are read. With two Modbus controllers each one is polled every 2 × this interval.'},
     {k:'bus.commLossSec',l:'Pause the run after no answer for',t:'num',min:0,max:3600,u:'s',h:'0 = never pause'},
     {k:'run.bottomBand',l:`“${bn} reached” band ±`,t:'num',min:0.5,max:50,step:0.5,u:'°C',h:`Used by “Wait for ${bn}” in Sequence phases.`}]},
-   {h:'SSR supply relay',show:()=>!!CFG.limits.relay,note:'GPIO 4 switches a relay in the common +5 V supply of both SSRs: on while a local channel\'s outputs are on, off when they are off and at once on a fault (a shorted SSR cannot be switched off by its own input).',fields:[
-    {k:'relay.activeLow',l:'The relay is on when GPIO 4 is',t:'sel',bool:true,o:[['false','High (MOSFET / SSR modules)'],['true','Low (opto relay boards)']]}]},
-   {h:'RS485 bus',beta:true,show:()=>CFG.limits.rs485,note:'Shared by both Modbus channels. Modbus is a beta feature: not tested with a real controller yet.',fields:[
+   {h:'SSR supply relay',show:()=>!!CFG.limits.relay,note:'GPIO 4 drives an active-high DC solid-state relay in the common +5 V supply of both SSR inputs: on while a local channel\'s outputs are on, off when they are off and at once on a fault or E-stop. It covers a stuck SSR input or driver transistor; an SSR whose output is shorted needs a contactor in the heater supply.',fields:[]},
+  ]; }
+// RS485 bus: in the tile of each Modbus channel (one bus, shared by both: a change shows in both tiles)
+function busGroup(P){ return {h:'RS485 bus',beta:true,show:g=>CFG.limits.rs485&&g(P+'type')==='modbus',note:'Shared by both Modbus channels. Modbus is a beta feature: not tested with a real controller yet.',fields:[
     {k:'bus.baud',l:'Baud rate',t:'sel',num:true,o:[2400,4800,9600,19200,38400].map(b=>[b,b])},
     {k:'bus.parity',l:'Parity',t:'sel',num:true,o:[[0,'None'],[1,'Even'],[2,'Odd']]},
     {k:'bus.stopBits',l:'Stop bits',t:'sel',num:true,o:[[1,'1'],[2,'2']]},
-    {k:'bus.timeoutMs',l:'Response timeout',t:'num',min:50,max:2000,step:10,u:'ms'}]}]; }
+    {k:'bus.timeoutMs',l:'Response timeout',t:'num',min:50,max:2000,step:10,u:'ms'}]}; }
 const REGS=[['pv','Process value (read)'],['spEff','Effective setpoint (read)'],['out','Output % (read)'],['status','Status word (read)'],['alarm','Alarm word (read)'],
   ['sp','Setpoint SP (write, required)'],['spLo','Setpoint lower limit (read)'],['spHi','Setpoint upper limit (read)'],['rampRate','Setpoint gradient r.SP (write)'],
   ['ctrlOff','Outputs off (write 1)'],['remote','Front panel lock (write 1)']];
@@ -1671,7 +1695,12 @@ function runawayFields(P,ty){ const R=`${P}${ty}.runaway.`, sh=g=>g(P+'type')===
     {k:R+'heatSec',l:'… for',t:'num',min:10,max:3600,u:'s',show:sh2},
     {k:R+'minRise',l:'… with a rise below',t:'num',min:0.5,max:100,step:0.5,u:'°C',show:sh2},
     {k:R+'holdBand',l:'Holding: PV off the setpoint by more than ±',t:'num',min:1,max:200,u:'°C',show:sh2},
-    {k:R+'holdSec',l:'… for longer than',t:'num',min:5,max:3600,u:'s',show:sh2}]; }
+    {k:R+'holdSec',l:'… for longer than',t:'num',min:5,max:3600,u:'s',show:sh2},
+    {k:R+'offEnable',l:'Heating while off (stuck SSR / controller)',t:'sw',def:true,show:sh,w:true,h:'Outputs off, but the PV rises. Checked from 2 min after the outputs went off, not while the other channel heats.'},
+    {k:R+'offRise',l:'… PV rises by',t:'num',min:2,max:100,step:0.5,u:'°C',def:10,show:g=>sh(g)&&g(R+'offEnable')},
+    {k:R+'offSec',l:'… within',t:'num',min:10,max:3600,u:'s',def:60,show:g=>sh(g)&&g(R+'offEnable')},
+    {k:R+'frozenEnable',l:'Reading frozen',t:'sw',def:true,show:sh,w:true,h:'Outputs on, but the reading does not change at all (stuck converter or controller value).'},
+    {k:R+'frozenSec',l:'… for',t:'num',min:10,max:3600,u:'s',def:120,show:g=>sh(g)&&g(R+'frozenEnable')}]; }
 function chanGroups(i){ const P=`channels.${i}.`, ty=t=>g=>g(P+'type')===t;
   return [
    {h:'General',fields:[{k:P+'name',l:'Name',t:'text',max:16,h:'Shown on all screens'},
@@ -1687,6 +1716,7 @@ function chanGroups(i){ const P=`channels.${i}.`, ty=t=>g=>g(P+'type')===t;
      {k:P+'modbus.minStep',l:'Min. step between writes',t:'num',min:0.1,max:100,step:0.1,u:'°C',show:g=>g(P+'modbus.rampMode')==='host'},
      {k:P+'modbus.minWriteSec',l:'Min. time between writes',t:'num',min:1,max:3600,u:'s',show:g=>g(P+'modbus.rampMode')==='host'},
      {k:P+'modbus.lockFront',l:'Lock the front panel while running',t:'sw'}]},
+   busGroup(P),
    {h:'Register addresses',det:true,show:ty('modbus'),note:'Decimal protocol addresses (0-based, as sent on the wire); −1 = not available. The PMA KS 4x-1 defaults use the “1dP” column of its interface description (value = register / 10), e.g. SP = 11372.',
     fields:REGS.map(([k,l])=>({k:P+'modbus.reg.'+k,l,t:'num',min:-1,max:65534})).concat([
      {k:P+'modbus.reg.scale',l:'Divide values by',t:'num',min:1,max:1000,step:'any'},
@@ -1697,14 +1727,17 @@ function chanGroups(i){ const P=`channels.${i}.`, ty=t=>g=>g(P+'type')===t;
      {k:P+'local.sensor',l:'Converter',t:'sel',o:[['max31855','MAX31855'],['max6675','MAX6675']]},
      {k:P+'local.calOffset',l:'Calibration offset',t:'num',min:-50,max:50,step:0.01,u:'°C'},
      {k:P+'local.calGain',l:'Calibration gain',t:'num',min:0.5,max:2,step:0.0001,h:'Calibrated = raw × gain + offset'}]},
-   {h:'PID control',show:ty('local'),fields:[
+   {h:'PID control',show:ty('local'),extra:autotuneHtml(i),fields:[
      {k:P+'local.kp',l:'Kp',t:'num',min:0,max:1000,step:0.01,u:'% / °C'},
      {k:P+'local.ki',l:'Ki',t:'num',min:0,max:100,step:0.0001,u:'% / (°C·s)'},
      {k:P+'local.kd',l:'Kd',t:'num',min:0,max:10000,step:0.1,u:'%·s / °C'},
      {k:P+'local.windowSec',l:'SSR window',t:'num',min:0.2,max:10,step:0.1,u:'s',h:'The SSR is on for the output share of every window'},
      {k:P+'local.maxOut',l:'Max. output',t:'num',min:0,max:100,u:'%'},
      {k:P+'local.maxTemp',l:'Max. temperature (outputs off above)',t:'num',min:50,max:600,u:'°C'}]},
-   {h:'Thermal runaway protection',show:g=>g(P+'type')!=='off',note:'Modbus and local keep their own values; the ones of the selected type are used.',fields:runawayFields(P,'modbus').concat(runawayFields(P,'local'))}];
+   {h:'Protection',show:g=>g(P+'type')!=='off',note:'A tripped check switches the outputs off (local: also the SSR supply relay), stops a running program and waits for Acknowledge. Modbus and local keep their own values; the ones of the selected type are used.',
+    fields:runawayFields(P,'modbus').concat(runawayFields(P,'local'),[
+     {k:P+'local.cjEnable',l:'Converter too hot',t:'sw',def:true,w:true,show:ty('local'),h:'The MAX31855’s own (cold-junction) temperature: a hot enclosure makes the readings drift.'},
+     {k:P+'local.cjMax',l:'… above',t:'num',min:30,max:125,u:'°C',def:70,show:g=>g(P+'type')==='local'&&g(P+'local.cjEnable')}])}];
 }
 function calHtml(i){ return `<h3>Two-point calibration</h3><p class="hint">Measure one or two temperatures with a reference thermometer. “Now” takes the current raw reading (without calibration). With one point only the offset changes.</p>
   <div class="cal"><span></span><span>Raw reading</span><span>True temperature</span>
@@ -1713,7 +1746,7 @@ function calHtml(i){ return `<h3>Two-point calibration</h3><p class="hint">Measu
   <div class="row"><button data-calc="${i}">Calculate offset and gain</button><span class="msg" id="calMsg${i}"></span></div>`; }
 function rawNow(i){ const c=live&&live.ch[i], l=CFG.channels[i].local; if(!c||c.pv==null) return null; return (c.pv-l.calOffset)/(l.calGain||1); }
 function buildChanPage(){
-  mkForm('common',$('cCommon'),commonGroups(),{title:'Polling and bus'});
+  mkForm('common',$('cCommon'),commonGroups(),{title:'All channels'});
   for(const i of CH) mkForm('ch'+i,$('cf'+i),chanGroups(i),{sticky:true,save:'Save channel settings',top:`<p class="live1" id="chLive${i}"></p>`,
     confirm:async(F,body)=>{ const c=body.channels&&body.channels[i]; if(c&&c.type&&runActive()) return ask(`Changing the type of ${CFG.channels[i].name} stops the running program. Continue?`,'Change type'); return true; }});
   chBuilt=true; chNamesKey=CFG.channels[0].name;
@@ -1735,16 +1768,17 @@ $('pg-channels').addEventListener('click',async e=>{
     fEl(F,fg).value=(Math.round(g*10000)/10000).toString(); fEl(F,fo).value=(Math.round(o*100)/100).toString(); updForm(F);
     setMsg('calMsg'+i,'Offset and gain filled in — save the channel settings to use them.'); return; }
   if(d.at!=null){ const i=+d.ch, cmd=d.at;
-    if(cmd==='start'){ const sp=parseFloat($('atSp'+i).value); if(isNaN(sp)) return; setMsg('atMsg'+i,'Starting…'); const r=await api('/api/autotune',{ch:i,cmd,sp}); setMsg('atMsg'+i,r.err||(r.ok?'':'Not started: see the message on the Status page.'),!!r.err||!r.ok); }
+    if(cmd==='start'){ const sp=parseFloat($('atSp'+i).value); if(isNaN(sp)) return; setMsg('atMsg'+i,'Starting…'); const r=await api('/api/autotune',{ch:i,cmd,sp}); setMsg('atMsg'+i,r.err||(r.ok?'':'Not started: see the message on the Dashboard.'),!!r.err||!r.ok); }
     else if(cmd==='stop'||cmd==='discard'){ const r=await api('/api/autotune',{ch:i,cmd}); setMsg('atMsg'+i,r.err||'',!!r.err); }
     else if(cmd==='accept'){ const r=await api('/api/autotune',{ch:i,cmd}); if(r.err){ setMsg('atMsg'+i,r.err,true); return; } await loadCfg(); setMsg('atMsg'+i,'New PID values saved.'); }
     poll(); return; }
   if(d.pread!=null){ readParams(+d.pread); return; }
 });
-function extraHtml(i){ const c=CFG.channels[i];
-  if(c.type==='local') return `<section class="panel"><h2>PID autotune</h2><p class="hint">Relay test around a test temperature (Tyreus–Luyben rule): the heater is switched between more and less power until the oscillation is steady, which takes 10–30 minutes. The proposed values can be accepted or discarded. The test temperature must be at least 10 °C above the current temperature and 15 °C below the max. temperature.</p>
+function autotuneHtml(i){ const c=CFG.channels[i];
+  return `<h4>PID autotune</h4><p class="hint">Relay test around a test temperature (Tyreus–Luyben rule): the heater is switched between more and less power until the oscillation is steady, which takes 10–30 minutes. The proposed values can be accepted or discarded. The test temperature must be at least 10 °C above the current temperature and 15 °C below the max. temperature.</p>
     <div class="row"><label class="f">Test temperature <input type="number" id="atSp${i}" step="1" value="${Math.min(200,c.local.maxTemp-15)}"> °C</label><button class="pri" data-at="start" data-ch="${i}" id="atGo${i}">Start autotune</button><button data-at="stop" data-ch="${i}" id="atStop${i}">Stop</button></div>
-    <div class="msg" id="atMsg${i}"></div><div id="atRes${i}"></div></section>`;
+    <div class="msg" id="atMsg${i}"></div><div id="atRes${i}"></div>`; }
+function extraHtml(i){ const c=CFG.channels[i];
   if(c.type==='modbus') return `<section class="panel"><h2>Controller parameters</h2>${c.modbus.profile==='pma'?`<p class="hint">Reads the PID and alarm parameters of the PMA KS 4x-1. Values are written one at a time; the controller rejects values outside its limits.</p>
     <div class="row"><button data-pread="${i}">Read from controller</button></div><div class="ed-wrap" id="pTbl${i}"></div><h3>Actions</h3><div class="row" id="pAct${i}"><span class="hint" style="margin:0">Read the parameters first.</span></div><div class="msg" id="pMsg${i}"></div>`
     :'<p class="hint">Parameter access is built in only for the PMA KS 4x-1. For other controllers use the Modbus tools (Tools page) with the addresses from their manual.</p>'}</section>`;
@@ -1762,7 +1796,7 @@ async function readParams(i){ const tb=$('pTbl'+i); tb.textContent='Reading… (
 function updChanPage(){
   if(!CFG||!live) return;
   if(!chBuilt) buildChanPage();
-  else if(chNamesKey!==CFG.channels[0].name&&!FORMS.common.dirty){ mkForm('common',$('cCommon'),commonGroups(),{title:'Polling and bus'}); chNamesKey=CFG.channels[0].name; }
+  else if(chNamesKey!==CFG.channels[0].name&&!FORMS.common.dirty){ mkForm('common',$('cCommon'),commonGroups(),{title:'All channels'}); chNamesKey=CFG.channels[0].name; }
   chTabs();
   for(const i of CH){ const c=live.ch[i], cc=CFG.channels[i];
     const k=cc.type+cc.modbus.profile; if(xKey[i]!==k){ xKey[i]=k; $('cx'+i).innerHTML=extraHtml(i); }
@@ -1795,12 +1829,29 @@ const upTxt=s=>{ const d=Math.floor(s/86400); return (d?d+' d ':'')+fmt(s%86400)
 function updSystem(){
   if(!CFG||!live) return;
   if(!sysBuilt){ sysBuilt=true; buildTimeForm();
+    const L=CFG.limits||{};
+    mkForm('safe',$('sSafe'),[{h:'',fields:[
+      {k:'safety.manualIdle',l:'End manual mode without activity',t:'sw',w:true,h:'A forgotten manual setpoint: it is switched off after this long without a touch, a web action or a serial command (a beep and a message 1 min before).'},
+      {k:'safety.manualIdleMin',l:'… after',t:'num',min:2,max:1440,u:'min',def:30,show:g=>g('safety.manualIdle')},
+      {k:'safety.estop',l:'E-stop input (GPIO 5)',t:'sw',w:true,show:()=>!!L.estop,h:'Normally closed contact between GPIO 5 and GND. Open contact or a broken wire: all outputs and the SSR supply relay off, a running program stops.'},
+      {k:'safety.sound',l:'Alarm sound',t:'sw',def:true,w:true,show:()=>!!L.sound,h:'Faults and E-stop: three long beeps every 3 s. “Action required” and the manual-mode warning: two short beeps every 10 s. Run finished: three short beeps. A touch or a web action silences the current alarm.'},
+      {k:'safety.chipWarn',l:'Warn when the chip gets hot',t:'sw',def:true,w:true,show:()=>!!L.chipTemp,h:'The ESP32-S3’s internal temperature sensor, read every 30 s: a warning in the log above the limit.'},
+      {k:'safety.chipMaxC',l:'… above',t:'num',min:40,max:120,u:'°C',def:80,show:g=>!!L.chipTemp&&g('safety.chipWarn')}],
+      extra:L.sound?`<div class="row"><button id="bBeep">Test beep</button><span class="msg" id="beepMsg"></span></div>`:''}],
+      {title:'Safety',auto:true,top:'<p class="live1" id="safeLive"></p>'});
+    if($('bBeep')) $('bBeep').onclick=async()=>{ try{ const r=await api('/api/beep',{}); setMsg('beepMsg',r.err||'',!!r.err); }catch(e){ setMsg('beepMsg','No answer from the device.',true); } };
     mkForm('disp',$('sDisp'),[{h:'',fields:[
       {k:'display.accent',l:'Accent colour',t:'accent',h:'Used on the touch screen and on this page; the channel colours follow from it.'},
       {k:'display.themeDark',l:'Touch screen theme',t:'theme',def:true},
       {k:'display.brightness',l:'Touch screen brightness',t:'range',min:10,max:255,w:true,fmt:v=>Math.round(v/255*100)+' %'},
       {k:'display.rotate180',l:'Rotate the screen by 180°',t:'sw'},
       {k:'display.screenCheck',l:'Restart a hanging screen by itself',t:'sw',def:true,h:'Checks the display and the touch controller every second and restarts one that hangs (logged as an event).'}]}],{title:'Display',auto:true}); }
+  const sf=live.safety||{}, L=CFG.limits||{}, sl=[];
+  if(L.estop) sl.push(sf.estop?'<span class="msg bad" style="margin:0">E-stop active</span>':`E-stop contact ${sf.contact||'–'}${CFG.safety&&CFG.safety.estop?'':' (input not watched)'}`);
+  if(sf.chipC!=null) sl.push(`chip ${f1(sf.chipC)} °C${sf.chipHot?' <span class="msg bad" style="margin:0">hot</span>':''}`);
+  if(sf.muted) sl.push('alarm silenced');
+  const slh=sl.join(' · ')||'No E-stop input on this board.';
+  if($('safeLive')&&$('safeLive').innerHTML!==slh) $('safeLive').innerHTML=slh;
   const host=CFG.wifi.hostname;
   const kv=[['Firmware','TempCtl Duo '+live.fw],['Board',live.board+(live.variant?' · '+live.variant:'')],['Network',live.net],['Host name',`<a href="http://${esc(host)}.local/">${esc(host)}.local</a>`],['Uptime',upTxt(live.up)]]
     .map(([k,v])=>`<dt>${k}</dt><dd>${k==='Host name'?v:esc(v)}</dd>`).join('');

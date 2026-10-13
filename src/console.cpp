@@ -7,6 +7,7 @@
 #include <math.h>
 #include <stdarg.h>
 #include "app_state.h"
+#include "safety.h"
 #include "config.h"
 #include "net.h"
 #include "program_store.h"
@@ -378,7 +379,7 @@ static const char* const H_API[] = {
 static const char* const H_SETTINGS[] = {
     "SETTINGS - all settings, changed with set, shown with get",
     "  get                          all settings below as key=value (passwords never shown)",
-    "  get <section>                one section: b, t, bus, run, wifi, display",
+    "  get <section>                one section: b, t, bus, run, wifi, display, safety",
     "  set <key>=<value> ...        change one or more settings; checked first, nothing is",
     "                               changed if one value is wrong; saved and used at once",
     "  factory reset yes            all settings to defaults, Wi-Fi included (programs kept)",
@@ -408,6 +409,7 @@ static const char* const H_SETTINGS[] = {
     "  windowSec=<s>                SSR time window, 0.2 ... 10",
     "  maxOut=<%>                   highest output, 0 ... 100",
     "  maxTemp=<C>                  cut-off: outputs off above it, 50 ... 600",
+    "  cjEnable=on|off  cjMax=<C>   converter too hot: fault above cjMax (30 ... 125; MAX31855)",
     "  e.g. set b.local.calOffset=-1.5 b.local.kp=2.5 b.local.ki=0.02 b.local.kd=40",
     "",
     "RUNAWAY PROTECTION (b.local.runaway.* / t.local.runaway.*,",
@@ -417,6 +419,11 @@ static const char* const H_SETTINGS[] = {
     "  minRise=<C>                  heatSec (10 ... 3600) with a rise below minRise (0.5 ... 100)",
     "  holdBand=<C>  holdSec=<s>    holding failed: PV more than holdBand (1 ... 200) off the",
     "                               setpoint for longer than holdSec (5 ... 3600)",
+    "  offEnable=on|off             heating while off (stuck SSR): outputs off, but the PV rises",
+    "  offRise=<C>  offSec=<s>      offRise (2 ... 100) within offSec (10 ... 3600); from 2 min",
+    "                               after off, not while the other channel heats",
+    "  frozenEnable=on|off          reading frozen: outputs on, the reading did not change at all",
+    "  frozenSec=<s>                for frozenSec (10 ... 3600)",
     "  e.g. set b.local.runaway.enable=on b.local.runaway.heatSec=300 b.local.runaway.minRise=5",
     "",
     "MODBUS CONTROLLER - beta (b.modbus.* / t.modbus.*)",
@@ -469,8 +476,15 @@ static const char* const H_SETTINGS[] = {
     "                               set from the web browser the first time",
     "  e.g. set time.zone=Europe/Berlin",
     "",
-    "RELAY (relay.*, S3: GPIO 4, the common +5 V supply of the SSRs)",
-    "  activeLow=on|off             on: the relay is on while the pin is low (opto relay boards)",
+    "SAFETY (safety.*)",
+    "  manualIdle=on|off            manual mode ends after manualIdleMin (2 ... 1440) minutes",
+    "  manualIdleMin=<min>          without activity (touch, web, serial); a beep 1 min before",
+    "  estop=on|off                 E-stop input (S3: GPIO 5, NC contact to GND): open = all",
+    "                               outputs off, run stopped",
+    "  sound=on|off                 alarm beeps (S3: GPIO 6, CYD: speaker connector)",
+    "  chipWarn=on|off              warning above chipMaxC (40 ... 120) chip temperature (S3)",
+    "  chipMaxC=<C>",
+    "  e.g. set safety.estop=on safety.manualIdle=on safety.manualIdleMin=60",
 };
 
 struct HelpSec {
@@ -1092,6 +1106,14 @@ static void cmdInfo() {
   ni.replace("\n", ", ");
   say("network   %s", ni.length() ? ni.c_str() : "off");
   say("web       http://%s.local/", S.hostname);
+  {
+    char e[48] = "", c[32] = "";
+    if (safetyEstopWired())
+      snprintf(e, sizeof(e), ", E-stop %s (contact %s)", !S.estop ? "off" : L.estop ? "ACTIVE" : "ok", L.estopRaw ? "open" : "closed");
+    if (safetyChipTempWired() && !isnan(L.chipC)) snprintf(c, sizeof(c), ", chip %.0f C%s", L.chipC, L.chipHot ? " (HOT)" : "");
+    say("safety    sound %s%s%s%s", !safetySoundWired() ? "-" : S.sound ? "on" : "off", e, c,
+        S.manualIdle ? ", manual idle timeout on" : "");
+  }
   ProgSummary* sums = (ProgSummary*)malloc(sizeof(ProgSummary) * PROG_MAX);
   if (sums) {
     programSummaries(sums);
@@ -1189,8 +1211,8 @@ static void cmdTune(const Args& a) {
 // One table: the keys of the settings API (channels[i]. -> b. / t.), what values they take (checked
 // before anything is changed) and how get shows them.
 enum KType : uint8_t { K_NUM, K_INT, K_BOOL, K_CHOICE, K_SET, K_STR, K_IP, K_ADDR, K_ACCENT, K_PARITY, K_HOST, K_TZ };
-enum KSec : uint8_t { KS_CH, KS_BUS, KS_RUN, KS_WIFI, KS_DISP, KS_TIME, KS_RELAY };
-static const char* const KSEC_NAME[] = {"", "bus", "run", "wifi", "display", "time", "relay"};
+enum KSec : uint8_t { KS_CH, KS_BUS, KS_RUN, KS_WIFI, KS_DISP, KS_TIME, KS_SAFETY };
+static const char* const KSEC_NAME[] = {"", "bus", "run", "wifi", "display", "time", "safety"};
 struct SKey {
   uint8_t sec, t;
   const char* key;  // path below the section (channels: below channels[i])
@@ -1200,7 +1222,10 @@ struct SKey {
 #define RUNAWAY(p)                                                                                      \
   {KS_CH, K_BOOL, p "runaway.enable", 0, 0, nullptr}, {KS_CH, K_NUM, p "runaway.minOut", 0, 100, nullptr}, \
       {KS_CH, K_INT, p "runaway.heatSec", 10, 3600, nullptr}, {KS_CH, K_NUM, p "runaway.minRise", 0.5f, 100, nullptr}, \
-      {KS_CH, K_NUM, p "runaway.holdBand", 1, 200, nullptr}, {KS_CH, K_INT, p "runaway.holdSec", 5, 3600, nullptr}
+      {KS_CH, K_NUM, p "runaway.holdBand", 1, 200, nullptr}, {KS_CH, K_INT, p "runaway.holdSec", 5, 3600, nullptr}, \
+      {KS_CH, K_BOOL, p "runaway.offEnable", 0, 0, nullptr}, {KS_CH, K_NUM, p "runaway.offRise", 2, 100, nullptr},   \
+      {KS_CH, K_INT, p "runaway.offSec", 10, 3600, nullptr}, {KS_CH, K_BOOL, p "runaway.frozenEnable", 0, 0, nullptr}, \
+      {KS_CH, K_INT, p "runaway.frozenSec", 10, 3600, nullptr}
 static const SKey KEYS[] = {
     {KS_CH, K_STR, "name", 1, 31, nullptr},
     {KS_CH, K_CHOICE, "type", 0, 0, "off|local|modbus"},
@@ -1217,6 +1242,8 @@ static const SKey KEYS[] = {
     {KS_CH, K_NUM, "local.windowSec", 0.2f, 10, nullptr},
     {KS_CH, K_NUM, "local.maxOut", 0, 100, nullptr},
     {KS_CH, K_NUM, "local.maxTemp", 50, 600, nullptr},
+    {KS_CH, K_BOOL, "local.cjEnable", 0, 0, nullptr},
+    {KS_CH, K_NUM, "local.cjMax", 30, 125, nullptr},
     RUNAWAY("local."),
     {KS_CH, K_INT, "modbus.addr", 1, 247, nullptr},
     {KS_CH, K_CHOICE, "modbus.profile", 0, 0, "pma|generic"},
@@ -1261,7 +1288,12 @@ static const SKey KEYS[] = {
     {KS_DISP, K_BOOL, "screenCheck", 0, 0, nullptr},
     {KS_DISP, K_SET, "liveMin", 0, 0, "1|5|10|15|30|60|120|240|480|720|1440"},
     {KS_TIME, K_TZ, "zone", 0, 0, nullptr},
-    {KS_RELAY, K_BOOL, "activeLow", 0, 0, nullptr},
+    {KS_SAFETY, K_BOOL, "manualIdle", 0, 0, nullptr},
+    {KS_SAFETY, K_INT, "manualIdleMin", 2, 1440, nullptr},
+    {KS_SAFETY, K_BOOL, "estop", 0, 0, nullptr},
+    {KS_SAFETY, K_BOOL, "sound", 0, 0, nullptr},
+    {KS_SAFETY, K_BOOL, "chipWarn", 0, 0, nullptr},
+    {KS_SAFETY, K_NUM, "chipMaxC", 40, 120, nullptr},
 };
 static const char* const ACCENT_NAMES[] = {"blue", "pink", "violet", "orange", "mauve", "green"};
 static const uint32_t ACCENT_RGB[] = {0x2196F3, 0xD1449B, 0x6C71C4, 0xD65D0E, 0x8839EF, 0x50A14F};
@@ -1657,6 +1689,7 @@ static void execute(char* text) {
   Args a;
   parse(text, a);
   if (!a.n && !a.nk) return;
+  safetyActivity();
   snap = (Snap*)malloc(sizeof(Snap));
   if (!snap) return err("out of memory");
   {

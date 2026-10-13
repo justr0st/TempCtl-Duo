@@ -810,6 +810,87 @@ static void testRunaway() {
   CHECK(f == FAULT_NONE);
 }
 
+// ------------------------------------------------------------------ guard (heating while off, frozen)
+
+static void testGuard() {
+  Settings st;
+  settingsDefaults(st, BoardLimits{true, 2});
+  const Runaway c = st.ch[0].loc.runaway;
+  CHECK(c.offEnable && c.offRise == 10 && c.offSec == 60 && c.frozenEnable && c.frozenSec == 120);
+  CHECK(st.ch[0].loc.cjEnable && st.ch[0].loc.cjMax == 70);
+  CHECK(!st.manualIdle && st.manualIdleMin == 30 && !st.estop && st.sound && st.chipWarn && st.chipMaxC == 80);
+  GuardMonitor g;
+  uint8_t f = FAULT_NONE;
+  // off and cooling, then a stuck SSR: +0.5 degC/s -> fault within the window (after the settle time)
+  float pv = 200;
+  int t = 0;
+  for (; t < 400 && !f; ++t) {
+    pv += t < 200 ? -0.2f : 0.5f;
+    f = g.update(c, 1, false, false, pv, pv);
+  }
+  CHECK(f == FAULT_OFFHEAT && t > 200 && t < 230);
+  // still rising from the heater right after "off": nothing within the settle time
+  g.reset();
+  f = FAULT_NONE;
+  pv = 100;
+  for (t = 0; t < 110 && !f; ++t) f = g.update(c, 1, false, false, pv += 0.2f, pv);
+  CHECK(f == FAULT_NONE);
+  // the other channel heats: no check
+  g.reset();
+  f = FAULT_NONE;
+  pv = 30;
+  for (t = 0; t < 600 && !f; ++t) f = g.update(c, 1, false, true, pv += 0.3f, pv);
+  CHECK(f == FAULT_NONE);
+  // slow drift (5 degC per minute) is fine
+  g.reset();
+  pv = 30;
+  for (t = 0; t < 900 && !f; ++t) f = g.update(c, 1, false, false, pv += 5.0f / 60, pv);
+  CHECK(f == FAULT_NONE);
+  // disabled
+  Runaway c2 = c;
+  c2.offEnable = 0;
+  c2.frozenEnable = 0;
+  g.reset();
+  pv = 30;
+  for (t = 0; t < 600 && !f; ++t) f = g.update(c2, 1, false, false, pv += 1, pv);
+  for (t = 0; t < 600 && !f; ++t) f = g.update(c2, 1, true, false, 100, 100);
+  CHECK(f == FAULT_NONE);
+  // frozen: outputs on, the same raw reading for 120 s
+  g.reset();
+  for (t = 0; t < 300 && !f; ++t) f = g.update(c, 1, true, false, 150, 150.25f);
+  CHECK(f == FAULT_FROZEN && t >= 120 && t <= 122);
+  // changing readings: fine; off: no frozen check
+  g.reset();
+  f = FAULT_NONE;
+  for (t = 0; t < 600 && !f; ++t) f = g.update(c, 1, true, false, 150, (t & 1) ? 150.25f : 150.0f);
+  CHECK(f == FAULT_NONE);
+  g.reset();
+  for (t = 0; t < 100 && !f; ++t) f = g.update(c, 1, false, false, 150, 150);
+  CHECK(f == FAULT_NONE);
+  // settings JSON round trip of the new keys
+  Settings a = st;
+  a.ch[1].loc.runaway.offRise = 12.5f;
+  a.ch[1].mb.runaway.frozenSec = 300;
+  a.ch[1].loc.cjMax = 85;
+  a.manualIdle = 1;
+  a.manualIdleMin = 45;
+  a.estop = 1;
+  a.chipMaxC = 75;
+  JsonDocument d;
+  settingsToJson(a, d.to<JsonObject>(), false);
+  Settings b = st;
+  char msg[96];
+  CHECK(settingsFromJson(d.as<JsonObjectConst>(), b, msg, sizeof(msg)));
+  CHECK(b.ch[1].loc.runaway.offRise == 12.5f && b.ch[1].mb.runaway.frozenSec == 300 && b.ch[1].loc.cjMax == 85);
+  CHECK(b.manualIdle == 1 && b.manualIdleMin == 45 && b.estop == 1 && b.chipMaxC == 75);
+  // validation clamps
+  b.manualIdleMin = 0;
+  b.ch[0].loc.runaway.offSec = 1;
+  b.ch[0].loc.cjMax = 500;
+  settingsValidate(b, BoardLimits{true, 2}, msg, sizeof(msg));
+  CHECK(b.manualIdleMin == 2 && b.ch[0].loc.runaway.offSec == 10 && b.ch[0].loc.cjMax == 125);
+}
+
 // ------------------------------------------------------------------ autotune
 
 static bool runTune(Heater& h, RelayAutotune& at, const TuneConfig& c) {
@@ -943,6 +1024,7 @@ int main() {
   testThermocouple();
   testPid();
   testRunaway();
+  testGuard();
   testAutotune();
   testTimeZones();
   printf(fails ? "%d FAILED\n" : "all tests passed\n", fails);

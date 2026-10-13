@@ -67,6 +67,10 @@ int uiTouchCalPoll(int& step, uint16_t& a, uint16_t& b, uint16_t& c, uint16_t& d
 void uiTouchCalCancel() { calState = -1; }
 String netApName() { return String("TempCtl-Duo-1A2B"); }
 void syslogTee(const uint8_t*, size_t) {}
+void safetyActivity() {}
+bool safetyEstopWired() { return false; }
+bool safetySoundWired() { return true; }
+bool safetyChipTempWired() { return false; }
 // web API stand-in for the api mode: echoes the request, "/big" answers 20 kB in pieces
 void webApiRequest(const char* line) {
   if (strstr(line, "/big")) {
@@ -117,6 +121,10 @@ int main() {
   consoleBegin();
   type("help\r");
   type("status\r");
+  type("get safety\r");
+  type("set safety.estop=on safety.manualIdleMin=45 b.local.runaway.offRise=12 b.local.cjMax=80\r");
+  type("get b.local\r");
+  type("info\r");
   type("STATUS\r\n");
   type("manual b on sp=180\r");
   type("manual t sp=9999\r");
@@ -184,6 +192,10 @@ int main() {
   type("tune b start temp=500\r");
   tune[0].state = TuneState::Done; tune[0].res.kp = 3.2f; tune[0].res.ki = 0.021f; tune[0].res.kd = 45;
   type("status\r");
+  type("get safety\r");
+  type("set safety.estop=on safety.manualIdleMin=45 b.local.runaway.offRise=12 b.local.cjMax=80\r");
+  type("get b.local\r");
+  type("info\r");
   type("tune b accept\r");
   type("get b.local\r");
   type("get display\r");
@@ -227,6 +239,10 @@ int main() {
   run(1100);
   type("\x1b[A");          // an arrow key stops watch, its "[A" is not typed
   type("status\r");
+  type("get safety\r");
+  type("set safety.estop=on safety.manualIdleMin=45 b.local.runaway.offRise=12 b.local.cjMax=80\r");
+  type("get b.local\r");
+  type("info\r");
   // 1.0.26: api mode (JSON lines)
   type("api on\r\n");
   Serial.feed("{\"id\":1,\"m\":\"GET\",\"p\":\"/api/live\"}\n"); run(300);
@@ -237,6 +253,10 @@ int main() {
   printf("\n[test] (20 kB answer above)\n");
   Serial.feed("api off\n"); run(300);
   type("status\r");
+  type("get safety\r");
+  type("set safety.estop=on safety.manualIdleMin=45 b.local.runaway.offRise=12 b.local.cjMax=80\r");
+  type("get b.local\r");
+  type("info\r");
   type("api on\r");
   run(16000);  // no request for 15 s: back to the console
   type("help api\r");
