@@ -1284,6 +1284,7 @@ static void manualSwitch(int ch, bool on) {
 
 // (Re)opens the bus and selects the channel backends after a settings change
 static void applySettings(const Settings& prev, bool first) {
+  localCtrlRelayLevel(s.relayActiveLow != 0);  // (first: the relay pin becomes an output, off)
   modbusBusBegin(bus, s);
   eng.setBand(s.bottomBand);
   for (int i = 0; i < NUM_CHANNELS; ++i) {

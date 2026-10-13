@@ -468,6 +468,9 @@ static const char* const H_SETTINGS[] = {
     "                               \"help time\", UTC+hh:mm (no summer time), or empty (UTC);",
     "                               set from the web browser the first time",
     "  e.g. set time.zone=Europe/Berlin",
+    "",
+    "RELAY (relay.*, S3: GPIO 4, the common +5 V supply of the SSRs)",
+    "  activeLow=on|off             on: the relay is on while the pin is low (opto relay boards)",
 };
 
 struct HelpSec {
@@ -1186,8 +1189,8 @@ static void cmdTune(const Args& a) {
 // One table: the keys of the settings API (channels[i]. -> b. / t.), what values they take (checked
 // before anything is changed) and how get shows them.
 enum KType : uint8_t { K_NUM, K_INT, K_BOOL, K_CHOICE, K_SET, K_STR, K_IP, K_ADDR, K_ACCENT, K_PARITY, K_HOST, K_TZ };
-enum KSec : uint8_t { KS_CH, KS_BUS, KS_RUN, KS_WIFI, KS_DISP, KS_TIME };
-static const char* const KSEC_NAME[] = {"", "bus", "run", "wifi", "display", "time"};
+enum KSec : uint8_t { KS_CH, KS_BUS, KS_RUN, KS_WIFI, KS_DISP, KS_TIME, KS_RELAY };
+static const char* const KSEC_NAME[] = {"", "bus", "run", "wifi", "display", "time", "relay"};
 struct SKey {
   uint8_t sec, t;
   const char* key;  // path below the section (channels: below channels[i])
@@ -1258,6 +1261,7 @@ static const SKey KEYS[] = {
     {KS_DISP, K_BOOL, "screenCheck", 0, 0, nullptr},
     {KS_DISP, K_SET, "liveMin", 0, 0, "1|5|10|15|30|60|120|240|480|720|1440"},
     {KS_TIME, K_TZ, "zone", 0, 0, nullptr},
+    {KS_RELAY, K_BOOL, "activeLow", 0, 0, nullptr},
 };
 static const char* const ACCENT_NAMES[] = {"blue", "pink", "violet", "orange", "mauve", "green"};
 static const uint32_t ACCENT_RGB[] = {0x2196F3, 0xD1449B, 0x6C71C4, 0xD65D0E, 0x8839EF, 0x50A14F};

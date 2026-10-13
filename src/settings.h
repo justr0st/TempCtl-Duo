@@ -118,6 +118,9 @@ struct Settings {
   // not set yet (UTC; the web page sets it from the browser once)
   char tzName[32];
 
+  // SSR supply relay (boards with PIN_SSR_RELAY): 1 = the relay is on while the pin is low
+  uint8_t relayActiveLow;
+
   // Tools: setpoint-address finder range
   uint16_t scanFrom, scanTo;
 

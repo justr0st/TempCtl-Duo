@@ -59,3 +59,10 @@ struct LocalTune {
 };
 void localCtrlTuneGet(int ch, LocalTune& t);
 void localCtrlTuneClear(int ch);  // after accept / discard: back to Idle
+
+// SSR supply relay (PIN_SSR_RELAY, S3): on while a local channel's outputs are on (or autotune runs) and
+// no local channel has a fault; off otherwise, switched by the local task every 250 ms (a fault: in the
+// same step). The level is set from the settings (until then the pin stays an input).
+bool localCtrlRelayWired();
+void localCtrlRelayLevel(bool activeLow);
+bool localCtrlRelayOn();

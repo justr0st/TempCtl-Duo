@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <esp_timer.h>
 #include <math.h>
+#include "app_state.h"
 #include "config.h"
 #include "pid.h"
 #include "runaway.h"
@@ -266,6 +267,54 @@ static void step(int ch, float dt) {
   ssrSet(ch, duty, window);
 }
 
+// ------------------------------------------------------------------ SSR supply relay
+#if defined(PIN_SSR_RELAY) && HAVE_LOCAL
+static volatile int8_t relayLow = -1;  // -1: level not known yet (pin left an input)
+static volatile bool relayOn = false;
+static void relayWrite(bool on) {
+  if (relayLow < 0) return;
+  digitalWrite(PIN_SSR_RELAY, (on != (relayLow == 1)) ? HIGH : LOW);
+}
+bool localCtrlRelayWired() { return true; }
+void localCtrlRelayLevel(bool activeLow) {
+  const int8_t want = activeLow ? 1 : 0;
+  if (relayLow == want) return;
+  relayLow = want;
+  relayWrite(relayOn);  // (first time: the level first, then the pin an output, so it never glitches on)
+  pinMode(PIN_SSR_RELAY, OUTPUT);
+  relayWrite(relayOn);
+}
+bool localCtrlRelayOn() { return relayOn; }
+
+// after each control step: on while outputs are wanted, off at once on any local fault
+static void relayUpdate() {
+  bool want = false, fault = false;
+  const char* why = nullptr;
+  {
+    LockL g;
+    for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+      const Local& l = loc[ch];
+      if (!l.enabled) continue;
+      if (l.fault) {
+        fault = true;
+        why = l.faultText;
+      }
+      want |= l.on || l.tuning;
+    }
+  }
+  const bool on = want && !fault;
+  if (on == relayOn) return;
+  relayOn = on;
+  relayWrite(on);
+  if (!on && fault) logEvent("SSR supply relay off: %s", why && *why ? why : "fault");
+}
+#else
+bool localCtrlRelayWired() { return false; }
+void localCtrlRelayLevel(bool) {}
+bool localCtrlRelayOn() { return false; }
+static void relayUpdate() {}
+#endif
+
 static void localTask(void*) {
   uint32_t last = millis();
   TickType_t wake = xTaskGetTickCount();
@@ -275,6 +324,7 @@ static void localTask(void*) {
     const float dt = (now - last) / 1000.0f;
     last = now;
     for (int ch = 0; ch < NUM_CHANNELS; ++ch) step(ch, dt);
+    relayUpdate();
   }
 }
 

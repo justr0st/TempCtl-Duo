@@ -753,6 +753,7 @@ static void handleGetConfig() {
   JsonObject l = d["limits"].to<JsonObject>();
   l["rs485"] = lim.rs485;
   l["localMax"] = lim.localMax;
+  l["relay"] = localCtrlRelayWired();
   sendJson(d);
 }
 
@@ -1068,6 +1069,7 @@ static void handleLive() {
     Guard g;
     d["tz"] = JsonString(gSettings.tzName);  // time zone ("" = not set: the page sends the browser's)
   }
+  if (localCtrlRelayWired()) d["relay"] = localCtrlRelayOn();  // SSR supply relay (S3)
   if (sdlogSlot()) {  // SD run log (S3): the System page shows the card's run files
     SdState sd;
     sdlogState(sd);

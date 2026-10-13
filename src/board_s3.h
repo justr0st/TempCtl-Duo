@@ -58,6 +58,10 @@
 #define PIN_TC_CS_TOP 38  // v1.1 board (WS2812 on GPIO38): swap 38 <-> 48
 #define PIN_SSR_BOTTOM 21
 #define PIN_SSR_TOP 47
+// Relay in the common +5 V supply of both SSRs (high side): on only while a local channel's outputs are
+// on, off at once on a fault (a shorted SSR can't be switched off by its control pin, the relay can).
+// Level selectable (relay.activeLow); until the settings are loaded the pin stays an input.
+#define PIN_SSR_RELAY 4
 
 // ---- Status LED: on-board WS2812 (v1.0: GPIO48, v1.1: GPIO38) ----
 #define STATUS_LED_WS2812 1

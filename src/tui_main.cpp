@@ -19,6 +19,7 @@ static uint32_t chartAt = 0;
 struct Tile {
   lv_obj_t *box, *name, *status, *pv, *pvUnit, *spCap, *sp, *out, *barBg, *bar;
   lv_obj_t *minus, *value, *plus, *manSw, *extend, *ack;
+  lv_obj_t* warn;      // blinking warning badge on the tile's top edge: a fault waits for Acknowledge
   float pend;          // stepper value not sent yet (NaN = none)
   uint32_t pendAt;     // last stepper press
   uint32_t downAt;     // - / + pressed down (held > 3 s: steps of 5 degC)
@@ -177,6 +178,28 @@ static void onExtend(lv_event_t* e) {
 
 static void onAck(lv_event_t* e) { sendCmd(CMD_ACK_FAULT, (int)(intptr_t)lv_event_get_user_data(e)); }
 
+// a round badge with a red warning triangle, centred on the tile's top edge (over the tile, blinks)
+static lv_obj_t* warnBadge(lv_obj_t* parent, int x, int y, int w) {
+  const int d = TUI_SMALL ? 26 : 32;
+  lv_obj_t* b = lv_obj_create(parent);
+  lv_obj_remove_style_all(b);
+  lv_obj_add_style(b, &S_.panel, 0);
+  lv_obj_set_style_pad_all(b, 0, 0);
+  lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_border_width(b, 2, 0);
+  lv_obj_set_style_border_color(b, tc(C_DANGER), 0);
+  lv_obj_set_size(b, d, d);
+  lv_obj_set_pos(b, x + w / 2 - d / 2, y - d / 2 + 2);
+  lv_obj_set_scrollable(b, false);
+  lv_obj_t* l = lv_label_create(b);
+  lv_label_set_text(l, LV_SYMBOL_WARNING);
+  lv_obj_set_style_text_font(l, TUI_SMALL ? &lv_font_montserrat_14 : &lv_font_montserrat_16, 0);
+  lv_obj_add_style(l, &S_.danger, 0);
+  lv_obj_center(l);
+  tSetHidden(b, true);
+  return b;
+}
+
 #if !TUI_SMALL
 static void tileCreate(int ch, lv_obj_t* parent, int x, int y, int w, int h) {
   Tile& t = tiles[ch];
@@ -249,6 +272,7 @@ static void tileCreate(int ch, lv_obj_t* parent, int x, int y, int w, int h) {
   t.ack = tButton(t.box, "Acknowledge", onAck, (void*)(intptr_t)ch, iw, 38);
   lv_obj_add_style(t.ack, &S_.btnDanger, 0);
   lv_obj_set_pos(t.ack, 0, by);
+  t.warn = warnBadge(parent, x, y, w);
 }
 #endif
 
@@ -311,6 +335,7 @@ static void tileCreateSmall(int ch, lv_obj_t* parent, int x, int y, int w, int h
   t.ack = tButton(t.box, "Acknowledge", onAck, (void*)(intptr_t)ch, iw, 30);
   lv_obj_add_style(t.ack, &S_.btnDanger, 0);
   lv_obj_align(t.ack, LV_ALIGN_TOP_LEFT, 0, 16);
+  t.warn = warnBadge(parent, x, y, w);
 }
 #endif
 
@@ -426,6 +451,7 @@ static void tileUpdate(int ch) {
 
   // right-hand control: acknowledge (fault) / extend hold (run) / manual switch
   const bool fault = C.fault != 0;
+  tSetHidden(t.warn, !fault || ((lv_tick_get() / 500) & 1));  // blinks (the UI updates every 250 ms)
   tSetHidden(t.ack, !fault);
   tSetHidden(t.minus, fault);
   tSetHidden(t.value, fault);

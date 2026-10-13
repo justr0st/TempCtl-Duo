@@ -29,6 +29,11 @@ LiveData gLive;
 History* gHist = nullptr;
 SemaphoreHandle_t gLock = nullptr;
 
+// SSR supply relay (local_ctrl.h): the S3 has one, on while the bottom is in manual
+bool localCtrlRelayWired() { return SCREEN_W > 400; }
+void localCtrlRelayLevel(bool) {}
+bool localCtrlRelayOn() { return gLive.ch[1].outOn; }
+
 // breadcrumbs (crumbs.h): nothing to keep on a PC
 #include "crumbs.h"
 void crumb(CrumbSlot, CrumbCode, int16_t) {}
@@ -490,6 +495,12 @@ int main(int argc, char** argv) {
   tModalClose();
   run(400);
   shot("10-fault");
+  run(500);
+  shot("10b-fault-blink");
+  run(250);
+  shot("10c-fault-blink");
+  run(250);
+  shot("10d-fault-blink");
   gLive.ch[0].fault = 0;
   gLive.ch[0].pvValid = true;
   gLive.intrValid = false;

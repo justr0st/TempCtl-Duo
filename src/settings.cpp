@@ -110,6 +110,7 @@ void settingsDefaults(Settings& s, const BoardLimits& lim) {
   s.scanTo = 3199 + DP1;
   s.selProgram = 0;
   s.tzName[0] = 0;
+  s.relayActiveLow = 0;
   // bottom = Modbus, top = Off; without RS485 both local (as many as the board wires)
   const uint8_t t0 = lim.rs485 ? CH_MODBUS : (lim.localMax >= 1 ? CH_LOCAL : CH_OFF);
   const uint8_t t1 = lim.rs485 ? CH_OFF : (lim.localMax >= 2 ? CH_LOCAL : CH_OFF);
@@ -476,6 +477,7 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
   tc.add(s.tsMinX); tc.add(s.tsMaxX); tc.add(s.tsMinY); tc.add(s.tsMaxY);
   JsonObject tz = o["time"].to<JsonObject>();
   tz["zone"] = s.tzName;
+  o["relay"].to<JsonObject>()["activeLow"] = s.relayActiveLow != 0;
   JsonObject t = o["tools"].to<JsonObject>();
   t["scanFrom"] = s.scanFrom;
   t["scanTo"] = s.scanTo;
@@ -673,6 +675,8 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
       else copyStr(s.tzName, sizeof(s.tzName), name);
     }
   }
+  JsonObjectConst rl = R.obj(o, "", "relay");
+  if (!rl.isNull()) R.flag(rl, "relay.", "activeLow", s.relayActiveLow);
   JsonObjectConst t = R.obj(o, "", "tools");
   if (!t.isNull()) {
     R.num(t, "tools.", "scanFrom", s.scanFrom);

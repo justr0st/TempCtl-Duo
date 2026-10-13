@@ -34,12 +34,36 @@ nav a.on{background:var(--sunk);border-color:var(--line);box-shadow:inset 3px 0 
 nav svg{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 nav small{color:var(--muted);font-weight:400;margin-left:auto;font-size:12px}
 .foot{margin-top:auto;display:flex;flex-direction:column;gap:6px;font-size:13.5px;color:var(--muted)}
+/* sidebar: run + channels on every page; sections apart with a subtle line */
+.sctl{margin-top:auto;display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid var(--line);font-size:13.5px}
+.sctl:not([hidden])+.foot{margin-top:0}
+.foot{padding-top:12px;border-top:1px solid var(--line)}
+.srun{display:flex;align-items:center;gap:8px}.srun .st{flex:1;min-width:0;display:flex;flex-direction:column}
+.srun b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.srun small{color:var(--muted)}
+.sbtn{display:flex;gap:6px}
+.ib{width:36px;height:36px;min-height:36px;padding:0;border-radius:8px}
+.ib svg{width:18px;height:18px;fill:currentColor;stroke:none}
+#sPlay .pa{display:none}#sPlay.run .pl{display:none}#sPlay.run .pa{display:inline}
+.sch{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:2px 8px}
+.sch i{width:9px;height:9px;border-radius:50%;background:var(--c)}
+.sch .n{font-weight:600;color:var(--c);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sch .v{grid-column:2;color:var(--muted);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sch .v.bad{color:var(--danger)}
+.sch .ib{grid-row:1/3;grid-column:3;width:32px;height:32px;min-height:32px}
+.sch .ib svg{fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round}
+.sch .ib.on{background:var(--c);border-color:var(--c);color:var(--panel)}
+#sRelay{color:var(--muted)}
+/* channel card: a fault waits for Acknowledge - blinking badge on the top edge */
+.fwarn{position:absolute;top:-15px;left:50%;transform:translateX(-50%);width:30px;height:30px;border-radius:50%;background:var(--panel);border:2px solid var(--danger);display:flex;align-items:center;justify-content:center;animation:fblink 1s steps(1) infinite;z-index:1}
+.fwarn svg{width:17px;height:17px;fill:none;stroke:var(--danger);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+@keyframes fblink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.fwarn{animation:none}}
 .foot .lk{display:flex;align-items:center;gap:8px;color:var(--text);font-weight:500}
 .dot{width:10px;height:10px;border-radius:50%;background:var(--danger);flex:none}.dot.ok{background:var(--ok)}
 .foot select{min-height:30px;padding:2px 6px}
 main{min-width:0;padding:0 16px 40px}
-.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;padding:12px 0;background:var(--bg)}
-.top .jump{margin-left:auto;display:flex;gap:6px}
+.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;padding:12px 0;background:var(--bg);min-height:60px}
+.top .jump{margin-left:auto;display:none;gap:6px}  /* only where the Status page is one column (below) */
 #menu{display:none}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
 .mt{margin-top:12px}
@@ -68,7 +92,9 @@ button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
 .zbar button{min-width:38px;padding:4px 10px}
 .zbar input[type=range]{flex:1;min-width:120px;accent-color:var(--acc)}
 .zr{color:var(--muted);font-size:13px;margin-left:4px}
-#histCsv{margin-left:auto;min-height:30px;padding:3px 12px}
+#histCsv,#runCsv{margin-left:auto;min-height:30px;padding:3px 12px}
+#bPreview{min-height:30px;padding:3px 12px}
+#sdP[hidden]+#sLogP{margin-top:0}
 #histCsv.dis{opacity:.45}
 .legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted);margin-top:8px}
 .legend span{display:inline-flex;align-items:center;gap:6px}
@@ -79,7 +105,7 @@ button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
 .legend .lh{color:var(--muted)}
 .msg{margin-top:8px;font-size:14px;color:var(--muted);min-height:1.4em}.msg.bad{color:var(--danger)}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
-.chan{border-top:4px solid var(--c)}
+.chan{border-top:4px solid var(--c);position:relative}
 .chan .hd{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
 .chan .nm{font-family:var(--cond);font-weight:600;font-size:19px;color:var(--c)}
 .chan .ty{color:var(--muted);font-size:13px;font-weight:400;margin-left:6px}
@@ -270,7 +296,7 @@ table.t input{width:90px}
 .chip i{width:9px;height:9px;border-radius:50%;background:currentColor;display:block}
 @media (max-width:520px){.form{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}.fld input[type=number]{width:96px}}
 @media (max-width:760px){.prow{grid-template-columns:30px minmax(0,1fr)}.prow .pm,.prow .pa{grid-column:2}.prow .pa{justify-content:flex-start}}
-@media (max-width:1100px){.grid2{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:1100px){.grid2{grid-template-columns:minmax(0,1fr)}.top .jump{display:flex}}
 @media (max-width:860px){
  .app{grid-template-columns:minmax(0,1fr);background:none}
  aside{position:fixed;left:0;top:0;z-index:30;width:260px;transform:translateX(-105%);transition:transform .2s;box-shadow:0 0 24px rgba(0,0,0,.35)}
@@ -317,17 +343,22 @@ table.t input{width:90px}
     <a href="#/" data-pg="status" class="on" aria-current="page"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 4-7 5 9"/><path d="M3 21h18"/></svg>Status</a>
     <a href="#/programs" data-pg="programs"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Programs</a>
     <a href="#/channels" data-pg="channels"><svg viewBox="0 0 24 24"><path d="M10 13.5V5a2 2 0 0 1 4 0v8.5a4 4 0 1 1-4 0z"/><path d="M12 9v6"/></svg>Channels</a>
-    <a href="#/system" data-pg="system"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>System</a>
+    <a href="#/log" data-pg="log"><svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>Log</a>
+    <a href="#/settings" data-pg="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</a>
     <a href="#/tools" data-pg="tools"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 17.8V21h3.2l6.3-6.3a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg>Tools</a>
   </nav>
+  <div class="sctl" id="sCtl" aria-label="Run and channels" hidden>
+    <div class="srun"><div class="st"><b id="sRunName"></b><small id="sRunSt"></small></div>
+      <span class="sbtn"><button class="ib" id="sPlay" title="Start" aria-label="Start"><svg viewBox="0 0 24 24"><path class="pl" d="M8 5v14l11-7z"/><path class="pa" d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button><button class="ib" id="sStop" title="Stop" aria-label="Stop"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg></button></span></div>
+    <div id="sChs"></div>
+    <small id="sRelay" hidden></small>
+  </div>
   <div class="foot">
     <span class="lk"><i class="dot" id="linkDot"></i><span id="linkTxt">Connecting…</span></span>
     <button class="serb" id="bSerOff" hidden title="Ends the USB connection (the device keeps running)">Disconnect USB</button>
     <button class="serb" id="bNetOff" hidden title="Closes this device's page in this tab (the device keeps running)">Disconnect</button>
     <span id="net"></span>
     <span id="clk"></span>
-    <a href="/api/log.csv">Download run log (CSV)</a>
-    <a href="/api/history.csv">Download live history (CSV)</a>
     <label class="f tswl">Dark mode <span class="tsw"><input type="checkbox" id="theme" role="switch" aria-label="Dark mode"><span class="tr" aria-hidden="true"><span class="kn"><svg class="su" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg><svg class="mo" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></span></span></span></label>
   </div>
 </aside>
@@ -356,6 +387,8 @@ table.t input{width:90px}
     <label class="f" id="lmWrap" hidden>Period <select id="liveMin" aria-label="Live chart period"></select></label>
     <span class="zr" id="chartCap"></span>
     <a class="btn" id="histCsv" href="/api/history.csv" download hidden title="Everything the device keeps in memory, one row per second">Export CSV</a>
+    <a class="btn" id="runCsv" href="/api/log.csv" download hidden title="The last run: PV, setpoint and plan of both channels">Export CSV</a>
+    <button id="bPreview" hidden title="Back to the preview of the selected program">Back to preview</button>
   </div>
   <div class="chartbox" id="chartbox"></div>
   <div class="zbar" id="zbar"><button id="zout" aria-label="Zoom out">−</button><button id="zin" aria-label="Zoom in">+</button><button id="zfit">Fit</button>
@@ -393,7 +426,7 @@ table.t input{width:90px}
 <div data-chp="1" hidden><section class="panel mt" id="cf1"></section><div class="cards mt" id="cx1"></div></div></div>
 </div>
 
-<div class="pg" id="pg-system" hidden>
+<div class="pg" id="pg-settings" hidden>
 <div class="cards">
 <section class="panel" aria-label="Device"><h2>Device</h2><dl class="kv" id="devInfo"></dl>
   <div class="fbar"><button id="bRestart">Restart device</button><button id="bScrRst" title="Sets the display and the touch controller up again (when the screen hangs or shows rubbish); the device keeps running">Restart screen</button><span class="msg" id="rsMsg"></span></div></section>
@@ -418,10 +451,13 @@ table.t input{width:90px}
 <section class="panel" id="sDisp" data-form="disp"></section>
 <section class="panel" id="sTime" data-form="time"></section>
 </div>
-<section class="panel mt" id="sdP" aria-label="Run logs on the SD card" hidden>
+</div>
+
+<div class="pg" id="pg-log" hidden>
+<section class="panel" id="sdP" aria-label="Run logs on the SD card" hidden>
   <div class="edhead"><h2>Run logs (SD card)</h2><span class="tools"><button id="sdRef">Refresh</button></span></div>
   <p class="hint" id="sdSt"></p><div class="plist" id="sdList"></div><div class="msg" id="sdMsg"></div></section>
-<section class="panel mt" id="sLogP" aria-label="Log"><h2>Log</h2>
+<section class="panel mt" id="sLogP" aria-label="System log"><h2>System log</h2>
   <div class="slbar" id="slBar"><input type="search" id="slFind" placeholder="Search" aria-label="Search the log">
     <button id="slDl" title="All lines as a text file">Download</button><span class="msg" id="slMsg"></span></div>
   <div class="slog" id="slog" role="log" aria-live="off"><div class="none">Loading…</div></div>
@@ -919,6 +955,7 @@ function renderChart(){
   if(!zv.fit){ zs.max=Math.max(0,xfull-zv.span); zs.step=1; if(document.activeElement!==zs) zs.value=zv.v0; }
   $('zrange').textContent=zv.fit?'Whole program':`${fmt(V0)} – ${fmt(V1)}`;
   $('lmWrap').hidden=!lv; $('histCsv').hidden=!lv;
+  const lastRun=M.kind==='last'; $('runCsv').hidden=!lastRun; $('bPreview').hidden=!lastRun;  // after a run: its CSV, back to the preview
   $('chartCap').textContent=lv?(M.have<M.cap?`${fmt(M.have)} recorded`:`memory holds ${fmt(M.cap)}`):M.kind==='preview'?`Preview of “${M.prog?M.prog.name:''}”${hasWaits(M.prog)?' (waits not counted)':''}`:M.kind==='last'?'Last run':'';
 }
 // Live view: PV / SP of each channel can be switched off (chart, scale and CSV export; kept by the browser)
@@ -968,6 +1005,7 @@ let chansKey='';
 function buildChans(){
   $('chans').innerHTML=CH.map(i=>`
   <section class="panel chan" id="card${i}" style="--c:${PV[i]}" aria-label="${esc(chName(i))}">
+    <span class="fwarn" id="fwn${i}" hidden title="Fault: acknowledge it below"><svg viewBox="0 0 24 24"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></span>
     <div class="hd"><span class="nm"><span id="nm${i}"></span><span class="ty" id="ty${i}"></span></span><span class="state" id="st${i}"></span></div>
     <div class="read">
       <div><small>PV</small><b id="pv${i}">–</b></div>
@@ -1045,7 +1083,7 @@ function updateChans(){
     $('st'+i).textContent=st; $('st'+i).className='state '+(c.fault||(!c.ok&&c.type!=='off')?'fault':active&&c.inProgram?(c.state==='halt'||c.state==='pause'||c.state==='wait'?'pause':'run'):c.manual.on?'man':'');
     $('card'+i).classList.toggle('on',!!c.outOn);
     $('why'+i).textContent=whyText(c,i,r,active);
-    $('flt'+i).hidden=!c.fault; $('fltT'+i).textContent=c.fault?'Fault: '+c.fault:'';
+    $('flt'+i).hidden=!c.fault; $('fltT'+i).textContent=c.fault?'Fault: '+c.fault:''; $('fwn'+i).hidden=!c.fault;
     $('runRows'+i).hidden=!(active&&c.inProgram);
     const canT=active&&c.inProgram&&c.kept>=0&&c.target!=null;
     document.querySelectorAll(`[data-dt="${i}"],[data-set="${i}"]`).forEach(b=>b.disabled=!canT);
@@ -1056,6 +1094,43 @@ function updateChans(){
     const ms=$('manSp'+i); if(document.activeElement!==ms) ms.value=c.manual.sp!=null?c.manual.sp:''; ms.min=c.spMin; ms.max=c.spMax;
   }
 }
+
+/* ---------- sidebar: run and channels on every page ---------- */
+const SIDE_ST={ramp:'Ramp',hold:'Hold',wait:'Waiting',jump:'Jump',keep:'Keeps',halt:'Paused',pause:'Program pause',done:'Done',off:'Off'};
+function updSide(){
+  if(!live) return; $('sCtl').hidden=false;
+  const r=live.run, active=r.state==='running'||r.state==='paused';
+  $('sRunName').textContent=active?(r.name||''):(progs&&progs.programs[live.sel]&&progs.programs[live.sel].used?progs.programs[live.sel].name:'No program');
+  $('sRunSt').textContent=$('badge').textContent+(active||r.state==='finished'||r.state==='stopped'?' · '+$('clock').textContent:'');
+  const pl=$('sPlay'), running=r.state==='running'&&!r.progPause;
+  pl.classList.toggle('run',running);
+  const lab=running?'Pause':r.state==='paused'?'Resume':active&&r.progPause?'Continue':'Start';
+  pl.title=lab; pl.setAttribute('aria-label',lab);
+  pl.disabled=running?$('bPause').disabled:r.state==='paused'?$('bStart').disabled:active&&r.progPause?$('bPause').disabled:$('bStart').disabled;
+  $('sStop').disabled=!active;
+  const key=live.ch.map(c=>c.name).join('|');
+  if($('sChs').dataset.k!==key){ $('sChs').dataset.k=key;
+    $('sChs').innerHTML=CH.map(i=>`<div class="sch" style="--c:${PV[i]}"><i></i><span class="n">${esc(chName(i))}</span>
+      <button class="ib" data-sman="${i}"><svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.3 7.3a8 8 0 1 0 11.4 0"/></svg></button>
+      <span class="v" id="sv${i}"></span></div>`).join(''); }
+  for(const i of CH){ const c=live.ch[i], inRun=active&&c.inProgram;
+    const st=c.fault?'Fault':!c.ok&&c.type!=='off'?'No link':c.type==='off'?'Off':inRun?(SIDE_ST[c.state]||c.state):c.autotune?'Autotune':c.manual.on?'Manual':'Idle';
+    const v=$('sv'+i); v.textContent=(c.pv!=null?f1(c.pv)+' °C':'–')+' · '+st; v.classList.toggle('bad',!!c.fault);
+    const b=document.querySelector(`[data-sman="${i}"]`); if(!b) continue;
+    b.classList.toggle('on',!!c.manual.on); b.disabled=inRun||c.type==='off'||!!c.fault||!!c.autotune;
+    const t=inRun?'In the program':c.manual.on?'Manual: switch off':'Manual: switch on'; b.title=t; b.setAttribute('aria-label',`${chName(i)}: ${t}`); }
+  const rl=$('sRelay'); rl.hidden=live.relay==null; if(live.relay!=null) rl.textContent='SSR supply relay: '+(live.relay?'on':'off');
+}
+$('sPlay').onclick=()=>{ if(!live) return; const r=live.run;
+  if(r.state==='running'&&!r.progPause) $('bPause').click();
+  else if(r.progPause) $('bPause').click();  // (continue)
+  else $('bStart').click(); };  // start / resume (asks about unsaved changes, an interrupted run)
+$('sStop').onclick=()=>$('bStop').click();
+$('sChs').addEventListener('click',async e=>{ const b=e.target.closest('[data-sman]'); if(!b||!live) return; const i=+b.dataset.sman, c=live.ch[i];
+  b.disabled=true;
+  if(c.manual.on) await api('/api/manual',{ch:i,on:false});
+  else await api('/api/manual',{ch:i,sp:c.manual.sp!=null?c.manual.sp:+$('manSp'+i).value,on:true});
+  poll(); });
 
 /* ---------- program editor (tables + chart handles; spec 9.3.3 / 9.3.4) ---------- */
 const running=()=>!!live&&(live.run.state==='running'||live.run.state==='paused');
@@ -1353,6 +1428,7 @@ $('bStart').onclick=async()=>{ if(!live) return; if(live.run.state==='paused'){ 
 $('bPause').onclick=()=>{ if(live&&live.run.progPause) cmd('continue'); else cmd('pause'); };
 $('bStop').onclick=async()=>{ if(await ask('Stop the program? Each channel applies its end action.','Stop')) cmd('stop'); };
 $('bNext').onclick=()=>cmd('next');
+$('bPreview').onclick=()=>{ showLast=false; previewDraft(); chartAt=0; };
 $('hCont').onclick=()=>cmd('continue');
 $('bRecover').onclick=async()=>{ const r=await api('/api/run',{cmd:'recover'}); if(r&&r.err) note(r.err,true); showLast=true; chartAt=0; poll(); };
 $('bDismiss').onclick=async()=>{ if(await ask('Dismiss the interrupted run? Its channels stay off; it cannot be resumed afterwards.','Dismiss')){ await api('/api/run',{cmd:'dismiss'}); poll(); } };
@@ -1375,11 +1451,12 @@ async function updateLog(){
     return `<li class="k${l.kind||1}"><span title="${w.toLocaleString()}">${l.rt!=null?fmt(l.rt):w.toTimeString().slice(0,5)}</span>${esc(l.msg)}</li>`; }).join('')||'<li><span></span>No events yet.</li>';
 }
 
-/* ---------- pages (hash routes: #/programs, #/channels, #/system, #/tools; anything else = Status) ---------- */
-const PAGES={status:'Status',programs:'Programs',channels:'Channels',system:'System',tools:'Tools'};
+/* ---------- pages (hash routes: #/programs, #/channels, #/log, #/settings, #/tools; anything else = Status) ---------- */
+const PAGES={status:'Status',programs:'Programs',channels:'Channels',log:'Log',settings:'Settings',tools:'Tools'};
+const PAGE_ALIAS={system:'settings'};  // (old links)
 let page='';
 function route(){
-  const h=location.hash, m=h.startsWith('#/')?h.slice(2):'', pg=PAGES[m]?m:'status', changed=pg!==page;
+  const h=location.hash, m0=h.startsWith('#/')?h.slice(2):'', m=PAGE_ALIAS[m0]||m0, pg=PAGES[m]?m:'status', changed=pg!==page;
   page=pg;
   for(const k in PAGES) $('pg-'+k).hidden=k!==pg;
   document.querySelectorAll('nav a[data-pg]').forEach(a=>{ const on=a.dataset.pg===pg; a.classList.toggle('on',on); if(on) a.setAttribute('aria-current','page'); else a.removeAttribute('aria-current'); });
@@ -1400,10 +1477,11 @@ function masonry(){ document.querySelectorAll('.cards').forEach(c=>{
 }); }
 async function pageUpdate(force){
   if(!live) return;
-  if((page==='channels'||page==='system'||page==='tools')&&(!CFG||cfgGen!==live.cfgGen)) await loadCfg();
+  if((page==='channels'||page==='settings'||page==='tools')&&(!CFG||cfgGen!==live.cfgGen)) await loadCfg();
   if(page==='programs') renderProgs(force);
   else if(page==='channels') updChanPage();
-  else if(page==='system'){ updSystem(); sdUpdate(); slUpdate(); }
+  else if(page==='settings') updSystem();
+  else if(page==='log'){ sdUpdate(); slUpdate(); }
   else if(page==='tools') updTools();
   masonry();
 }
@@ -1444,7 +1522,8 @@ function mkForm(id,box,groups,o={}){
   FORMS[id]=F; box.dataset.form=id;
   box.innerHTML=(o.title?`<h2>${esc(o.title)}</h2>`:'')+(o.top||'')+groups.map((g,gi)=>{
     const body=(g.note?`<p class="hint">${esc(g.note)}</p>`:'')+`<div class="form">${g.fields.map(fldHtml).join('')}</div>`+(g.extra||'');
-    return g.det?`<details class="grp" data-g="${gi}"><summary>${esc(g.h)}</summary>${body}</details>`:`<div data-g="${gi}">${g.h?`<h3>${esc(g.h)}</h3>`:''}${body}</div>`;
+    const hh=esc(g.h||'')+(g.beta?' <span class="beta">beta</span>':'');
+    return g.det?`<details class="grp" data-g="${gi}"><summary>${hh}</summary>${body}</details>`:`<div data-g="${gi}">${g.h?`<h3>${hh}</h3>`:''}${body}</div>`;
   }).join('')+(o.auto?'<div class="msg" data-fmsg></div>':`<div class="fbar"><button class="pri" data-fsave="${id}">${esc(o.save||'Save')}</button><button data-frev="${id}">Revert</button><span class="msg" data-fmsg></span></div>`);
   fillForm(F); return F;
 }
@@ -1576,7 +1655,9 @@ function commonGroups(){ const bn=CFG.channels[0].name;
     {k:'bus.pollMs',l:'Polling interval',t:'num',min:250,max:10000,step:50,u:'ms',h:'How often PV, SP and output are read. With two Modbus controllers each one is polled every 2 × this interval.'},
     {k:'bus.commLossSec',l:'Pause the run after no answer for',t:'num',min:0,max:3600,u:'s',h:'0 = never pause'},
     {k:'run.bottomBand',l:`“${bn} reached” band ±`,t:'num',min:0.5,max:50,step:0.5,u:'°C',h:`Used by “Wait for ${bn}” in Sequence phases.`}]},
-   {h:'RS485 bus (beta)',show:()=>CFG.limits.rs485,note:'Shared by both Modbus channels. Modbus is a beta feature: not tested with a real controller yet.',fields:[
+   {h:'SSR supply relay',show:()=>!!CFG.limits.relay,note:'GPIO 4 switches a relay in the common +5 V supply of both SSRs: on while a local channel\'s outputs are on, off when they are off and at once on a fault (a shorted SSR cannot be switched off by its own input).',fields:[
+    {k:'relay.activeLow',l:'The relay is on when GPIO 4 is',t:'sel',bool:true,o:[['false','High (MOSFET / SSR modules)'],['true','Low (opto relay boards)']]}]},
+   {h:'RS485 bus',beta:true,show:()=>CFG.limits.rs485,note:'Shared by both Modbus channels. Modbus is a beta feature: not tested with a real controller yet.',fields:[
     {k:'bus.baud',l:'Baud rate',t:'sel',num:true,o:[2400,4800,9600,19200,38400].map(b=>[b,b])},
     {k:'bus.parity',l:'Parity',t:'sel',num:true,o:[[0,'None'],[1,'Even'],[2,'Odd']]},
     {k:'bus.stopBits',l:'Stop bits',t:'sel',num:true,o:[[1,'1'],[2,'2']]},
@@ -1931,7 +2012,7 @@ async function poll(){
     applyPalette();
     if(!progs||progsGen!==live.progGen) await loadPrograms(); else fillProgSelect();
     await loadSaved(live.sel); if(running()) await ensureRunProg(true);
-    updateRun(); updateChans(); updateEditor();
+    updateRun(); updateChans(); updateEditor(); updSide();
     const active=live.run.state==='running'||live.run.state==='paused', now=Date.now();
     if(page==='status'&&(!M||now-chartAt>(active||view==='live'?2000:5000))){ chartAt=now; await refreshChart(); }
     if(page==='status') chartHead();

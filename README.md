@@ -172,9 +172,10 @@ Wiring picture: `claude/wiring/s3-wiring.png` (display on J1, RS485 / thermocoup
 | LCD SCK / SDI (MOSI) / SDO (MISO) | 12 / 11 / 13 | | RS485 TX → DI | 1 |
 | LCD_CS / LCD_RS (D/C) / LCD_RST | 10 / 9 / 14 | | RS485 RX ← RO | 2 |
 | LED (backlight, PWM) | 8 | | RS485 DE + /RE | 42 |
-| SD_CS (held high, SD not used) | 18 | | Thermocouple SCK / SO (later) | 41 / 40 |
+| SD_CS (SD card: run logs) | 18 | | Thermocouple SCK / SO (later) | 41 / 40 |
 | CTP_SDA / CTP_SCL | 16 / 15 | | TC CS bottom / top (later) | 39 / 38 |
 | CTP_RST / CTP_INT | 17 / 7 | | SSR bottom / top (later) | 21 / 47 |
+| | | | SSR supply relay (+5 V common of both SSRs) | 4 |
 
 Flash and watch the log through the USB port labelled **"UART"**. The native **"USB"** port is the serial
 console (section 4b; later also the Web Serial page): open it with any terminal at 115200 baud, opening it
@@ -385,9 +386,16 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
   pauses, the forecast of the rest of the run dashed; zoom − / + / Fit, Ctrl + wheel, drag, pinch;
   "Live" shows the live history over a chosen period, see below), channel cards (PV, SP, output, what the channel does, target
   −5 / −1 / +1 / +5 / Set and Extend hold during a run, manual switch + setpoint otherwise, fault +
-  Acknowledge; outputs on: 4 px border and 20 % tint in the channel colour, like the touch tiles), the "Action required" overlay, "Save the run's changes?" after a run with run edits, and
-  the event log. Channel colours come from the device's accent colour (spec 6); dark mode switch in the
+  Acknowledge; outputs on: 4 px border and 20 % tint in the channel colour, like the touch tiles; a fault
+  waiting for Acknowledge: a blinking red warning badge on the card's top edge, also on the touch tiles),
+  the "Action required" overlay, "Save the run's changes?" after a run with run edits, and the event
+  log. After a run the chart shows it with **Export CSV** (the run's PV / setpoint / plan) and **Back to
+  preview**. The jump buttons in the title bar (Run, Channels, Program, Log) appear only when the page is
+  one column wide. Channel colours come from the device's accent colour (spec 6); dark mode switch in the
   sidebar (follows the system until switched; remembered by the browser; colours fade over).
+- Sidebar, on every page: the pages, then the run (program, state and time, Start / Pause / Continue /
+  Resume and Stop) and both channels (PV and what they do, manual on / off), the SSR supply relay
+  (S3), then the connection, address, clock and dark mode — sections apart with a thin line.
 - Program editor (under the channel cards): the selected program as tables (Sequence: one row per
   phase, cards on narrow screens; Timeline: two tables side by side) and on the chart (drag squares up /
   down = target, diamonds = ramp end, circles = hold end; whole seconds and °C). Outside a run edits go
@@ -415,30 +423,36 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
   setpoint on, or kept / set by a run's end action (Modbus; local channels: while their output is on).
 - Refresh: the page asks for new values every polling interval (Channels page; 250 ms … 1 s) and draws
   the newest temperature at the end of the chart; the chart history comes every 2 s.
-- Pages (sidebar; addresses `#/programs`, `#/channels`, `#/system`, `#/tools`, so a page can be
+- Pages (sidebar; addresses `#/programs`, `#/channels`, `#/log`, `#/settings` (old `#/system` too), `#/tools`, so a page can be
   bookmarked; all on the one page file, the drafts stay while switching pages):
   - **Programs**: the 20 slots with type, channels, phases / steps and time; Open (in the Status page
     editor), Duplicate (into the first empty slot), Export (the program's JSON file), Delete; empty
     slots: New sequence / New timeline / Import (a program JSON file).
-  - **Channels**: polling interval, link-loss pause, "bottom reached" band, RS485 bus; per channel (tabs):
+  - **Channels**: polling interval, link-loss pause, "bottom reached" band, SSR supply relay (S3: GPIO 4
+    switches a relay in the common +5 V supply of both SSRs — on while a local channel's outputs are on
+    or autotune runs, off when none is and at once on any local fault, event "SSR supply relay off: …";
+    level selectable: on when the pin is high / low; until the settings are read the pin stays an input,
+    so the relay module's own pull-up / pull-down keeps it off), RS485 bus (beta); per channel (tabs):
     name, type, end action, setpoint limits; Modbus: address, controller type (+ load register defaults),
     setpoint ramps, front lock, register map, PMA parameters and actions; local: converter, calibration
     (with a two-point helper), PID, SSR window, max. output / temperature, PID autotune; runaway limits
     of the selected type. Changed fields are marked; Save sends only the changed values
     (`POST /api/config`) and lists values the device had to adjust to the allowed range.
-  - **System** (tiles fill the free space): device info, restart, restart of the screen only (display
+  - **Log**: the SD run logs (S3, below) and the system log (below).
+  - **Settings** (tiles fill the free space): device info, restart, restart of the screen only (display
     and touch controller set up again, the device keeps running), Wi-Fi (with network scan, show / hide
     password, optional fixed IP address), touch display (light / dark switch, brightness slider;
     applied at once, no Save button — the screen follows the slider while it is dragged) (accent colour:
     a preset or "Custom" with the browser's colour picker; theme, brightness, rotation, screen check),
-    **Log**: everything the device logs, colour-coded — errors (red), warnings (amber), program runs
+    the clock (time zone, below).
+    **System log** (Log page): everything the device logs, colour-coded — errors (red), warnings (amber), program runs
     (accent), events, technical lines of the serial log ([wifi], [lcd], [mem] …, grey); filters per kind,
     search, download as text. The events of earlier starts come from flash (each start is a section);
     times are the real time when the device knows it (NTP on Wi-Fi, or the page sets the clock), else
     the time since the start. The device keeps about 7000 lines on the S3 (256 kB PSRAM), about 50 on
     the CYD (4 kB); the last 300 events (not the technical lines) survive restarts (`/duo/events.txt`,
     saved at most every 30 s and before a requested restart).
-    **Run logs (SD card)**, S3 only: one CSV file per program run on the display's micro-SD card
+    **Run logs (SD card)** (Log page), S3 only: one CSV file per program run on the display's micro-SD card
     (FAT32, folder `runs`, name = start time (local) + program, or start / run number when the clock is
     not set): a row every second — `time` (local, `2026-10-13 01:05:35`), `run_s, where` (phase / steps),
     per channel `pv, sp` (active setpoint), `prog` (program setpoint), `out` (%), `state` — and a row for
@@ -447,7 +461,7 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
     Delete on the page, or read the card in a PC. Without a card the run is simply not logged. All card
     work runs in its own task; the card shares the SPI bus with the display: it is mounted only while it
     is written or read, and the screen check skips that second.
-    **Clock**: the time zone for local times (SD run logs): set from the browser the first time the
+    **Clock** (Settings page): the time zone for local times (SD run logs): set from the browser the first time the
     page is opened (its zone if the device's list has it, else its current offset as `UTC+hh:mm`),
     changeable here, on the touch screen (System › Time zone: region, then place) and over serial
     (`set time.zone=Europe/Berlin`, `help time` lists the zones). Summer time follows the zone's rules.

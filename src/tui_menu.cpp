@@ -4,6 +4,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include "local_ctrl.h"
 #include "net.h"
 #include "settings_store.h"
 #include <esp_heap_caps.h>
@@ -662,7 +663,7 @@ void networkUpdate() {
 }
 
 // ------------------------------------------------------------ system
-static lv_obj_t *sInfo, *sPoll, *sBand, *sTz;
+static lv_obj_t *sInfo, *sPoll, *sBand, *sTz, *sRelay;
 
 // ------------------------------------------------------------ time zone (two steps: region, then the place)
 static const char* const TZ_OFFSETS[] = {"UTC-12:00", "UTC-11:00", "UTC-10:00", "UTC-09:30", "UTC-09:00", "UTC-08:00",
@@ -807,6 +808,14 @@ static void onRestart(lv_event_t*) {
           "", onRestartAnswer, 0, true);
 }
 
+static void onRelayLevel(lv_event_t*) {
+  {
+    Guard g;
+    gSettings.relayActiveLow = lv_obj_has_state(sRelay, LV_STATE_CHECKED) ? 1 : 0;
+  }
+  saveSettingsAndNotify();  // (the control task applies the level)
+}
+
 lv_obj_t* systemCreate() {
   TPage p = tPageCreate("System", backToMenu);
   lv_obj_t* r = settingRow(p.body, "Polling interval", "How often PV, SP and output are read. Two Modbus channels: each every 2 \xC3\x97 this");
@@ -815,6 +824,11 @@ lv_obj_t* systemCreate() {
   sBand = tButton(r, "", onBand, nullptr, CW2, BH);
   r = settingRow(p.body, "Time zone", "Local time in the SD run logs");
   sTz = tButton(r, "", onTz, nullptr, CW2, BH);
+  sRelay = nullptr;
+  if (localCtrlRelayWired()) {
+    r = settingRow(p.body, "SSR relay active low", "On: the supply relay is on while GPIO 4 is low");
+    sRelay = tSwitch(r, onRelayLevel);
+  }
   lv_obj_t* info = tPanel(p.body);
   lv_obj_set_size(info, LV_PCT(100), LV_SIZE_CONTENT);
   sInfo = tLabel(info, &tfont_14, "");
@@ -839,6 +853,7 @@ void systemShow() {
   for (char* c = tzb; *c; ++c)
     if (*c == '_') *c = ' ';
   tButtonText(sTz, tzb);
+  if (sRelay) tSetChecked(sRelay, s.relayActiveLow != 0);
   systemUpdate();
 }
 
@@ -859,8 +874,9 @@ void systemUpdate() {
   snprintf(ps, sizeof(ps), " \xC2\xB7 PSRAM %u kB free", (unsigned)(ESP.getFreePsram() / 1024));
   strlcat(ram, ps, sizeof(ram));
 #endif
-  snprintf(b, sizeof(b), PRODUCT_NAME " " FW_VERSION " \xC2\xB7 " BOARD_NAME "%s%s\n%s\nUp %s \xC2\xB7 %s\nLive history in memory: %s",
-           BOARD_VARIANT[0] ? " " : "", BOARD_VARIANT, netInfo().c_str(), up, ram, hist);
+  snprintf(b, sizeof(b), PRODUCT_NAME " " FW_VERSION " \xC2\xB7 " BOARD_NAME "%s%s\n%s\nUp %s \xC2\xB7 %s\nLive history in memory: %s%s",
+           BOARD_VARIANT[0] ? " " : "", BOARD_VARIANT, netInfo().c_str(), up, ram, hist,
+           !localCtrlRelayWired() ? "" : localCtrlRelayOn() ? "\nSSR supply relay: on" : "\nSSR supply relay: off");
   tSetText(sInfo, b);
 }
 
