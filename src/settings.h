@@ -133,6 +133,7 @@ struct Settings {
   uint16_t manualIdleMin;
   uint8_t estop;          // 1: E-stop input watched (PIN_ESTOP, NC contact to GND)
   uint8_t sound;          // 1: alarm beeps (PIN_BUZZER)
+  uint8_t relay;          // 1: SSR supply relay switched by PIN_SSR_RELAY (S3); 0: the pin stays low (no relay)
   uint8_t chipWarn;       // 1: warning above chipMaxC (S3 chip temperature)
   float chipMaxC;
 

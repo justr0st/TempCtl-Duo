@@ -33,6 +33,16 @@ ASSETS = [
 ]
 
 
+def only(url):
+    """the boards an asset is compiled into (the S3 serves the page with the web fonts, the CYD without them
+    and no fonts: about 130 kB less in the CYD's firmware slot)"""
+    if url == "/" or url.endswith(".woff2"):
+        return "#ifdef BOARD_HAS_PSRAM"
+    if url == "/nofonts":
+        return "#ifndef BOARD_HAS_PSRAM"
+    return None
+
+
 def c_bytes(data):
     lines = []
     for i in range(0, len(data), 20):
@@ -70,13 +80,22 @@ def build():
         if gz:
             data = gzip.compress(data, compresslevel=9, mtime=0)
         total += len(data)
+        cond = only(url)
+        if cond:
+            parts.append(cond)
         parts.append("// %s (%d bytes%s)" % (rel, len(data), ", gzip" if gz else ""))
         parts.append("static const uint8_t WA_%d[] PROGMEM = {" % n)
         parts.append(c_bytes(data))
         parts.append("};")
-        table.append('  {"%s", "%s", WA_%d, %d, %s, %s},' % (url, ctype, n, len(data), str(gz).lower(), str(imm).lower()))
+        if cond:
+            parts.append("#endif")
+            table.append(cond)
+        served = "/" if url == "/nofonts" else url  # (the CYD serves the page without fonts at /)
+        table.append('  {"%s", "%s", WA_%d, %d, %s, %s},' % (served, ctype, n, len(data), str(gz).lower(), str(imm).lower()))
+        if cond:
+            table.append("#endif")
     parts.append("")
-    parts.append("// [0] is the page itself; %d bytes in all" % total)
+    parts.append("// %d bytes in all (both boards; each board compiles in only its own page / fonts)" % total)
     parts.append("static const WebAsset WEB_ASSETS[] = {")
     parts.extend(table)
     parts.append("};")

@@ -66,6 +66,9 @@ void localCtrlTuneClear(int ch);  // after accept / discard: back to Idle
 // SSR supply relay (PIN_SSR_RELAY, S3): on while a local channel's outputs are on (or autotune runs) and
 // no local channel has a fault; off otherwise, switched by the local task every 250 ms (a fault: in the
 // same step; E-stop too). Active high: the pin drives the input of a DC solid-state relay directly; it is
-// low (off) from localCtrlEarlyInit().
-bool localCtrlRelayWired();
+// low (off) from localCtrlEarlyInit(). Setting safety.relay off (no relay fitted, the SSR inputs on +5 V
+// directly): the pin stays low.
+bool localCtrlRelayWired();             // the board has the relay pin
+bool localCtrlRelayUsed();              // wired and switched on in the settings
 bool localCtrlRelayOn();
+void localCtrlRelayEnable(bool on);     // from the settings (safety.relay)

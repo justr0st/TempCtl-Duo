@@ -186,6 +186,8 @@ output at least 0.5 A DC). Input + = GPIO4, input − = GND (driven directly by 
 output: 5 V (J1-21) → OUT+, OUT− → the "+" inputs of both SSRs. GPIO4 is driven low (off) from the first
 line of `setup()`. The relay covers a stuck SSR input or driver transistor; an SSR whose output is shorted
 keeps heating — that needs a contactor in the heater supply (and the independent limiter of section 7).
+Setting `safety.relay` (web Settings › Safety, touch System, serial; default on): off only when no relay is
+fitted and the SSR "+" inputs get 5 V directly — GPIO4 then stays low.
 
 Flash and watch the log through the USB port labelled **"UART"**. The native **"USB"** port is the serial
 console (section 4b; later also the Web Serial page): open it with any terminal at 115200 baud, opening it
@@ -201,7 +203,7 @@ touch values and the mapped point).
 ### ESP32-2432S028R "CYD" (envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`)
 
 The CYD has too few free pins for RS485 plus two local channels, so it has three wirings, one env each
-(pictures in `claude/wiring/`):
+(pictures in `claude/wiring/`, KiCad schematics in `hardware/cyd-schematic/`, sheets A / B / C):
 
 | Env | Channels | Wiring |
 |---|---|---|
@@ -247,7 +249,8 @@ set `PIN_RS485_DE` to `-1` in `src/board_cyd.h` / `src/board_s3.h`.
 - Free CYD pins: only IO22 (P3-2 and CN1-3), IO27 (CN1-2, 10 k pull-up) and IO35 (P3-3, input only) are
   on connectors. The SD slot pins (IO5, IO18, IO19, IO23) are reached with a micro-SD breakout adapter
   (no SD card in the slot). IO6–IO11 are the module's flash and not usable.
-- CYD alarm sound: the speaker connector P4 (IO26, on-board amplifier); IO35 can't drive a buzzer (input
+- CYD alarm sound: a small 8 Ω speaker (0.5–2 W) or a passive piezo on the speaker connector P4 (IO26
+  drives the on-board SC8002B amplifier; bridged output, SPK− is not ground); IO35 can't drive a buzzer (input
   only). No E-stop input and no chip temperature on the CYD (no free pin / sensor).
 
 ## 3. Can the LCTC M226-TE (from the screenshot) work the same way?
@@ -284,6 +287,29 @@ PMA-specific extras (status word, self-tuning, outputs off, parameter page) won'
 TempCtl Duo keeps its settings in `/duo/settings.json` and doesn't read TempCtl's: Wi-Fi, controller and
 touch settings start from defaults. Defaults: bottom = Modbus (address 1), top = Off (`cyd-2xlocal`: both
 local); change them on the web page's *Channels* page. After switching from the TempCtl build delete the `.pio` folder once.
+
+### Firmware update without USB (OTA)
+
+- **Web page** (any board, over Wi-Fi): *Settings › Device › Firmware update*: choose the `firmware.bin` of
+  this board (PlatformIO: `.pio/build/<env>/firmware.bin`, e.g. `.pio/build/s3/firmware.bin`) and *Install*.
+  The page checks the file first (ESP image of the right chip, TempCtl Duo id string with the same env:
+  an image for another board / env is refused, also by the device), uploads it (about a minute), the
+  device writes it into its other firmware slot and restarts.
+- **SD card** (S3): copy `firmware.bin` into the card's root folder, then *Settings › Device › Check the SD
+  card › Install from the SD card* (or touch *System › Firmware update*, serial `fw sd` / `fw sd install
+  yes`). After the install the file is renamed `firmware.done`.
+- Not while a program runs or an output is on. The touch screen shows the progress; don't switch off.
+- **Rollback**: the new firmware runs "on probation" and confirms itself after 30 s of normal running (loop
+  and control task alive). A crash or reset before that makes the bootloader start the previous firmware
+  again, which logs "Firmware update to … failed: it did not start correctly". Events: "Firmware update
+  started", "Firmware … written", "Firmware updated from … to …", "Firmware … confirmed".
+- **CYD: once over USB first.** OTA needs two firmware slots: the CYD envs now use `partitions_cyd_ota.csv`
+  (2 × 1.875 MB firmware + 192 kB file system, instead of `huge_app.csv`). The first USB upload with this
+  table **erases the file system**: back up settings and programs before (web page, *Tools › Backup*),
+  restore them afterwards. Wi-Fi settings are in that backup too, so the device starts as an access point
+  until they are restored. The CYD firmware is about 1.77 MB (90 % of a slot); the page and icons are
+  embedded without the web fonts on the CYD (the S3 only gets those), which keeps it in the slot.
+- Serial: `fw` (version, board, slot), `fw sd`, `fw sd install yes`.
 
 Touch calibration defaults (200…3700 / 240…3800) suit most CYDs. If touches land off, adjust them with
 `POST /api/config {"display":{"touchCal":[minX,maxX,minY,maxY]}}` and restart.
@@ -440,10 +466,7 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
   - **Programs**: the 20 slots with type, channels, phases / steps and time; Open (in the Dashboard
     editor), Duplicate (into the first empty slot), Export (the program's JSON file), Delete; empty
     slots: New sequence / New timeline / Import (a program JSON file).
-  - **Channels**: "All channels" tile: polling interval, link-loss pause, "bottom reached" band, SSR supply relay (S3: GPIO 4
-    drives an active-high DC solid-state relay in the common +5 V supply of both SSR inputs — on while a
-    local channel's outputs are on or autotune runs, off when none is and at once on any local fault or
-    E-stop, event "SSR supply relay off: …"; a note only, nothing to set). Below it the channel tile with one tab
+  - **Channels**: "All channels" tile: polling interval, link-loss pause, "bottom reached" band. Below it the channel tile with one tab
     per channel (name, colour dot, type), its subsections apart with a thin line:
     name, type, end action, setpoint limits; Modbus: address, controller type (+ load register defaults),
     setpoint ramps, front lock, RS485 bus (beta; one bus, shown in the tile of each Modbus channel),
@@ -557,6 +580,9 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 | POST | `/api/manual` | `{"sp":150}` and/or `{"on":true}`, optional `"ch":1` (top; default 0 = bottom) |
 | POST | `/api/autotune` | local channels: `{"ch":1,"cmd":"start","sp":200}`, `"stop"`, `"accept"` (proposed kp/ki/kd → settings), `"discard"`; progress and result in `/api/status` → `channels[].autotune` |
 | POST | `/api/ack` | `{"ch":0}` acknowledge a channel fault (runaway, sensor, over temperature, heating while off, frozen reading, converter too hot); refused while the cause is still there. The outputs stay off until switched on again |
+| GET | `/api/ota` | firmware update: `board`, `version`, `slot`, `slotKb` (0 = no second slot, `why`), `canStart` / `why`, `probation`, `sd` (SD slot), `status` {`phase` idle / running / done / failed, `source`, `done`, `total`, `version`, `msg`}; `/api/live` → `ota` while one runs or the new firmware is on probation |
+| POST | `/api/ota?size=<bytes>` | multipart upload of a `firmware.bin` (field `fw`, Wi-Fi only): written while it arrives, `{"ok":true,"version"}` or `{"err"}`; the device restarts 2 s later |
+| GET / POST | `/api/ota/sd` | S3: the `firmware.bin` in the SD card's root (`found`, `sizeKb`, `board`, `version`, `problem`) / install it (progress in `/api/live` → `ota`) |
 | POST | `/api/beep` | `{}` one short test beep (Settings › Safety). `/api/live` → `safety`: `estop`, `contact` (open / closed, S3), `chipC`, `chipHot`, `muted`; `/api/config` → `limits.estop / sound / chipTemp` |
 | POST | `/api/cmd` | `{"cmd":"start"|"pause"|"resume"|"stop"|"next"|"continue", "prog":index}` (`skip` = `next`) |
 | POST | `/api/wifi` | `{"ssid","pass","apPass"}`, reconnects without restart |
@@ -576,6 +602,7 @@ The web UI has no login. Keep it on a trusted network.
 
 ```
 platformio.ini            environments s3, cyd-1xlocal-1x485, cyd-2xlocal, cyd-2xlocal-2x485; libraries
+partitions_cyd_ota.csv    CYD flash layout: two firmware slots (OTA) + 192 kB file system
 include/lv_conf.h         LVGL 9.6 configuration
 src/version.h             product name, version, host / AP name
 src/config.h              selects the board header, chart size
@@ -599,13 +626,19 @@ src/app_state.*           control task: polling both channels, run engine, manua
 src/tui*.cpp, tui.h, ui.h touch UI of both boards (480×320 S3, 320×240 CYD), section 4a
 src/fonts/                touch UI fonts (tools/lv_font_gen.py from tools/fonts/*.ttf)
 src/web.*                 HTTP server, JSON API
+src/safety.*              E-stop input, alarm sound, user activity, chip temperature (section 7a)
+src/ota.*, ota_image.*    firmware update (web upload, SD card), image check (pure C++, unit-tested), rollback
+src/sdlog.*               SD card (S3): run logs, firmware.bin
+hardware/s3-schematic/    KiCad schematic of the S3 device (+ PDF / PNG)
+hardware/cyd-schematic/   KiCad schematics of the three CYD wirings (+ PDF / PNG)
+hardware/gen/             generator of both (Python 3: python3 make.py ..)
 web/, tools/web_embed.py  web page + fonts → src/web_assets.h (generated before each build)
 tools/build_site.py       the same page as static files (device URL layout), for the launcher / GitHub Pages
 tools/launcher/           local app: Go launcher (build.sh → dist/tempctl-duo-<version>.exe), section 5b
 test/ui_host/             touch UI preview on a PC (screenshots, random-tap test)
 test/console_host/        serial console on a PC (scripted commands -> output)
 src/console.*             serial console (section 4b), LogSerial (log lines that don't break typed input)
-test/host_test.cpp        g++ -std=c++17 -Isrc -I<ArduinoJson>/src test/host_test.cpp src/duo_program.cpp src/run_engine.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp && ./a.out
+test/host_test.cpp        g++ -std=c++17 -Isrc -I<ArduinoJson>/src test/host_test.cpp src/duo_program.cpp src/run_engine.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp src/ota_image.cpp && ./a.out
 ```
 
 ## 7. Safety
@@ -617,7 +650,7 @@ limit alarms and `SP.Hi` setpoint limit. Set *Highest allowed setpoint* on *Cont
 ### 7a. Protections in the firmware (spec 9.2a)
 
 Per channel (Channels page › Protection, touch Channels, `b.local.runaway.*` / `b.modbus.runaway.*` /
-`b.local.cj*`); a tripped check switches the outputs off (local: also the SSR supply relay), stops a run
+`b.local.cj*`); a tripped check switches the outputs off (local: also the SSR supply relay, when used), stops a run
 and waits for Acknowledge:
 
 | Check | Default | |
@@ -634,6 +667,7 @@ General (Settings › Safety, touch System, `safety.*`):
 |---|---|---|
 | Manual mode timeout (`manualIdle`, `manualIdleMin`) | off, 30 min | manual mode ends after this long without a touch, a web action or a serial command; message + beeps 1 min before |
 | E-stop input (`estop`, S3 GPIO5) | off | NC contact to GND, pull-up; open or a broken wire: SSRs and relay off at once (SSR timer / local task), run stopped, manual and autotune off, Modbus outputs off; nothing can be switched on while it is open |
+| SSR supply relay (`relay`, S3 GPIO4) | on | active-high DC SSR in the +5 V of both SSR inputs: on while a local channel's outputs are on or autotune runs, off when none is and at once on any local fault or E-stop (event "SSR supply relay off: …"). Off: no relay fitted, GPIO4 stays low (with a relay fitted the heaters then get no power) |
 | Alarm sound (`sound`, S3 GPIO6, CYD speaker P4) | on | fault / E-stop: 3 long beeps every 3 s; "Action required" and the timeout warning: 2 short beeps every 10 s; run finished: 3 short beeps. Any touch / web action / serial command silences the current alarm |
 | Chip temperature warning (`chipWarn`, `chipMaxC`, S3) | on, 80 °C | read every 30 s; a warning event above the limit (5 °C hysteresis) |
 

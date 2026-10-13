@@ -2,6 +2,8 @@
 #include <stdint.h>
 void uiInit();
 void uiLoop();
+// a firmware upload runs inside one web request: it calls this so the touch screen shows the progress
+void uiOtaRefresh();
 void uiSetBrightness(uint8_t b);
 // Restart of the screen hardware without restarting the device: touch controller and display
 // controller set up again, everything redrawn. Asked from any task, done in the next uiLoop().

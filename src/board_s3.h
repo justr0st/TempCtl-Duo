@@ -6,6 +6,8 @@
 #pragma once
 
 #define BOARD_NAME "ESP32-S3"
+#define BOARD_ID "s3"  // env name: firmware images for another env are refused (ota)
+#define BOARD_CHIP 9   // ESP image header chip id (ESP32-S3)
 
 // ---- Display: ST7796S on SPI2 (FSPI, IO_MUX pins 10-13) ----
 #define LCD_CTRL_ST7796 1

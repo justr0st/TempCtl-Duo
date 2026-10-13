@@ -2,6 +2,8 @@
 #include "syslog.h"
 #include "tui.h"
 #include "safety.h"
+#include "ota.h"
+#include "sdlog.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -664,7 +666,7 @@ void networkUpdate() {
 }
 
 // ------------------------------------------------------------ system
-static lv_obj_t *sInfo, *sPoll, *sBand, *sTz, *sIdle, *sEstop, *sSound, *sChip;
+static lv_obj_t *sInfo, *sPoll, *sBand, *sTz, *sFw, *sIdle, *sEstop, *sSound, *sRelay, *sChip;
 
 // ------------------------------------------------------------ time zone (two steps: region, then the place)
 static const char* const TZ_OFFSETS[] = {"UTC-12:00", "UTC-11:00", "UTC-10:00", "UTC-09:30", "UTC-09:00", "UTC-08:00",
@@ -856,9 +858,30 @@ static void onSafetySw(lv_event_t* e) {
     Guard g;
     if (o == sEstop) gSettings.estop = on;
     if (o == sSound) gSettings.sound = on;
+    if (o == sRelay) gSettings.relay = on;
   }
   saveSettingsAndNotify();
   if (o == sSound && on) safetyBeepTest();
+}
+
+// ---- firmware update from the SD card (S3; the web page: any board)
+static SdFirmware sdFw;
+static void onSdFwAnswer(int b, int) {
+  if (b != 2) return;
+  char err[120];
+  if (!sdlogFirmwareInstall(err, sizeof(err))) tToast(err, true);
+}
+static void onSdFw(lv_event_t*) {
+  char err[120];
+  if (!otaCanStart(err, sizeof(err))) return tToast(err, true);
+  if (!sdlogFirmwareCheck(sdFw, err, sizeof(err))) return tToast(err, true);
+  if (!sdFw.found) return tToast("No firmware.bin on the SD card (in its root folder).", true);
+  if (sdFw.problem[0]) return tToast(sdFw.problem, true);
+  char t[64], m[160];
+  snprintf(t, sizeof(t), "Install firmware %s?", sdFw.version);
+  snprintf(m, sizeof(m), "From the SD card (%u kB), now %s. The device restarts afterwards; the new firmware is checked for 30 s.",
+           (unsigned)(sdFw.size / 1024), FW_VERSION);
+  tDialog(t, m, "Cancel", "Install", "", onSdFwAnswer, 0);
 }
 
 lv_obj_t* systemCreate() {
@@ -869,12 +892,21 @@ lv_obj_t* systemCreate() {
   sBand = tButton(r, "", onBand, nullptr, CW2, BH);
   r = settingRow(p.body, "Time zone", "Local time in the SD run logs");
   sTz = tButton(r, "", onTz, nullptr, CW2, BH);
+  sFw = nullptr;
+  if (sdlogSlot()) {
+    r = settingRow(p.body, "Firmware update", "firmware.bin in the SD card's root folder (or: web page, Settings)");
+    sFw = tButton(r, "SD card", onSdFw, nullptr, CW2, BH);
+  }
   r = settingRow(p.body, "Manual mode timeout", "Manual mode ends after this long without a touch, web or serial action (a beep 1 min before)");
   sIdle = tButton(r, "", onIdle, nullptr, CW2, BH);
-  sEstop = sSound = sChip = nullptr;
+  sEstop = sSound = sRelay = sChip = nullptr;
   if (safetyEstopWired()) {
     r = settingRow(p.body, "E-stop input", "GPIO 5, NC contact to GND. Open: all outputs off, run stopped");
     sEstop = tSwitch(r, onSafetySw);
+  }
+  if (localCtrlRelayWired()) {
+    r = settingRow(p.body, "SSR supply relay", "GPIO 4, +5 V of the SSR inputs. Switch off only if no relay is fitted");
+    sRelay = tSwitch(r, onSafetySw);
   }
   if (safetySoundWired()) {
     r = settingRow(p.body, "Alarm sound", "Faults, E-stop, \"Action required\", run finished. A touch silences it");
@@ -917,6 +949,7 @@ void systemShow() {
   tButtonText(sIdle, b);
   if (sEstop) tSetChecked(sEstop, s.estop != 0);
   if (sSound) tSetChecked(sSound, s.sound != 0);
+  if (sRelay) tSetChecked(sRelay, s.relay != 0);
   if (sChip) {
     if (s.chipWarn) snprintf(b, sizeof(b), "%.0f \xC2\xB0" "C", s.chipMaxC);
     else strlcpy(b, "Off", sizeof(b));
@@ -958,7 +991,7 @@ void systemUpdate() {
   }
   snprintf(b, sizeof(b), PRODUCT_NAME " " FW_VERSION " \xC2\xB7 " BOARD_NAME "%s%s\n%s\nUp %s \xC2\xB7 %s\nLive history in memory: %s%s%s",
            BOARD_VARIANT[0] ? " " : "", BOARD_VARIANT, netInfo().c_str(), up, ram, hist,
-           !localCtrlRelayWired() ? "" : localCtrlRelayOn() ? "\nSSR supply relay: on" : "\nSSR supply relay: off", sf);
+           !localCtrlRelayUsed() ? "" : localCtrlRelayOn() ? "\nSSR supply relay: on" : "\nSSR supply relay: off", sf);
   tSetText(sInfo, b);
 }
 

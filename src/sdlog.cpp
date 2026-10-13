@@ -1,4 +1,6 @@
 // Run logs on the SD card (sdlog.h)
+#include "ota.h"
+#include "ota_image.h"
 #include "sdlog.h"
 #include <Arduino.h>
 #include <math.h>
@@ -302,7 +304,7 @@ static void flush(bool closing) {
 }
 
 // ------------------------------------------------------------ web requests (done by the SD task)
-enum ReqType : uint8_t { RQ_NONE = 0, RQ_LIST, RQ_LOAD, RQ_DELETE };
+enum ReqType : uint8_t { RQ_NONE = 0, RQ_LIST, RQ_LOAD, RQ_DELETE, RQ_FWCHECK };
 static struct {
   volatile uint8_t type;
   volatile bool abandoned;  // the web gave up waiting: the SD task cleans up and frees the slot
@@ -314,7 +316,10 @@ static struct {
   uint32_t totalKb, freeKb;
   char* data;  // LOAD: PSRAM, handed to the web (or freed when abandoned)
   size_t len;
+  SdFirmware fw;  // FWCHECK
 } rq;
+static volatile bool fwInstall = false;  // install /firmware.bin (started by sdlogFirmwareInstall)
+static void installFirmware();
 static constexpr int LIST_MAX = 200;
 static SemaphoreHandle_t rqFree = nullptr, rqDone = nullptr;  // binary: one request at a time / answered
 static void doRequest();
@@ -324,6 +329,7 @@ static void writerTask(void*) {
   for (;;) {
     ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200));  // (a web request wakes it at once)
     if (rq.type) doRequest();
+    if (fwInstall) installFirmware();
     if (!open_) continue;
     size_t n;
     portENTER_CRITICAL(&mux);
@@ -562,6 +568,82 @@ static bool deleteFile(const char* name, char* err, size_t n) {
   });
 }
 
+// ------------------------------------------------------------ firmware update from the card
+static const char* const FW_FILE = "/sd/firmware.bin";
+static const char* const FW_DONE = "/sd/firmware.done";
+static constexpr size_t FW_CHUNK = 4096;
+
+static bool checkFirmware(SdFirmware& f, char* err, size_t n) {
+  memset(&f, 0, sizeof(f));
+  return withCard(err, n, [&]() -> bool {
+    FILE* fp = fopen(FW_FILE, "rb");
+    if (!fp) return true;  // none on the card
+    uint8_t* buf = (uint8_t*)malloc(FW_CHUNK);
+    if (!buf) {
+      fclose(fp);
+      snprintf(err, n, "out of memory");
+      return false;
+    }
+    ImageScanner sc;
+    sc.reset();
+    for (size_t k; (k = fread(buf, 1, FW_CHUNK, fp)) > 0;) sc.feed(buf, k);
+    fclose(fp);
+    free(buf);
+    f.found = true;
+    f.size = sc.size();
+    strlcpy(f.board, sc.board(), sizeof(f.board));
+    strlcpy(f.version, sc.version(), sizeof(f.version));
+    strlcpy(f.problem, imageProblem(sc, BOARD_ID, BOARD_CHIP), sizeof(f.problem));
+    return true;
+  });
+}
+
+// in the SD task: the card stays mounted (bus lock held) for the whole install, about 20 s; the display
+// keeps drawing (only its screen check waits)
+static void installFirmware() {
+  fwInstall = false;
+  char err[96] = "";
+  bool written = false;
+  const bool ok = withCard(err, sizeof(err), [&]() -> bool {
+    FILE* fp = fopen(FW_FILE, "rb");
+    if (!fp) return snprintf(err, sizeof(err), "no firmware.bin on the card"), false;
+    struct stat stt;
+    const uint32_t size = stat(FW_FILE, &stt) == 0 ? (uint32_t)stt.st_size : 0;
+    uint8_t* buf = (uint8_t*)malloc(FW_CHUNK);
+    if (!buf || !otaBegin(OTA_SD, size, err, sizeof(err))) {
+      free(buf);
+      fclose(fp);
+      if (!err[0]) snprintf(err, sizeof(err), "out of memory");
+      return false;
+    }
+    bool good = true;
+    for (size_t k; good && (k = fread(buf, 1, FW_CHUNK, fp)) > 0;) good = otaWrite(buf, k);
+    if (good && ferror(fp)) {
+      otaAbort("reading the card failed");
+      good = false;
+    }
+    fclose(fp);
+    free(buf);
+    if (!good) {
+      OtaStatus o;
+      otaStatus(o);
+      snprintf(err, sizeof(err), "%s", o.msg);
+      return false;
+    }
+    if (!otaEnd(err, sizeof(err))) return false;
+    written = true;
+    unlink(FW_DONE);  // installed: renamed, so it is not offered again
+    if (rename(FW_FILE, FW_DONE) != 0) logEvent("SD card: firmware.bin could not be renamed (delete it in a PC)");
+    return true;
+  }, 10000);
+  if (!ok && !written) {
+    OtaStatus o;
+    otaStatus(o);
+    if (o.phase == OTA_RUNNING) otaAbort(err);  // (card lost after the start)
+    else if (o.phase != OTA_FAILED) logEvent("Firmware update from the SD card not started: %s", err);
+  }
+}
+
 static void doRequest() {
   rq.err[0] = 0;
   rq.data = nullptr;
@@ -576,6 +658,7 @@ static void doRequest() {
       rq.ok = rq.data != nullptr;
       break;
     case RQ_DELETE: rq.ok = deleteFile(rq.name, rq.err, sizeof(rq.err)); break;
+    case RQ_FWCHECK: rq.ok = checkFirmware(rq.fw, rq.err, sizeof(rq.err)); break;
     default: rq.ok = false;
   }
   portENTER_CRITICAL(&mux);  // (decided together with the web side's give-up, so exactly one frees the slot)
@@ -665,6 +748,23 @@ bool sdlogDelete(const char* name, char* err, size_t n) {
   return ok;
 }
 
+bool sdlogFirmwareCheck(SdFirmware& f, char* err, size_t n) {
+  memset(&f, 0, sizeof(f));
+  if (!ask(RQ_FWCHECK, nullptr, err, n)) return false;
+  const bool ok = rq.ok;
+  f = rq.fw;
+  done();
+  return ok;
+}
+
+bool sdlogFirmwareInstall(char* err, size_t n) {
+  if (!sdTask) return snprintf(err, n, "SD card not available"), false;
+  if (!otaCanStart(err, n)) return false;
+  fwInstall = true;
+  xTaskNotifyGive(sdTask);
+  return true;
+}
+
 #else  // ------------------------------------------------------------ no SD slot
 
 bool sdlogSlot() { return false; }
@@ -688,6 +788,15 @@ char* sdlogLoad(const char*, size_t& len, char* err, size_t n) {
   return nullptr;
 }
 bool sdlogDelete(const char*, char* err, size_t n) {
+  snprintf(err, n, "no SD slot on this board");
+  return false;
+}
+bool sdlogFirmwareCheck(SdFirmware& f, char* err, size_t n) {
+  memset(&f, 0, sizeof(f));
+  snprintf(err, n, "no SD slot on this board");
+  return false;
+}
+bool sdlogFirmwareInstall(char* err, size_t n) {
   snprintf(err, n, "no SD slot on this board");
   return false;
 }

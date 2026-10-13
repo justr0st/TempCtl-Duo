@@ -118,6 +118,7 @@ void networkShow();
 void networkUpdate();
 lv_obj_t* systemCreate();
 void systemShow();
+void tuiOtaPoll();  // firmware update overlay (uiLoop, every 250 ms)
 void systemUpdate();
 lv_obj_t* progListCreate();
 void progListShow();

@@ -1,7 +1,7 @@
 // Host-side tests. Build & run on a PC (ArduinoJson 7 headers, e.g. from .pio/libdeps/<env>/ArduinoJson/src):
 //   g++ -std=c++17 -I../src -I<ArduinoJson>/src host_test.cpp ../src/duo_program.cpp
 //       ../src/run_engine.cpp ../src/settings.cpp ../src/tc_sensor.cpp ../src/pid.cpp ../src/runaway.cpp
-//       ../src/autotune.cpp -o host_test
+//       ../src/autotune.cpp ../src/ota_image.cpp -o host_test
 //   ./host_test
 #include <cassert>
 #include <cmath>
@@ -14,6 +14,9 @@
 #include "autotune.h"
 #include "pid.h"
 #include "runaway.h"
+#include "ota_image.h"
+#include <vector>
+#include <algorithm>
 #include "settings.h"
 #include "tc_sensor.h"
 
@@ -818,7 +821,17 @@ static void testGuard() {
   const Runaway c = st.ch[0].loc.runaway;
   CHECK(c.offEnable && c.offRise == 10 && c.offSec == 60 && c.frozenEnable && c.frozenSec == 120);
   CHECK(st.ch[0].loc.cjEnable && st.ch[0].loc.cjMax == 70);
-  CHECK(!st.manualIdle && st.manualIdleMin == 30 && !st.estop && st.sound && st.chipWarn && st.chipMaxC == 80);
+  CHECK(!st.manualIdle && st.manualIdleMin == 30 && !st.estop && st.sound && st.relay && st.chipWarn && st.chipMaxC == 80);
+  {  // safety.relay round trip (off = no relay fitted)
+    Settings r = st;
+    JsonDocument d;
+    deserializeJson(d, "{\"safety\":{\"relay\":false}}");
+    char msg[96];
+    CHECK(settingsFromJson(d.as<JsonObjectConst>(), r, msg, sizeof(msg)) && r.relay == 0);
+    JsonDocument o;
+    settingsToJson(r, o.to<JsonObject>(), true);
+    CHECK(o["safety"]["relay"] == false);
+  }
   GuardMonitor g;
   uint8_t f = FAULT_NONE;
   // off and cooling, then a stuck SSR: +0.5 degC/s -> fault within the window (after the settle time)
@@ -889,6 +902,60 @@ static void testGuard() {
   b.ch[0].loc.cjMax = 500;
   settingsValidate(b, BoardLimits{true, 2}, msg, sizeof(msg));
   CHECK(b.manualIdleMin == 2 && b.ch[0].loc.runaway.offSec == 10 && b.ch[0].loc.cjMax == 125);
+}
+
+// ------------------------------------------------------------------ firmware image check (ota_image)
+
+static std::vector<uint8_t> fakeImage(int chip, const char* id, size_t at, size_t total) {
+  std::vector<uint8_t> v(total);
+  for (size_t i = 0; i < total; ++i) v[i] = (uint8_t)(i * 131 + 7);
+  v[0] = 0xE9;
+  v[12] = (uint8_t)chip;
+  v[13] = 0;
+  if (id) memcpy(v.data() + at, id, strlen(id) + 1);
+  return v;
+}
+static void feedChunks(ImageScanner& s, const std::vector<uint8_t>& v, size_t chunk) {
+  s.reset();
+  for (size_t i = 0; i < v.size(); i += chunk) s.feed(v.data() + i, std::min(chunk, v.size() - i));
+}
+
+static void testImageScanner() {
+  const char* ID = "TCDUO-IMAGE|s3|1.0.39|end";
+  for (size_t chunk : {1u, 7u, 100u, 1436u, 4096u, 1u << 20})
+    for (size_t at : {16u, 1430u, 1436u - 5, 4090u, 300000u}) {
+      auto v = fakeImage(9, ID, at, 400000);
+      ImageScanner s;
+      feedChunks(s, v, chunk);
+      CHECK(s.headerOk() && s.chipId() == 9 && s.found() && !strcmp(s.board(), "s3") && !strcmp(s.version(), "1.0.39"));
+      CHECK(!*imageProblem(s, "s3", 9));
+    }
+  ImageScanner s;
+  // the key alone (the scanner's own constant in every image) is not an id
+  auto v = fakeImage(9, "TCDUO-IMAGE|", 5000, 300000);
+  memcpy(v.data() + 9000, ID, strlen(ID) + 1);
+  feedChunks(s, v, 1436);
+  CHECK(s.found() && !strcmp(s.version(), "1.0.39"));
+  // refused: other board, other chip, no id, not an image, too small
+  feedChunks(s, fakeImage(9, "TCDUO-IMAGE|cyd-2xlocal|1.0.39|end", 7000, 300000), 4096);
+  CHECK(strstr(imageProblem(s, "s3", 9), "cyd-2xlocal") != nullptr);
+  feedChunks(s, fakeImage(0, ID, 7000, 300000), 4096);
+  CHECK(strstr(imageProblem(s, "s3", 9), "another ESP32 chip") != nullptr);
+  feedChunks(s, fakeImage(9, ID, 7000, 300000), 4096);
+  CHECK(strstr(imageProblem(s, "cyd-2xlocal", 0), "ESP32-S3") != nullptr);
+  feedChunks(s, fakeImage(9, nullptr, 0, 300000), 4096);
+  CHECK(!strcmp(imageProblem(s, "s3", 9), "not a TempCtl Duo firmware"));
+  auto w = fakeImage(9, ID, 7000, 300000);
+  w[0] = 0x50;
+  feedChunks(s, w, 4096);
+  CHECK(strstr(imageProblem(s, "s3", 9), "not an ESP32 firmware image") != nullptr);
+  feedChunks(s, fakeImage(9, ID, 100, 1000), 4096);
+  CHECK(strstr(imageProblem(s, "s3", 9), "too small") != nullptr);
+  // a truncated id at the very end: not found
+  auto t = fakeImage(9, nullptr, 0, 300000);
+  memcpy(t.data() + 300000 - 20, "TCDUO-IMAGE|s3|1.0.3", 20);
+  feedChunks(s, t, 4096);
+  CHECK(!s.found());
 }
 
 // ------------------------------------------------------------------ autotune
@@ -1025,6 +1092,7 @@ int main() {
   testPid();
   testRunaway();
   testGuard();
+  testImageScanner();
   testAutotune();
   testTimeZones();
   printf(fails ? "%d FAILED\n" : "all tests passed\n", fails);

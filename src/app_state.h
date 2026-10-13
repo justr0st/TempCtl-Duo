@@ -251,6 +251,7 @@ void controlTaskStart();
 // local outputs off, then the main loop restarts once the display has finished drawing.
 void appRequestRestart(const char* from);
 bool appRestartPending();
+uint32_t controlCycles();  // control cycles since the start (alive check: firmware update probation)
 unsigned controlTaskStackFree();  // bytes of the control task's stack never used so far
 bool sendCmd(CmdType c, int arg = 0, float value = 0, int idx = -1, uint8_t sub = 0);
 bool busRequest(BusRequest& r, uint32_t timeoutMs = 20000);  // blocks until done

@@ -121,6 +121,7 @@ void settingsDefaults(Settings& s, const BoardLimits& lim) {
   s.manualIdleMin = 30;
   s.estop = 0;
   s.sound = 1;
+  s.relay = 1;
   s.chipWarn = 1;
   s.chipMaxC = 80;
   // bottom = Modbus, top = Off; without RS485 both local (as many as the board wires)
@@ -224,6 +225,7 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
   clampv<uint16_t>(s.manualIdleMin, 2, 1440);
   s.estop = s.estop ? 1 : 0;
   s.sound = s.sound ? 1 : 0;
+  s.relay = s.relay ? 1 : 0;
   s.chipWarn = s.chipWarn ? 1 : 0;
   clampv(s.chipMaxC, 40.0f, 120.0f);
   if (s.themeDark != THEME_DARK_DEFAULT) s.themeDark = s.themeDark ? 1 : 0;
@@ -512,6 +514,7 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
   sf["manualIdleMin"] = s.manualIdleMin;
   sf["estop"] = s.estop != 0;
   sf["sound"] = s.sound != 0;
+  sf["relay"] = s.relay != 0;
   sf["chipWarn"] = s.chipWarn != 0;
   sf["chipMaxC"] = s.chipMaxC;
   JsonObject t = o["tools"].to<JsonObject>();
@@ -724,6 +727,7 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
     R.num(sf, "safety.", "manualIdleMin", s.manualIdleMin);
     R.flag(sf, "safety.", "estop", s.estop);
     R.flag(sf, "safety.", "sound", s.sound);
+    R.flag(sf, "safety.", "relay", s.relay);
     R.flag(sf, "safety.", "chipWarn", s.chipWarn);
     R.num(sf, "safety.", "chipMaxC", s.chipMaxC);
   }

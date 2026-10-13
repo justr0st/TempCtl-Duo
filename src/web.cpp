@@ -16,6 +16,8 @@
 #include <math.h>
 #include "app_state.h"
 #include "safety.h"
+#include "ota.h"
+#include <esp_task_wdt.h>
 #include "controller.h"
 #include "local_ctrl.h"
 #include "net.h"
@@ -1019,6 +1021,110 @@ static void handlePostParam() {
   sendJson(d);
 }
 
+// ------------------------------------------------------------ firmware update (spec 9.11)
+static void otaStatusJson(JsonObject o) {
+  OtaStatus st;
+  otaStatus(st);
+  static const char* const PH[] = {"idle", "running", "done", "failed"};
+  o["phase"] = PH[st.phase <= OTA_FAILED ? st.phase : 0];
+  o["source"] = st.source == OTA_SD ? "sd" : st.source == OTA_WEB ? "web" : "";
+  o["done"] = st.done;
+  o["total"] = st.total;
+  o["version"] = JsonString(st.version);
+  o["msg"] = JsonString(st.msg);
+}
+
+// GET /api/ota: what can be updated
+static void handleOtaInfo() {
+  JsonDocument d;
+  d["board"] = BOARD_ID;
+  d["version"] = FW_VERSION;
+  d["slot"] = otaRunningSlot();
+  uint32_t size;
+  char why[120];
+  const bool slot = otaSlot(size, why, sizeof(why));
+  d["slotKb"] = slot ? size / 1024 : 0;
+  char err[120] = "";
+  d["canStart"] = otaCanStart(err, sizeof(err));
+  if (err[0]) d["why"] = err;
+  d["probation"] = otaProbation();
+  d["sd"] = sdlogSlot();
+  otaStatusJson(d["status"].to<JsonObject>());
+  sendJson(d);
+}
+
+// POST /api/ota?size=<bytes> (multipart, field "fw"): the upload is written while it arrives; the answer
+// comes when it is complete; the device restarts 2 s later
+static char otaErr[120];
+static void handleOtaUpload() {
+  HTTPUpload& u = server.upload();
+  esp_task_wdt_reset();  // (the whole upload runs inside one handleClient() of the loop task)
+  switch (u.status) {
+    case UPLOAD_FILE_START: {
+      otaErr[0] = 0;
+      safetyActivity();
+      const uint32_t size = (uint32_t)server.arg("size").toInt();
+      otaBegin(OTA_WEB, size, otaErr, sizeof(otaErr));
+      break;
+    }
+    case UPLOAD_FILE_WRITE: {
+      if (!otaErr[0] && !otaWrite(u.buf, u.currentSize)) {
+        OtaStatus st;
+        otaStatus(st);
+        strlcpy(otaErr, st.msg, sizeof(otaErr));
+      }
+      static uint32_t drawn = 0;
+      if (millis() - drawn > 300) {  // the touch screen's progress overlay
+        drawn = millis();
+        uiOtaRefresh();
+      }
+      break;
+    }
+    case UPLOAD_FILE_END:
+      if (!otaErr[0]) otaEnd(otaErr, sizeof(otaErr));
+      break;
+    case UPLOAD_FILE_ABORTED:
+      if (!otaErr[0]) {
+        otaAbort("the upload was interrupted");
+        strlcpy(otaErr, "the upload was interrupted", sizeof(otaErr));
+      }
+      break;
+  }
+}
+static void handleOtaDone() {
+  JsonDocument d;
+  OtaStatus st;
+  otaStatus(st);
+  d["ok"] = !otaErr[0] && st.phase == OTA_DONE;
+  if (otaErr[0]) d["err"] = otaErr;
+  else if (st.phase != OTA_DONE) d["err"] = "no firmware file received";
+  d["version"] = JsonString(st.version);
+  sendJson(d);
+}
+
+// GET /api/ota/sd: the firmware.bin on the SD card (S3); POST /api/ota/sd: install it
+static void handleOtaSdCheck() {
+  SdFirmware f;
+  char err[96] = "";
+  JsonDocument d;
+  if (!sdlogFirmwareCheck(f, err, sizeof(err))) return sendError(err);
+  d["found"] = f.found;
+  if (f.found) {
+    d["sizeKb"] = f.size / 1024;
+    d["board"] = JsonString(f.board);
+    d["version"] = JsonString(f.version);
+    d["problem"] = JsonString(f.problem);
+  }
+  sendJson(d);
+}
+static void handleOtaSdInstall() {
+  char err[120];
+  if (!sdlogFirmwareInstall(err, sizeof(err))) return sendError(err);
+  JsonDocument d;
+  d["ok"] = true;
+  sendJson(d);
+}
+
 // POST /api/beep: one short test beep (Settings page)
 static void handleBeep() {
   safetyBeepTest();
@@ -1082,7 +1188,13 @@ static void handleLive() {
     Guard g;
     d["tz"] = JsonString(gSettings.tzName);  // time zone ("" = not set: the page sends the browser's)
   }
-  if (localCtrlRelayWired()) d["relay"] = localCtrlRelayOn();  // SSR supply relay (S3)
+  if (localCtrlRelayUsed()) d["relay"] = localCtrlRelayOn();  // SSR supply relay (S3, setting safety.relay on)
+  {  // firmware update in progress / new firmware on probation (spec 9.11)
+    OtaStatus st;
+    otaStatus(st);
+    if (st.phase != OTA_IDLE || otaProbation()) otaStatusJson(d["ota"].to<JsonObject>());
+    if (otaProbation()) d["ota"]["probation"] = true;
+  }
   {  // safety (spec 9.2a)
     JsonObject o = d["safety"].to<JsonObject>();
     o["estop"] = L.estop;           // active: all outputs forced off
@@ -1396,24 +1508,16 @@ static const Route ROUTES[] = {
     {"/api/params", HTTP_POST, handlePostParam},
     {"/api/action", HTTP_POST, handleAction},
     {"/api/beep", HTTP_POST, handleBeep},
+    {"/api/ota", HTTP_GET, handleOtaInfo},
+    {"/api/ota/sd", HTTP_GET, handleOtaSdCheck},
+    {"/api/ota/sd", HTTP_POST, handleOtaSdInstall},
 };
 
 void webBegin() {
-#ifdef BOARD_HAS_PSRAM
-  server.on("/", HTTP_GET, [] { sendAsset(WEB_ASSETS[0]); });
-#endif
-  for (size_t i = 1; i < WEB_ASSET_COUNT; ++i) {
+  // the page, fonts and icons (web_assets.h: the S3 has the page with web fonts at /, the CYD the one
+  // without, and no font files)
+  for (size_t i = 0; i < WEB_ASSET_COUNT; ++i) {
     const WebAsset* a = &WEB_ASSETS[i];
-#ifdef BOARD_HAS_PSRAM
-    if (!strcmp(a->path, "/nofonts")) continue;
-#else
-    // no PSRAM (CYD): the page without web fonts, no font downloads (system fonts instead)
-    if (!strcmp(a->path, "/nofonts")) {
-      server.on("/", HTTP_GET, [a] { sendAsset(*a); });
-      continue;
-    }
-    if (!strncmp(a->path, "/f/", 3) && strcmp(a->path, "/f/OFL.txt")) continue;
-#endif
     server.on(a->path, HTTP_GET, [a] { sendAsset(*a); });
   }
   for (const Route& r : ROUTES)
@@ -1423,6 +1527,11 @@ void webBegin() {
       r.fn();
       crumb(CR_LOOP, L_WEB);
     });
+  server.on("/api/ota", HTTP_POST, [] {
+    crumbWeb("/api/ota");
+    handleOtaDone();
+    crumb(CR_LOOP, L_WEB);
+  }, handleOtaUpload);
   server.onNotFound([] { sendBody(404, "text/plain", (const uint8_t*)"Not found", 9, "404"); });
   server.begin();
 }

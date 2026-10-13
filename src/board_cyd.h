@@ -4,6 +4,7 @@
 #pragma once
 
 #define BOARD_NAME "CYD"  // + BOARD_VARIANT below
+#define BOARD_CHIP 0      // ESP image header chip id (ESP32)
 
 // ---- Display: ILI9341 on SPI2 (HSPI, IO_MUX pins 12-15) ----
 #define LCD_CTRL_ILI9341 1
@@ -80,6 +81,7 @@
 
 #if defined(CYD_1XLOCAL_1X485)
 #define BOARD_VARIANT "1x local + 1x RS485"
+#define BOARD_ID "cyd-1xlocal-1x485"
 #define LOCAL_CHANNELS_MAX 1
 // ---- The one local channel (bottom or top, whichever is set to local) ----
 #define PIN_TC_CS_LOCAL 5  // SD CS: pull-up keeps the converter deselected at boot (strapping pin, high = ok)
@@ -87,6 +89,7 @@
 
 #elif defined(CYD_2XLOCAL_2X485)
 #define BOARD_VARIANT "2x local + RS485"
+#define BOARD_ID "cyd-2xlocal-2x485"
 #define LOCAL_CHANNELS_MAX 2
 // ---- Bottom channel on the SD slot pins, top channel on the pads of the removed RGB LED ----
 #define PIN_TC_CS_BOTTOM 5  // SD CS (pull-up = deselected at boot)
@@ -96,13 +99,14 @@
 
 #else  // CYD_2XLOCAL
 #define BOARD_VARIANT "2x local"
+#define BOARD_ID "cyd-2xlocal"
 #define LOCAL_CHANNELS_MAX 2
 // ---- Bottom channel on the SD slot pins, top channel on P3 / CN1 ----
 #define PIN_TC_CS_BOTTOM 5  // SD CS (pull-up = deselected at boot)
 #define PIN_SSR_BOTTOM 18   // SD CLK (no pull-up)
 #define PIN_TC_CS_TOP 27    // CN1-2, board pull-up R18 = deselected at boot
 #define PIN_SSR_TOP 22      // P3-2 / CN1-3, no pull-up
-// IO35 (P3-3, input only) stays free, e.g. for a door / E-stop input.
+// IO35 (P3-3, input only) stays free.
 #endif
 
 #if defined(CYD_2XLOCAL_2X485)

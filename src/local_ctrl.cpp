@@ -299,10 +299,12 @@ static void step(int ch, float dt) {
 
 // ------------------------------------------------------------------ SSR supply relay
 #if defined(PIN_SSR_RELAY) && HAVE_LOCAL
-static volatile bool relayOn = false;
+static volatile bool relayOn = false, relayEnabled = true;
 static void relayWrite(bool on) { digitalWrite(PIN_SSR_RELAY, on ? HIGH : LOW); }  // active high
 bool localCtrlRelayWired() { return true; }
+bool localCtrlRelayUsed() { return relayEnabled; }
 bool localCtrlRelayOn() { return relayOn; }
+void localCtrlRelayEnable(bool on) { relayEnabled = on; }  // off: the next step switches it off for good
 
 // after each control step: on while outputs are wanted, off at once on any local fault
 static void relayUpdate() {
@@ -321,15 +323,18 @@ static void relayUpdate() {
     }
   }
   const bool estop = safetyEstop();
-  const bool on = want && !fault && !estop;
+  const bool used = relayEnabled;
+  const bool on = used && want && !fault && !estop;
   if (on == relayOn) return;
   relayOn = on;
   relayWrite(on);
-  if (!on && (fault || estop)) logEvent("SSR supply relay off: %s", estop ? "E-stop" : why && *why ? why : "fault");
+  if (!on && used && (fault || estop)) logEvent("SSR supply relay off: %s", estop ? "E-stop" : why && *why ? why : "fault");
 }
 #else
 bool localCtrlRelayWired() { return false; }
+bool localCtrlRelayUsed() { return false; }
 bool localCtrlRelayOn() { return false; }
+void localCtrlRelayEnable(bool) {}
 static void relayUpdate() {}
 #endif
 

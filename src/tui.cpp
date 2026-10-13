@@ -7,6 +7,7 @@
 #include "lcd.h"
 #include "touch.h"
 #include "safety.h"
+#include "ota.h"
 #include "ui.h"
 
 void tuiBackground();
@@ -380,7 +381,69 @@ void uiScreenCheckInfo(void (*line)(const char*)) {
   (void)t;
 }
 
+// ------------------------------------------------------------ firmware update in progress (ota.h)
+// A full-screen overlay while an update is written (web upload or SD card) until the restart; a failed
+// update closes it with a message.
+static lv_obj_t *otaBox = nullptr, *otaText = nullptr, *otaBar = nullptr;
+void tuiOtaPoll() {
+  static uint32_t at = 0;
+  if (at && lv_tick_elaps(at) < 250) return;
+  at = tTickNow();
+  OtaStatus st;
+  otaStatus(st);
+  static uint8_t lastPhase = OTA_IDLE;
+  const bool show = st.phase == OTA_RUNNING || st.phase == OTA_DONE;
+  if (st.phase == OTA_FAILED && lastPhase == OTA_RUNNING) {
+    char m[128];
+    snprintf(m, sizeof(m), "Firmware update failed: %s", st.msg);
+    tToast(m, true);
+  }
+  lastPhase = st.phase;
+  if (!show) {
+    if (otaBox) lv_obj_delete(otaBox);
+    otaBox = nullptr;
+    return;
+  }
+  if (!otaBox) {
+    tModalClose();
+    otaBox = lv_obj_create(lv_layer_sys());
+    lv_obj_remove_style_all(otaBox);
+    lv_obj_add_style(otaBox, &S_.scr, 0);
+    lv_obj_set_size(otaBox, SCREEN_W, SCREEN_H);
+    lv_obj_set_clickable(otaBox, true);  // (touches don't reach the screens below)
+    lv_obj_set_scrollable(otaBox, false);
+    otaText = tLabel(otaBox, &tfont_16b, "");
+    lv_obj_set_width(otaText, SCREEN_W - 40);
+    lv_obj_set_style_text_align(otaText, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(otaText, LV_ALIGN_CENTER, 0, -20);
+    otaBar = lv_bar_create(otaBox);
+    lv_obj_set_size(otaBar, SCREEN_W - 80, 12);
+    lv_obj_align(otaBar, LV_ALIGN_CENTER, 0, TUI_SMALL ? 30 : 40);
+    lv_bar_set_range(otaBar, 0, 100);
+  }
+  const int pct = st.phase == OTA_DONE ? 100 : st.total ? (int)((uint64_t)st.done * 100 / st.total) : -1;
+  char b[160];
+  if (st.phase == OTA_DONE) {
+    snprintf(b, sizeof(b), "Firmware %s written\nRestarting...", st.version);
+  } else {
+    char amount[32];
+    if (pct >= 0) snprintf(amount, sizeof(amount), "%d %%", pct);
+    else snprintf(amount, sizeof(amount), "%u kB", (unsigned)(st.done / 1024));
+    snprintf(b, sizeof(b), "Firmware update%s%s\n%s %s\nDon't switch off.", st.version[0] ? " to " : "", st.version,
+             st.source == OTA_SD ? "From the SD card:" : "Over Wi-Fi:", amount);
+  }
+  lv_label_set_text(otaText, b);
+  lv_bar_set_value(otaBar, pct >= 0 ? pct : 50, LV_ANIM_OFF);
+}
+
+void uiOtaRefresh() {
+  if (!disp) return;
+  tuiOtaPoll();
+  lv_timer_handler();
+}
+
 void uiLoop() {
+  tuiOtaPoll();
   if (scrRestartReq) {
     scrRestartReq = false;
     screenRestartAsked();

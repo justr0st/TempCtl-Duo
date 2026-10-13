@@ -44,7 +44,8 @@ class SymDef:
         raise KeyError(f"{self.name}: no pin {num}")
 
 
-def box(name, w, left=(), right=(), top=(), bottom=(), prefix="U", value=None, numbers_hidden=True, desc=""):
+def box(name, w, left=(), right=(), top=(), bottom=(), prefix="U", value=None, numbers_hidden=True, desc="",
+        plen=2):
     """Module / connector box. w in grid units (even). left / right: [(num, name, type) or None (gap)], top /
     bottom: [(num, name, type, x)] with x in grid units from the left edge. Body: lib (0,0) .. (w, -h)."""
     rows = max(len(left), len(right))
@@ -52,14 +53,14 @@ def box(name, w, left=(), right=(), top=(), bottom=(), prefix="U", value=None, n
     pins = []
     for i, p in enumerate(left):
         if p:
-            pins.append(Pin(p[0], p[1], p[2], -2, -(i + 1) * 2, 0))
+            pins.append(Pin(p[0], p[1], p[2], -plen, -(i + 1) * 2, 0, plen))
     for i, p in enumerate(right):
         if p:
-            pins.append(Pin(p[0], p[1], p[2], w + 2, -(i + 1) * 2, 180))
+            pins.append(Pin(p[0], p[1], p[2], w + plen, -(i + 1) * 2, 180, plen))
     for p in top:
-        pins.append(Pin(p[0], p[1], p[2], p[3], 2, 270))
+        pins.append(Pin(p[0], p[1], p[2], p[3], plen, 270, plen))
     for p in bottom:
-        pins.append(Pin(p[0], p[1], p[2], p[3], -h - 2, 90))
+        pins.append(Pin(p[0], p[1], p[2], p[3], -h - plen, 90, plen))
     s = SymDef(name, prefix=prefix, value=value, pins=pins,
                graphics=[("rect", 0, 0, w * G, -h * G, "background")], numbers_hidden=numbers_hidden,
                ref_at=(0, 3.81 if top else 1.27, 0), val_at=(0, 1.27 if not top else 1.27, 0), desc=desc)
@@ -170,4 +171,37 @@ def lib():
         right=[None, ("1", "OUT+", "passive"), ("2", "OUT-", "passive")], prefix="K",
         value="DC SSR, active high", numbers_hidden=True,
         desc="SSR supply relay: DC solid-state relay, input 3-32 V DC (driven directly by a GPIO), output >= 0.5 A DC")
+    # ---- CYD (ESP32-2432S028R): the connectors as one box; pin numbers = connector-pin
+    def cyd(name, led_pads):
+        right = [None, ("P3-1", "IO21 (backlight)", "bidirectional"), ("P3-2", "IO22", "bidirectional"),
+                 ("P3-3", "IO35 (input only)", "input"), None,
+                 ("CN1-2", "IO27 (10k pull-up)", "bidirectional"), ("CN1-3", "IO22 (= P3-2)", "bidirectional"), None,
+                 ("SD-2", "IO5 CD/DAT3", "bidirectional"), ("SD-3", "IO23 CMD", "bidirectional"),
+                 ("SD-5", "IO18 CLK", "bidirectional"), ("SD-7", "IO19 DAT0", "bidirectional"), None]
+        if led_pads:
+            right += [("LED-R", "IO4 (LED pad R)", "bidirectional"), ("LED-G", "IO16 (LED pad G)", "bidirectional"),
+                      ("LED-B", "IO17 (LED pad B)", "bidirectional"), None]
+        right += [("P4-1", "SPK+", "output"), ("P4-2", "SPK-", "output"), None,
+                  ("P1-2", "TX (IO1)", "output"), ("P1-3", "RX (IO3)", "input"), None]
+        return box(name, 30, right=right, plen=4,
+                   top=[("CN1-1", "3V3", "power_out", 6), ("SD-4", "VDD", "passive", 12),
+                        ("P1-1", "VIN", "power_out", 18)],
+                   bottom=[("P1-4", "GND", "power_in", 4), ("P3-4", "GND", "passive", 10),
+                           ("CN1-4", "GND", "passive", 16), ("SD-6", "VSS", "passive", 22)],
+                   prefix="U", value="ESP32-2432S028R (CYD)", numbers_hidden=False,
+                   desc="ESP32-2432S028R (Cheap Yellow Display): connectors P1, P3, CN1, P4, the micro-SD slot (via a "
+                        "breakout adapter)" + (" and the RGB LED pads (LED removed)" if led_pads else "") +
+                        "; pin numbers = connector-pin")
+    L["CYD"] = cyd("CYD_ESP32-2432S028R", False)
+    L["CYD_LED"] = cyd("CYD_ESP32-2432S028R_LEDpads", True)
+    L["Speaker"] = SymDef("Speaker", prefix="LS", value="Speaker", numbers_hidden=False, names_hidden=False,
+                          name_offset=0.254,
+                          pins=[Pin("1", "+", "passive", -4, 2, 0, 2), Pin("2", "-", "passive", -4, -2, 0, 2)],
+                          graphics=[("rect", -2.54, 3.81, 0, -3.81, "background"),
+                                    ("poly", [(0, 3.81), (3.81, 7.62), (3.81, -7.62), (0, -3.81)], 0.254, "none")],
+                          ref_at=(6.35, 1.27, 0), val_at=(6.35, -1.27, 0), desc="Loudspeaker (8 ohm) or passive piezo")
+    L["WS2812"] = box("WS2812B", 12, left=[None, ("4", "DIN", "input"), None],
+                      right=[None, ("2", "DOUT", "output"), None],
+                      top=[("1", "VDD", "power_in", 6)], bottom=[("3", "VSS", "power_in", 6)], prefix="D",
+                      value="WS2812B", numbers_hidden=False, desc="Addressable RGB LED WS2812B (status LED)")
     return L

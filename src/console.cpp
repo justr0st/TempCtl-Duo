@@ -8,6 +8,8 @@
 #include <stdarg.h>
 #include "app_state.h"
 #include "safety.h"
+#include "ota.h"
+#include "sdlog.h"
 #include "config.h"
 #include "net.h"
 #include "program_store.h"
@@ -352,6 +354,10 @@ static const char* const H_DEVICE[] = {
     "  screen restart                 restart only the display and the touch controller",
     "                                 (when the screen hangs or shows rubbish)",
     "  screen check                   what the automatic screen check sees now",
+    "  fw                             firmware: version, board, update slot",
+    "  fw sd                          the firmware.bin on the SD card (S3)",
+    "  fw sd install yes              install it (restarts; checked for 30 s, else the",
+    "                                 previous firmware starts again). Upload: web page",
     "  help [section]                 this list, or one section: help wifi",
     "  Up / Down keys                 the last commands (without passwords)",
     "  api on | api off               machine mode (JSON lines) for programs and the",
@@ -482,6 +488,8 @@ static const char* const H_SETTINGS[] = {
     "  estop=on|off                 E-stop input (S3: GPIO 5, NC contact to GND): open = all",
     "                               outputs off, run stopped",
     "  sound=on|off                 alarm beeps (S3: GPIO 6, CYD: speaker connector)",
+    "  relay=on|off                 SSR supply relay (S3: GPIO 4, +5 V of the SSR inputs, on while",
+    "                               a local channel heats); off: no relay fitted, GPIO 4 stays low",
     "  chipWarn=on|off              warning above chipMaxC (40 ... 120) chip temperature (S3)",
     "  chipMaxC=<C>",
     "  e.g. set safety.estop=on safety.manualIdle=on safety.manualIdleMin=60",
@@ -1107,11 +1115,13 @@ static void cmdInfo() {
   say("network   %s", ni.length() ? ni.c_str() : "off");
   say("web       http://%s.local/", S.hostname);
   {
-    char e[48] = "", c[32] = "";
+    char e[48] = "", c[32] = "", r[40] = "";
+    if (localCtrlRelayWired())
+      snprintf(r, sizeof(r), ", supply relay %s", !S.relay ? "not used" : localCtrlRelayOn() ? "on" : "off");
     if (safetyEstopWired())
       snprintf(e, sizeof(e), ", E-stop %s (contact %s)", !S.estop ? "off" : L.estop ? "ACTIVE" : "ok", L.estopRaw ? "open" : "closed");
     if (safetyChipTempWired() && !isnan(L.chipC)) snprintf(c, sizeof(c), ", chip %.0f C%s", L.chipC, L.chipHot ? " (HOT)" : "");
-    say("safety    sound %s%s%s%s", !safetySoundWired() ? "-" : S.sound ? "on" : "off", e, c,
+    say("safety    sound %s%s%s%s%s", !safetySoundWired() ? "-" : S.sound ? "on" : "off", r, e, c,
         S.manualIdle ? ", manual idle timeout on" : "");
   }
   ProgSummary* sums = (ProgSummary*)malloc(sizeof(ProgSummary) * PROG_MAX);
@@ -1292,6 +1302,7 @@ static const SKey KEYS[] = {
     {KS_SAFETY, K_INT, "manualIdleMin", 2, 1440, nullptr},
     {KS_SAFETY, K_BOOL, "estop", 0, 0, nullptr},
     {KS_SAFETY, K_BOOL, "sound", 0, 0, nullptr},
+    {KS_SAFETY, K_BOOL, "relay", 0, 0, nullptr},
     {KS_SAFETY, K_BOOL, "chipWarn", 0, 0, nullptr},
     {KS_SAFETY, K_NUM, "chipMaxC", 40, 120, nullptr},
 };
@@ -1702,6 +1713,30 @@ static void execute(char* text) {
   snap = nullptr;
 }
 
+// fw / fw sd / fw sd install yes (spec 9.11)
+static void cmdFw(const Args& a) {
+  char e[120];
+  if (!strcmp(a.word(1), "sd")) {
+    if (!strcmp(a.word(2), "install")) {
+      if (strcmp(a.word(3), "yes")) return err("to install: fw sd install yes");
+      if (!sdlogFirmwareInstall(e, sizeof(e))) return err("%s", e);
+      return say("installing from the SD card (the device restarts when it is written)");
+    }
+    SdFirmware f;
+    if (!sdlogFirmwareCheck(f, e, sizeof(e))) return err("%s", e);
+    if (!f.found) return say("no firmware.bin in the SD card's root folder");
+    say("firmware.bin: %u kB, board %s, version %s%s%s", (unsigned)(f.size / 1024), f.board[0] ? f.board : "?",
+        f.version[0] ? f.version : "?", f.problem[0] ? " - refused: " : " - fw sd install yes installs it",
+        f.problem);
+    return;
+  }
+  uint32_t size;
+  const bool slot = otaSlot(size, e, sizeof(e));
+  say("firmware  %s (board %s), slot %s%s", FW_VERSION, BOARD_ID, otaRunningSlot(), otaProbation() ? ", new: checked for 30 s" : "");
+  if (slot) say("update    slot of %u kB free; upload on the web page (Settings), or fw sd", (unsigned)(size / 1024));
+  else say("update    %s", e);
+}
+
 static void dispatch(const Args& a) {
   const char* c = a.word(0);
   if (!strcmp(c, "help") || !strcmp(c, "?")) return help(a.word(1));
@@ -1718,6 +1753,7 @@ static void dispatch(const Args& a) {
     return watchLine();
   }
   if (!strcmp(c, "info")) return cmdInfo();
+  if (!strcmp(c, "fw") || !strcmp(c, "firmware")) return cmdFw(a);
   if (!strcmp(c, "log")) return cmdLog(a);
   if (!strcmp(c, "ack")) return cmdAck(a);
   if (!strcmp(c, "tune")) return cmdTune(a);

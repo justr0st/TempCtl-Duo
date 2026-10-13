@@ -68,8 +68,17 @@ void uiTouchCalCancel() { calState = -1; }
 String netApName() { return String("TempCtl-Duo-1A2B"); }
 void syslogTee(const uint8_t*, size_t) {}
 void safetyActivity() {}
+#include "ota.h"
+#include "sdlog.h"
+bool otaSlot(uint32_t& size, char* why, size_t n) { size = 1966080; return true; }
+const char* otaRunningSlot() { return "app0"; }
+bool otaProbation() { return false; }
+bool sdlogFirmwareCheck(SdFirmware& f, char*, size_t) { memset(&f, 0, sizeof(f)); f.found = true; f.size = 1900000; strcpy(f.board, "cyd-1xlocal-1x485"); strcpy(f.version, "1.0.40"); return true; }
+bool sdlogFirmwareInstall(char* e, size_t n) { snprintf(e, n, "a program is running - stop it first"); return false; }
 bool safetyEstopWired() { return false; }
 bool safetySoundWired() { return true; }
+bool localCtrlRelayWired() { return true; }
+bool localCtrlRelayOn() { return false; }
 bool safetyChipTempWired() { return false; }
 // web API stand-in for the api mode: echoes the request, "/big" answers 20 kB in pieces
 void webApiRequest(const char* line) {
@@ -125,6 +134,10 @@ int main() {
   type("set safety.estop=on safety.manualIdleMin=45 b.local.runaway.offRise=12 b.local.cjMax=80\r");
   type("get b.local\r");
   type("info\r");
+  type("fw\r");
+  type("fw sd\r");
+  type("fw sd install\r");
+  type("fw sd install yes\r");
   type("STATUS\r\n");
   type("manual b on sp=180\r");
   type("manual t sp=9999\r");

@@ -13,6 +13,7 @@
 #include "config.h"
 #include "local_ctrl.h"
 #include "safety.h"
+#include "ota.h"
 #include "net.h"
 #include "ui.h"
 #include "web.h"
@@ -40,6 +41,7 @@ static void memLog(const char* where) {
 void setup() {
   localCtrlEarlyInit();  // SSR outputs low (off) before anything else
   safetyBegin();         // E-stop input, buzzer (spec 9.2a)
+  otaBoot();             // a new firmware on probation? (confirmed by otaLoop after 30 s)
 #if !(defined(BOARD_S3) && ARDUINO_USB_MODE == 0)
   // CYD: the console shares this port; the api mode (Web Serial page) sends whole programs in one line
   // and gets answers of several kB: larger buffers, so neither side waits on the 115200 baud line
@@ -55,6 +57,7 @@ void setup() {
 #endif
   LogSerial.println();
   appInit();          // settings, shared state
+  otaBootReport();    // the result of the last firmware update (event log)
   // the control task first: it installs the RS485 UART driver while the heap is still unfragmented
   // (on the CYD the driver allocation failed once Wi-Fi, web and the first screen draw were running)
   controlTaskStart(); // Modbus + program engine on core 0
@@ -109,6 +112,7 @@ void loop() {
     delay(10);
     return;
   }
+  otaLoop();
   crumb(CR_LOOP, L_UI);
   uiLoop();
   crumb(CR_LOOP, L_CONSOLE);

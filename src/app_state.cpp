@@ -1321,6 +1321,7 @@ static void manualSwitch(int ch, bool on) {
 // (Re)opens the bus and selects the channel backends after a settings change
 static void applySettings(const Settings& prev, bool first) {
   safetyConfigure(s.estop != 0, s.sound != 0);  // (first: the relay pin becomes an output, off)
+  localCtrlRelayEnable(s.relay != 0);
   modbusBusBegin(bus, s);
   eng.setBand(s.bottomBand);
   for (int i = 0; i < NUM_CHANNELS; ++i) {
@@ -1831,7 +1832,11 @@ static void safetyCycle(const bool* commOk) {
   gLive.soundMuted = safetySoundMuted();
 }
 
+static volatile uint32_t cycles = 0;
+uint32_t controlCycles() { return cycles; }
+
 static void cycle(float dt) {
+  ++cycles;
   pollChannels();
   crumb(CR_CONTROL, C_CYCLE);
 

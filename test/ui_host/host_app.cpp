@@ -32,6 +32,8 @@ SemaphoreHandle_t gLock = nullptr;
 // SSR supply relay (local_ctrl.h): the S3 has one, on while the bottom is in manual
 bool localCtrlRelayWired() { return SCREEN_W > 400; }
 bool localCtrlRelayOn() { return gLive.ch[1].outOn; }
+bool localCtrlRelayUsed() { return localCtrlRelayWired() && gSettings.relay; }
+void localCtrlRelayEnable(bool) {}
 
 // breadcrumbs (crumbs.h): nothing to keep on a PC
 #include "crumbs.h"
@@ -593,6 +595,18 @@ int main(int argc, char** argv) {
   shot("28-chan-runaway");
   lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 3000, LV_ANIM_OFF);
   shot("28b-chan-guard");
+  {  // firmware update overlay (ota.h)
+    extern void otaStubSet(int phase);
+    otaStubSet(1);
+    now_ += 300;
+    tuiOtaPoll();
+    run(100);
+    shot("30-ota");
+    otaStubSet(0);
+    now_ += 300;
+    tuiOtaPoll();
+    run(100);
+  }
 #if defined(TOUCH_XPT2046)
   tShow(SCR_MAIN);
   if (uiTouchCalStart()) {  // touch calibration: the 4 crosses (24 px from the edges)
@@ -618,3 +632,22 @@ bool safetyEstopWired() { return SCREEN_W > 400; }
 bool safetySoundWired() { return true; }
 bool safetyChipTempWired() { return SCREEN_W > 400; }
 void safetyBeepTest() {}
+
+// firmware update (ota.h, sdlog.h)
+#include "ota.h"
+#include "sdlog.h"
+static OtaStatus otaStub{};
+void otaStatus(OtaStatus& s) { s = otaStub; }
+bool otaCanStart(char* e, size_t n) { snprintf(e, n, "a program is running - stop it first"); return false; }
+bool sdlogFirmwareCheck(SdFirmware& f, char*, size_t) { memset(&f, 0, sizeof(f)); return true; }
+bool sdlogFirmwareInstall(char* e, size_t n) { snprintf(e, n, "-"); return false; }
+bool sdlogSlot() { return SCREEN_W > 400; }
+
+void otaStubSet(int phase) {
+  otaStub = OtaStatus{};
+  otaStub.phase = (uint8_t)phase;
+  otaStub.source = OTA_WEB;
+  otaStub.total = 1900000;
+  otaStub.done = 1140000;
+  strcpy(otaStub.version, "1.0.39");
+}

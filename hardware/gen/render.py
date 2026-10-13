@@ -1,9 +1,8 @@
-"""Draws the sheet as SVG (mm units, A2) in the look of the KiCad default theme."""
+"""Draws a sheet as SVG (mm units, A3) in the look of the KiCad default theme."""
 import html
 import sys
 
 from model import G
-from sheet import S
 
 W, H = 420, 297
 C = {"bg": "#FFFFFF", "wire": "#008400", "body": "#840000", "fill": "#FFFFC2", "pinname": "#006464",
@@ -104,7 +103,7 @@ def part(p, o):
         o.append(line([(x1, y2), (x2, y1)], C["dnp"], 0.3))
 
 
-def svg():
+def svg(S):
     o = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}" font-family="{FONT}">',
          f'<rect width="{W}" height="{H}" fill="{C["bg"]}"/>']
     # page border with the reference grid
@@ -142,18 +141,14 @@ def svg():
     o.append(f'<rect x="{bx}" y="{by}" width="{bw}" height="{bh}" fill="#fff" stroke="{C["border"]}" stroke-width="0.25"/>')
     for yy in (by + 8, by + 22):
         o.append(line([(bx, yy), (bx + bw, yy)], C["border"], 0.15))
-    o.append(t(bx + 2, by + 5.5, "Modules connected with cables; pins: src/board_s3.h", 1.27, C["border"]))
+    o.append(t(bx + 2, by + 5.5, S.notes, 1.27, C["border"]))
     o.append(t(bx + 2, by + 13, "Title:", 1.27, C["border"]))
-    o.append(t(bx + 12, by + 13.5, "TempCtl Duo - ESP32-S3 wiring", 2.4, "#000", weight="bold"))
-    o.append(t(bx + 2, by + 19, "env s3, firmware 1.0.38", 1.27, C["border"]))
+    o.append(t(bx + 12, by + 13.5, S.title, 2.4, "#000", weight="bold"))
+    o.append(t(bx + 2, by + 19, f"env {S.env}, firmware {S.rev}", 1.27, C["border"]))
     o.append(t(bx + 2, by + 25.5, "Size: A3", 1.27, C["border"]))
     o.append(t(bx + 22, by + 25.5, "Date: 2026-10-13", 1.27, C["border"]))
-    o.append(t(bx + 54, by + 25.5, "Rev: 1.0.38", 1.27, C["border"]))
+    o.append(t(bx + 54, by + 25.5, f"Rev: {S.rev}", 1.27, C["border"]))
     o.append(t(bx + 80, by + 25.5, "Sheet: 1/1", 1.27, C["border"]))
-    o.append(t(bx + 2, by + 30, "File: TempCtl-Duo-S3.kicad_sch", 1.27, C["border"]))
+    o.append(t(bx + 2, by + 30, f"File: {S.project}.kicad_sch", 1.27, C["border"]))
     o.append("</svg>")
     return "\n".join(o)
-
-
-if __name__ == "__main__":
-    open(sys.argv[1], "w").write(svg())

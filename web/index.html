@@ -117,6 +117,14 @@ button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
 .read .o{font-size:13px;color:var(--muted)}
 .meter{height:8px;background:var(--sunk);border:1px solid var(--line);border-radius:4px;overflow:hidden;width:120px;margin-top:4px}
 .meter i{display:block;height:100%;background:var(--c);width:0}
+.fw .fwn{color:var(--muted);font-size:13.5px;min-width:0;overflow-wrap:anywhere}
+.fwdrop{margin-top:14px;padding:14px;border:2px dashed var(--line);border-radius:10px;background:var(--sunk);display:flex;flex-direction:column;gap:10px;transition:border-color .12s,background .12s}
+.fwdrop .dz{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;color:var(--muted);text-align:center}
+.fwdrop .dz b{color:var(--text);font-weight:600}
+.fwdrop .sel{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.fwdrop .sel:has(.fwn:empty){display:none}
+.fwdrop.over{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 10%,var(--panel))}
+.fwdrop.over *{pointer-events:none}
+.fwp{display:flex;align-items:center;gap:10px;margin-top:8px}.fwp .meter{flex:1;width:auto;margin:0;height:10px}.fwp .meter i{background:var(--acc)}
 .why{color:var(--muted);font-size:13.5px;min-height:1.4em;margin:8px 0 6px}
 .row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
 .row .lbl{color:var(--muted);font-size:13.5px;min-width:86px}
@@ -446,7 +454,15 @@ table.t input{width:90px}
 <div class="pg" id="pg-settings" hidden>
 <div class="cards">
 <section class="panel" id="setDev" aria-label="Device"><h2>Device</h2><dl class="kv" id="devInfo"></dl>
-  <div class="fbar"><button id="bRestart">Restart device</button><button id="bScrRst" title="Sets the display and the touch controller up again (when the screen hangs or shows rubbish); the device keeps running">Restart screen</button><span class="msg" id="rsMsg"></span></div></section>
+  <div class="fbar"><button id="bRestart">Restart device</button><button id="bScrRst" title="Sets the display and the touch controller up again (when the screen hangs or shows rubbish); the device keeps running">Restart screen</button><span class="msg" id="rsMsg"></span></div>
+  <h3 id="setFw">Firmware update</h3>
+  <p class="hint" id="fwHint">…</p>
+  <div class="fwdrop fw" id="fwUp"><input type="file" id="fwFile" accept=".bin,application/octet-stream" hidden>
+    <div class="dz"><span><b>Drop firmware.bin here</b> or</span><button id="fwPick">Choose firmware file…</button></div>
+    <div class="sel"><span class="fwn" id="fwName"></span><button class="pri" id="fwGo" disabled>Install</button></div></div>
+  <div class="fbar fw" id="fwSd" hidden><button id="fwSdCheck">Check the SD card</button><span class="fwn" id="fwSdName"></span><button class="pri" id="fwSdGo" hidden>Install from the SD card</button></div>
+  <div class="fwp" id="fwProg" hidden><div class="meter"><i id="fwBarI"></i></div><span id="fwPct"></span></div>
+  <div class="msg" id="fwMsg"></div></section>
 <section class="panel" id="setWifi" aria-label="Wi-Fi"><h2>Wi-Fi</h2>
   <p class="hint">Leave the network name empty to run as an access point only. If the device cannot join the network within 20 s it also opens its own access point. A new host name takes effect after a restart.</p>
   <div class="form">
@@ -1678,7 +1694,6 @@ function commonGroups(){ const bn=CFG.channels[0].name;
     {k:'bus.pollMs',l:'Polling interval',t:'num',min:250,max:10000,step:50,u:'ms',h:'How often PV, SP and output are read. With two Modbus controllers each one is polled every 2 × this interval.'},
     {k:'bus.commLossSec',l:'Pause the run after no answer for',t:'num',min:0,max:3600,u:'s',h:'0 = never pause'},
     {k:'run.bottomBand',l:`“${bn} reached” band ±`,t:'num',min:0.5,max:50,step:0.5,u:'°C',h:`Used by “Wait for ${bn}” in Sequence phases.`}]},
-   {h:'SSR supply relay',show:()=>!!CFG.limits.relay,note:'GPIO 4 drives an active-high DC solid-state relay in the common +5 V supply of both SSR inputs: on while a local channel\'s outputs are on, off when they are off and at once on a fault or E-stop. It covers a stuck SSR input or driver transistor; an SSR whose output is shorted needs a contactor in the heater supply.',fields:[]},
   ]; }
 // RS485 bus: in the tile of each Modbus channel (one bus, shared by both: a change shows in both tiles)
 function busGroup(P){ return {h:'RS485 bus',beta:true,show:g=>CFG.limits.rs485&&g(P+'type')==='modbus',note:'Shared by both Modbus channels. Modbus is a beta feature: not tested with a real controller yet.',fields:[
@@ -1734,7 +1749,7 @@ function chanGroups(i){ const P=`channels.${i}.`, ty=t=>g=>g(P+'type')===t;
      {k:P+'local.windowSec',l:'SSR window',t:'num',min:0.2,max:10,step:0.1,u:'s',h:'The SSR is on for the output share of every window'},
      {k:P+'local.maxOut',l:'Max. output',t:'num',min:0,max:100,u:'%'},
      {k:P+'local.maxTemp',l:'Max. temperature (outputs off above)',t:'num',min:50,max:600,u:'°C'}]},
-   {h:'Protection',show:g=>g(P+'type')!=='off',note:'A tripped check switches the outputs off (local: also the SSR supply relay), stops a running program and waits for Acknowledge. Modbus and local keep their own values; the ones of the selected type are used.',
+   {h:'Protection',show:g=>g(P+'type')!=='off',note:'A tripped check switches the outputs off, stops a running program and waits for Acknowledge. Modbus and local keep their own values; the ones of the selected type are used.',
     fields:runawayFields(P,'modbus').concat(runawayFields(P,'local'),[
      {k:P+'local.cjEnable',l:'Converter too hot',t:'sw',def:true,w:true,show:ty('local'),h:'The MAX31855’s own (cold-junction) temperature: a hot enclosure makes the readings drift.'},
      {k:P+'local.cjMax',l:'… above',t:'num',min:30,max:125,u:'°C',def:70,show:g=>g(P+'type')==='local'&&g(P+'local.cjEnable')}])}];
@@ -1824,6 +1839,88 @@ async function buildTimeForm(){
   for(const extra of [b.fixed,cur]) if(extra&&!o.some(x=>x[0]===extra)) o.push([extra,extra+' (no summer time)']);
   mkForm('time',$('sTime'),[{h:'',fields:[
     {k:'time.zone',l:'Time zone',t:'sel',o,h:`For the times in the SD run logs (local time). This browser: ${esc(b.zone||b.fixed)}.`}]}],{title:'Clock',auto:true}); }
+/* ---------- firmware update (spec 9.11): upload of a .bin (Wi-Fi only), firmware.bin on the SD card (S3) ---------- */
+const FW={info:null,at:0,file:null,img:null,expect:null,phase:'',sd:null};
+// what the .bin is: ESP image header (0xE9, chip id at 12: 0 ESP32, 9 ESP32-S3) and the TempCtl Duo id string
+async function fwInspect(file){
+  const b=new Uint8Array(await file.arrayBuffer()); const r={size:b.length,chip:b.length>13?b[12]|(b[13]<<8):-1,magic:b[0]===0xE9,board:'',version:''};
+  const key=[...'TCDUO-IMAGE|'].map(c=>c.charCodeAt(0));
+  outer: for(let i=0;i+key.length<b.length;i++){ if(b[i]!==84) continue; for(let k=0;k<key.length;k++) if(b[i+k]!==key[k]) continue outer;
+    let s=''; for(let j=i+key.length;j<Math.min(b.length,i+key.length+80)&&b[j];j++) s+=String.fromCharCode(b[j]);
+    const m=/^([^|]+)\|([^|]+)\|end/.exec(s); if(m){ r.board=m[1]; r.version=m[2]; break; } }
+  return r; }
+function fwProblem(r){ const I=FW.info; if(!I) return 'no answer from the device';
+  if(r.size<65536) return 'the file is too small for a firmware image';
+  if(!r.magic) return 'not an ESP32 firmware image (use .pio/build/<env>/firmware.bin)';
+  const chip=I.board==='s3'?9:0; if(r.chip!==chip) return r.chip===9?'this firmware is for the ESP32-S3, not for this board':'this firmware is for another ESP32 chip than this board';
+  if(!r.board) return 'not a TempCtl Duo firmware';
+  if(r.board!==I.board) return `this firmware is for “${r.board}”, this device is “${I.board}”`;
+  if(I.slotKb&&r.size>I.slotKb*1024) return `the file is larger than the firmware slot (${I.slotKb} kB)`;
+  return ''; }
+async function fwLoad(force){ if(!force&&FW.info&&Date.now()-FW.at<5000) return; FW.at=Date.now();
+  try{ FW.info=await api('/api/ota'); }catch(e){ return; } fwShow(); }
+function fwShow(){ const I=FW.info; if(!I) return; const wifi=!OFF&&!SER.on;
+  $('fwHint').textContent=`Running ${I.version} (board ${I.board}, slot ${I.slot}).`+(I.slotKb?` Drop or choose the firmware.bin of this board (PlatformIO: .pio/build/${I.board}/firmware.bin); the device restarts and checks the new firmware for 30 s — if it does not run, the previous one starts again.`:` ${I.why||'No second firmware slot.'}`)+(wifi?'':' The upload works over Wi-Fi only (open the page from the device’s address).');
+  $('fwUp').hidden=!I.slotKb||!wifi; $('fwSd').hidden=!I.sd||!I.slotKb;
+  $('fwGo').disabled=!FW.img||!!fwProblem(FW.img)||!I.canStart||FW.phase==='upload';
+  $('fwGo').title=I.canStart?'':I.why||''; }
+$('fwPick').onclick=()=>{ $('fwFile').value=''; $('fwFile').click(); };
+$('fwFile').onchange=()=>fwSelect($('fwFile').files[0]);
+async function fwSelect(f,note){ FW.file=f||null; FW.img=null; setMsg('fwMsg','');
+  if(!f){ $('fwName').textContent=''; fwShow(); return; }
+  $('fwName').textContent=f.name+' …'; FW.img=await fwInspect(f); const p=fwProblem(FW.img);
+  $('fwName').textContent=`${f.name}: ${FW.img.version?'firmware '+FW.img.version+' for '+FW.img.board:Math.round(f.size/1024)+' kB'}`;
+  if(p) setMsg('fwMsg',p,true); else if(!FW.info.canStart) setMsg('fwMsg',FW.info.why||'',true); else if(note) setMsg('fwMsg',note);
+  fwShow(); }
+// drag and drop of the .bin onto the box (files only; a file dropped elsewhere on the page is not opened by the browser)
+const fwHasFiles=e=>!!e.dataTransfer&&[...e.dataTransfer.types].includes('Files');
+const fwBusy=()=>FW.phase==='upload'||FW.phase==='sd'||!!FW.expect;
+let fwDrag=0;
+for(const [ev,fn] of Object.entries({
+  dragenter:e=>{ if(!fwHasFiles(e)) return; e.preventDefault(); if(!fwBusy()&&++fwDrag===1) $('fwUp').classList.add('over'); },
+  dragover:e=>{ if(!fwHasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect=fwBusy()?'none':'copy'; },
+  dragleave:e=>{ if(!fwHasFiles(e)) return; if(--fwDrag<=0){ fwDrag=0; $('fwUp').classList.remove('over'); } },
+  drop:e=>{ if(!fwHasFiles(e)) return; e.preventDefault(); fwDrag=0; $('fwUp').classList.remove('over'); if(fwBusy()) return;
+    const fs=[...e.dataTransfer.files], f=fs.find(x=>/\.bin$/i.test(x.name))||fs[0]; if(!f) return;
+    $('fwFile').value=''; fwSelect(f,fs.length>1?`${fs.length} files dropped: using ${f.name}.`:''); }}))
+  $('fwUp').addEventListener(ev,fn);
+for(const ev of ['dragover','drop']) window.addEventListener(ev,e=>{ if(fwHasFiles(e)&&!e.defaultPrevented){ e.preventDefault(); if(ev==='dragover') e.dataTransfer.dropEffect='none'; } });
+function fwBar(pct,text){ $('fwProg').hidden=pct==null; if(pct!=null){ $('fwBarI').style.width=Math.max(0,Math.min(100,pct))+'%'; $('fwPct').textContent=text||Math.round(pct)+' %'; } }
+// after the restart: wait for the device, then compare the version
+function fwExpect(v){ FW.expect={v,from:FW.info.version,at:Date.now()}; }
+function fwWatch(){ const E=FW.expect; if(!E||!live) return; if(Date.now()-E.at<4000) return;
+  if(live.fw===E.v){ const pr=live.ota&&live.ota.probation;
+    setMsg('fwMsg',pr?`Firmware ${E.v} runs — checking it for 30 s…`:`Firmware ${E.v} installed and confirmed.`); fwBar(null);
+    if(!pr){ FW.expect=null; FW.phase=''; fwLoad(true); } }
+  else if(live.fw===E.from&&live.up<120&&Date.now()-E.at>15000){ setMsg('fwMsg',`The new firmware did not start correctly: ${E.from} runs again (see the system log).`,true); FW.expect=null; FW.phase=''; fwBar(null); fwLoad(true); } }
+$('fwGo').onclick=async()=>{ const f=FW.file, r=FW.img; if(!f||!r) return; const p=fwProblem(r); if(p){ setMsg('fwMsg',p,true); return; }
+  if(!await ask(`Install firmware ${r.version} (now ${FW.info.version})? The upload takes about a minute; the device then restarts. The outputs stay off.`,'Install')) return;
+  FW.phase='upload'; fwShow(); setMsg('fwMsg','Uploading…'); fwBar(0);
+  const fd=new FormData(); fd.append('fw',f,f.name); const x=new XMLHttpRequest();
+  x.open('POST','/api/ota?size='+f.size); x.timeout=300000;
+  x.upload.onprogress=e=>{ if(e.lengthComputable) fwBar(e.loaded/e.total*100,`${Math.round(e.loaded/e.total*100)} % (${Math.round(e.loaded/1024)} kB)`); };
+  x.onload=()=>{ let j={}; try{ j=JSON.parse(x.responseText); }catch(e){}
+    if(j.ok){ fwBar(100,'written'); setMsg('fwMsg',`Firmware ${j.version||r.version} written — the device restarts, the page reconnects by itself…`); fwExpect(j.version||r.version); }
+    else{ FW.phase=''; fwBar(null); setMsg('fwMsg','Update failed: '+(j.err||('HTTP '+x.status)),true); fwLoad(true); } };
+  x.onerror=x.ontimeout=()=>{ FW.phase=''; fwBar(null); setMsg('fwMsg','The upload was interrupted (connection lost). Nothing was changed if the device did not restart.',true); fwLoad(true); };
+  x.send(fd); };
+$('fwSdCheck').onclick=async()=>{ setMsg('fwMsg','Reading the SD card…'); $('fwSdGo').hidden=true; $('fwSdName').textContent='';
+  let r; try{ r=await api('/api/ota/sd',undefined,20000); }catch(e){ setMsg('fwMsg','No answer from the device.',true); return; }
+  if(r.err){ setMsg('fwMsg',r.err,true); return; } FW.sd=r;
+  if(!r.found){ setMsg('fwMsg','No firmware.bin in the root folder of the SD card.',true); return; }
+  $('fwSdName').textContent=`firmware.bin: ${r.version?'firmware '+r.version+' for '+r.board:'?'} (${r.sizeKb} kB)`;
+  if(r.problem){ setMsg('fwMsg',r.problem,true); return; }
+  setMsg('fwMsg',FW.info&&!FW.info.canStart?FW.info.why||'':'',FW.info&&!FW.info.canStart); $('fwSdGo').hidden=false; };
+$('fwSdGo').onclick=async()=>{ const r=FW.sd; if(!r||!r.found) return;
+  if(!await ask(`Install firmware ${r.version} from the SD card (now ${FW.info.version})? It takes about 30 s; the device then restarts. The outputs stay off.`,'Install')) return;
+  let j; try{ j=await api('/api/ota/sd',{}); }catch(e){ setMsg('fwMsg','No answer from the device.',true); return; }
+  if(j.err){ setMsg('fwMsg',j.err,true); return; } FW.phase='sd'; $('fwSdGo').hidden=true; setMsg('fwMsg','Installing from the SD card…'); fwBar(0); fwExpect(r.version); FW.expect.at=Date.now()+60000; };
+// progress of an update that the device reports (SD card, or one started elsewhere)
+function fwLive(){ const o=live&&live.ota; if(!o) return;
+  if(o.phase==='running'&&FW.phase!=='upload'){ const pct=o.total?o.done/o.total*100:null; fwBar(pct==null?50:pct,o.total?`${Math.round(pct)} %${o.source==='sd'?' (SD card)':''}`:`${Math.round(o.done/1024)} kB`); }
+  if(o.phase==='done'&&FW.phase==='sd'){ fwBar(100,'written'); setMsg('fwMsg',`Firmware ${o.version} written — the device restarts, the page reconnects by itself…`); if(FW.expect) FW.expect.at=Date.now(); }
+  if(o.phase==='failed'&&FW.phase==='sd'){ FW.phase=''; FW.expect=null; fwBar(null); setMsg('fwMsg','Update failed: '+o.msg,true); } }
+
 let sysBuilt=false, wDirty=false;
 const upTxt=s=>{ const d=Math.floor(s/86400); return (d?d+' d ':'')+fmt(s%86400); };
 function updSystem(){
@@ -1834,6 +1931,7 @@ function updSystem(){
       {k:'safety.manualIdle',l:'End manual mode without activity',t:'sw',w:true,h:'A forgotten manual setpoint: it is switched off after this long without a touch, a web action or a serial command (a beep and a message 1 min before).'},
       {k:'safety.manualIdleMin',l:'… after',t:'num',min:2,max:1440,u:'min',def:30,show:g=>g('safety.manualIdle')},
       {k:'safety.estop',l:'E-stop input (GPIO 5)',t:'sw',w:true,show:()=>!!L.estop,h:'Normally closed contact between GPIO 5 and GND. Open contact or a broken wire: all outputs and the SSR supply relay off, a running program stops.'},
+      {k:'safety.relay',l:'SSR supply relay (GPIO 4)',t:'sw',def:true,w:true,show:()=>!!L.relay,h:'An active-high DC solid-state relay in the common +5 V supply of both SSR inputs: on while a local channel heats, off at once on a fault or E-stop (covers a stuck SSR input or driver; a shorted SSR output needs a contactor). Switch it off only when no relay is fitted: GPIO 4 then stays low — with a relay fitted, the heaters would get no power.'},
       {k:'safety.sound',l:'Alarm sound',t:'sw',def:true,w:true,show:()=>!!L.sound,h:'Faults and E-stop: three long beeps every 3 s. “Action required” and the manual-mode warning: two short beeps every 10 s. Run finished: three short beeps. A touch or a web action silences the current alarm.'},
       {k:'safety.chipWarn',l:'Warn when the chip gets hot',t:'sw',def:true,w:true,show:()=>!!L.chipTemp,h:'The ESP32-S3’s internal temperature sensor, read every 30 s: a warning in the log above the limit.'},
       {k:'safety.chipMaxC',l:'… above',t:'num',min:40,max:120,u:'°C',def:80,show:g=>!!L.chipTemp&&g('safety.chipWarn')}],
@@ -1849,9 +1947,11 @@ function updSystem(){
   const sf=live.safety||{}, L=CFG.limits||{}, sl=[];
   if(L.estop) sl.push(sf.estop?'<span class="msg bad" style="margin:0">E-stop active</span>':`E-stop contact ${sf.contact||'–'}${CFG.safety&&CFG.safety.estop?'':' (input not watched)'}`);
   if(sf.chipC!=null) sl.push(`chip ${f1(sf.chipC)} °C${sf.chipHot?' <span class="msg bad" style="margin:0">hot</span>':''}`);
+  if(live.relay!=null) sl.push('SSR supply relay '+(live.relay?'on':'off'));
   if(sf.muted) sl.push('alarm silenced');
   const slh=sl.join(' · ')||'No E-stop input on this board.';
   if($('safeLive')&&$('safeLive').innerHTML!==slh) $('safeLive').innerHTML=slh;
+  fwLoad(); fwLive(); fwWatch();
   const host=CFG.wifi.hostname;
   const kv=[['Firmware','TempCtl Duo '+live.fw],['Board',live.board+(live.variant?' · '+live.variant:'')],['Network',live.net],['Host name',`<a href="http://${esc(host)}.local/">${esc(host)}.local</a>`],['Uptime',upTxt(live.up)]]
     .map(([k,v])=>`<dt>${k}</dt><dd>${k==='Host name'?v:esc(v)}</dd>`).join('');

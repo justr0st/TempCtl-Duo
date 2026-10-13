@@ -44,3 +44,13 @@ int sdlogList(SdFile* out, int max, uint32_t& totalKb, uint32_t& freeKb, char* e
 // the whole file into a PSRAM buffer (free() it); null + err if missing / too big / no card
 char* sdlogLoad(const char* name, size_t& len, char* err, size_t n);
 bool sdlogDelete(const char* name, char* err, size_t n);
+
+// firmware update from the card (S3, spec 9.11): /firmware.bin in the card's root
+struct SdFirmware {
+  bool found;
+  uint32_t size;
+  char board[32], version[16];
+  char problem[96];  // "" = this device can install it
+};
+bool sdlogFirmwareCheck(SdFirmware& f, char* err, size_t n);  // reads the whole file (a few seconds)
+bool sdlogFirmwareInstall(char* err, size_t n);              // starts it in the SD task (progress: otaStatus)
