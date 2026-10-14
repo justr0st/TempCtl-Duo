@@ -5,6 +5,7 @@
 #include "ui.h"
 #include "syslog.h"
 #include "sdlog.h"
+#include "backup.h"
 #include "crumbs.h"
 #include <LittleFS.h>
 #include <ArduinoJson.h>
@@ -1501,6 +1502,102 @@ static void handleSdDelete() {
   sendJson(r);
 }
 
+// ------------------------------------------------------------ backups on the SD card (S3, spec 9.12)
+// GET /api/backup: {"slot","card","err","totalKb","freeKb","files":[[name, size, mtime], ...]} newest first
+static void handleBackupList() {
+  JsonDocument d;
+  d["slot"] = sdlogSlot();
+  if (sdlogSlot()) {
+    constexpr int MAXF = 100;
+    SdFile* files = (SdFile*)heap_caps_malloc(sizeof(SdFile) * MAXF, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!files) return sendError("Out of memory", 500);
+    char err[64] = "";
+    uint32_t total = 0, freeKb = 0;
+    const int n = sdlogList(files, MAXF, total, freeKb, err, sizeof(err), SD_BACKUPS);
+    d["card"] = n >= 0;
+    d["err"] = JsonString(n < 0 ? err : "");
+    d["totalKb"] = total;
+    d["freeKb"] = freeKb;
+    JsonArray a = d["files"].to<JsonArray>();
+    for (int i = 0; i < n; ++i) {
+      JsonArray x = a.add<JsonArray>();
+      x.add(JsonString(files[i].name));
+      x.add(files[i].size);
+      x.add(files[i].mtime);
+    }
+    free(files);
+  }
+  extraHeaders = "Cache-Control: no-store\r\n";
+  sendJson(d);
+}
+
+// POST /api/backup {}: a new backup -> {"ok":true,"name":...}
+static void handleBackupCreate() {
+  char name[64], err[120];
+  if (!backupCreate(name, sizeof(name), err, sizeof(err))) return sendError(err);
+  JsonDocument d;
+  d["ok"] = true;
+  d["name"] = JsonString(name);
+  sendJson(d);
+}
+
+// GET /api/backup/info?name=: {"time","fw","settings","programs","slots":"1, 2, 5","mask"} (mask: bit k = slot k)
+static void handleBackupInfo() {
+  BackupInfo i;
+  char err[120];
+  if (!backupInfo(reqArg("name").c_str(), i, err, sizeof(err))) return sendError(err);
+  JsonDocument d;
+  d["time"] = JsonString(i.time);
+  d["fw"] = JsonString(i.fw);
+  d["settings"] = i.settings;
+  d["programs"] = i.programs;
+  d["slots"] = JsonString(i.slots);
+  d["mask"] = i.mask;
+  sendJson(d);
+}
+
+// POST /api/backup/restore {"name","settings":true,"programs":true} -> {"ok","msg"} / {"ok":false,"err"}
+static void handleBackupRestore() {
+  JsonDocument b;
+  if (!parseBody(b)) return sendError("Invalid JSON");
+  const uint8_t what = ((b["settings"] | false) ? BACKUP_SETTINGS : 0) | ((b["programs"] | false) ? BACKUP_PROGRAMS : 0);
+  char msg[400];
+  if (!backupRestore(b["name"] | "", what, msg, sizeof(msg))) return sendError(msg);
+  JsonDocument r;
+  r["ok"] = true;
+  r["msg"] = JsonString(msg);
+  sendJson(r);
+}
+
+// POST /api/backup/delete {"name"}
+static void handleBackupDelete() {
+  JsonDocument b;
+  if (!parseBody(b)) return sendError("Invalid JSON");
+  char err[96];
+  if (!sdlogDelete(b["name"] | "", err, sizeof(err), SD_BACKUPS)) return sendError(err);
+  JsonDocument r;
+  r["ok"] = true;
+  sendJson(r);
+}
+
+// GET /api/backup/file?name=: the file itself (JSON)
+static void handleBackupFile() {
+  const String name = reqArg("name");
+  char err[96];
+  size_t len = 0;
+  char* data = sdlogLoad(name.c_str(), len, err, sizeof(err), SD_BACKUPS);
+  if (!data) return sendError(err, 404);
+  extraHeaders = String("Content-Disposition: attachment; filename=\"") + name + "\"\r\nCache-Control: no-store\r\n";
+  size_t at = 0;
+  sendStream("application/json", "backup", [&](char* b, size_t n) -> size_t {
+    const size_t k = len - at < n ? len - at : n;
+    memcpy(b, data + at, k);
+    at += k;
+    return k;
+  });
+  free(data);
+}
+
 // ------------------------------------------------------------ setup
 // the web API: the same handlers for HTTP and for the serial api mode
 struct Route {
@@ -1520,6 +1617,12 @@ static const Route ROUTES[] = {
     {"/api/sd", HTTP_GET, handleSdList},
     {"/api/sd/file", HTTP_GET, handleSdFile},
     {"/api/sd/delete", HTTP_POST, handleSdDelete},
+    {"/api/backup", HTTP_GET, handleBackupList},
+    {"/api/backup", HTTP_POST, handleBackupCreate},
+    {"/api/backup/info", HTTP_GET, handleBackupInfo},
+    {"/api/backup/restore", HTTP_POST, handleBackupRestore},
+    {"/api/backup/delete", HTTP_POST, handleBackupDelete},
+    {"/api/backup/file", HTTP_GET, handleBackupFile},
     {"/api/status", HTTP_GET, handleStatus},
     {"/api/log.csv", HTTP_GET, handleCsv},
     {"/api/history.csv", HTTP_GET, handleHistCsv},

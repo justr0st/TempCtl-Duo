@@ -311,6 +311,18 @@ local); change them on the web page's *Channels* page. After switching from the 
   embedded without the web fonts on the CYD (the S3 only gets those), which keeps it in the slot.
 - Serial: `fw` (version, board, slot), `fw sd`, `fw sd install yes`.
 
+### Backup on the SD card (S3)
+
+Settings and all programs in one file in the card's `backup` folder, named by the device's local date and time
+(`backup/2026-10-14_153012.json`; before the clock is set `start<boot>_<n>.json`). Made by hand: web *Tools ›
+Backup › SD card › Back up to SD card*, touch *System › Backup to SD card*, serial `backup sd`. Restore: the web
+and touch list the backups newest first; pick one, then settings and programs, settings only or programs only
+(with a confirmation). Settings: all are replaced, the stored Wi-Fi passwords stay (they are not in the backup);
+changed network settings are used after a restart. Programs: the slots the backup holds are replaced, the
+other slots stay. Not while a program runs. The web page also downloads and deletes backups, and its file
+restore (*Restore settings…* / *Restore programs…*) takes a backup file too. The file:
+`{"fmt":1,"kind":"tempctl-duo-backup","fw","board","host","time","settings":{…},"programs":[{"i":0,"program":{…}},…]}`.
+
 Touch calibration defaults (200…3700 / 240…3800) suit most CYDs. If touches land off, adjust them with
 `POST /api/config {"display":{"touchCal":[minX,maxX,minY,maxY]}}` and restart.
 
@@ -390,6 +402,7 @@ their ranges and an example per section.
 | `screen restart` | set only the display and the touch controller up again (S3: reset pins + I2C bus freed; CYD: software reset + SPI) and redraw; prints whether the touch controller answers |
 | `screen check` | what the automatic screen check sees now: display status read back, touch controller, number of automatic restarts |
 | Up / Down keys | the last 20 commands (lines with `pw=` and password entries are not kept) |
+| `backup sd` · `backup sd list` · `backup sd restore n=<n> [settings\|programs] [yes]` · `backup sd delete n=<n> yes` | S3: settings + all programs to a new file on the SD card · the backups, newest first, numbered · without `yes`: what backup n holds; with `yes`: restore both parts or one · delete one |
 | `api on` · `api off` | machine mode for the Web Serial page (JSON lines, below) |
 
 **api mode** (`api on`, spec 7b): one JSON object per line, for the Web Serial page. Requests
@@ -509,7 +522,8 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
     changeable here, on the touch screen (System › Time zone: region, then place) and over serial
     (`set time.zone=Europe/Berlin`, `help time` lists the zones). Summer time follows the zone's rules.
   - **Tools**: Modbus tools for a Modbus channel (find the setpoint address, read registers, write one
-    register); backup / restore of the settings and of all programs as JSON files.
+    register); backup / restore of the settings and of all programs as JSON files; S3: backups on the SD
+    card (back up, list, restore all / settings / programs, download, delete; section 4).
 
 ## 5b. The page over USB (Web Serial) and the local app
 
@@ -570,6 +584,12 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 | GET | `/api/sd` | SD run logs (S3): `slot`, `card`, `logging`, `file`, `err`, `totalKb`, `freeKb`, `files` [[name, bytes, mtime], …] newest first |
 | GET | `/api/sd/file?name=` | one run log (CSV; up to 4 MB through the web) |
 | POST | `/api/sd/delete` | `{"name":…}` deletes a run log (not the one being written) |
+| GET | `/api/backup` | SD backups (S3): `slot`, `card`, `err`, `totalKb`, `freeKb`, `files` [[name, bytes, mtime], …] newest first |
+| POST | `/api/backup` | `{}` writes a new backup → `{"ok":true,"name":…}` |
+| GET | `/api/backup/info?name=` | what a backup holds: `time`, `fw`, `settings`, `programs` (count), `slots` ("1, 2, 5"), `mask` (bit k = slot k) |
+| POST | `/api/backup/restore` | `{"name":…,"settings":true,"programs":true}` → `{"ok":true,"msg":…}` (or `err`; not during a run) |
+| POST | `/api/backup/delete` | `{"name":…}` deletes a backup |
+| GET | `/api/backup/file?name=` | the backup file (JSON) |
 | GET | `/api/eventlog.txt` | the events saved in flash, all starts: lines `boot \t epoch \t uptime \t kind \t text` |
 | POST | `/api/time` | `{"t":<UTC s>}`: sets the device clock if it has no NTP time (the page does it; for the log); `{"zone":…, "fixed":"UTC+02:00"}`: the time zone, only while none is set |
 | GET | `/api/timezones` | `{"zones":[…]}`: the names `time.zone` takes (besides `UTC+hh:mm`) |
@@ -634,7 +654,8 @@ src/fonts/                touch UI fonts (tools/lv_font_gen.py from tools/fonts/
 src/web.*                 HTTP server, JSON API
 src/safety.*              E-stop input, alarm sound, user activity, chip temperature (section 7a)
 src/ota.*, ota_image.*    firmware update (web upload, SD card), image check (pure C++, unit-tested), rollback
-src/sdlog.*               SD card (S3): run logs, firmware.bin
+src/sdlog.*               SD card (S3): run logs, firmware.bin, backup files
+src/backup.*              backup of settings + programs on the SD card (S3), restore
 hardware/s3-schematic/    KiCad schematic of the S3 device (+ PDF / PNG)
 hardware/cyd-schematic/   KiCad schematics of the three CYD wirings (+ PDF / PNG)
 hardware/gen/             generator of both (Python 3: python3 make.py ..)

@@ -545,6 +545,33 @@ int main(int argc, char** argv) {
   lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 400, LV_ANIM_OFF);
   shot("14d-system-safety");
   gLive.estopRaw = false;
+  if (!SMALL) {  // SD card backup (S3)
+    int x, y;
+    lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 110, LV_ANIM_OFF);
+    run(100);
+    shot("14e0-system-backup");
+    if (findText(lv_screen_active(), "Back up", x, y)) {
+      tap(x, y);
+      run(300);
+      shot("14e-backup-saved");
+      run(5000);
+    } else printf("[host] backup button not found\n");
+    if (findText(lv_screen_active(), "Choose\xE2\x80\xA6", x, y)) {
+      tap(x, y);
+      run(300);
+      shot("14f-restore-list");
+      if (findText(lv_layer_top(), "02.10.2026", x, y) || findText(lv_layer_top(), "2026-10-02 09:05:12", x, y)) tap(x, y);
+      run(300);
+      shot("14g-restore-what");
+      if (findText(lv_layer_top(), "Settings and programs", x, y)) tap(x, y);
+      run(300);
+      shot("14h-restore-confirm");
+      if (findText(lv_layer_top(), "Restore", x, y)) tap(x, y);
+      run(300);
+      shot("14i-restored");
+      tModalClose();
+    } else printf("[host] restore button not found\n");
+  }
   tShow(SCR_LOG);
   run(400);
   shot("15-log");
@@ -642,6 +669,36 @@ bool otaCanStart(char* e, size_t n) { snprintf(e, n, "a program is running - sto
 bool sdlogFirmwareCheck(SdFirmware& f, char*, size_t) { memset(&f, 0, sizeof(f)); return true; }
 bool sdlogFirmwareInstall(char* e, size_t n) { snprintf(e, n, "-"); return false; }
 bool sdlogSlot() { return SCREEN_W > 400; }
+// backups (backup.h): three on the card
+#include "backup.h"
+static const char* const BK_NAMES[] = {"2026-10-14_153012.json", "2026-10-02_090512.json", "2026-09-28_181455_2.json"};
+int sdlogList(SdFile* out, int max, uint32_t& totalKb, uint32_t& freeKb, char*, size_t, SdDir dir) {
+  totalKb = 7775936, freeKb = 6400000;
+  int n = 0;
+  if (dir == SD_BACKUPS)
+    for (const char* b : BK_NAMES)
+      if (n < max) {
+        memset(&out[n], 0, sizeof(SdFile));
+        strcpy(out[n].name, b);
+        out[n++].size = 6352;
+      }
+  return n;
+}
+bool backupCreate(char* name, size_t nn, char*, size_t) { snprintf(name, nn, "%s", BK_NAMES[0]); return true; }
+bool backupInfo(const char*, BackupInfo& i, char*, size_t) {
+  memset(&i, 0, sizeof(i));
+  strcpy(i.time, "2026-10-02 09:05:12");
+  strcpy(i.fw, "1.0.41");
+  i.settings = true;
+  i.programs = 3;
+  strcpy(i.slots, "1, 2, 5");
+  i.mask = 0x13;
+  return true;
+}
+bool backupRestore(const char*, uint8_t what, char* msg, size_t n) {
+  snprintf(msg, n, "%s restored.", what == BACKUP_ALL ? "Settings and 3 programs" : what == BACKUP_SETTINGS ? "Settings" : "3 programs");
+  return true;
+}
 
 void otaStubSet(int phase) {
   otaStub = OtaStatus{};

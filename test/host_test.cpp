@@ -16,6 +16,7 @@
 #include "runaway.h"
 #include "ota_image.h"
 #include "raw_hist.h"
+#include "backup.h"
 #include <vector>
 #include <algorithm>
 #include "settings.h"
@@ -1135,6 +1136,26 @@ static void testRawHist() {
   CHECK(a.n == 0);
 }
 
+static void testBackupLabel() {
+  char b[48];
+  backupLabel("2026-10-14_153012.json", b, sizeof(b));
+  CHECK(!strcmp(b, "2026-10-14 15:30:12"));
+  backupLabel("2026-10-14_153012_2.json", b, sizeof(b));
+  CHECK(!strcmp(b, "2026-10-14 15:30:12 (2)"));
+  backupLabel("2026-10-14_153012_12.json", b, sizeof(b));
+  CHECK(!strcmp(b, "2026-10-14 15:30:12 (12)"));
+  backupLabel("start12_3.json", b, sizeof(b));
+  CHECK(!strcmp(b, "start 12, backup 3 (no clock)"));
+  backupLabel("mine.json", b, sizeof(b));
+  CHECK(!strcmp(b, "mine"));
+  backupLabel("2026-10-14_15301x.json", b, sizeof(b));
+  CHECK(!strcmp(b, "2026-10-14_15301x"));
+  backupLabel("2026-10-14_153012_.json", b, sizeof(b));
+  CHECK(!strcmp(b, "2026-10-14_153012_"));
+  backupLabel("2026-10-14_153012.json", b, 12);  // (cut, terminated)
+  CHECK(strlen(b) == 11);
+}
+
 int main() {
   testCrc();
   testParse();
@@ -1158,6 +1179,7 @@ int main() {
   testGuard();
   testImageScanner();
   testRawHist();
+  testBackupLabel();
   testAutotune();
   testTimeZones();
   printf(fails ? "%d FAILED\n" : "all tests passed\n", fails);

@@ -147,6 +147,7 @@ button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
 .sdrow .pm{color:var(--muted);font-size:13.5px;display:flex;flex-wrap:wrap;gap:2px 10px}
 .sdrow .pa{display:flex;gap:6px;justify-content:flex-end}
 @media (max-width:640px){.sdrow{grid-template-columns:minmax(0,1fr) auto}.sdrow .pm{grid-column:1;grid-row:2}.sdrow .pa{grid-row:1/3;grid-column:2}}
+@media (max-width:640px){.sdrow.bk .pm{grid-column:2;grid-row:1;justify-content:flex-end}.sdrow.bk .pa{grid-row:2;grid-column:1/3;justify-content:flex-start}}
 .slbar .kf{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:3px 10px;border-radius:999px;font-size:13.5px}
 .slbar .kf i{width:9px;height:9px;border-radius:50%;display:block}
 .slbar .kf[aria-pressed=false]{opacity:.45;border-style:dashed}
@@ -686,6 +687,10 @@ html:root .conn .head img{width:56px;height:56px;filter:drop-shadow(0 0 6px rgba
     <div class="sub"><h3>Programs</h3><p class="hint">All programs in one file. Restoring replaces the programs in the slots that the file contains; the other slots stay as they are.</p>
       <div class="row"><button id="bPrDl">Download all programs</button><button id="bPrUp">Restore programs…</button></div><div class="msg" id="prMsg"></div></div>
   </div>
+  <div class="sub mt" id="bkSd" hidden><div class="edhead"><h3>SD card</h3><span class="tools"><button id="bkRef">Refresh</button></span></div>
+    <p class="hint">Settings and all programs in one file in the card's backup folder, named by the device's date and time. Restore all of it or a part. Wi-Fi passwords are not in the backup; restoring keeps the stored ones.</p>
+    <div class="row"><button id="bkNew" class="pri">Back up to SD card</button></div>
+    <p class="hint" id="bkSt"></p><div class="plist" id="bkList"></div><div class="msg" id="bkMsg"></div></div>
 </section>
 </div>
 </main>
@@ -1755,7 +1760,7 @@ async function pageUpdate(force){
   else if(page==='channels') updChanPage();
   else if(page==='settings') updSystem();
   else if(page==='log'){ sdUpdate(); slUpdate(); }
-  else if(page==='tools') updTools();
+  else if(page==='tools'){ updTools(); bkUpdate(); }
   masonry();
 }
 function download(name,obj){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(obj,null,1)],{type:'application/json'}));
@@ -2307,7 +2312,8 @@ $('bWr').onclick=async()=>{ const a=+$('wrA').value, v=+$('wrV').value, ch=tch()
   try{ const r=await api('/api/mb/write',{ch,addr:a,value:v},20000); setMsg('wrOut',r.ok?'Written.':r.err||'Failed',!r.ok); }catch(e){ setMsg('wrOut','Device not reachable.',true); } };
 $('bCfgDl').onclick=async()=>{ try{ const c=await api('/api/config'); delete c.limits; if(c.wifi){ delete c.wifi.passSet; delete c.wifi.apPassSet; }
   download(`tempctl-duo-settings-${(c.wifi&&c.wifi.hostname)||'device'}.json`,c); setMsg('cfgMsg',''); }catch(e){ setMsg('cfgMsg','Device not reachable.',true); } };
-$('bCfgUp').onclick=async()=>{ const t=await pickFile(); if(t==null) return; const o=parseJson(t);
+$('bCfgUp').onclick=async()=>{ const t=await pickFile(); if(t==null) return; let o=parseJson(t);
+  if(o&&o.kind==='tempctl-duo-backup') o=o.settings;  // (an SD card backup: its settings)
   if(!o||typeof o!=='object'||!Array.isArray(o.channels)||!o.bus){ setMsg('cfgMsg','This is not a TempCtl Duo settings file.',true); return; }
   if(!await ask('Replace the settings with the ones from the file? Channel types, names and all other settings change; a running program may be stopped.','Restore')) return;
   delete o.limits; const r=await postCfg(o); if(r.err){ setMsg('cfgMsg','Restore failed: '+r.err,true); return; } CFG=r;
@@ -2324,6 +2330,62 @@ $('bPrUp').onclick=async()=>{ const t=await pickFile(); if(t==null) return; cons
   for(const x of list){ if(runActive()&&live.run.prog===x.i){ bad.push(`slot ${x.i+1}: running`); continue; }
     try{ const r=await api('/api/program',{i:x.i,program:x.program}); if(r.err) bad.push(`slot ${x.i+1}: ${r.err}`); else { n++; delete DRAFT[x.i]; delete SAVED[x.i]; savedGen[x.i]=-1; } }catch(e){ bad.push(`slot ${x.i+1}: no answer`); } }
   await loadPrograms(); setMsg('prMsg',`${n} program(s) restored.${bad.length?' Not restored: '+bad.join('; '):''}`,bad.length>0); };
+
+/* ---------- backups on the SD card (Tools, S3: settings + all programs in one file, spec 9.12) ---------- */
+const BK={list:null,busy:false};
+function bkName(n){  // "2026-10-14_153012.json" (the device's local time) / "start12_1.json"
+  let m=/^(\d{4})-(\d\d)-(\d\d)_(\d\d)(\d\d)(\d\d)(?:_(\d+))?\.json$/.exec(n);
+  if(m){ const d=new Date(+m[1],m[2]-1,+m[3],+m[4],+m[5],+m[6]);
+    return d.toLocaleString([], {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'})+(m[7]?` (${m[7]})`:''); }
+  m=/^start(\d+)_(\d+)\.json$/.exec(n); if(m) return `start ${m[1]}, backup ${m[2]} (no clock)`;
+  return n.replace(/\.json$/,''); }
+async function bkLoad(){
+  if(BK.busy) return; BK.busy=true; $('bkRef').disabled=true;
+  try{ BK.list=await api('/api/backup',undefined,20000); }catch(e){ BK.list={err:'No answer from the device'}; }
+  BK.busy=false; $('bkRef').disabled=false; bkRender(); masonry(); }
+function bkRender(){
+  const L=BK.list; if(!L){ $('bkSt').textContent='Card not read yet.'; $('bkList').innerHTML=''; return; }
+  const files=L.files||[], why=L.err||'';
+  $('bkSt').innerHTML=L.card===false||why?(/^no card/.test(why)||!why?'No card found - insert a FAT32 card.':esc(why))
+    :(files.length?`${files.length} backup${files.length===1?'':'s'}, newest first`:'No backups on the card yet')+(L.freeKb?` · ${kB(L.freeKb)} free of ${kB(L.totalKb)}`:'')+'.';
+  $('bkList').innerHTML=files.map(([n,size])=>`<div class="sdrow bk"><span class="pn">${esc(bkName(n))}</span><span class="pm"><span>${fsize(size)}</span></span>
+    <span class="pa"><button data-bk="res" data-n="${esc(n)}">Restore…</button><button data-bk="get" data-n="${esc(n)}">Download</button><button data-bk="del" data-n="${esc(n)}" class="danger">Delete</button></span></div>`).join(''); }
+function bkUpdate(){ const sd=!!(live&&live.sd); $('bkSd').hidden=!sd; if(sd&&BK.list===null) bkLoad(); }
+$('bkRef').onclick=()=>bkLoad();
+$('bkNew').onclick=async()=>{ const b=$('bkNew'); b.disabled=true; setMsg('bkMsg','Writing the backup…');
+  try{ const r=await api('/api/backup',{},30000);
+    if(r.err) setMsg('bkMsg','Backup failed: '+r.err,true); else { setMsg('bkMsg',`Saved: ${bkName(r.name)} (backup/${r.name}).`); await bkLoad(); } }
+  catch(e){ setMsg('bkMsg','No answer from the device.',true); }
+  b.disabled=false; };
+$('bkList').addEventListener('click',async e=>{ const b=e.target.closest('button[data-bk]'); if(!b) return; const n=b.dataset.n, act=b.dataset.bk;
+  if(act==='del'){ if(!await ask(`Delete the backup of ${bkName(n)} from the SD card?`,'Delete')) return;
+    const r=await api('/api/backup/delete',{name:n},20000).catch(()=>({err:'No answer from the device'})); if(r.err){ setMsg('bkMsg',r.err,true); return; }
+    setMsg('bkMsg',''); bkLoad(); return; }
+  if(act==='get'){ b.disabled=true; setMsg('bkMsg','Reading the file…');
+    try{ const path='/api/backup/file?name='+encodeURIComponent(n); let t;
+      if(SER.on){ t=await serReq(path,undefined,60000); if(typeof t!=='string') throw new Error(t&&t.err||'not readable'); }
+      else { const r=await fetch(path,{cache:'no-store'}); if(!r.ok){ let m='not readable'; try{ m=(await r.json()).err||m; }catch(x){} throw new Error(m); } t=await r.text(); }
+      const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([t],{type:'application/json'})); a.download='tempctl-duo-backup-'+n;
+      document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },500); setMsg('bkMsg','');
+    }catch(err){ setMsg('bkMsg','Download failed: '+err.message,true); }
+    b.disabled=false; return; }
+  if(runActive()){ setMsg('bkMsg','A program is running - stop it first.',true); return; }
+  b.disabled=true; setMsg('bkMsg','Reading the backup…'); let i;
+  try{ i=await api('/api/backup/info?name='+encodeURIComponent(n),undefined,20000); }catch(x){ i={err:'No answer from the device'}; }
+  b.disabled=false; if(i.err){ setMsg('bkMsg',i.err,true); return; } setMsg('bkMsg','');
+  const pr=`${i.programs} program${i.programs===1?'':'s'}`+(i.programs?` (slot${i.programs===1?'':'s'} ${i.slots})`:'');
+  const opts=[]; if(i.settings&&i.programs) opts.push(['all','Restore both',true]);
+  if(i.settings) opts.push(['set','Settings only',!i.programs]); if(i.programs) opts.push(['prog','Programs only',!i.settings]);
+  if(!opts.length){ setMsg('bkMsg','This backup holds nothing to restore.',true); return; } opts.push(['cancel','Cancel']);
+  const a=await choose(`Restore from the backup of ${bkName(n)}${i.fw?` (firmware ${i.fw})`:''}?\nIt holds ${i.settings?'the settings and ':''}${pr}.\n`+
+    `Settings: all of them are replaced (the stored Wi-Fi passwords stay). Programs: the slots in the backup are replaced, the other slots stay as they are.`,opts);
+  if(a==='cancel') return;
+  setMsg('bkMsg','Restoring…');
+  let r; try{ r=await api('/api/backup/restore',{name:n,settings:a!=='prog',programs:a!=='set'},30000); }catch(x){ r={err:'No answer from the device'}; }
+  if(r.err) setMsg('bkMsg','Restore: '+r.err,true); else setMsg('bkMsg',r.msg);
+  if(a!=='set'){ for(let k=0;k<20;k++) if(i.mask&(1<<k)){ delete DRAFT[k]; delete SAVED[k]; savedGen[k]=-1; } await loadPrograms().catch(()=>{}); }
+  if(a!=='prog'){ cfgGen=-1; await loadCfg(); for(const F of Object.values(FORMS)) fillForm(F); }
+  poll(); });
 
 /* ---------- system log (System page): saved events of earlier starts + everything of this start ---------- */
 const SLK=['Tech','Event','Run','Warning','Error'], SLC=['var(--muted)','var(--text)','var(--acc)','var(--amber)','var(--danger)'];

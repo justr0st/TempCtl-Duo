@@ -31,6 +31,7 @@
 
 static const char* const MNT = "/sd";
 static const char* const DIR_RUNS = "/sd/runs";
+static const char* const DIR_BACKUP = "/sd/backup";
 static constexpr size_t BUF = 64 * 1024;           // per buffer (two: one fills while the other is emptied)
 static constexpr size_t PEND = 192 * 1024;         // taken from the buffers, kept until it is on the card
 static constexpr uint32_t FLUSH_MS = 30000;        // write at least every 30 s
@@ -304,10 +305,11 @@ static void flush(bool closing) {
 }
 
 // ------------------------------------------------------------ web requests (done by the SD task)
-enum ReqType : uint8_t { RQ_NONE = 0, RQ_LIST, RQ_LOAD, RQ_DELETE, RQ_FWCHECK };
+enum ReqType : uint8_t { RQ_NONE = 0, RQ_LIST, RQ_LOAD, RQ_DELETE, RQ_FWCHECK, RQ_BACKUP };
 static struct {
   volatile uint8_t type;
   volatile bool abandoned;  // the web gave up waiting: the SD task cleans up and frees the slot
+  uint8_t dir;              // SdDir
   char name[64];
   bool ok;
   char err[96];
@@ -316,6 +318,8 @@ static struct {
   uint32_t totalKb, freeKb;
   char* data;  // LOAD: PSRAM, handed to the web (or freed when abandoned)
   size_t len;
+  char* wdata;  // BACKUP: the file's content (owned by the request: the SD task frees it)
+  size_t wlen;
   SdFirmware fw;  // FWCHECK
 } rq;
 static volatile bool fwInstall = false;  // install /firmware.bin (started by sdlogFirmwareInstall)
@@ -476,14 +480,18 @@ void sdlogState(SdState& s) {
 }
 
 // ------------------------------------------------------------ web
-static bool nameOk(const char* name) {
+static const char* dirPath(uint8_t dir) { return dir == SD_BACKUPS ? DIR_BACKUP : DIR_RUNS; }
+
+static bool nameOk(const char* name, uint8_t dir) {
   const size_t n = strlen(name);
-  if (n < 5 || n > 60 || strcmp(name + n - 4, ".csv")) return false;
+  const char* ext = dir == SD_BACKUPS ? ".json" : ".csv";
+  const size_t e = strlen(ext);
+  if (n <= e || n > 60 || strcmp(name + n - e, ext)) return false;
   return !strchr(name, '/') && !strchr(name, '\\') && !strstr(name, "..");
 }
 
 // --- run by the SD task
-static int listFiles(SdFile* out, int max, uint32_t& totalKb, uint32_t& freeKb, char* err, size_t n) {
+static int listFiles(uint8_t dir, SdFile* out, int max, uint32_t& totalKb, uint32_t& freeKb, char* err, size_t n) {
   int count = 0;
   totalKb = freeKb = 0;
   const bool ok = withCard(err, n, [&]() -> bool {
@@ -494,14 +502,14 @@ static int listFiles(SdFile* out, int max, uint32_t& totalKb, uint32_t& freeKb, 
       totalKb = (uint32_t)((fs->n_fatent - 2) * clus);
       freeKb = (uint32_t)(fre * clus);
     }
-    DIR* d = opendir(DIR_RUNS);
-    if (!d) return true;  // no run logged yet
+    DIR* d = opendir(dirPath(dir));
+    if (!d) return true;  // nothing written yet
     char p[96];
     for (struct dirent* e; (e = readdir(d)) != nullptr && count < max;) {
-      if (!nameOk(e->d_name)) continue;
+      if (!nameOk(e->d_name, dir)) continue;
       SdFile& f = out[count];
       strlcpy(f.name, e->d_name, sizeof(f.name));
-      snprintf(p, sizeof(p), "%s/%.60s", DIR_RUNS, e->d_name);
+      snprintf(p, sizeof(p), "%s/%.60s", dirPath(dir), e->d_name);
       struct stat st;
       if (stat(p, &st) != 0) continue;
       f.size = (uint32_t)st.st_size;
@@ -525,12 +533,12 @@ static int listFiles(SdFile* out, int max, uint32_t& totalKb, uint32_t& freeKb, 
   return count;
 }
 
-static char* loadFile(const char* name, size_t& len, char* err, size_t n) {
+static char* loadFile(uint8_t dir, const char* name, size_t& len, char* err, size_t n) {
   len = 0;
   char* data = nullptr;
   withCard(err, n, [&]() -> bool {
     char p[96];
-    snprintf(p, sizeof(p), "%s/%s", DIR_RUNS, name);
+    snprintf(p, sizeof(p), "%s/%s", dirPath(dir), name);
     struct stat st;
     if (stat(p, &st) != 0) {
       snprintf(err, n, "no such file");
@@ -556,14 +564,39 @@ static char* loadFile(const char* name, size_t& len, char* err, size_t n) {
   return data;
 }
 
-static bool deleteFile(const char* name, char* err, size_t n) {
+static bool deleteFile(uint8_t dir, const char* name, char* err, size_t n) {
   return withCard(err, n, [&]() -> bool {
     char p[96];
-    snprintf(p, sizeof(p), "%s/%s", DIR_RUNS, name);
+    snprintf(p, sizeof(p), "%s/%s", dirPath(dir), name);
     if (unlink(p) != 0) {
       snprintf(err, n, "could not delete the file");
       return false;
     }
+    return true;
+  });
+}
+
+// a backup file: name = base on entry, the file name written on return
+static bool writeBackup(const char* data, size_t len, char* name, size_t nn, char* err, size_t n) {
+  char base[64];
+  strlcpy(base, name, sizeof(base));
+  return withCard(err, n, [&]() -> bool {
+    mkdir(DIR_BACKUP, 0775);
+    char rel[96];
+    snprintf(rel, sizeof(rel), "backup/%s.json", base);
+    for (int k = 2; k < 100 && nameUsed(rel); ++k) snprintf(rel, sizeof(rel), "backup/%s_%d.json", base, k);
+    char p[112];
+    snprintf(p, sizeof(p), "%s/%s", MNT, rel);
+    FILE* f = fopen(p, "w");
+    if (!f) return snprintf(err, n, "cannot create %.60s", rel), false;
+    bool good = fwrite(data, 1, len, f) == len;
+    good &= fclose(f) == 0;
+    if (!good) {
+      unlink(p);
+      snprintf(err, n, "write error (card full?)");
+      return false;
+    }
+    strlcpy(name, rel + 7, nn);  // ("backup/")
     return true;
   });
 }
@@ -650,17 +683,20 @@ static void doRequest() {
   rq.len = 0;
   switch (rq.type) {
     case RQ_LIST:
-      rq.count = listFiles(rq.files, LIST_MAX, rq.totalKb, rq.freeKb, rq.err, sizeof(rq.err));
+      rq.count = listFiles(rq.dir, rq.files, LIST_MAX, rq.totalKb, rq.freeKb, rq.err, sizeof(rq.err));
       rq.ok = rq.count >= 0;
       break;
     case RQ_LOAD:
-      rq.data = loadFile(rq.name, rq.len, rq.err, sizeof(rq.err));
+      rq.data = loadFile(rq.dir, rq.name, rq.len, rq.err, sizeof(rq.err));
       rq.ok = rq.data != nullptr;
       break;
-    case RQ_DELETE: rq.ok = deleteFile(rq.name, rq.err, sizeof(rq.err)); break;
+    case RQ_DELETE: rq.ok = deleteFile(rq.dir, rq.name, rq.err, sizeof(rq.err)); break;
     case RQ_FWCHECK: rq.ok = checkFirmware(rq.fw, rq.err, sizeof(rq.err)); break;
+    case RQ_BACKUP: rq.ok = writeBackup(rq.wdata, rq.wlen, rq.name, sizeof(rq.name), rq.err, sizeof(rq.err)); break;
     default: rq.ok = false;
   }
+  free(rq.wdata);
+  rq.wdata = nullptr;
   portENTER_CRITICAL(&mux);  // (decided together with the web side's give-up, so exactly one frees the slot)
   rq.type = RQ_NONE;
   const bool gone = rq.abandoned;
@@ -677,17 +713,24 @@ static void doRequest() {
 // --- web side (loop task): hands the request to the SD task and waits for the answer
 static constexpr uint32_t WEB_WAIT_MS = 8000;  // (the loop watchdog allows 15 s)
 
-static bool ask(uint8_t type, const char* name, char* err, size_t n) {
+// wdata (RQ_BACKUP): taken over in any case
+static bool ask(uint8_t type, const char* name, char* err, size_t n, uint8_t dir = SD_RUNS, char* wdata = nullptr,
+                size_t wlen = 0) {
   if (!sdTask || !rqFree) {
+    free(wdata);
     snprintf(err, n, "SD card not available");
     return false;
   }
   if (xSemaphoreTake(rqFree, pdMS_TO_TICKS(WEB_WAIT_MS)) != pdTRUE) {
+    free(wdata);
     snprintf(err, n, "SD card busy - try again");
     return false;
   }
   xSemaphoreTake(rqDone, 0);  // (clear)
   strlcpy(rq.name, name ? name : "", sizeof(rq.name));
+  rq.dir = dir;
+  rq.wdata = wdata;
+  rq.wlen = wlen;
   rq.abandoned = false;
   rq.type = type;
   xTaskNotifyGive(sdTask);
@@ -707,9 +750,9 @@ static bool ask(uint8_t type, const char* name, char* err, size_t n) {
 }
 static void done() { xSemaphoreGive(rqFree); }
 
-int sdlogList(SdFile* out, int max, uint32_t& totalKb, uint32_t& freeKb, char* err, size_t n) {
+int sdlogList(SdFile* out, int max, uint32_t& totalKb, uint32_t& freeKb, char* err, size_t n, SdDir dir) {
   totalKb = freeKb = 0;
-  if (!ask(RQ_LIST, nullptr, err, n)) return -1;
+  if (!ask(RQ_LIST, nullptr, err, n, dir)) return -1;
   int count = rq.ok ? rq.count : -1;
   if (count > max) count = max;
   if (count > 0) memcpy(out, rq.files, sizeof(SdFile) * count);
@@ -719,13 +762,15 @@ int sdlogList(SdFile* out, int max, uint32_t& totalKb, uint32_t& freeKb, char* e
   return count;
 }
 
-char* sdlogLoad(const char* name, size_t& len, char* err, size_t n) {
+static const char* badName(uint8_t dir) { return dir == SD_BACKUPS ? "not a backup file name" : "not a run log name"; }
+
+char* sdlogLoad(const char* name, size_t& len, char* err, size_t n, SdDir dir) {
   len = 0;
-  if (!nameOk(name)) {
-    snprintf(err, n, "not a run log name");
+  if (!nameOk(name, dir)) {
+    snprintf(err, n, "%s", badName(dir));
     return nullptr;
   }
-  if (!ask(RQ_LOAD, name, err, n)) return nullptr;
+  if (!ask(RQ_LOAD, name, err, n, dir)) return nullptr;
   char* data = rq.data;
   len = rq.len;
   rq.data = nullptr;
@@ -733,17 +778,27 @@ char* sdlogLoad(const char* name, size_t& len, char* err, size_t n) {
   return data;
 }
 
-bool sdlogDelete(const char* name, char* err, size_t n) {
-  if (!nameOk(name)) {
-    snprintf(err, n, "not a run log name");
+bool sdlogDelete(const char* name, char* err, size_t n, SdDir dir) {
+  if (!nameOk(name, dir)) {
+    snprintf(err, n, "%s", badName(dir));
     return false;
   }
-  if (open_ && !strcmp(file + 5, name)) {  // ("runs/" + name)
+  if (dir == SD_RUNS && open_ && !strcmp(file + 5, name)) {  // ("runs/" + name)
     snprintf(err, n, "this run is still being logged");
     return false;
   }
-  if (!ask(RQ_DELETE, name, err, n)) return false;
+  if (!ask(RQ_DELETE, name, err, n, dir)) return false;
   const bool ok = rq.ok;
+  done();
+  return ok;
+}
+
+bool sdlogBackupWrite(char* data, size_t len, const char* base, char* name, size_t nn, char* err, size_t n) {
+  if (nn) name[0] = 0;
+  if (!data) return snprintf(err, n, "out of memory"), false;
+  if (!ask(RQ_BACKUP, base, err, n, SD_BACKUPS, data, len)) return false;
+  const bool ok = rq.ok;
+  if (ok) strlcpy(name, rq.name, nn);
   done();
   return ok;
 }
@@ -777,17 +832,23 @@ void sdlogState(SdState& s) {
   memset(&s, 0, sizeof(s));
   s.card = -1;
 }
-int sdlogList(SdFile*, int, uint32_t& totalKb, uint32_t& freeKb, char* err, size_t n) {
+int sdlogList(SdFile*, int, uint32_t& totalKb, uint32_t& freeKb, char* err, size_t n, SdDir) {
   totalKb = freeKb = 0;
   snprintf(err, n, "no SD slot on this board");
   return -1;
 }
-char* sdlogLoad(const char*, size_t& len, char* err, size_t n) {
+char* sdlogLoad(const char*, size_t& len, char* err, size_t n, SdDir) {
   len = 0;
   snprintf(err, n, "no SD slot on this board");
   return nullptr;
 }
-bool sdlogDelete(const char*, char* err, size_t n) {
+bool sdlogDelete(const char*, char* err, size_t n, SdDir) {
+  snprintf(err, n, "no SD slot on this board");
+  return false;
+}
+bool sdlogBackupWrite(char* data, size_t, const char*, char* name, size_t nn, char* err, size_t n) {
+  free(data);
+  if (nn) name[0] = 0;
   snprintf(err, n, "no SD slot on this board");
   return false;
 }

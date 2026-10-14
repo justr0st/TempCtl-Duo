@@ -4,6 +4,8 @@
 #include "safety.h"
 #include "ota.h"
 #include "sdlog.h"
+#include "backup.h"
+#include "config.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -892,6 +894,89 @@ static void onSdFw(lv_event_t*) {
   tDialog(t, m, "Cancel", "Install", "", onSdFwAnswer, 0);
 }
 
+#if HAS_SD
+// ---- backup of the settings and all programs on the SD card (S3, spec 9.12)
+static constexpr int BK_MAX = 40;  // (the choice list's rows)
+static SdFile* bkFiles = nullptr;  // PSRAM, while the restore popups are open
+static int bkN = 0;
+static char bkName[64];
+static uint8_t bkWhat, bkMap[3];
+static BackupInfo bkInfo;
+
+static bool runIsActive() {
+  LiveData L;
+  liveCopy(L);
+  return L.state == RunState::Running || L.state == RunState::Paused;
+}
+static void onBackup(lv_event_t*) {
+  char name[64], err[120], label[48], m[96];
+  if (!backupCreate(name, sizeof(name), err, sizeof(err))) return tToast(err, true);
+  backupLabel(name, label, sizeof(label));
+  snprintf(m, sizeof(m), "Backup saved on the SD card: %s", label);
+  tToast(m);
+}
+static void onBkDone(int, int) {}
+static void onBkAnswer(int b, int) {
+  if (b != 2) return;
+  static char msg[400];
+  const bool ok = backupRestore(bkName, bkWhat, msg, sizeof(msg));
+  tDialog(ok ? "Restored" : "Restore", msg, "OK", "", "", onBkDone, 0);
+  systemShow();
+}
+static void onBkWhat(int i, int) {
+  if (i < 0 || i > 2 || !bkMap[i]) return;
+  bkWhat = bkMap[i];
+  char label[48], t[64], m[320], pr[112] = "";
+  backupLabel(bkName, label, sizeof(label));
+  if (bkWhat & BACKUP_PROGRAMS)
+    snprintf(pr, sizeof(pr), " The program slot%s %s %s replaced.", bkInfo.programs == 1 ? "" : "s", bkInfo.slots,
+             bkInfo.programs == 1 ? "is" : "are");
+  snprintf(t, sizeof(t), "Restore %s?", bkWhat == BACKUP_ALL ? "settings and programs" : bkWhat == BACKUP_SETTINGS ? "the settings" : "the programs");
+  snprintf(m, sizeof(m), "From the backup of %s%s%s%s.%s%s", label, bkInfo.fw[0] ? " (firmware " : "", bkInfo.fw, bkInfo.fw[0] ? ")" : "",
+           bkWhat & BACKUP_SETTINGS ? " All settings are replaced (the Wi-Fi passwords stay)." : "", pr);
+  tDialog(t, m, "Cancel", "Restore", "", onBkAnswer, 0, true);
+}
+static void onBkPick(int i, int) {
+  if (i < 0 || i >= bkN || !bkFiles) return;
+  strlcpy(bkName, bkFiles[i].name, sizeof(bkName));
+  char err[120];
+  if (!backupInfo(bkName, bkInfo, err, sizeof(err))) return tToast(err, true);
+  static char items[64];
+  items[0] = 0;
+  int k = 0;
+  auto add = [&](const char* t, uint8_t w) {
+    if (k) strlcat(items, "\n", sizeof(items));
+    strlcat(items, t, sizeof(items));
+    bkMap[k++] = w;
+  };
+  memset(bkMap, 0, sizeof(bkMap));
+  if (bkInfo.settings && bkInfo.programs) add("Settings and programs", BACKUP_ALL);
+  if (bkInfo.settings) add("Settings only", BACKUP_SETTINGS);
+  if (bkInfo.programs) add("Programs only", BACKUP_PROGRAMS);
+  if (!k) return tToast("This backup holds nothing to restore.", true);
+  tChoice("Restore what?", items, -1, onBkWhat, 0);
+}
+static void onRestoreList(lv_event_t*) {
+  if (runIsActive()) return tToast("A program is running - stop it first.", true);
+  if (!bkFiles) bkFiles = (SdFile*)heap_caps_malloc(sizeof(SdFile) * BK_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!bkFiles) return tToast("Out of memory", true);
+  uint32_t totalKb, freeKb;
+  char err[96];
+  bkN = sdlogList(bkFiles, BK_MAX, totalKb, freeKb, err, sizeof(err), SD_BACKUPS);
+  if (bkN < 0) return tToast(err, true);
+  if (!bkN) return tToast("No backups on the SD card yet.", true);
+  static char items[BK_MAX * 32];
+  items[0] = 0;
+  for (int i = 0; i < bkN; ++i) {
+    char label[48];
+    backupLabel(bkFiles[i].name, label, sizeof(label));
+    if (i) strlcat(items, "\n", sizeof(items));
+    strlcat(items, label, sizeof(items));
+  }
+  tChoice("Restore a backup", items, -1, onBkPick, 0);
+}
+#endif
+
 lv_obj_t* systemCreate() {
   TPage p = tPageCreate("System", backToMenu);
   lv_obj_t* r = settingRow(p.body, "Polling interval", "How often PV, SP and output are read. Two Modbus channels: each every 2 \xC3\x97 this");
@@ -904,6 +989,12 @@ lv_obj_t* systemCreate() {
   if (sdlogSlot()) {
     r = settingRow(p.body, "Firmware update", "firmware.bin in the SD card's root folder (or: web page, Settings)");
     sFw = tButton(r, "SD card", onSdFw, nullptr, CW2, BH);
+#if HAS_SD
+    r = settingRow(p.body, "Backup to SD card", "Settings and all programs in one file (backup folder on the card)");
+    tButton(r, "Back up", onBackup, nullptr, CW2, BH);
+    r = settingRow(p.body, "Restore from SD card", "Settings, programs or both from a backup on the card");
+    tButton(r, "Choose" "\xE2\x80\xA6", onRestoreList, nullptr, CW2, BH);
+#endif
   }
   r = settingRow(p.body, "Manual mode timeout", "Manual mode ends after this long without a touch, web or serial action (a beep 1 min before)");
   sIdle = tButton(r, "", onIdle, nullptr, CW2, BH);

@@ -10,6 +10,7 @@
 #include "safety.h"
 #include "ota.h"
 #include "sdlog.h"
+#include "backup.h"
 #include "config.h"
 #include "net.h"
 #include "program_store.h"
@@ -348,6 +349,18 @@ static const char* const H_SETTINGS_SHORT[] = {
     "  touch cal                      calibrate the touch screen (tap 4 targets)",
 #endif
 };
+#if HAS_SD
+static const char* const H_BACKUP[] = {
+    "BACKUP ON THE SD CARD (settings and all programs in one file in /backup)",
+    "  backup sd                      make a backup (named by date and time)",
+    "  backup sd list                 the backups on the card, newest first (numbered)",
+    "  backup sd restore n=<n>        what backup n holds; restore it with",
+    "  backup sd restore n=<n> [settings|programs] yes",
+    "                                 both parts, or only the settings / the programs",
+    "                                 (programs: the slots in the backup are replaced)",
+    "  backup sd delete n=<n> yes     delete backup n from the card",
+};
+#endif
 static const char* const H_DEVICE[] = {
     "DEVICE",
     "  reboot                         restart (not while a program runs)",
@@ -508,6 +521,9 @@ static const HelpSec HELP[] = {
     HS("autotune|tune", H_TUNE),
     HS("wifi|network", H_WIFI),
     HS("", H_SETTINGS_SHORT),  // (help settings: the long page)
+#if HAS_SD
+    HS("backup|restore|sd", H_BACKUP),
+#endif
     HS("device|reboot|help", H_DEVICE),
 };
 
@@ -554,7 +570,8 @@ static void help(const char* section = nullptr) {
     }
     for (const HelpSec& h : HELP)
       if (nameIn(h.names, section)) return printLines(h.lines, h.n);
-    return err("no help section \"%s\" (status, manual, programs, autotune, wifi, settings, time, device, api)", section);
+    return err("no help section \"%s\" (status, manual, programs, autotune, wifi, settings, time,%s device, api)", section,
+               HAS_SD ? " backup," : "");
   }
   banner();
   for (const HelpSec& h : HELP) {
@@ -1737,6 +1754,75 @@ static void cmdFw(const Args& a) {
   else say("update    %s", e);
 }
 
+#if HAS_SD
+// backup sd [list | restore n=<n> [settings|programs] [yes] | delete n=<n> yes] (spec 9.12)
+static void cmdBackup(const Args& a) {
+  if (strcmp(a.word(1), "sd")) return err("backup sd | backup sd list | backup sd restore n=<n> | backup sd delete n=<n> yes");
+  const char* w = a.word(2);
+  char e[400];
+  if (!*w) {
+    char name[64];
+    if (!backupCreate(name, sizeof(name), e, sizeof(e))) return err("%s", e);
+    return say("saved: backup/%s (settings and all programs)", name);
+  }
+  const bool list = !strcmp(w, "list"), res = !strcmp(w, "restore"), del = !strcmp(w, "delete");
+  if (!list && !res && !del) return err("backup sd | backup sd list | backup sd restore n=<n> | backup sd delete n=<n> yes");
+  constexpr int MAXF = 100;
+  SdFile* f = (SdFile*)heap_caps_malloc(sizeof(SdFile) * MAXF, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!f) return err("out of memory");
+  uint32_t totalKb, freeKb;
+  const int n = sdlogList(f, MAXF, totalKb, freeKb, e, sizeof(e), SD_BACKUPS);
+  char label[48];
+  if (n < 0) {
+    free(f);
+    return err("%s", e);
+  }
+  if (list) {
+    for (int i = 0; i < n; ++i) {
+      backupLabel(f[i].name, label, sizeof(label));
+      say("%3d  %-26s %4u kB", i + 1, label, (unsigned)((f[i].size + 1023) / 1024));
+    }
+    free(f);
+    if (!n) return say("no backups on the SD card (backup sd makes one)");
+    return say("%d backup%s, newest first; backup sd restore n=<n> shows what one holds", n, n == 1 ? "" : "s");
+  }
+  float v;
+  if (!number(a.get("n"), v) || v < 1 || v > n || v != (int)v) {
+    free(f);
+    if (!n) return err("no backups on the SD card");
+    return err("backup sd %s n=<1 ... %d> (backup sd list numbers them)", w, n);
+  }
+  char name[64];
+  strlcpy(name, f[(int)v - 1].name, sizeof(name));
+  free(f);
+  backupLabel(name, label, sizeof(label));
+  if (del) {
+    if (strcmp(a.word(3), "yes")) return err("to delete the backup of %s: backup sd delete n=%d yes", label, (int)v);
+    if (!sdlogDelete(name, e, sizeof(e), SD_BACKUPS)) return err("%s", e);
+    return say("deleted: backup/%s", name);
+  }
+  // restore [settings|programs] [yes]
+  uint8_t what = BACKUP_ALL;
+  int k = 3;
+  if (!strcmp(a.word(k), "settings")) what = BACKUP_SETTINGS, ++k;
+  else if (!strcmp(a.word(k), "programs")) what = BACKUP_PROGRAMS, ++k;
+  if (strcmp(a.word(k), "yes")) {
+    BackupInfo i;
+    if (!backupInfo(name, i, e, sizeof(e))) return err("%s", e);
+    char fw[32] = "";
+    if (i.fw[0]) snprintf(fw, sizeof(fw), " (firmware %s)", i.fw);
+    say("backup of %s%s: %s%d program%s", label, fw, i.settings ? "settings and " : "", i.programs, i.programs == 1 ? "" : "s");
+    if (i.programs) say("  program slots: %s", i.slots);
+    say("to restore: backup sd restore n=%d yes (or: ... n=%d settings yes / ... n=%d programs yes)", (int)v, (int)v, (int)v);
+    return say("settings: all are replaced (the Wi-Fi passwords stay); programs: the slots in the backup are replaced");
+  }
+  if (runActive()) return err("a program is running - stop it first");
+  const bool ok = backupRestore(name, what, e, sizeof(e));
+  if (!ok) return err("%s", e);
+  say("%s", e);
+}
+#endif
+
 static void dispatch(const Args& a) {
   const char* c = a.word(0);
   if (!strcmp(c, "help") || !strcmp(c, "?")) return help(a.word(1));
@@ -1754,6 +1840,11 @@ static void dispatch(const Args& a) {
   }
   if (!strcmp(c, "info")) return cmdInfo();
   if (!strcmp(c, "fw") || !strcmp(c, "firmware")) return cmdFw(a);
+#if HAS_SD
+  if (!strcmp(c, "backup")) return cmdBackup(a);
+#else
+  if (!strcmp(c, "backup")) return err("no SD slot on this board (backup files: web page, Tools > Backup)");
+#endif
   if (!strcmp(c, "log")) return cmdLog(a);
   if (!strcmp(c, "ack")) return cmdAck(a);
   if (!strcmp(c, "tune")) return cmdTune(a);

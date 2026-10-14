@@ -39,11 +39,16 @@ struct SdFile {
   char name[64];
   uint32_t size, mtime;
 };
+// the card's folders: /runs (run logs, *.csv), /backup (settings + programs, *.json; backup.h)
+enum SdDir : uint8_t { SD_RUNS = 0, SD_BACKUPS = 1 };
 // fills up to max entries; returns the count (-1: no card / error -> err). total/free in kB (0 = unknown)
-int sdlogList(SdFile* out, int max, uint32_t& totalKb, uint32_t& freeKb, char* err, size_t n);
+int sdlogList(SdFile* out, int max, uint32_t& totalKb, uint32_t& freeKb, char* err, size_t n, SdDir dir = SD_RUNS);
 // the whole file into a PSRAM buffer (free() it); null + err if missing / too big / no card
-char* sdlogLoad(const char* name, size_t& len, char* err, size_t n);
-bool sdlogDelete(const char* name, char* err, size_t n);
+char* sdlogLoad(const char* name, size_t& len, char* err, size_t n, SdDir dir = SD_RUNS);
+bool sdlogDelete(const char* name, char* err, size_t n, SdDir dir = SD_RUNS);
+// a new file in /backup: data (heap_caps_malloc'd; taken over and freed in any case) as <base>.json
+// (<base>_2.json ... if taken); name: the file name written
+bool sdlogBackupWrite(char* data, size_t len, const char* base, char* name, size_t nn, char* err, size_t n);
 
 // firmware update from the card (S3, spec 9.11): /firmware.bin in the card's root
 struct SdFirmware {

@@ -75,6 +75,30 @@ const char* otaRunningSlot() { return "app0"; }
 bool otaProbation() { return false; }
 bool sdlogFirmwareCheck(SdFirmware& f, char*, size_t) { memset(&f, 0, sizeof(f)); f.found = true; f.size = 1900000; strcpy(f.board, "cyd-1xlocal-1x485"); strcpy(f.version, "1.0.40"); return true; }
 bool sdlogFirmwareInstall(char* e, size_t n) { snprintf(e, n, "a program is running - stop it first"); return false; }
+#include "backup.h"
+#include "config.h"
+#if HAS_SD  // (BOARD=s3 ./build.sh)
+static const char* bkNames[3] = {"2026-10-14_153012.json", "2026-10-02_090512.json", "start12_1.json"};
+static int bkCount = 3;
+int sdlogList(SdFile* out, int max, uint32_t& totalKb, uint32_t& freeKb, char*, size_t, SdDir) {
+  totalKb = 7775936, freeKb = 6400000;
+  int n = 0;
+  for (int i = 0; i < bkCount && n < max; ++i, ++n) { memset(&out[n], 0, sizeof(SdFile)); strcpy(out[n].name, bkNames[i]); out[n].size = 6352; }
+  return n;
+}
+bool sdlogDelete(const char* name, char*, size_t, SdDir) {
+  for (int i = 0; i < bkCount; ++i) if (!strcmp(bkNames[i], name)) { for (int j = i; j + 1 < bkCount; ++j) bkNames[j] = bkNames[j + 1]; --bkCount; return true; }
+  return false;
+}
+bool backupCreate(char* name, size_t nn, char*, size_t) { snprintf(name, nn, "2026-10-14_160000.json"); return true; }
+bool backupInfo(const char*, BackupInfo& i, char*, size_t) {
+  memset(&i, 0, sizeof(i)); strcpy(i.fw, "1.0.41"); i.settings = true; i.programs = 3; strcpy(i.slots, "1, 2, 5"); i.mask = 0x13; return true;
+}
+bool backupRestore(const char* name, uint8_t what, char* msg, size_t n) {
+  snprintf(msg, n, "[%s what=%d] %s restored.", name, what, what == BACKUP_ALL ? "Settings and 3 programs" : what == BACKUP_SETTINGS ? "Settings" : "3 programs");
+  return true;
+}
+#endif
 bool safetyEstopWired() { return false; }
 bool safetySoundWired() { return true; }
 bool localCtrlRelayWired() { return true; }
@@ -274,6 +298,22 @@ int main() {
   run(16000);  // no request for 15 s: back to the console
   type("help api\r");
   type("wifi forget\r");
+#if HAS_SD
+  type("help backup\r");
+  type("backup\r");
+  type("backup sd\r");
+  type("backup sd list\r");
+  type("backup sd restore\r");
+  type("backup sd restore n=2\r");
+  type("backup sd restore n=2 programs yes\r");
+  type("backup sd restore n=3 yes\r");
+  type("backup sd restore n=9 yes\r");
+  type("backup sd delete n=3\r");
+  type("backup sd delete n=3 yes\r");
+  type("backup sd list\r");
+#else
+  type("backup sd\r");
+#endif
   type("factory reset\r");
   type("factory reset yes\r");
   printf("\n");

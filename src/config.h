@@ -11,6 +11,13 @@
 #error "No board selected: build with -D BOARD_S3 or -D BOARD_CYD (platformio.ini envs s3, cyd-1xlocal-1x485, cyd-2xlocal, cyd-2xlocal-2x485)"
 #endif
 
+// SD card (run logs, firmware update, backups): S3 only (the CYD's SD pins carry the thermocouples)
+#if defined(PIN_SD_CS) && defined(BOARD_HAS_PSRAM)
+#define HAS_SD 1
+#else
+#define HAS_SD 0
+#endif
+
 // Chart resolution (points). Live: the chosen period (display.liveMin) in CHART_N
 // bins of the live history. Running: the program timeline (plus some spare time)
 // is divided into CHART_N bins.
