@@ -343,6 +343,168 @@ table.t input{width:90px}
 .conn .devs small{color:var(--muted);font-weight:400;font-size:13px}
 .conn .devs .none{color:var(--muted);font-size:14px}
 .foot .serb{align-self:flex-start}
+/* ===== Glass style (spec 7, "Look"; html:root = same specificity as a class, so these win over the base rules); the page's own tokens (accent, channel colours) stay ===== */
+html:root{
+  --grain:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='240' height='240' filter='url(%23n)'/></svg>");
+  --glass:rgba(255,255,255,.52);--glass-border:rgba(255,255,255,.72);
+  --glass-shadow:0 12px 40px -14px rgba(18,42,62,.32),inset 0 1px 0 rgba(255,255,255,.6);
+  --pill:rgba(255,255,255,.5);--pill-hover:rgba(255,255,255,.88);--pill-border:rgba(255,255,255,.78);
+  --field:rgba(255,255,255,.46);--field-focus:rgba(255,255,255,.85);
+  --guide:rgba(255,255,255,.62);--grain-op:.5;
+  --line:rgba(20,44,60,.13);--sunk:rgba(255,255,255,.42);
+  --bg-base:#B9CCD8;
+  --mesh:
+    radial-gradient(58% 60% at 0% 0%,#F1F4F2 0%,rgba(241,244,242,0) 72%),
+    radial-gradient(55% 62% at 100% 0%,color-mix(in srgb,var(--acc) 72%,#fff) 0%,rgba(255,255,255,0) 74%),
+    radial-gradient(62% 70% at 0% 100%,color-mix(in srgb,var(--acc) 40%,#174A5E) 0%,rgba(23,74,94,0) 74%),
+    radial-gradient(58% 64% at 100% 100%,color-mix(in srgb,var(--acc) 30%,#A9C9D6) 0%,rgba(169,201,214,0) 72%),
+    linear-gradient(135deg,#E5ECEF 0%,#BFD3DE 48%,#97B6C6 100%);
+}
+@media (prefers-color-scheme:dark){html:root:not([data-theme="light"]){
+  --glass:rgba(16,24,30,.50);--glass-border:rgba(255,255,255,.10);
+  --glass-shadow:0 16px 48px -16px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.06);
+  --pill:rgba(255,255,255,.07);--pill-hover:rgba(255,255,255,.15);--pill-border:rgba(255,255,255,.12);
+  --field:rgba(0,0,0,.24);--field-focus:rgba(0,0,0,.38);
+  --guide:rgba(255,255,255,.16);--grain-op:.32;
+  --line:rgba(255,255,255,.09);--sunk:rgba(255,255,255,.05);
+  --bg-base:#0B1014;
+  --mesh:
+    radial-gradient(60% 65% at 100% 0%,color-mix(in srgb,var(--acc) 62%,transparent) 0%,rgba(0,0,0,0) 72%),
+    radial-gradient(62% 72% at 0% 100%,color-mix(in srgb,color-mix(in srgb,var(--acc) 55%,#0E3540) 75%,transparent) 0%,transparent 74%),
+    radial-gradient(50% 55% at 0% 0%,rgba(140,160,180,.20) 0%,rgba(140,160,180,0) 70%),
+    radial-gradient(58% 62% at 100% 100%,color-mix(in srgb,var(--acc) 40%,transparent) 0%,rgba(0,0,0,0) 72%),
+    linear-gradient(135deg,#131C22 0%,#0B1014 100%);
+}}
+html:root[data-theme="dark"]{
+  --glass:rgba(16,24,30,.50);--glass-border:rgba(255,255,255,.10);
+  --glass-shadow:0 16px 48px -16px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.06);
+  --pill:rgba(255,255,255,.07);--pill-hover:rgba(255,255,255,.15);--pill-border:rgba(255,255,255,.12);
+  --field:rgba(0,0,0,.24);--field-focus:rgba(0,0,0,.38);
+  --guide:rgba(255,255,255,.16);--grain-op:.32;
+  --line:rgba(255,255,255,.09);--sunk:rgba(255,255,255,.05);
+  --bg-base:#0B1014;
+  --mesh:
+    radial-gradient(60% 65% at 100% 0%,color-mix(in srgb,var(--acc) 62%,transparent) 0%,rgba(0,0,0,0) 72%),
+    radial-gradient(62% 72% at 0% 100%,color-mix(in srgb,color-mix(in srgb,var(--acc) 55%,#0E3540) 75%,transparent) 0%,transparent 74%),
+    radial-gradient(50% 55% at 0% 0%,rgba(140,160,180,.20) 0%,rgba(140,160,180,0) 70%),
+    radial-gradient(58% 62% at 100% 100%,color-mix(in srgb,var(--acc) 40%,transparent) 0%,rgba(0,0,0,0) 72%),
+    linear-gradient(135deg,#131C22 0%,#0B1014 100%);
+}
+/* backdrop: mesh + grain (painted once, fixed: scrolling does not repaint it) */
+html:root body{background-color:var(--bg-base);background-image:var(--mesh);background-attachment:fixed}
+html:root body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:var(--grain-op);mix-blend-mode:soft-light;
+  background-image:var(--grain);background-size:240px 240px}
+
+/* glass surfaces: sidebar, top bar, panels. Only these blur; controls on them are plain translucent fills */
+html:root .app{background:none;gap:0}
+html:root aside{margin:12px 0 12px 12px;height:calc(100vh - 24px);top:12px;border-radius:18px;
+  background:var(--glass);border:1px solid var(--glass-border);box-shadow:var(--glass-shadow);
+  -webkit-backdrop-filter:blur(22px) saturate(1.25);backdrop-filter:blur(22px) saturate(1.25)}
+html:root main{padding:0 20px 40px 16px}
+html:root .top{background:transparent;padding-top:16px}
+/* sticky title bar: a copy of the fixed backdrop, faded out at the bottom; content scrolls away under it */
+html:root .top::before,html:root .top::after{content:"";position:absolute;z-index:-1;left:-16px;right:-20px;top:0;bottom:0;pointer-events:none;
+  -webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 45%,transparent 100%);mask-image:linear-gradient(to bottom,#000 0%,#000 45%,transparent 100%)}
+html:root .top::before{opacity:var(--tf,0);background-color:var(--bg-base);background-image:var(--mesh);background-attachment:fixed;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+html:root .top::after{opacity:calc(var(--grain-op) * var(--tf,0));mix-blend-mode:soft-light;background-image:var(--grain);background-size:240px 240px}
+html:root .top h1{letter-spacing:-.01em}
+html:root .panel{background:var(--glass);border:1px solid var(--glass-border);border-radius:18px;box-shadow:var(--glass-shadow);
+  -webkit-backdrop-filter:blur(22px) saturate(1.25);backdrop-filter:blur(22px) saturate(1.25);padding:16px 18px}
+html:root .chan{border-top:1px solid var(--glass-border);overflow:visible}
+html:root #card0,html:root [data-cht="0"],html:root #sChs .sch:nth-child(1){--v:var(--vB)}
+html:root #card1,html:root [data-cht="1"],html:root #sChs .sch:nth-child(2){--v:var(--vT)}
+html:root .chan::before{content:"";position:absolute;left:18px;right:18px;top:-1px;height:3px;border-radius:0 0 3px 3px;background:var(--v,var(--c));box-shadow:0 0 14px 1px color-mix(in srgb,var(--v,var(--c)) 55%,transparent)}
+html:root .chan .meter i,html:root .sch i,html:root .ctabs button i{background:var(--v,var(--c))}
+/* output on (manual or program): the card in the channel colour - 20 % tint, 4 px edge, soft glow; back when off */
+html:root .chan{transition:background-color .25s,border-color .25s,box-shadow .25s}
+html:root .chan.on{border:4px solid var(--v,var(--c));padding:13px 15px;background:linear-gradient(color-mix(in srgb,var(--v,var(--c)) 20%,transparent),color-mix(in srgb,var(--v,var(--c)) 20%,transparent)),var(--glass);
+  box-shadow:var(--glass-shadow),0 0 22px -6px color-mix(in srgb,var(--v,var(--c)) 70%,transparent)}
+html:root .chan.on::before{display:none}
+
+/* controls: pills */
+html:root button,html:root .btn{border-radius:999px;background:var(--pill);border-color:var(--pill-border);padding:6px 15px;transition:background .15s,box-shadow .15s,transform .1s}
+html:root button:hover:not(:disabled){background:var(--pill-hover);border-color:var(--pill-border);box-shadow:0 6px 16px -8px rgba(10,30,45,.35)}
+html:root button:active:not(:disabled){transform:translateY(1px)}
+html:root button.pri{background:var(--acc);border-color:transparent;color:var(--acc-ink);box-shadow:0 6px 18px -8px color-mix(in srgb,var(--acc) 80%,transparent)}
+html:root button.pri:hover:not(:disabled){background:color-mix(in srgb,var(--acc) 88%,#fff)}
+html:root .ib{border-radius:12px;padding:0}
+html:root .sch .ib.on{background:var(--c);border-color:transparent;color:#fff;box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 22%,transparent)}
+html:root select,html:root input[type=number],html:root input[type=text],html:root input[type=password]{border-radius:12px;background:var(--field);border-color:var(--pill-border)}
+html:root select:focus,html:root input:focus{background:var(--field-focus);border-color:var(--acc);box-shadow:0 0 0 3px color-mix(in srgb,var(--acc) 18%,transparent);outline:none}
+html:root .seg{border-radius:999px;border-color:var(--pill-border);background:var(--pill);padding:2px;gap:2px}
+html:root .seg button{border-radius:999px;background:transparent;border:0;box-shadow:none;padding:3px 14px}
+html:root .seg button[aria-pressed=true]{background:var(--pill-hover);box-shadow:0 2px 8px -4px rgba(10,30,45,.35)}
+html:root .state{background:var(--pill);border-color:currentColor}
+html:root .meter{background:var(--field);border-color:var(--pill-border);border-radius:999px}
+html:root .meter i{border-radius:999px}
+
+/* navigation: glass pills, the accent stays the "you are here" mark */
+html:root nav a{border-radius:12px}
+html:root nav a:hover{background:var(--pill);border-color:var(--pill-border)}
+html:root nav a.on{background:var(--pill-hover);border-color:var(--pill-border);box-shadow:0 6px 16px -10px rgba(10,30,45,.4),inset 3px 0 0 var(--acc)}
+html:root .sctl,html:root .foot{border-top-color:var(--line)}
+html:root .brand{gap:12px;padding:4px 6px 10px}
+html:root .brand img{width:54px;height:54px;filter:drop-shadow(0 0 6px rgba(134,201,255,.32)) drop-shadow(0 4px 10px rgba(0,98,211,.24))}
+
+@media (max-width:860px){
+  html:root aside{margin:0;height:100vh;top:0;border-radius:0 18px 18px 0}
+  html:root button,html:root .btn{padding:6px 12px}
+  html:root main{padding:0 12px 40px}
+  html:root .top::before,html:root .top::after{left:-12px;right:-12px}
+}
+
+/* channel tabs: folder tabs growing out of the card (css-tip "rounded tab"; the first one is the ".left" variant, flush
+   with the card's left edge). The selected tab and the card share ONE frosted background (.tabbg, clipped to the union
+   of both shapes), so there is no seam between them. Outlines are unclipped 1px paths on the same pixel grid as the card
+   border. Inactive tabs have their own fill (.bg) and tuck under the selected tab's foot. Shapes: script shapeTabs(). */
+html:root #pg-channels{position:relative}
+html:root .tabbg{position:absolute;z-index:0;pointer-events:none;background:var(--glass);
+  -webkit-backdrop-filter:blur(22px) saturate(1.25);backdrop-filter:blur(22px) saturate(1.25)}
+html:root .ctabs{gap:0;padding-left:0;margin-top:14px;align-items:flex-end;position:relative;z-index:2}
+html:root .ctabs button{position:relative;z-index:1;margin:0 0 -1px;border:0;border-radius:0;background:transparent;min-height:38px;
+  padding:6px 30px;box-shadow:none;color:var(--muted);-webkit-backdrop-filter:none;backdrop-filter:none}
+html:root .ctabs button:first-child{padding-left:20px}
+html:root .ctabs button+button{margin-left:-13px;padding-left:31px}
+html:root .ctabs button:hover:not(:disabled){background:transparent;box-shadow:none;color:var(--text);transform:none}
+html:root .ctabs button[aria-pressed=true]{z-index:3;min-height:42px;color:var(--text)}
+html:root{--tab-off:color-mix(in srgb,#15303F 9%,transparent)}
+@media (prefers-color-scheme:dark){html:root:not([data-theme="light"]){--tab-off:color-mix(in srgb,#FFFFFF 9%,transparent)}}
+html:root[data-theme="dark"]{--tab-off:color-mix(in srgb,#FFFFFF 9%,transparent)}
+html:root .ctabs .bg{position:absolute;inset:0;z-index:-2;pointer-events:none;background:var(--tab-off);
+  -webkit-backdrop-filter:blur(22px) saturate(1.25);backdrop-filter:blur(22px) saturate(1.25)}
+html:root .ctabs button[aria-pressed=true] .bg{display:none}
+html:root .ctabs svg.tabsh{position:absolute;inset:0;width:100%;height:100%;z-index:-1;overflow:visible;pointer-events:none}
+html:root .ctabs svg.tabsh .ol{fill:none;stroke:var(--glass-border);stroke-width:1}
+html:root .ctabs .arc{display:none}
+html:root .ctabs button[aria-pressed=true] .arc{display:block;position:absolute;z-index:-1;left:var(--ax,0px);top:0;width:58%;height:78%;pointer-events:none;
+  border-top:2px solid var(--v,var(--c));border-left:2px solid var(--v,var(--c));border-top-left-radius:12.5px;
+  filter:drop-shadow(0 0 3px color-mix(in srgb,var(--v,var(--c)) 80%,transparent));
+  -webkit-mask-image:linear-gradient(to right,#000 20%,transparent),linear-gradient(to bottom,#000 25%,transparent);-webkit-mask-composite:source-in;
+  mask-image:linear-gradient(to right,#000 20%,transparent),linear-gradient(to bottom,#000 25%,transparent);mask-composite:intersect}
+html:root .ctab-panel{position:relative;z-index:1;background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none;
+  border-color:transparent;border-radius:0 18px 18px 18px;box-shadow:none}
+html:root .ctab-panel::before{content:"";position:absolute;inset:-1px;border:1px solid var(--glass-border);border-radius:0 18px 18px 18px;pointer-events:none;
+  -webkit-mask:linear-gradient(to right,#000 var(--g0,0px),transparent var(--g0,0px) var(--g1,0px),#000 var(--g1,0px)) 0 0/100% 1px no-repeat,linear-gradient(#000,#000) 0 1px/100% calc(100% - 1px) no-repeat;
+  mask:linear-gradient(to right,#000 var(--g0,0px),transparent var(--g0,0px) var(--g1,0px),#000 var(--g1,0px)) 0 0/100% 1px no-repeat,linear-gradient(#000,#000) 0 1px/100% calc(100% - 1px) no-repeat}
+/* dashboard "Manual" switch = the sidebar's power button (off: glass, on: channel colour) */
+html:root .chan .switch{width:36px;height:36px;border-radius:12px;background:var(--pill);border:1px solid var(--pill-border);color:var(--text);transition:background .15s,box-shadow .15s}
+html:root .chan .switch::after{top:50%;left:50%;width:18px;height:18px;border-radius:0;transform:translate(-50%,-50%);background:currentColor;transition:none;
+  -webkit-mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'><path d='M12 3v9'/><path d='M6.3 7.3a8 8 0 1 0 11.4 0'/></svg>") center/contain no-repeat;
+  mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'><path d='M12 3v9'/><path d='M6.3 7.3a8 8 0 1 0 11.4 0'/></svg>") center/contain no-repeat}
+html:root .chan .switch:hover{background:var(--pill-hover)}
+html:root .chan .switch:checked{background:var(--c);border-color:transparent;color:#fff;box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 22%,transparent)}
+html:root .chan .switch:checked::after{left:50%}
+
+/* native dropdown lists: solid, theme-coloured (the translucent field colour would make the list light) */
+html:root{--opt-bg:#F4F7F9}
+@media (prefers-color-scheme:dark){html:root:not([data-theme="light"]){--opt-bg:#1A2329}}
+html:root[data-theme="dark"]{--opt-bg:#1A2329}
+html:root select option,html:root select optgroup{background-color:var(--opt-bg);color:var(--text)}
+/* connect screen (page not served by a device): the same backdrop and logo */
+html:root .conn{background-color:var(--bg-base);background-image:var(--mesh);background-attachment:fixed}
+html:root .conn .head img{width:56px;height:56px;filter:drop-shadow(0 0 6px rgba(134,201,255,.32)) drop-shadow(0 4px 10px rgba(0,98,211,.24))}
+/* devices that ask for less transparency (or are slow with it): the same look without the frosted blur */
+@media (prefers-reduced-transparency:reduce){html:root aside,html:root .panel,html:root .tabbg,html:root .ctabs .bg,html:root .top::before{-webkit-backdrop-filter:none;backdrop-filter:none}}
 </style>
 </head>
 <body>
@@ -549,6 +711,7 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',
 const fmt=t=>{t=Math.max(0,Math.round(t));const h=Math.floor(t/3600),m=Math.floor(t/60)%60,s=String(t%60).padStart(2,'0');return h?`${h}:${String(m).padStart(2,'0')}:${s}`:`${m}:${s}`;};
 const f1=v=>v==null?'–':(+v).toFixed(1);
 const CH=[0,1], KEY=['B','T'], PV=['var(--pvB)','var(--pvT)'], SP=['var(--spB)','var(--spT)'];
+let tabsHtml=''; const TAB_R=12, TAB_TR=12;  // channel tabs (shapeTabs)
 const EV={PHASE:1,STEP:2,RAMP_END:3,HOLD_END:4,PAUSE:5,CONT:6,END:7,STOP:8};
 let live=null, progs=null, progsGen=-1, runProg=null, runProgAt=0, chartAt=0, view='prog', showLast=true, edKey='';
 let logSeq=0, logList=[], prevState='idle', askedSave=false;
@@ -715,11 +878,14 @@ function isDark(){ const t=document.documentElement.dataset.theme; return t?t===
 let palKey='';
 function applyPalette(force){
   const acc=(live&&live.accent)||'#2196F3', dark=isDark(), key=acc+dark; if(key===palKey&&!force) return; palKey=key;
-  const st=document.documentElement.style; ['--acc','--acc-ink','--pvB','--spB','--pvT','--spT'].forEach(p=>st.removeProperty(p));
-  const bg=hex2rgb(getComputedStyle(document.documentElement).getPropertyValue('--panel'));
+  const st=document.documentElement.style; ['--acc','--acc-ink','--pvB','--spB','--pvT','--spT','--vB','--vT'].forEach(p=>st.removeProperty(p));
+  // contrast reference: the frosted card (glass over the backdrop) of the current theme
+  const bg=hex2rgb(dark?'#1A2329':'#E4EBEF');
   const [h,s,l]=rgb2hsl(hex2rgb(acc));
   for(const [ch,dh] of [['B',-150],['T',150]]){ const hh=(h+dh+360)%360, [pv,lp]=fitC(hh,s,l,bg,4.5,dark), [sp]=fitC(hh,s,Math.min(1,lp+.12),bg,3,dark);
-    st.setProperty('--pv'+ch,rgb2hex(pv)); st.setProperty('--sp'+ch,rgb2hex(sp)); }
+    st.setProperty('--pv'+ch,rgb2hex(pv)); st.setProperty('--sp'+ch,rgb2hex(sp));
+    // lit colour (strips, glows, meters, tab arc; not text): same hue, full saturation, only lightly fitted in light mode
+    st.setProperty('--v'+ch,rgb2hex(dark?pv:fitC(hh,1,l,bg,1.6,false)[0])); }
   const [a]=fitC(h,s,l,bg,3,dark); st.setProperty('--acc',rgb2hex(a));
   st.setProperty('--acc-ink',contrast(a,[1,1,1])>=contrast(a,[.06,.08,.09])?'#FFFFFF':'#0F1417');
 }
@@ -1498,7 +1664,7 @@ function route(){
   document.querySelectorAll('nav a[data-pg]').forEach(a=>{ const on=a.dataset.pg===pg; a.classList.toggle('on',on); if(on) a.setAttribute('aria-current','page'); else a.removeAttribute('aria-current'); });
   $('title').textContent=PAGES[pg]; $('jump').hidden=pg!=='status'; $('jumpS').hidden=pg!=='settings'; document.title=pg==='status'?'TempCtl Duo':PAGES[pg]+' – TempCtl Duo';
   $('side').classList.remove('open'); $('menu').setAttribute('aria-expanded','false');
-  if(changed){ window.scrollTo(0,0); if(pg==='status'){ lastChart=0; chartAt=0; } pageUpdate(true); }
+  if(changed){ window.scrollTo(0,0); if(pg==='status'){ lastChart=0; chartAt=0; } pageUpdate(true); requestAnimationFrame(()=>{ shapeTabs(); topFade(); }); }
 }
 window.addEventListener('hashchange',route);
 document.addEventListener('click',e=>{ const a=e.target.closest('a[data-jump]'); if(!a) return; e.preventDefault(); const t=$(a.dataset.jump); if(t) t.scrollIntoView({behavior:'smooth',block:'start'}); });
@@ -1686,9 +1852,52 @@ $('plist').addEventListener('click',async e=>{
 /* ---------- Channels page ---------- */
 let chSel=0, chBuilt=false, chNamesKey='', xKey=['',''];
 const TYPE_TXT={off:'off',modbus:'Modbus',local:'local'};
-function chTabs(){ if(!CFG) return; const h=CH.map(i=>`<button role="tab" data-cht="${i}" aria-pressed="${i===chSel}" aria-selected="${i===chSel}" style="--c:${PV[i]}"><i></i>${esc(CFG.channels[i].name)} <small>${TYPE_TXT[CFG.channels[i].type]||''}</small></button>`).join('');
-  if($('chTabs').innerHTML!==h) $('chTabs').innerHTML=h; document.querySelectorAll('[data-chp]').forEach(d=>d.hidden=+d.dataset.chp!==chSel); }
+function chTabs(){ if(!CFG) return; const h=CH.map(i=>`<button role="tab" data-cht="${i}" aria-pressed="${i===chSel}" aria-selected="${i===chSel}" style="--c:${PV[i]}"><span class="bg" aria-hidden="true"></span><svg class="tabsh" aria-hidden="true"><path class="ol"/></svg><span class="arc" aria-hidden="true"></span><i></i>${esc(CFG.channels[i].name)} <small>${TYPE_TXT[CFG.channels[i].type]||''}</small></button>`).join('');
+  if(tabsHtml!==h){ tabsHtml=h; $('chTabs').innerHTML=h; requestAnimationFrame(shapeTabs); } document.querySelectorAll('[data-chp]').forEach(d=>d.hidden=+d.dataset.chp!==chSel); }
 $('chTabs').onclick=e=>{ const b=e.target.closest('button[data-cht]'); if(!b) return; chSel=+b.dataset.cht; chTabs(); updChanPage(); };
+/* Channel tabs (spec 7, "Look"): css-tip "rounded tab" shapes. lb / rb = left / right foot: 'flat' (first tab, flush with the card's
+   left edge), 'flare' (curves out into the card's top edge), 'under' (inactive tab tucked under the selected neighbour: its
+   edge stops where the neighbour's foot starts, its fill follows that curve). Outline coordinates are 1px-stroke centres on
+   the card border's pixel grid; the tabs overlap by TAB_R+1 px. The selected tab and the card share one frosted background
+   (.tabbg = union of both shapes), so there is no seam; the card's top edge is open under the selected tab (--g0 / --g1). */
+function tabShape(W,H,lb,rb,ox,oy,yb){
+  const r=TAB_R, TR=TAB_TR, e=.5, P=(x,y)=>(x+ox)+' '+(y+oy), A=(rad,sw,x,y)=>' A'+rad+' '+rad+' 0 0 '+sw+' '+P(x,y);
+  const xl=lb==='flare'?r+e:e, xr=rb==='flare'?W-r-e:W-e;
+  let ol, fs, oe, fe;
+  if(lb==='flare'){ ol='M'+P(e,H-e)+A(r,0,r+e,H-e-r); fs=ol; }
+  else if(lb==='under'){ ol='M'+P(e,H-e-r); fs='M'+P(r+e,H-e)+A(r,1,e,H-e-r); }
+  else { ol='M'+P(e,H); fs='M'+P(0,yb)+' L'+P(0,TR+e); }
+  const top=' L'+P(xl,TR+e)+A(TR,1,xl+TR,e)+' L'+P(xr-TR,e)+A(TR,1,xr,TR+e);
+  if(rb==='flare'){ oe=' L'+P(xr,H-e-r)+A(r,0,W-e,H-e); fe=oe+' L'+P(W,yb); }
+  else { oe=' L'+P(xr,H-e-r); fe=oe+A(r,1,W-e-r,H-e)+' L'+P(W-e-r,yb); }
+  return {ol:ol+top+oe, fill:fs+top+fe+' L'+P(lb==='under'?r+e:0,yb)+' Z'};
+}
+function shapeTabs(){
+  const tabs=[...document.querySelectorAll('#chTabs button[data-cht]')], sel=tabs.findIndex(t=>t.getAttribute('aria-pressed')==='true');
+  if(!tabs.length||!tabs[0].offsetWidth) return;  // page not shown
+  tabs.forEach((b,i)=>{
+    const W=b.offsetWidth, H=b.offsetHeight, on=i===sel, lb=i===0?'flat':(!on&&sel===i-1?'under':'flare'), rb=!on&&sel===i+1?'under':'flare';
+    const sh=tabShape(W,H,lb,rb,0,0,on?H:H-1);
+    b.querySelector('.bg').style.clipPath=`path('${sh.fill}')`; b.querySelector('.ol').setAttribute('d',sh.ol);
+    b.style.setProperty('--ax',(lb==='flare'?TAB_R:0)+'px'); b._shape=[W,H,lb,rb];
+  });
+  const t=tabs[sel], pg=$('pg-channels'), box=document.querySelector('[data-chp]:not([hidden]) .ctab-panel'); if(!t||!box) return;
+  let bgEl=pg.querySelector('.tabbg'); if(!bgEl){ bgEl=document.createElement('div'); bgEl.className='tabbg'; bgEl.setAttribute('aria-hidden','true'); pg.insertBefore(bgEl,pg.firstChild); }
+  const gr=pg.getBoundingClientRect(), tr=t.getBoundingClientRect(), pr=box.getBoundingClientRect();
+  Object.assign(bgEl.style,{left:(pr.left-gr.left)+'px',top:(tr.top-gr.top)+'px',width:pr.width+'px',height:(pr.bottom-tr.top)+'px'});
+  const s=t._shape, tab=tabShape(s[0],s[1],s[2],s[3],tr.left-pr.left,0,s[1]).fill, cy=pr.top-tr.top, cw=pr.width, ch=pr.height, R=18;
+  const card=`M0 ${cy} L${cw-R} ${cy} A${R} ${R} 0 0 1 ${cw} ${cy+R} L${cw} ${cy+ch-R} A${R} ${R} 0 0 1 ${cw-R} ${cy+ch} L${R} ${cy+ch} A${R} ${R} 0 0 1 0 ${cy+ch-R} Z`;
+  bgEl.style.clipPath=`path('${tab} ${card}')`;
+  box.style.setProperty('--g0',(sel===0?1:tr.left-pr.left+1)+'px'); box.style.setProperty('--g1',(tr.right-pr.left-1)+'px');
+}
+if(window.ResizeObserver) new ResizeObserver(()=>shapeTabs()).observe($('cChan'));
+window.addEventListener('resize',shapeTabs);
+if(document.fonts&&document.fonts.ready) document.fonts.ready.then(shapeTabs);
+/* title bar (spec 7, "Look"): its backdrop band is transparent at the top of the page and fully there once the first card reaches the top */
+let tfRaf=0;
+function topFade(){ tfRaf=0; const top=document.querySelector('.top'), pg=document.querySelector('.pg:not([hidden])'), first=pg&&pg.querySelector('.panel,.ctabs,.cards');
+  const y0=first?first.getBoundingClientRect().top+scrollY:80; if(top) top.style.setProperty('--tf',Math.max(0,Math.min(1,scrollY/Math.max(1,y0))).toFixed(3)); }
+addEventListener('scroll',()=>{ if(!tfRaf) tfRaf=requestAnimationFrame(topFade); },{passive:true});
 function commonGroups(){ const bn=CFG.channels[0].name;
   return [{h:'',fields:[
     {k:'bus.pollMs',l:'Polling interval',t:'num',min:250,max:10000,step:50,u:'ms',h:'How often PV, SP and output are read. With two Modbus controllers each one is polled every 2 × this interval.'},

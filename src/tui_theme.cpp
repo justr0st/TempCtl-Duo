@@ -186,6 +186,8 @@ static void recolour() {
   lv_style_set_text_color(&S_.amber, col[C_AMBER]);
   lv_style_set_text_color(&S_.ok, col[C_OK]);
   lv_style_set_text_color(&S_.acc, col[C_ACC]);
+  lv_style_set_image_recolor(&S_.acc, col[C_ACC]);  // A8 line icons (tui_icons.c) are drawn in this colour
+  lv_style_set_image_recolor_opa(&S_.acc, LV_OPA_COVER);
   for (int i = 0; i < 2; ++i) {
     // "on" button of a channel: filled with its PV colour, symbol in the panel colour (contrast:
     // the PV colours are fitted to 4.5:1 against the panel)

@@ -26,8 +26,8 @@ if [ ! -f obj/liblvgl.a ]; then  # LVGL itself is the same for both boards
   find $LVGL/src -name "*.c" | xargs -P 8 -I{} sh -c 'gcc -O1 -w '"$INC"' -c {} -o obj/lv_$(echo {} | md5sum | cut -c1-12).o'
   ar rcs obj/liblvgl.a obj/lv_*.o
 fi
-for f in $R/src/fonts/*.c; do o=$FO/$(basename $f .c).o; [ $o -nt $f ] || gcc -O1 -w $INC $BD -c $f -o $o; done
+for f in $R/src/fonts/*.c $R/src/tui_icons.c; do o=$FO/$(basename $f .c).o; [ $o -nt $f ] || gcc -O1 -w $INC $BD -c $f -o $o; done
 g++ -std=gnu++17 -O0 -g $SAN -Wall -Wno-unused-function $INC $BD host_app.cpp \
   $R/src/tui.cpp $R/src/tui_theme.cpp $R/src/tui_widgets.cpp $R/src/tui_main.cpp $R/src/tui_chart.cpp \
   $R/src/tui_menu.cpp $R/src/tui_prog.cpp $R/src/tui_chan.cpp $R/src/settings.cpp $R/src/duo_program.cpp \
-  $R/src/run_engine.cpp $FO/tfont_*.o obj/liblvgl.a -lm $EXTRA -o $OUT
+  $R/src/run_engine.cpp $FO/tfont_*.o $FO/tui_icons.o obj/liblvgl.a -lm $EXTRA -o $OUT

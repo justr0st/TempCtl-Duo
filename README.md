@@ -409,6 +409,11 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
 
 ## 5a. Web page
 
+- Look (1.0.40): frosted glass — an accent-tinted gradient backdrop, translucent blurred sidebar and cards,
+  pill buttons, channel colour strips, folder tabs on the Channels page, a title bar that fades in while
+  scrolling; a channel card turns into its channel colour while the output is on. Browsers that ask for
+  reduced transparency get it without the blur. Logo: `web/icons/`
+  (from `logo/TempCtl.svg`).
 - Source: `web/index.html` (one file: HTML, CSS, JS) and the Barlow / Barlow Semi Condensed fonts in
   `web/fonts/` (woff2 subsets: Latin, Latin-1, Latin Extended-A and a few symbols; SIL Open Font License,
   `web/fonts/OFL.txt`). The page works without internet (AP mode): everything comes from the device.

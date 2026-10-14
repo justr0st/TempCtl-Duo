@@ -32,6 +32,7 @@ bool themeDark();
 uint32_t themeGen();                              // changes with every themeApply()
 
 extern "C" {
+extern const lv_image_dsc_t tui_icon_programs, tui_icon_channels, tui_icon_system, tui_icon_log;  // tui_icons.c
 extern const lv_font_t tfont_12, tfont_14, tfont_16b, tfont_20c, tfont_28c, tfont_40c;
 }
 

@@ -28,19 +28,20 @@ lv_obj_t* menuCreate() {
   lv_obj_set_style_pad_gap(p.body, G, 0);
   lv_obj_set_style_pad_all(p.body, G, 0);
   struct Item {
-    const char* icon;
+    const char* icon;            // LVGL symbol, or
+    const lv_image_dsc_t* img;   // a line icon of the web sidebar (tui_icons.c)
     const char* text;
     const char* sub;
     TScreen s;
     bool on;
   };
   static const Item items[] = {
-      {LV_SYMBOL_FILE, "Programs", "view, edit, start", SCR_PROGRAMS, true},
-      {LV_SYMBOL_SETTINGS, "Channels", "controllers, sensors, PID", SCR_CHANNELS, true},
-      {LV_SYMBOL_WIFI, "Network", "Wi-Fi, address", SCR_NETWORK, true},
-      {LV_SYMBOL_IMAGE, "Display", "brightness, colours", SCR_DISPLAY, true},
-      {LV_SYMBOL_HOME, "System", "polling, info, restart", SCR_SYSTEM, true},
-      {LV_SYMBOL_LIST, "Event log", "what happened", SCR_LOG, true},
+      {nullptr, &tui_icon_programs, "Programs", "view, edit, start", SCR_PROGRAMS, true},
+      {nullptr, &tui_icon_channels, "Channels", "controllers, sensors, PID", SCR_CHANNELS, true},
+      {LV_SYMBOL_WIFI, nullptr, "Network", "Wi-Fi, address", SCR_NETWORK, true},
+      {LV_SYMBOL_IMAGE, nullptr, "Display", "brightness, colours", SCR_DISPLAY, true},
+      {nullptr, &tui_icon_system, "System", "polling, info, restart", SCR_SYSTEM, true},
+      {nullptr, &tui_icon_log, "Event log", "what happened", SCR_LOG, true},
   };
   const int w = (SCREEN_W - 2 * G - 2 * G) / 3, h = (SCREEN_H - T_HDR - 2 * G - G) / 2;
   for (const Item& it : items) {
@@ -48,8 +49,15 @@ lv_obj_t* menuCreate() {
     lv_obj_set_flex_flow(b, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_gap(b, 4, 0);
     lv_obj_t* ic = lv_obj_get_child(b, 0);
-    lv_obj_set_style_text_font(ic, &lv_font_montserrat_20, 0);
-    lv_label_set_text(ic, it.icon);
+    if (it.img) {  // A8 line icon, drawn in the accent colour (S_.acc sets the image recolour)
+      lv_obj_delete(ic);
+      ic = lv_image_create(b);
+      lv_image_set_src(ic, it.img);
+      lv_obj_move_to_index(ic, 0);
+    } else {
+      lv_obj_set_style_text_font(ic, &lv_font_montserrat_20, 0);
+      lv_label_set_text(ic, it.icon);
+    }
     lv_obj_add_style(ic, &S_.acc, 0);
     tLabel(b, &tfont_16b, it.text);
     if (!TUI_SMALL) {  // 320x240: no room for the hint
