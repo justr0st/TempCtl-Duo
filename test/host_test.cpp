@@ -15,6 +15,7 @@
 #include "pid.h"
 #include "runaway.h"
 #include "ota_image.h"
+#include "raw_hist.h"
 #include <vector>
 #include <algorithm>
 #include "settings.h"
@@ -1071,6 +1072,69 @@ static void testTimeZones() {
   tzset();
 }
 
+// ------------------------------------------------------------------ every reading (raw_hist.h)
+
+static void testRawHist() {
+  static uint32_t buf[2 * 5];
+  RawRing r;
+  r.w = buf;
+  r.cap = 5;
+  CHECK(r.find(0) == 0 && r.total == 0);
+  for (int i = 0; i < 8; ++i) r.put(1000 + i * 250, (int16_t)(200 + i));  // 8 readings, ring of 5
+  CHECK(r.total == 8 && r.oldest() == 3);
+  CHECK(r.find(0) == 3);                    // older than the ring: from the oldest kept
+  CHECK(r.find(1000 + 4 * 250) == 5);       // strictly after
+  CHECK(r.find(1000 + 4 * 250 - 1) == 4);
+  CHECK(r.find(99999) == 8);
+  uint8_t o[16];
+  r.copy(6, 2, o);
+  const uint32_t ms0 = o[0] | o[1] << 8 | o[2] << 16 | (uint32_t)o[3] << 24;
+  const int16_t pv1 = (int16_t)(o[12] | o[13] << 8);
+  CHECK(ms0 == 1000 + 6 * 250 && (int16_t)(o[4] | o[5] << 8) == 206 && pv1 == 207 && o[6] == 0 && o[7] == 0);
+  r.copy(1, 1, o);  // overwritten: a gap at time 0
+  CHECK((o[0] | o[1] | o[2] | o[3]) == 0 && (int16_t)(o[4] | o[5] << 8) == RAW_NONE);
+  r.put(5000, RAW_NONE);
+  CHECK(r.pvAt(8) == RAW_NONE && r.msAt(8) == 5000);
+  // millis wrap: compared wrap-safe
+  RawRing q;
+  static uint32_t b2[2 * 4];
+  q.w = b2;
+  q.cap = 4;
+  q.put(0xFFFFFF00u, 1);
+  q.put(0xFFFFFFF0u, 2);
+  q.put(0x10u, 3);
+  CHECK(q.find(0xFFFFFFF8u) == 2 && q.find(0xFFFFFF00u) == 1);
+
+  // run anchors: 1 s cycles; run 10 s, pause 5 s, run 5 s, then a jump (resumed position)
+  RunAnchors a;
+  uint32_t t = 50000;
+  int32_t rt = 0;
+  for (int i = 0; i <= 10; ++i, t += 1000, rt += 1000) a.track(t, rt);   // 0..10 s
+  rt -= 1000;
+  for (int i = 0; i < 5; ++i, t += 1000) a.track(t, rt);                  // paused at 10 s
+  for (int i = 0; i < 5; ++i, t += 1000) a.track(t, rt += 1000);          // running again
+  CHECK(a.n == 3 && a.ms[0] == 50000 && a.rt[0] == 0);
+  CHECK(a.ms[1] == 60000 && a.rt[1] == 10000);   // pause starts after the reading at 10 s
+  CHECK(a.ms[2] == 65000 && a.rt[2] == 10000);   // runs again
+  // interpolation between the anchors and the newest point gives the run time of any reading
+  auto at = [&](uint32_t m) {
+    uint32_t pm = a.ms[0];
+    int32_t pr = a.rt[0];
+    for (int k = 1; k <= a.n; ++k) {
+      const uint32_t nm = k < a.n ? a.ms[k] : a.lastMs;
+      const int32_t nr = k < a.n ? a.rt[k] : a.lastRt;
+      if (m <= nm) return pr + (int32_t)((int64_t)(m - pm) * (nr - pr) / (int64_t)(nm - pm));
+      pm = nm, pr = nr;
+    }
+    return pr;
+  };
+  CHECK(at(55500) == 5500 && at(62000) == 10000 && at(67000) == 12000 && a.lastRt == 15000);
+  a.track(t, rt + 60000);  // jump ahead by a minute
+  CHECK(a.n == 5 && a.rt[4] == 75000 && a.rt[3] == 15000);
+  a.reset();
+  CHECK(a.n == 0);
+}
+
 int main() {
   testCrc();
   testParse();
@@ -1093,6 +1157,7 @@ int main() {
   testRunaway();
   testGuard();
   testImageScanner();
+  testRawHist();
   testAutotune();
   testTimeZones();
   printf(fails ? "%d FAILED\n" : "all tests passed\n", fails);

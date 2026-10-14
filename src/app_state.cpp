@@ -15,6 +15,7 @@
 #include "settings_store.h"
 #include "status_led.h"
 #include "version.h"
+#include "raw_hist.h"
 #include <esp_system.h>
 #include <esp_rom_sys.h>
 
@@ -393,7 +394,47 @@ uint32_t iramPureFree() {
   return all > both ? all - both : 0;
 }
 
+// every PV reading for the web chart (raw_hist.h); the run's time anchors
+static RawRing rawRing[NUM_CHANNELS];
+static uint32_t rawLastMs[NUM_CHANNELS];
+static bool rawGap[NUM_CHANNELS];
+static RunAnchors runAnch;
+
+uint32_t rawCap() { return rawRing[0].cap; }
+void rawPlan(const uint32_t* after, uint32_t winMs, uint32_t maxN, RawPlan& p) {
+  Guard g;
+  p.nowMs = millis();
+  for (int c = 0; c < NUM_CHANNELS; ++c) {
+    const RawRing& r = rawRing[c];
+    uint32_t a = after[c];
+    if (winMs && (int32_t)(p.nowMs - winMs - a) > 0) a = p.nowMs - winMs;  // not older than the window
+    p.from[c] = r.find(a);
+    p.n[c] = r.total - p.from[c];
+    if (p.n[c] > maxN) p.n[c] = maxN;
+  }
+}
+uint32_t rawCopy(int ch, uint32_t k, uint32_t n, uint8_t* out) {
+  Guard g;
+  return rawRing[ch].copy(k, n, out);
+}
+// each cycle (under gLock): a channel's new reading (its poll succeeded since the last one: two Modbus
+// controllers are read in turns), or one gap entry when it has no valid reading
+static void rawRecord(const float* pv, const bool* pvOk, const uint32_t* lastOk) {
+  for (int c = 0; c < NUM_CHANNELS; ++c) {
+    if (pvOk[c]) {
+      if (lastOk[c] == rawLastMs[c] && !rawGap[c]) continue;
+      rawLastMs[c] = lastOk[c];
+      rawGap[c] = false;
+      rawRing[c].put(lastOk[c], t16(pv[c]));
+    } else if (!rawGap[c] && slots[c].active->type() != CH_OFF) {
+      rawGap[c] = true;
+      rawRing[c].put(millis(), RAW_NONE);
+    }
+  }
+}
+
 static void histStartRun(float total) {
+  runAnch.reset();
   gHist->runValid = true;
   gHist->runSpan = runSpanFor(total);
   gHist->runBin = gHist->runSpan / CHART_N;
@@ -814,6 +855,12 @@ void chartJson(String& o, bool run) {
     o += String(have);
     o += ",\"cap\":";
     o += String(liveHistSec());
+    // device millis of this answer ("now" of the chart) and the per-channel size of the every-reading
+    // history (GET /api/raw; 0: none)
+    o += ",\"ms\":";
+    o += String((unsigned long)millis());
+    o += ",\"raw\":";
+    o += String((unsigned long)rawCap());
     int32_t pv[CHART_N], x[CHART_N];  // 2.4 kB of stack
     auto arr = [&](const int32_t* a, const int32_t* ref, bool below) {
       o += '[';
@@ -887,6 +934,25 @@ void chartJson(String& o, bool run) {
   jNum(o, gHist->runSpan);
   o += ",\"el\":";
   jNum(o, gEngSnap.elapsed());
+  // run time against device millis (raw_hist.h RunAnchors): "ra" anchors, "rn" the newest point
+  o += ",\"ms\":";
+  o += String((unsigned long)millis());
+  o += ",\"raw\":";
+  o += String((unsigned long)rawCap());
+  o += ",\"ra\":[";
+  for (int i = 0; i < runAnch.n; ++i) {
+    if (i) o += ',';
+    o += '[';
+    o += String((unsigned long)runAnch.ms[i]);
+    o += ',';
+    o += String((long)runAnch.rt[i]);
+    o += ']';
+  }
+  o += "],\"rn\":[";
+  o += String((unsigned long)runAnch.lastMs);
+  o += ',';
+  o += String((long)runAnch.lastRt);
+  o += ']';
   o += ",\"rem\":";
   jNum(o, rem);
   o += ",\"pv\":[";
@@ -1951,12 +2017,14 @@ static void cycle(float dt) {
   // every reading counts for the lowest / highest value of its chart slot (the chart shows the
   // spread, so short peaks and dips between two slots are not lost)
   static float accLo[NUM_CHANNELS] = {NAN, NAN}, accHi[NUM_CHANNELS] = {NAN, NAN};
+  rawRecord(pv, pvOk, lastOk);
   for (int i = 0; i < NUM_CHANNELS; ++i)
     if (pvOk[i]) {
       accLo[i] = isnan(accLo[i]) ? pv[i] : fminf(accLo[i], pv[i]);
       accHi[i] = isnan(accHi[i]) ? pv[i] : fmaxf(accHi[i], pv[i]);
     }
   if (eng.active() && gHist->runValid) {
+    runAnch.track(millis(), (int32_t)lroundf(eng.elapsed() * 1000.0f));
     int idx = (int)(eng.elapsed() / gHist->runBin);
     if (idx >= CHART_N) idx = CHART_N - 1;
     if (idx < 0) idx = 0;
@@ -2227,6 +2295,24 @@ void appInit() {
 #endif
     for (int r = 0; r < HV_ROWS * NUM_CHANNELS; ++r)
       for (int i = 0; i < CHART_N; ++i) hv[r][i] = NAN;
+  }
+  // every PV reading (raw_hist.h): S3 RAW_HIST_BYTES of PSRAM; CYD RAW_HIST_CYD readings per channel in
+  // the IRAM heap (32-bit access only; before the live history, which takes what is left of that heap)
+  if (gHist) {
+#ifdef BOARD_HAS_PSRAM
+    const uint32_t rc = RAW_HIST_BYTES / NUM_CHANNELS / 8;
+    const uint32_t caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_32BIT;
+#else
+    const uint32_t rc = RAW_HIST_CYD;
+    const uint32_t caps = MALLOC_CAP_EXEC | MALLOC_CAP_32BIT | MALLOC_CAP_INTERNAL;
+#endif
+    for (int c = 0; c < NUM_CHANNELS; ++c) {
+      rawRing[c].w = (uint32_t*)heap_caps_malloc(rc * 8, caps);
+      rawRing[c].cap = rawRing[c].w ? rc : 0;
+    }
+    if (!rawRing[0].cap || !rawRing[1].cap) rawRing[0].cap = rawRing[1].cap = 0;  // both or none
+    LogSerial.printf("[hist] every reading: %lu per channel (%lu bytes)\n", (unsigned long)rawRing[0].cap,
+                     (unsigned long)(rawRing[0].cap * 8 * NUM_CHANNELS));
   }
   // live history ring (see config.h)
   if (gHist) {

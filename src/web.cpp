@@ -1300,6 +1300,44 @@ static void handleChart() {
   sendText(200, "application/json", out);
 }
 
+// GET /api/raw?a0=&a1=&win=&max= : every PV reading of both channels after a0 / a1 (device millis), at most
+// win s old, at most max per channel (default 8192). Binary, little-endian: uint32 now (millis), n0, n1,
+// 1 (format); then n0 + n1 records of 8 bytes: uint32 millis, int16 PV (0.1 degC, -32768 = no reading),
+// 2 bytes 0. Over Wi-Fi only (the serial link carries text).
+static void handleRaw() {
+  if (sreq) return sendError("Not over the serial link");
+  uint32_t after[NUM_CHANNELS];
+  for (int c = 0; c < NUM_CHANNELS; ++c) {
+    const String k = String("a") + c;
+    after[c] = reqHas(k.c_str()) ? (uint32_t)strtoul(reqArg(k.c_str()).c_str(), nullptr, 10) : 0;
+  }
+  const uint32_t win = reqHas("win") ? (uint32_t)strtoul(reqArg("win").c_str(), nullptr, 10) : 0;
+  uint32_t mx = reqHas("max") ? (uint32_t)strtoul(reqArg("max").c_str(), nullptr, 10) : 8192;
+  if (mx < 1) mx = 1;
+  if (mx > 16384) mx = 16384;
+  RawPlan p;
+  rawPlan(after, win > 4000000 ? 0 : win * 1000, mx, p);
+  extraHeaders = "Cache-Control: no-store\r\n";
+  int stage = 0, ch = 0;
+  uint32_t done = 0;
+  sendStream("application/octet-stream", "raw", [&](char* b, size_t n) -> size_t {
+    if (stage == 0) {
+      stage = 1;
+      const uint32_t h[4] = {p.nowMs, p.n[0], p.n[1], 1};
+      for (int i = 0; i < 4; ++i)
+        for (int k = 0; k < 4; ++k) b[i * 4 + k] = (char)(h[i] >> (8 * k));
+      return 16;
+    }
+    while (ch < NUM_CHANNELS && done >= p.n[ch]) ch++, done = 0;
+    if (ch >= NUM_CHANNELS) return 0;
+    uint32_t k = (uint32_t)(n / 8);
+    if (k > p.n[ch] - done) k = p.n[ch] - done;
+    rawCopy(ch, p.from[ch] + done, k, (uint8_t*)b);
+    done += k;
+    return (size_t)k * 8;
+  });
+}
+
 // ?since=n: event log entries after n
 static void handleLog() {
   LogEntry* e = (LogEntry*)malloc(sizeof(LogEntry) * LOG_N);  // 5 kB, only while answering
@@ -1473,6 +1511,7 @@ struct Route {
 static const Route ROUTES[] = {
     {"/api/live", HTTP_GET, handleLive},
     {"/api/chart", HTTP_GET, handleChart},
+    {"/api/raw", HTTP_GET, handleRaw},
     {"/api/log", HTTP_GET, handleLog},
     {"/api/syslog", HTTP_GET, handleSysLog},
     {"/api/eventlog.txt", HTTP_GET, handleEventFile},

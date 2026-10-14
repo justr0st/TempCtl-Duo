@@ -989,18 +989,19 @@ function pvPts(d,i,tOf,out){ const pv=d.pv[i], lo=d.dlo&&d.dlo[i], hi=d.dhi&&d.d
     out.push([t,aFirst?a:b],[t,aFirst?b:a]); prev=aFirst?b:a; }
   return out; }
 function modelFromRun(d){
-  const M={kind:d.mode,now:d.el,prog:runProg,hist:[],lanes:[],segs:[[],[]],ev:[],bin:d.bin};
+  const M={kind:d.mode,now:d.el,prog:runProg,hist:[],lanes:[],segs:[[],[]],ev:[],bin:d.bin,ms:d.ms,ra:d.ra,rn:d.rn,raw:d.raw};
   let lastT=0;
   for(const i of CH){ const pv=[],sp=[],ln=[]; const st=d.st[i]||'';
     pvPts(d,i,k=>k*d.bin,pv);
     for(let k=0;k<d.pv[i].length;k++){ const t=k*d.bin; if(d.sp[i][k]!=null) sp.push([t,d.sp[i][k]]);
       const c=st[k]||' '; if(c!==' '){ lastT=Math.max(lastT,(k+1)*d.bin); const t1=Math.min((k+1)*d.bin,d.el); if(ln.length&&ln[ln.length-1].c===c) ln[ln.length-1].t1=t1; else ln.push({t0:t,t1,c}); } }
-    M.hist.push({pv,sp}); M.lanes.push(ln); }
+    M.hist.push({pv,sp,pvBin:pv}); M.lanes.push(ln); }
   for(const e of d.ev) M.ev.push({t:e[0],type:e[1],ch:e[2],idx:e[3],past:true});
   if(d.mode==='run'){ for(const i of CH) for(const s of d.fc.seg[i]) M.segs[i].push({t0:s[0]+d.el,t1:s[1]+d.el,v0:s[2],v1:s[3],src:s[4],fl:s[5]});
     for(const e of d.fc.ev) if(e[1]!==EV.PHASE||e[0]>0.01) M.ev.push({t:e[0]+d.el,type:e[1],ch:e[2],idx:e[3],past:false});
     M.end=d.el+d.rem; for(const i of CH) for(const s of M.segs[i]) M.lanes[i].push({t0:s.t0,t1:s.t1,c:laneCode(M,i,s),f:true}); }
   else M.end=Math.max(d.el,1);
+  applyRaw(M);
   return M;
 }
 function modelPreview(p){
@@ -1011,10 +1012,11 @@ function modelPreview(p){
 }
 // live view: bins of d.bin s, the newest ends now, the others d.sh s later than whole bins before it
 function modelLive(d){
-  const M={kind:'live',now:0,hist:[],lanes:[[],[]],segs:[[],[]],ev:[],end:0,t0:-d.span,at:Date.now(),bin:d.bin,gap:Math.max(3,d.bin*2.5),have:d.have||0,cap:d.cap||d.span};
+  const M={kind:'live',now:0,hist:[],lanes:[[],[]],segs:[[],[]],ev:[],end:0,t0:-d.span,at:Date.now(),bin:d.bin,gap:Math.max(3,d.bin*2.5),have:d.have||0,cap:d.cap||d.span,ms:d.ms,raw:d.raw};
   for(const i of CH){ const pv=[],sp=[]; const n=d.pv[i].length, tOf=k=>k===n-1?0:(k-n+1)*d.bin+(d.sh||0);
-    pvPts(d,i,tOf,pv); for(let k=0;k<n;k++){ if(d.sp[i][k]!=null) sp.push([tOf(k),d.sp[i][k]]); } M.hist.push({pv,sp}); }
+    pvPts(d,i,tOf,pv); for(let k=0;k<n;k++){ if(d.sp[i][k]!=null) sp.push([tOf(k),d.sp[i][k]]); } M.hist.push({pv,sp,pvBin:pv}); }
   liveMinSel(d);
+  applyRaw(M);
   return M;
 }
 // period choices: up to what the device keeps
@@ -1050,6 +1052,61 @@ function chartHead(){
   else if(M.kind==='run'&&live.run.state==='running'&&live.run.el!=null&&live.run.el>=M.now){ M.now=live.run.el; M.head={t:live.run.el,v,sp}; lastChart=0; }
 }
 function previewDraft(){ const p=live?DRAFT[live.sel]:null; M=p&&progItems(p)?modelPreview(p):null; lastChart=0; }
+/* ---------- every reading (spec 7, "Chart: every reading"): the device keeps each PV reading (millis, PV)
+   per channel (GET /api/raw, binary); the page fetches only the new ones each poll and draws every one.
+   Older than what the device keeps: the chart's slots (last / lowest / highest). Wi-Fi only. ---------- */
+const RAW={t:[[],[]],v:[[],[]],after:[0,0],from:null,boot:null,busy:false,on:false};
+function rawReset(){ RAW.t=[[],[]]; RAW.v=[[],[]]; RAW.after=[0,0]; RAW.from=null; }
+async function rawPull(win){
+  if(SER.on||OFF||RAW.busy||!M||!M.raw) return false;
+  if(live&&RAW.boot!==live.boot){ rawReset(); RAW.boot=live.boot; }
+  // a longer window than fetched so far (e.g. a longer live period): fetch it all again from its start
+  const need=M.ms+(Date.now()-(M.at||Date.now()))-win*1000;
+  if(RAW.from!=null&&need<RAW.from-2000) rawReset();
+  if(RAW.from==null) RAW.from=need;
+  RAW.busy=true; let got=false;
+  try{
+    for(let round=0;round<40;round++){
+      const r=await fetch(`/api/raw?a0=${RAW.after[0]}&a1=${RAW.after[1]}&win=${Math.ceil(win)}&max=8192`,{cache:'no-store'});
+      if(!r.ok) break;
+      const dv=new DataView(await r.arrayBuffer()); if(dv.byteLength<16) break;
+      const n=[dv.getUint32(4,true),dv.getUint32(8,true)]; let o=16;
+      for(const c of CH){ const T=RAW.t[c],V=RAW.v[c];
+        for(let k=0;k<n[c];k++,o+=8){ const ms=dv.getUint32(o,true), pv=dv.getInt16(o+4,true);
+          if(!ms||(T.length&&ms<=T[T.length-1])) continue;  // overwritten meanwhile / not newer
+          T.push(ms); V.push(pv===-32768?null:pv/10); got=true; }
+        if(T.length) RAW.after[c]=T[T.length-1]; }
+      if(n[0]<8192&&n[1]<8192) break;
+    }
+    // the browser keeps at most what the device keeps (plus a little)
+    const lim=Math.max(2000,(M.raw||0)*1.2); for(const c of CH) if(RAW.t[c].length>lim){ const cut=RAW.t[c].length-lim; RAW.t[c].splice(0,cut); RAW.v[c].splice(0,cut); }
+    RAW.on=true;
+  }catch(e){} finally{ RAW.busy=false; }
+  return got;
+}
+// run time of a reading (device millis) from the run's anchors (piecewise linear), after the newest point:
+// + wall time while running
+function rawRunTime(M,ms){ const A=M.ra||[]; if(!A.length||ms<A[0][0]) return null;
+  const pts=A.concat([M.rn]); for(let k=1;k<pts.length;k++){ const [m1,r1]=pts[k], [m0,r0]=pts[k-1];
+    if(ms<=m1) return m1>m0?(r0+(ms-m0)*(r1-r0)/(m1-m0))/1000:r1/1000; }
+  if(M.kind!=='run') return null;  // after a finished run: not part of it
+  const [mn,rn]=M.rn; return (rn+(live&&live.run.state==='running'?ms-mn:0))/1000; }
+// PV points of the model: the slots older than the first kept reading, then every reading
+function applyRaw(M){
+  if(!M||!M.raw||!RAW.on||(M.kind!=='live'&&M.kind!=='run'&&M.kind!=='last')) return;
+  M.rawOn=[false,false];
+  for(const i of CH){ const T=RAW.t[i],V=RAW.v[i]; if(!T.length) continue;
+    const tOf=M.kind==='live'?(ms=>(ms-M.ms)/1000):(ms=>rawRunTime(M,ms));
+    const pts=[]; let first=null;
+    for(let k=0;k<T.length;k++){ const t=tOf(T[k]); if(t==null) continue; if(M.kind==='live'&&t<M.t0-1) continue; if(first==null) first=t; pts.push([t,V[k]]); }
+    if(!pts.length) continue;
+    M.hist[i].pv=M.hist[i].pvBin.filter(p=>p[0]<first).concat(pts); M.rawOn[i]=true; }
+  // a line breaks where readings are further apart than 2.5 polls of both channels (min. 3 s)
+  if(M.kind==='live') M.gap=Math.max(M.gap,5*((live&&live.pollMs)||1000)/1000);
+}
+async function rawUpdate(){ if(!M||!M.raw||page!=='status'||drag) return;
+  const win=M.kind==='live'?-M.t0+5:(M.ra&&M.ra.length?(M.ms-M.ra[0][0])/1000+5:0); if(!win) return;
+  if(await rawPull(win)){ applyRaw(M); lastChart=0; } }
 async function ensureRunProg(running){ const now=Date.now(); if(!runProg||(running&&now-runProgAt>5000)){ const r=await api('/api/run'); runProg=normProg(r.program); runProgAt=now; } }
 
 /* ---------- chart drawing (from the 9.3 simulator) ---------- */
@@ -1070,7 +1127,20 @@ function setDomain(){
 function zoomAt(t,f){ if(!M||M.kind==='live') return; const sp0=zv.fit?xfull:zv.span, v0=zv.fit?0:zv.v0, span=Math.max(20,Math.min(xfull,sp0*f)), r=(t-v0)/sp0;
   zv.fit=span>=xfull; zv.span=span; zv.v0=t-r*span; afterView(); }
 function afterView(){ if(!zv.fit){ zv.v0=Math.max(0,Math.min(zv.v0,xfull-zv.span)); zv.follow=M&&M.kind==='run'&&M.now>=zv.v0&&M.now<=zv.v0+zv.span; } lastChart=0; }
-const pathOf=pts=>{ let d='',pen=false,lt=null; const gap=M.kind==='live'?M.gap:Infinity;
+// more points than the chart has pixels: per pixel column only the first, lowest, highest and last (in time
+// order), so the drawing stays light and no peak is lost; zoomed in, every point
+function thin(pts){ const W=plotW(); if(pts.length<=W*3) return pts;
+  const out=[]; let col=null,g=[],before=null;
+  const flush=()=>{ if(!g.length) return; let lo=g[0],hi=g[0]; for(const p of g){ if(p[1]<lo[1]) lo=p; if(p[1]>hi[1]) hi=p; }
+    const keep=[g[0],lo,hi,g[g.length-1]].filter((p,i,a)=>a.indexOf(p)===i).sort((a,b)=>a[0]-b[0]); out.push(...keep); g=[]; };
+  for(const p of pts){ const c=Math.floor(X(p[0]));
+    if(c<CL-2){ before=p; continue; }                       // left of the view: only the nearest point (the line enters)
+    if(before){ out.push(before); before=null; }
+    if(c>CL+W+2){ flush(); out.push(p); break; }           // right of it: one point (the line leaves), then stop
+    if(p[1]==null){ flush(); out.push(p); col=null; continue; }
+    if(c!==col){ flush(); col=c; } g.push(p); }
+  flush(); return out; }
+const pathOf=pts0=>{ let d='',pen=false,lt=null; const gap=M.kind==='live'?M.gap:Infinity, pts=thin(pts0);
   for(const [t,v] of pts){ if(v==null){pen=false;continue;} if(lt!=null&&t-lt>gap) pen=false; d+=(pen?'L':'M')+X(t).toFixed(1)+','+Y(v).toFixed(1); pen=true; lt=t; } return d; };
 // closed area between a line (same gaps as pathOf) and the bottom of the chart
 const areaOf=pts=>{ let d='',run=[],lt=null; const gap=M.kind==='live'?M.gap:Infinity, b=Y(YMIN).toFixed(1);
@@ -1141,7 +1211,7 @@ function renderChart(){
     if(shSp) s+=`<path d="${pathOf(sp)}" style="fill:none;stroke:${SP[i]};stroke-width:1.8;stroke-linejoin:round;opacity:.5"/>`;
     if(shPv) s+=`<path d="${pathOf(M.hist[i].pv)}" style="fill:none;stroke:${PV[i]};stroke-width:2.5;stroke-linejoin:round"/>`;
     // newest reading (polled faster than the chart history is fetched): line from the last point + dot
-    const hp=M.hist[i].pv, hv=shPv&&M.head?M.head.v[i]:null;
+    const hp=M.hist[i].pv, hv=shPv&&M.head&&!(M.rawOn&&M.rawOn[i])?M.head.v[i]:null;
     if(hv!=null){ const L=hp.length?hp[hp.length-1]:null;
       if(L&&M.head.t-L[0]<near) s+=`<path d="M${X(L[0]).toFixed(1)} ${Y(L[1]).toFixed(1)}L${X(M.head.t).toFixed(1)} ${Y(hv).toFixed(1)}" style="fill:none;stroke:${PV[i]};stroke-width:2.5"/>`;
       s+=`<circle cx="${X(M.head.t).toFixed(1)}" cy="${Y(hv).toFixed(1)}" r="3.5" style="fill:${PV[i]}"/>`; }
@@ -2375,7 +2445,7 @@ async function poll(){
     updateRun(); updateChans(); updateEditor(); updSide();
     const active=live.run.state==='running'||live.run.state==='paused', now=Date.now();
     if(page==='status'&&(!M||now-chartAt>(active||view==='live'?2000:5000))){ chartAt=now; await refreshChart(); }
-    if(page==='status') chartHead();
+    if(page==='status'){ chartHead(); await rawUpdate(); }
     await updateLog();
     await pageUpdate();
   }catch(e){ $('linkDot').className='dot'; $('linkTxt').textContent='Device not reachable'; toShell({state:'lost'}); }

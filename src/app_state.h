@@ -280,6 +280,15 @@ void chartSnapshot(ChartData& d, bool live = false);  // live: the live view eve
 // as many as fit into buf. Returns the length (0 = done) and the next slot in `from`.
 // pvMask / spMask: channels (bit 0 bottom, bit 1 top) whose PV (+ lowest, highest) / setpoint are written
 size_t liveCsv(uint32_t& from, char* buf, size_t n, uint8_t pvMask = 3, uint8_t spMask = 3);
+// Every PV reading (raw_hist.h) for GET /api/raw: rawPlan() picks the readings after `after[ch]` (millis),
+// at most winMs old and maxN per channel (under gLock); rawCopy() then copies them in chunks.
+struct RawPlan {
+  uint32_t nowMs;
+  uint32_t from[NUM_CHANNELS], n[NUM_CHANNELS];
+};
+void rawPlan(const uint32_t* after, uint32_t winMs, uint32_t maxN, RawPlan& p);
+uint32_t rawCopy(int ch, uint32_t k, uint32_t n, uint8_t* out);
+uint32_t rawCap();  // readings kept per channel (0: none)
 uint32_t liveHistSec();          // seconds the live history can hold
 // Live chart periods (minutes) to choose from, up to what the history holds; the one in effect:
 // display.liveMin, at most the longest that fits (both under gLock / from the UI task)

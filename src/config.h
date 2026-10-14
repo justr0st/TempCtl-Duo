@@ -29,3 +29,7 @@
 #else
 #define LIVE_HIST_MIN 60
 #endif
+// Every PV reading for the web chart (raw_hist.h): 8 bytes each. S3: 2 MB of PSRAM = 131 072 per channel
+// (36 h at 1 s polling, 9 h at 250 ms); CYD: 600 per channel (10 min at 1 s) in the IRAM heap.
+#define RAW_HIST_BYTES (2u * 1024u * 1024u)
+#define RAW_HIST_CYD 600
