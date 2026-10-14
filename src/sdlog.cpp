@@ -10,6 +10,7 @@
 #if defined(PIN_SD_CS) && defined(BOARD_HAS_PSRAM)
 #include <ctype.h>
 #include <dirent.h>
+#include <fcntl.h>
 #include <diskio_impl.h>
 #include <diskio_sdmmc.h>
 #include <driver/gpio.h>
@@ -305,7 +306,7 @@ static void flush(bool closing) {
 }
 
 // ------------------------------------------------------------ web requests (done by the SD task)
-enum ReqType : uint8_t { RQ_NONE = 0, RQ_LIST, RQ_LOAD, RQ_DELETE, RQ_FWCHECK, RQ_BACKUP };
+enum ReqType : uint8_t { RQ_NONE = 0, RQ_LIST, RQ_LOAD, RQ_DELETE, RQ_BACKUP };
 static struct {
   volatile uint8_t type;
   volatile bool abandoned;  // the web gave up waiting: the SD task cleans up and frees the slot
@@ -320,10 +321,15 @@ static struct {
   size_t len;
   char* wdata;  // BACKUP: the file's content (owned by the request: the SD task frees it)
   size_t wlen;
-  SdFirmware fw;  // FWCHECK
 } rq;
 static volatile bool fwInstall = false;  // install /firmware.bin (started by sdlogFirmwareInstall)
 static void installFirmware();
+// firmware.bin check (sdlogFirmwareCheckStart): 0 none, 1 asked, 2 running, 3 done
+static volatile uint8_t fwChk = 0;
+static SdFirmware fwRes;
+static bool fwResOk = false;
+static char fwResErr[96] = "";
+static void runFirmwareCheck();
 static constexpr int LIST_MAX = 200;
 static SemaphoreHandle_t rqFree = nullptr, rqDone = nullptr;  // binary: one request at a time / answered
 static void doRequest();
@@ -333,6 +339,7 @@ static void writerTask(void*) {
   for (;;) {
     ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200));  // (a web request wakes it at once)
     if (rq.type) doRequest();
+    if (fwChk == 1) runFirmwareCheck();
     if (fwInstall) installFirmware();
     if (!open_) continue;
     size_t n;
@@ -605,23 +612,42 @@ static bool writeBackup(const char* data, size_t len, char* name, size_t nn, cha
 static const char* const FW_FILE = "/sd/firmware.bin";
 static const char* const FW_DONE = "/sd/firmware.done";
 static constexpr size_t FW_CHUNK = 4096;
+static constexpr size_t FW_CHECK_CHUNK = 16384;  // check: larger reads (multi-block, DMA-capable RAM)
 
 static bool checkFirmware(SdFirmware& f, char* err, size_t n) {
   memset(&f, 0, sizeof(f));
   return withCard(err, n, [&]() -> bool {
-    FILE* fp = fopen(FW_FILE, "rb");
-    if (!fp) return true;  // none on the card
-    uint8_t* buf = (uint8_t*)malloc(FW_CHUNK);
+    const int fd = open(FW_FILE, O_RDONLY);
+    if (fd < 0) return true;  // none on the card
+    size_t chunk = FW_CHECK_CHUNK;
+    uint8_t* buf = (uint8_t*)heap_caps_malloc(chunk, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (!buf) buf = (uint8_t*)malloc(chunk = FW_CHUNK);
     if (!buf) {
-      fclose(fp);
+      close(fd);
       snprintf(err, n, "out of memory");
       return false;
     }
+    struct stat stt;
+    const uint32_t fileSize = fstat(fd, &stt) == 0 ? (uint32_t)stt.st_size : 0;
     ImageScanner sc;
     sc.reset();
-    for (size_t k; (k = fread(buf, 1, FW_CHUNK, fp)) > 0;) sc.feed(buf, k);
-    fclose(fp);
+    bool bad = false;
+    // images since 1.0.43 carry the id near the start (ota.cpp): the first block is enough; older ones: all
+    for (int k; (k = read(fd, buf, chunk)) != 0;) {
+      if (k < 0) {
+        bad = true;
+        break;
+      }
+      sc.feed(buf, (size_t)k);
+      if (sc.found()) break;
+    }
+    if (fileSize) sc.setSize(fileSize);
+    close(fd);
     free(buf);
+    if (bad) {
+      snprintf(err, n, "reading firmware.bin failed");
+      return false;
+    }
     f.found = true;
     f.size = sc.size();
     strlcpy(f.board, sc.board(), sizeof(f.board));
@@ -629,6 +655,23 @@ static bool checkFirmware(SdFirmware& f, char* err, size_t n) {
     strlcpy(f.problem, imageProblem(sc, BOARD_ID, BOARD_CHIP), sizeof(f.problem));
     return true;
   });
+}
+
+// in the SD task
+static void runFirmwareCheck() {
+  fwChk = 2;
+  const uint32_t t0 = millis();
+  SdFirmware f;
+  char err[96] = "";
+  const bool ok = checkFirmware(f, err, sizeof(err));
+  fwRes = f;
+  fwResOk = ok;
+  strlcpy(fwResErr, ok ? "" : err, sizeof(fwResErr));
+  if (ok && f.found)
+    LogSerial.printf("[sd] firmware.bin checked: %u kB in %.1f s\n", (unsigned)(f.size / 1024), (millis() - t0) / 1000.0f);
+  else LogSerial.printf("[sd] firmware.bin check: %s\n", ok ? "none on the card" : err);
+  __sync_synchronize();
+  fwChk = 3;
 }
 
 // in the SD task: the card stays mounted (bus lock held) for the whole install, about 20 s; the display
@@ -691,7 +734,6 @@ static void doRequest() {
       rq.ok = rq.data != nullptr;
       break;
     case RQ_DELETE: rq.ok = deleteFile(rq.dir, rq.name, rq.err, sizeof(rq.err)); break;
-    case RQ_FWCHECK: rq.ok = checkFirmware(rq.fw, rq.err, sizeof(rq.err)); break;
     case RQ_BACKUP: rq.ok = writeBackup(rq.wdata, rq.wlen, rq.name, sizeof(rq.name), rq.err, sizeof(rq.err)); break;
     default: rq.ok = false;
   }
@@ -803,13 +845,23 @@ bool sdlogBackupWrite(char* data, size_t len, const char* base, char* name, size
   return ok;
 }
 
-bool sdlogFirmwareCheck(SdFirmware& f, char* err, size_t n) {
-  memset(&f, 0, sizeof(f));
-  if (!ask(RQ_FWCHECK, nullptr, err, n)) return false;
-  const bool ok = rq.ok;
-  f = rq.fw;
-  done();
-  return ok;
+bool sdlogFirmwareCheckStart(char* err, size_t n) {
+  if (!sdTask) return snprintf(err, n, "SD card not available"), false;
+  if (fwChk != 1 && fwChk != 2) {
+    fwChk = 1;
+    xTaskNotifyGive(sdTask);
+  }
+  return true;
+}
+
+int sdlogFirmwareCheckResult(SdFirmware& f, char* err, size_t n) {
+  const uint8_t st = fwChk;
+  if (!st) return -1;
+  if (st != 3) return 0;
+  __sync_synchronize();
+  f = fwRes;
+  strlcpy(err, fwResErr, n);
+  return fwResOk ? 1 : 2;
 }
 
 bool sdlogFirmwareInstall(char* err, size_t n) {
@@ -852,10 +904,14 @@ bool sdlogBackupWrite(char* data, size_t, const char*, char* name, size_t nn, ch
   snprintf(err, n, "no SD slot on this board");
   return false;
 }
-bool sdlogFirmwareCheck(SdFirmware& f, char* err, size_t n) {
-  memset(&f, 0, sizeof(f));
+bool sdlogFirmwareCheckStart(char* err, size_t n) {
   snprintf(err, n, "no SD slot on this board");
   return false;
+}
+int sdlogFirmwareCheckResult(SdFirmware& f, char* err, size_t n) {
+  memset(&f, 0, sizeof(f));
+  if (n) err[0] = 0;
+  return -1;
 }
 bool sdlogFirmwareInstall(char* err, size_t n) {
   snprintf(err, n, "no SD slot on this board");

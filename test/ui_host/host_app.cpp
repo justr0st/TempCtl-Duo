@@ -219,6 +219,7 @@ void touchLastRaw(int32_t* x, int32_t* y) {
 void touchSetCal(const TouchCal&) {}
 bool touchReset(const TouchCal&) { return true; }
 int touchCheck(char* i, size_t n) { snprintf(i, n, "host"); return -1; }
+void touchStats(char* i, size_t n) { snprintf(i, n, "host"); }
 
 // ------------------------------------------------------------ scenarios
 static void run(uint32_t ms) {
@@ -666,7 +667,8 @@ void safetyBeepTest() {}
 static OtaStatus otaStub{};
 void otaStatus(OtaStatus& s) { s = otaStub; }
 bool otaCanStart(char* e, size_t n) { snprintf(e, n, "a program is running - stop it first"); return false; }
-bool sdlogFirmwareCheck(SdFirmware& f, char*, size_t) { memset(&f, 0, sizeof(f)); return true; }
+bool sdlogFirmwareCheckStart(char*, size_t) { return true; }
+int sdlogFirmwareCheckResult(SdFirmware& f, char* e, size_t n) { memset(&f, 0, sizeof(f)); if (n) e[0] = 0; return 1; }
 bool sdlogFirmwareInstall(char* e, size_t n) { snprintf(e, n, "-"); return false; }
 bool sdlogSlot() { return SCREEN_W > 400; }
 // backups (backup.h): three on the card

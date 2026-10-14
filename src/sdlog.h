@@ -57,5 +57,9 @@ struct SdFirmware {
   char board[32], version[16];
   char problem[96];  // "" = this device can install it
 };
-bool sdlogFirmwareCheck(SdFirmware& f, char* err, size_t n);  // reads the whole file (a few seconds)
+// The check reads the whole file through the image scanner (a few seconds), in the SD task: start it, then ask
+// for the result. Start while one runs: no second one. False: no SD slot / not available (err).
+bool sdlogFirmwareCheckStart(char* err, size_t n);
+// -1 none started since the boot, 0 running, 1 done (f), 2 done with an error (err)
+int sdlogFirmwareCheckResult(SdFirmware& f, char* err, size_t n);
 bool sdlogFirmwareInstall(char* err, size_t n);              // starts it in the SD task (progress: otaStatus)

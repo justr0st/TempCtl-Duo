@@ -1103,12 +1103,22 @@ static void handleOtaDone() {
   sendJson(d);
 }
 
-// GET /api/ota/sd: the firmware.bin on the SD card (S3); POST /api/ota/sd: install it
+// GET /api/ota/sd?start=1: starts the check of the firmware.bin on the SD card (S3; the SD task reads the whole
+// file, a few seconds); GET /api/ota/sd: {"busy":true} while it runs ({"busy":false,"none":true} if none was
+// started), then its result {"found",...} or {"err"}. POST /api/ota/sd: install it
 static void handleOtaSdCheck() {
   SdFirmware f;
   char err[96] = "";
+  if (reqHas("start") && !sdlogFirmwareCheckStart(err, sizeof(err))) return sendError(err);
+  const int r = sdlogFirmwareCheckResult(f, err, sizeof(err));
   JsonDocument d;
-  if (!sdlogFirmwareCheck(f, err, sizeof(err))) return sendError(err);
+  if (r <= 0) {
+    d["busy"] = r == 0;
+    if (r < 0) d["none"] = true;
+    extraHeaders = "Cache-Control: no-store\r\n";
+    return sendJson(d);
+  }
+  if (r == 2) return sendError(err);
   d["found"] = f.found;
   if (f.found) {
     d["sizeKb"] = f.size / 1024;

@@ -14,9 +14,10 @@
 #include "touch.h"
 
 #ifndef TOUCH_USE_INT
-// CTP_INT is low while the panel is touched (G_MODE 0). Reading it saves the
-// I2C transfer when nothing is touched; off until checked on the hardware.
-#define TOUCH_USE_INT 0
+// CTP_INT is low while the panel is touched (G_MODE 0): while it is high and nothing was pressed, the I2C
+// read is skipped. Checked at run time: every 25th read (~0.75 s) is done anyway; a touch found while the line
+// is high (3 times) switches back to reading every time ("[touch] INT line ..." in the log).
+#define TOUCH_USE_INT 1
 #endif
 
 static const uint8_t ADDR = 0x38;
@@ -24,6 +25,9 @@ static bool ok = false, rotated = false, wasPressed = false;
 static bool foundOnce = false;  // found since the start (else no module: nothing to check)
 static uint8_t chipId = 0;
 static int32_t lastRawX = -1, lastRawY = -1;
+static int8_t intOk = -1;    // INT line: -1 not seen working yet, 1 works, 0 does not (read every time)
+static uint8_t intMiss = 0;  // touches found while the line was high
+static uint8_t intSkip = 0;  // reads skipped since the last real one
 
 static bool writeReg(uint8_t reg, uint8_t v) {
   Wire.beginTransmission(ADDR);
@@ -39,6 +43,68 @@ static bool readRegs(uint8_t reg, uint8_t* buf, uint8_t n) {
   if (Wire.requestFrom(ADDR, n) != n) return false;
   for (uint8_t i = 0; i < n; ++i) buf[i] = Wire.read();
   return true;
+}
+
+// Gaps in a held touch: the FT6336 sometimes reports no touch point for a read or two while the finger stays
+// (noise; seen all over the 4" panel, most in one corner). Up to GAP_READS such reads (LVGL reads every 30 ms)
+// keep the press at its last point, so a held button is not let go; "lift-up" from the controller and a
+// longer gap release it. Diagnosis: bridged gaps by length, and drop-outs that got through (release + new
+// press within 150 ms, by the reason of the release); a line once a minute when there were some, totals
+// for "screen check". (The log texts avoid the words the system log reads as warnings / errors.)
+static constexpr uint8_t GAP_READS = 2;
+enum { DR_I2C, DR_NONE, DR_LIFT };
+static uint8_t gapReads = 0;
+static uint32_t relAt = 0;
+static uint8_t relWhy = 0;
+static int32_t relX = 0, relY = 0, lastX = 0, lastY = 0, noteX = 0, noteY = 0;
+static uint32_t bridgedMin[GAP_READS], bridgedAll[GAP_READS], dropMin[3], dropAll[3];
+static uint32_t reads = 0, readErrs = 0, minuteAt = 0;
+
+static void released(uint8_t why) {
+  if (wasPressed) {
+    relAt = millis();
+    if (!relAt) relAt = 1;
+    relWhy = why;
+    relX = lastX, relY = lastY;
+  }
+  wasPressed = false;
+  gapReads = 0;
+}
+
+static void gapReport() {
+  const uint32_t now = millis();
+  if (!minuteAt) minuteAt = now;
+  if (now - minuteAt < 60000) return;
+  minuteAt = now;
+  const uint32_t b = bridgedMin[0] + bridgedMin[1], d = dropMin[0] + dropMin[1] + dropMin[2];
+  if (b || d)
+    LogSerial.printf("[touch] last minute: %lu short gap%s in held touches bridged (%lu of 1 read, %lu of 2 reads), %lu "
+                     "longer (%lu no point, %lu lift-up, %lu I2C); last at x %ld y %ld\n",
+                     (unsigned long)b, b == 1 ? "" : "s", (unsigned long)bridgedMin[0], (unsigned long)bridgedMin[1],
+                     (unsigned long)d, (unsigned long)dropMin[DR_NONE], (unsigned long)dropMin[DR_LIFT],
+                     (unsigned long)dropMin[DR_I2C], (long)noteX, (long)noteY);
+  memset(bridgedMin, 0, sizeof(bridgedMin));
+  memset(dropMin, 0, sizeof(dropMin));
+}
+
+void touchStats(char* info, size_t n) {
+  snprintf(info, n, "%lu reads, %lu I2C read problems; gaps bridged: %lu of 1 read, %lu of 2 reads; longer (release + "
+                    "press within 150 ms): %lu no point, %lu lift-up, %lu I2C; INT line %s",
+           (unsigned long)reads, (unsigned long)readErrs, (unsigned long)bridgedAll[0], (unsigned long)bridgedAll[1],
+           (unsigned long)dropAll[DR_NONE], (unsigned long)dropAll[DR_LIFT], (unsigned long)dropAll[DR_I2C],
+           !TOUCH_USE_INT || TOUCH_PIN_INT < 0 ? "not used" : intOk > 0 ? "used" : intOk == 0 ? "NOT working, polled" : "not seen yet");
+}
+
+// no touch point / I2C problem / lift-up: bridged (press kept at its last point) or released
+static bool noTouch(uint8_t why, int32_t* x, int32_t* y) {
+  if (wasPressed && why != DR_LIFT && gapReads < GAP_READS) {
+    ++gapReads;
+    *x = lastX;
+    *y = lastY;
+    return true;
+  }
+  released(why);
+  return false;
 }
 
 bool touchInit(const TouchCal&) {
@@ -87,6 +153,8 @@ bool touchReset(const TouchCal& cal) {
   delayMicroseconds(10);
   if (clocks) LogSerial.printf("[touch] I2C bus freed (%d clocks)\n", clocks);
   wasPressed = false;
+  relAt = 0;
+  gapReads = 0;
   return touchInit(cal);
 }
 
@@ -113,12 +181,31 @@ void touchLastRaw(int32_t* rx, int32_t* ry) {
 
 bool touchRead(int32_t* x, int32_t* y) {
   if (!ok) return false;  // not found at boot (display module not connected): no I2C traffic, no error log
-  if (TOUCH_USE_INT && TOUCH_PIN_INT >= 0 && !wasPressed && digitalRead(TOUCH_PIN_INT)) return false;
+  gapReport();
+  bool intHigh = false;
+  if (TOUCH_USE_INT && TOUCH_PIN_INT >= 0 && intOk != 0 && !wasPressed) {
+    intHigh = digitalRead(TOUCH_PIN_INT);
+    if (intHigh && ++intSkip < 25) return false;  // nothing touched (every 25th read checks the line)
+  }
+  intSkip = 0;
   uint8_t b[5];
-  if (!readRegs(0x02, b, sizeof(b))) return wasPressed = false;
+  ++reads;
+  if (!readRegs(0x02, b, sizeof(b))) {
+    ++readErrs;
+    return noTouch(DR_I2C, x, y);
+  }
   const uint8_t points = b[0] & 0x0F;
   const uint8_t event = b[1] >> 6;
-  if (points < 1 || points > 2 || event == 1) return wasPressed = false;
+  if (points < 1 || points > 2 || event == 1) return noTouch(event == 1 && points >= 1 && points <= 2 ? DR_LIFT : DR_NONE, x, y);
+  if (TOUCH_USE_INT && TOUCH_PIN_INT >= 0 && intOk != 0 && !wasPressed) {  // a new touch: did the line show it?
+    if (!intHigh && intOk < 0) {
+      intOk = 1;
+      LogSerial.println("[touch] INT line works: I2C read only while touched");
+    } else if (intHigh && ++intMiss >= 3) {
+      intOk = 0;
+      LogSerial.println("[touch] INT line stays high while touched - reading over I2C every time");
+    }
+  }
   const int32_t rx = ((b[1] & 0x0F) << 8) | b[2];
   const int32_t ry = ((b[3] & 0x0F) << 8) | b[4];
   lastRawX = rx;
@@ -133,6 +220,19 @@ bool touchRead(int32_t* x, int32_t* y) {
   }
   *x = constrain(px, 0, SCREEN_W - 1);
   *y = constrain(py, 0, SCREEN_H - 1);
+  if (gapReads) {  // a gap bridged
+    ++bridgedMin[gapReads - 1];
+    ++bridgedAll[gapReads - 1];
+    noteX = lastX, noteY = lastY;
+    gapReads = 0;
+  }
+  if (!wasPressed && relAt && millis() - relAt < 150) {  // a gap that got through
+    ++dropMin[relWhy];
+    ++dropAll[relWhy];
+    noteX = relX, noteY = relY;
+  }
+  relAt = 0;
+  lastX = *x, lastY = *y;
   return wasPressed = true;
 }
 #endif

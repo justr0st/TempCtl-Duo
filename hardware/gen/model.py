@@ -18,7 +18,7 @@ class Pin:
 
 
 class SymDef:
-    """lib: 'TempCtlDuo' or 'power'. graphics in lib mm (y up):
+    """lib: 'TempCtlDuo' (all symbols, also the power ones). graphics in lib mm (y up):
     ('rect', x1, y1, x2, y2, fill) fill: 'background' | 'none' | 'outline'
     ('poly', [(x, y), ...], width, fill)   ('circle', cx, cy, r, width, fill)"""
 
@@ -103,8 +103,9 @@ def lib():
                          graphics=[("rect", -2.54, 3.81, 0, -3.81, "background"),
                                    ("poly", [(0, 3.81), (2.54, 6.35), (2.54, -6.35), (0, -3.81)], 0.254, "none")],
                          ref_at=(5.08, 1.27, 0), val_at=(5.08, -1.27, 0), desc="Piezo buzzer")
-    # power
-    pw = lambda name, pts, ty, vy: SymDef(name, lib="power", prefix="#PWR" if name != "PWR_FLAG" else "#FLG", value=name,
+    # power (in the project library, not KiCad's "power" library: its copy changes between KiCad versions and
+    # ERC then reports every power symbol as "doesn't match copy in library")
+    pw = lambda name, pts, ty, vy: SymDef(name, lib="TempCtlDuo", prefix="#PWR" if name != "PWR_FLAG" else "#FLG", value=name,
                                           power=True, names_hidden=True, numbers_hidden=True, name_offset=0,
                                           pins=[Pin("1", name if name != "PWR_FLAG" else "pwr", ty, 0, 0,
                                                     270 if name == "GND" else 90, 0, True)],
@@ -139,7 +140,7 @@ def lib():
     L["Display"] = box(
         "Display_MSP4031", 22,
         right=[None, ("3", "LCD_CS", "input"), ("4", "LCD_RST", "input"), ("5", "LCD_RS", "input"), ("6", "SDI(MOSI)", "input"),
-               ("7", "SCK", "input"), ("8", "LED", "input"), ("9", "SDO(MISO)", "output"), ("10", "CTP_SCL", "input"),
+               ("7", "SCK", "input"), ("8", "LED", "input"), ("9", "SDO(MISO)", "tri_state"), ("10", "CTP_SCL", "input"),
                ("11", "CTP_RST", "input"), ("12", "CTP_SDA", "bidirectional"), ("13", "CTP_INT", "output"),
                ("14", "SD_CS", "input"), None],
         top=[("1", "VCC", "power_in", 8)], bottom=[("2", "GND", "power_in", 8)], prefix="DS",
@@ -157,7 +158,7 @@ def lib():
         prefix="J", value="PMA KS 4x-1 bus", numbers_hidden=False,
         desc="PMA KS 40-1 / 41-1 / 42-1 Modbus terminals (one or two controllers on the bus)")
     L["MAX31855"] = box(
-        "MAX31855_module", 20, left=[None, ("3", "CS", "input"), ("4", "SCK", "input"), ("5", "SO", "output"), None],
+        "MAX31855_module", 20, left=[None, ("3", "CS", "input"), ("4", "SCK", "input"), ("5", "SO", "tri_state"), None],
         right=[None, ("6", "T+", "passive"), ("7", "T-", "passive")],
         top=[("1", "VIN", "power_in", 10)], bottom=[("2", "GND", "power_in", 10)], prefix="U",
         value="MAX31855 module", desc="MAX31855 thermocouple converter breakout (3.3 V)")

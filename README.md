@@ -297,7 +297,13 @@ local); change them on the web page's *Channels* page. After switching from the 
   device writes it into its other firmware slot and restarts.
 - **SD card** (S3): copy `firmware.bin` into the card's root folder, then *Settings › Device › Check the SD
   card › Install from the SD card* (or touch *System › Firmware update*, serial `fw sd` / `fw sd install
-  yes`). After the install the file is renamed `firmware.done`.
+  yes`). The check runs in the SD task, in the background (the page shows "Reading firmware.bin… n s", touch
+  a message and then the dialog, serial prints the result when it is there). Images since 1.0.43 carry their
+  id string right after the ESP-IDF app description (section `.rodata_custom_desc`, file offset 288), so the
+  check reads only the first 16 kB (well under a second); for older images it reads the whole file (about
+  30 s on the S3: the card shares the SPI bus with the display, which is slow meanwhile). Log:
+  `[sd] firmware.bin checked: 1855 kB in 0.2 s`. After the install the file is
+  renamed `firmware.done`.
 - Not while a program runs or an output is on. The touch screen shows the progress; don't switch off.
 - **Rollback**: the new firmware runs "on probation" and confirms itself after 30 s of normal running (loop
   and control task alive). A crash or reset before that makes the bootloader start the previous firmware
@@ -368,6 +374,20 @@ the device; each automatic restart is an event in the log ("Screen restarted aut
   reacting, a hanging UI program (that is the loop watchdog's job: device restart).
 - Test: the serial command `screen check test` (not in the help) switches the display off and puts it
   to sleep; within a few seconds the check should restart it (event "Screen restarted automatically").
+- **Short touch gaps (S3)**: the FT6336 sometimes reports no touch point for a read or two while the finger
+  stays on the panel (seen all over Rost's 4" panel, most in the lower left corner). Up to 2 such reads (LVGL
+  reads every 30 ms, so up to ~60 ms) keep the press at its last point, so a held button (stepper
+  acceleration) is not let go; a "lift-up" from the controller releases at once, a longer gap after the 2
+  reads. `screen check` (serial) prints the statistics: reads, I2C read problems, gaps bridged (1 / 2 reads),
+  longer gaps (release + new press within 150 ms, by reason) and the INT line state; once a minute the log
+  gets `[touch] last minute: n short gaps in held touches bridged (...), n longer (...); last at x .. y ..`
+  when there were some.
+
+**S3 touch INT line** (CTP_INT, GPIO7, `TOUCH_USE_INT` in touch_ft6336.cpp): the FT6336 holds it low while
+the panel is touched, so the touch is read over I2C only then (and on every read while pressed, so a release
+is seen at once — no added delay). Every 25th read (~0.75 s) is done anyway: a touch found while the line is
+high (3 times) switches back to reading every time (`[touch] INT line stays high while touched ...`);
+`[touch] INT line works` after the first touch it saw.
 
 ## 4b. Serial console
 
@@ -608,7 +628,7 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 | POST | `/api/ack` | `{"ch":0}` acknowledge a channel fault (runaway, sensor, over temperature, heating while off, frozen reading, converter too hot); refused while the cause is still there. The outputs stay off until switched on again |
 | GET | `/api/ota` | firmware update: `board`, `version`, `slot`, `slotKb` (0 = no second slot, `why`), `canStart` / `why`, `probation`, `sd` (SD slot), `status` {`phase` idle / running / done / failed, `source`, `done`, `total`, `version`, `msg`}; `/api/live` → `ota` while one runs or the new firmware is on probation |
 | POST | `/api/ota?size=<bytes>` | multipart upload of a `firmware.bin` (field `fw`, Wi-Fi only): written while it arrives, `{"ok":true,"version"}` or `{"err"}`; the device restarts 2 s later |
-| GET / POST | `/api/ota/sd` | S3: the `firmware.bin` in the SD card's root (`found`, `sizeKb`, `board`, `version`, `problem`) / install it (progress in `/api/live` → `ota`) |
+| GET / POST | `/api/ota/sd` | S3: `?start=1` starts the check of the `firmware.bin` in the SD card's root; then `{"busy":true}` until its result (`found`, `sizeKb`, `board`, `version`, `problem`, or `err`) / POST: install it (progress in `/api/live` → `ota`) |
 | POST | `/api/beep` | `{}` one short test beep (Settings › Safety). `/api/live` → `safety`: `estop`, `contact` (open / closed, S3), `chipC`, `chipHot`, `muted`; `/api/config` → `limits.estop / sound / chipTemp` |
 | POST | `/api/cmd` | `{"cmd":"start"|"pause"|"resume"|"stop"|"next"|"continue", "prog":index}` (`skip` = `next`) |
 | POST | `/api/wifi` | `{"ssid","pass","apPass"}`, reconnects without restart |

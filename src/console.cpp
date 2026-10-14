@@ -1730,6 +1730,24 @@ static void execute(char* text) {
   snap = nullptr;
 }
 
+// fw sd: the check runs in the SD task; its result is printed when it is there
+static bool fwWaiting = false;
+static uint32_t fwWaitAt = 0;
+static void fwPoll() {
+  if (!fwWaiting) return;
+  SdFirmware f;
+  char e[120];
+  const int r = sdlogFirmwareCheckResult(f, e, sizeof(e));
+  if (r == 0 && millis() - fwWaitAt < 90000) return;
+  fwWaiting = false;
+  breakLine();
+  if (r == 0) return err("reading the SD card takes too long - try again");
+  if (r != 1) return err("%s", r == 2 ? e : "the check did not start");
+  if (!f.found) return say("no firmware.bin in the SD card's root folder");
+  say("firmware.bin: %u kB, board %s, version %s%s%s", (unsigned)(f.size / 1024), f.board[0] ? f.board : "?",
+      f.version[0] ? f.version : "?", f.problem[0] ? " - refused: " : " - fw sd install yes installs it", f.problem);
+}
+
 // fw / fw sd / fw sd install yes (spec 9.11)
 static void cmdFw(const Args& a) {
   char e[120];
@@ -1739,13 +1757,11 @@ static void cmdFw(const Args& a) {
       if (!sdlogFirmwareInstall(e, sizeof(e))) return err("%s", e);
       return say("installing from the SD card (the device restarts when it is written)");
     }
-    SdFirmware f;
-    if (!sdlogFirmwareCheck(f, e, sizeof(e))) return err("%s", e);
-    if (!f.found) return say("no firmware.bin in the SD card's root folder");
-    say("firmware.bin: %u kB, board %s, version %s%s%s", (unsigned)(f.size / 1024), f.board[0] ? f.board : "?",
-        f.version[0] ? f.version : "?", f.problem[0] ? " - refused: " : " - fw sd install yes installs it",
-        f.problem);
-    return;
+    if (fwWaiting) return say("still reading firmware.bin ...");
+    if (!sdlogFirmwareCheckStart(e, sizeof(e))) return err("%s", e);
+    fwWaiting = true;  // (the SD task reads the file; fwPoll prints the result)
+    fwWaitAt = millis();
+    return say("reading firmware.bin on the SD card ...");
   }
   uint32_t size;
   const bool slot = otaSlot(size, e, sizeof(e));
@@ -2358,6 +2374,7 @@ void consoleLoop() {
   connectPoll();
   calPoll();
   screenPoll();
+  fwPoll();
   if (watching && millis() - watchAt >= 1000) {
     watchAt += 1000;
     if (millis() - watchAt >= 1000) watchAt = millis();  // (fell behind: no burst)

@@ -363,7 +363,7 @@ int uiScreenCheckTest() {
 }
 
 void uiScreenCheckInfo(void (*line)(const char*)) {
-  char b[160], i[112];
+  char b[240], i[200];
   bool on;
   {
     Guard g;
@@ -375,6 +375,11 @@ void uiScreenCheckInfo(void (*line)(const char*)) {
   const int t = touchCheck(i, sizeof(i));
   snprintf(b, sizeof(b), "touch    %s", i);
   line(b);
+  touchStats(i, sizeof(i));
+  if (i[0]) {
+    snprintf(b, sizeof(b), "         %s", i);
+    line(b);
+  }
   snprintf(b, sizeof(b), "check    %s, %lu automatic restart(s) since the start%s", on ? "on (every second)" : "off",
            (unsigned long)autoRestarts, gaveUp ? " - given up for now" : "");
   line(b);

@@ -73,7 +73,14 @@ void safetyActivity() {}
 bool otaSlot(uint32_t& size, char* why, size_t n) { size = 1966080; return true; }
 const char* otaRunningSlot() { return "app0"; }
 bool otaProbation() { return false; }
-bool sdlogFirmwareCheck(SdFirmware& f, char*, size_t) { memset(&f, 0, sizeof(f)); f.found = true; f.size = 1900000; strcpy(f.board, "cyd-1xlocal-1x485"); strcpy(f.version, "1.0.40"); return true; }
+static int fwChecks = 0;  // the check "runs" for two polls
+bool sdlogFirmwareCheckStart(char*, size_t) { fwChecks = 3; return true; }
+int sdlogFirmwareCheckResult(SdFirmware& f, char* e, size_t n) {
+  memset(&f, 0, sizeof(f)); if (n) e[0] = 0;
+  if (!fwChecks) return -1;
+  if (fwChecks > 1) { --fwChecks; return 0; }
+  f.found = true; f.size = 1900000; strcpy(f.board, "cyd-1xlocal-1x485"); strcpy(f.version, "1.0.40"); return 1;
+}
 bool sdlogFirmwareInstall(char* e, size_t n) { snprintf(e, n, "a program is running - stop it first"); return false; }
 #include "backup.h"
 #include "config.h"
@@ -160,6 +167,8 @@ int main() {
   type("info\r");
   type("fw\r");
   type("fw sd\r");
+  type("fw sd\r");  // (still reading)
+  run(500);
   type("fw sd install\r");
   type("fw sd install yes\r");
   type("STATUS\r\n");

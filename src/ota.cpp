@@ -11,8 +11,12 @@
 #include "ota_image.h"
 #include "version.h"
 
-// kept in the image (the scanner of the next update looks for it)
-__attribute__((used)) const char OTA_IMAGE_ID[] = "TCDUO-IMAGE|" BOARD_ID "|" FW_VERSION "|end";
+// kept in the image (the scanner of the next update looks for it). In the "custom app description" section,
+// which the linker puts right after the ESP-IDF app description at the start of the first (flash data)
+// segment: file offset 24 + 8 + 256 = 288, so the SD card check finds it in the first kilobytes (1.0.43;
+// older images: anywhere in the read-only data, the check then reads the whole file).
+__attribute__((used, section(".rodata_custom_desc"))) const char OTA_IMAGE_ID[] =
+    "TCDUO-IMAGE|" BOARD_ID "|" FW_VERSION "|end";
 
 static constexpr const char* NOTE = "/duo/ota.json";  // {"from","to","src"} until the new firmware is confirmed
 static constexpr uint32_t PROBATION_MS = 30000;

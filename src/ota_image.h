@@ -16,6 +16,7 @@ class ImageScanner {
   const char* board() const { return board_; }
   const char* version() const { return version_; }
   uint32_t size() const { return total_; }
+  void setSize(uint32_t n) { total_ = n; }  // the file's size, when only its start was fed
 
  private:
   static constexpr size_t ID_MAX = 80;

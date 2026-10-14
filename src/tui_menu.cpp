@@ -881,17 +881,33 @@ static void onSdFwAnswer(int b, int) {
   char err[120];
   if (!sdlogFirmwareInstall(err, sizeof(err))) tToast(err, true);
 }
-static void onSdFw(lv_event_t*) {
+static lv_timer_t* sdFwTimer = nullptr;
+static uint32_t sdFwAt = 0;
+static void sdFwPoll(lv_timer_t*) {  // the check runs in the SD task: its result, then the dialog
   char err[120];
-  if (!otaCanStart(err, sizeof(err))) return tToast(err, true);
-  if (!sdlogFirmwareCheck(sdFw, err, sizeof(err))) return tToast(err, true);
+  const int r = sdlogFirmwareCheckResult(sdFw, err, sizeof(err));
+  if (r == 0 && lv_tick_elaps(sdFwAt) < 90000) return;
+  lv_timer_delete(sdFwTimer);
+  sdFwTimer = nullptr;
+  if (r == 0) return tToast("Checking the SD card takes too long - try again.", true);
+  if (r != 1) return tToast(r == 2 ? err : "The SD card check did not start.", true);
   if (!sdFw.found) return tToast("No firmware.bin on the SD card (in its root folder).", true);
   if (sdFw.problem[0]) return tToast(sdFw.problem, true);
+  if (!otaCanStart(err, sizeof(err))) return tToast(err, true);
   char t[64], m[160];
   snprintf(t, sizeof(t), "Install firmware %s?", sdFw.version);
   snprintf(m, sizeof(m), "From the SD card (%u kB), now %s. The device restarts afterwards; the new firmware is checked for 30 s.",
            (unsigned)(sdFw.size / 1024), FW_VERSION);
   tDialog(t, m, "Cancel", "Install", "", onSdFwAnswer, 0);
+}
+static void onSdFw(lv_event_t*) {
+  char err[120];
+  if (sdFwTimer) return;  // (still checking)
+  if (!otaCanStart(err, sizeof(err))) return tToast(err, true);
+  if (!sdlogFirmwareCheckStart(err, sizeof(err))) return tToast(err, true);
+  tToast("Reading firmware.bin on the SD card...");
+  sdFwAt = tTickNow();
+  sdFwTimer = lv_timer_create(sdFwPoll, 300, nullptr);
 }
 
 #if HAS_SD

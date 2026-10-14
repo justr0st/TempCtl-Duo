@@ -2188,9 +2188,16 @@ $('fwGo').onclick=async()=>{ const f=FW.file, r=FW.img; if(!f||!r) return; const
     else{ FW.phase=''; fwBar(null); setMsg('fwMsg','Update failed: '+(j.err||('HTTP '+x.status)),true); fwLoad(true); } };
   x.onerror=x.ontimeout=()=>{ FW.phase=''; fwBar(null); setMsg('fwMsg','The upload was interrupted (connection lost). Nothing was changed if the device did not restart.',true); fwLoad(true); };
   x.send(fd); };
-$('fwSdCheck').onclick=async()=>{ setMsg('fwMsg','Reading the SD card…'); $('fwSdGo').hidden=true; $('fwSdName').textContent='';
-  let r; try{ r=await api('/api/ota/sd',undefined,20000); }catch(e){ setMsg('fwMsg','No answer from the device.',true); return; }
-  if(r.err){ setMsg('fwMsg',r.err,true); return; } FW.sd=r;
+$('fwSdCheck').onclick=async()=>{ const b=$('fwSdCheck'); if(b.disabled) return; b.disabled=true;
+  setMsg('fwMsg','Reading firmware.bin on the SD card…'); $('fwSdGo').hidden=true; $('fwSdName').textContent='';
+  let r; const t0=Date.now();
+  try{ r=await api('/api/ota/sd?start=1',undefined,20000);  // the device reads the file in the background: ask until done
+    while(r&&r.busy&&Date.now()-t0<90000){ await new Promise(z=>setTimeout(z,600));
+      setMsg('fwMsg',`Reading firmware.bin on the SD card… ${Math.round((Date.now()-t0)/1000)} s`); r=await api('/api/ota/sd',undefined,20000); } }
+  catch(e){ r={err:'No answer from the device.'}; }
+  b.disabled=false;
+  if(r&&r.busy) r={err:'The SD card check takes too long - try again.'};
+  if(!r||r.err||r.none){ setMsg('fwMsg',(r&&r.err)||'The check did not start - try again.',true); return; } FW.sd=r;
   if(!r.found){ setMsg('fwMsg','No firmware.bin in the root folder of the SD card.',true); return; }
   $('fwSdName').textContent=`firmware.bin: ${r.version?'firmware '+r.version+' for '+r.board:'?'} (${r.sizeKb} kB)`;
   if(r.problem){ setMsg('fwMsg',r.problem,true); return; }

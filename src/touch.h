@@ -23,3 +23,5 @@ bool touchReset(const TouchCal& cal);
 // Asks the controller whether it is still there: 1 answers, 0 does not, -1 cannot tell (XPT2046 has
 // nothing to ask; FT6336 not found at boot). info: chip id etc. for the console.
 int touchCheck(char* info, size_t n);
+// Read statistics for "screen check" (FT6336: reads, I2C errors, short drop-outs, INT line; XPT2046: "")
+void touchStats(char* info, size_t n);

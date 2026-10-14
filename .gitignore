@@ -6,3 +6,10 @@
 
 # generated from web/ by tools/web_embed.py before each build
 src/web_assets.h
+
+# KiCad: local history, backups, ERC reports
+hardware/**/.history/
+hardware/**/*-backups/
+hardware/**/*.kicad_prl
+hardware/**/*.rpt
+hardware/**/fp-info-cache

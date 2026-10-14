@@ -36,6 +36,10 @@ int touchCheck(char* info, size_t n) {
   return -1;
 }
 
+void touchStats(char* info, size_t n) {
+  if (n) info[0] = 0;
+}
+
 void touchSetRotation(bool rotate180) { rotated = rotate180; }
 
 void touchSetCal(const TouchCal& c) { cal = c; }
