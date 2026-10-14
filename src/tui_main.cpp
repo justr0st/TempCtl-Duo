@@ -33,8 +33,8 @@ struct Tile {
 };
 static Tile tiles[NUM_CHANNELS];
 
-static LiveData L;      // last snapshot (main screen only)
-static Settings S;
+static const LiveData& L = tuiLive();      // the UI tick's snapshots (tui.cpp)
+static const Settings& S = tuiSettings();
 static RunState prevState = RunState::Idle;
 static char lastMsg[128] = "";
 static bool intrAsked = false;
@@ -753,9 +753,7 @@ lv_obj_t* mainCreate() {
 }
 #endif
 
-void mainUpdate(const LiveData& live, const Settings& set) {
-  L = live;
-  S = set;
+void mainUpdate() {
   headerUpdate();
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) tileUpdate(ch);
   // chart: every second (more often brings nothing: one point per second at most)
@@ -775,9 +773,7 @@ void mainUpdate(const LiveData& live, const Settings& set) {
 }
 
 // on every screen: "Action required", interrupted run (once), end of a run with edits, messages
-void mainEvents(const LiveData& live, const Settings& set) {
-  L = live;
-  S = set;
+void mainEvents() {
   haltUpdate();
   if (L.intrValid && !intrAsked && !tModalOpen()) {
     intrAsked = true;

@@ -1531,7 +1531,8 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   ≈ 3 kB of 8. Now, on boards without PSRAM: loop stack 16 kB (−8 kB), control task 6 kB (−2 kB), one
   LVGL draw buffer instead of two (−6.4 kB), event log 32 entries (−1.7 kB), the selected program's
   preview loaded into a temporary buffer only when it has to be recomputed (selection / stored program
-  changed, start PV moved ≥ 1 °C, or every 10 s; −3.9 kB on all boards), and **the page without web fonts**
+  changed, start PV moved ≥ 1 °C, or every 10 s; −3.9 kB on all boards; since 1.0.48: S3 keeps the parsed
+  program in PSRAM and recomputes on a 1 °C move, CYD on a 5 °C move, no 10 s timer), and **the page without web fonts**
   (`/` = a variant without `@font-face` built by `tools/web_embed.py`, font routes not registered;
   system fonts). Step 6 should give the CYD a lean touch UI (the old one is the biggest user).
   **Result (Rost, 2026-10-02): CYD and S3 work** (page, page switching, touch, AP and Rost's network).
@@ -2035,8 +2036,41 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
 - **1.0.45** (2026-10-14, b16a94b): hosted page on Cloudflare Workers static assets (7b, "Chosen").
 - **1.0.46** (2026-10-14, 2811e83): backlight PWM 5 → 20 kHz; `docs/SPEC.md` = pointer to `claude/tempctl-duo-spec.md` (the repo
   copy of this document, updated with each commit); old untracked files moved to `.old/` (ignored).
-- **1.0.47** (2026-10-14): web Settings › Display brightness label: 10 (the lowest) = "1 %", linear up to "99 %", "100 %"
+- **1.0.47** (2026-10-14, e0450f7): web Settings › Display brightness label: 10 (the lowest) = "1 %", linear up to "99 %", "100 %"
   only at 255 (fully on, no PWM) — Rost; "100 %" at 254 had hidden that the backlight still switched.
+- **1.0.48** (2026-10-15): fixes from the code review (Claude Docs "TempCtl Duo code review",
+  b16a94b; Rost picked the order):
+  - **Fix 2, atomic saves**: programs, run.json / runpos.json and settings rename the `.tmp` file over the old one
+    (remove + rename only if that fails); at boot a `.tmp` that parses is renamed into place when its file is
+    missing (`fsRecoverTmp`, log "[fs] … restored from … (a save was cut off)"), otherwise removed.
+  - **Fix 1a, POST header**: every POST needs `X-TempCtl: 1` (403 otherwise; the page's `api()` and the
+    firmware upload send it). Cross-site pages can't send it without a CORS preflight, which the device never
+    answers. Scripts must add it (README §5). Serial api path unchanged.
+  - **Fix 1b, Host check** (lenient, `src/host_check.h`, host-tested): empty, IPv4 / IPv6 literal, the host name,
+    the Wi-Fi host name, or one of them + a local suffix (.local, .lan, .home, .home.arpa, .localdomain,
+    .internal, .fritz.box, .box, .router, .intranet, .private); otherwise 403, each refused name logged once.
+  - **Fix 3, watchdog**: `busRequest` waits in 1 s slices feeding the task watchdog; find-SP scans at most 20 s
+    and answers `stoppedAt` (the page continues from there). `handleGetParams` still waits per parameter.
+  - **P1** page clock text set once a minute; **P2** polling stops while the tab is hidden (visibilitychange);
+    **P4** preview (above); **P8** local task copies only sensor type + CS under the lock; **P9** the top
+    channel's SSR window is offset by half a window (no common switch-on instant).
+  - **P10 / P5, CYD RAM** (≈ 5.9 kB less static DRAM): the main screen reads the UI tick's snapshot
+    (`tuiLive()` / `tuiSettings()`) instead of own copies; program editor keeps only channel names + limits;
+    `/api/config` GET/POST, `saveSettingsQuiet` use a heap copy for the time of the call (`ScratchSettings`);
+    `/api/live` copies gLive to the heap and only the 9 settings it needs. Left: tui_chan `E`, tui_menu `nEdit`,
+    control task `s` / `prev`, the snapshot.
+  - **P5** `/api/chart`: numbers through a stack buffer (`jInt` / `jUns`; 0.1 °C from the integer, `jTenth`,
+    same text as before, checked for −30000…30000 °C); live view: the rows are taken in one pass under gLock
+    (4.8 kB heap, 503 when there is none) and formatted after it. Run view: still formatted under gLock
+    (the forecast needs the engine; copying the rows would need ~10 kB on the CYD). Static fields in
+    `/api/live` are not gated on cfgGen (small gain, page changes).
+  - **P3** S3 live view kept incrementally: a new slot recomputes the newest bin, new bins shift the rows,
+    bins reaching past the ring's oldest slot are recomputed (checked against a full rebuild in a host
+    simulation: ring wrap, period changes, gaps). CYD: one pass over the history for all rows (was 8–12).
+  - **P7** syslog: read cursor kept between calls, at most 64 records walked per critical section; ring copies
+    with two memcpy; the serial tee takes its lock once per line. Host-simulated against a reference.
+  - **R8** host test: increment before the call, missing initialisers; builds with `-Wall -Wextra` (README).
+    **R9** `.vscode/settings.json` untracked (.gitignore), old `Claude outputs/*` moved to `.old/`.
 - Next: step 7b is done, the old UI removed. Open: the older untested points (Modbus beta, runs on the CYD, ...); later GitHub Pages (7b
   option 1) and a release build of the launcher.
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,

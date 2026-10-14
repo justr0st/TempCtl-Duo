@@ -106,8 +106,8 @@ void tShow(TScreen s);
 TScreen tCurrent();
 // per screen: create (once), update (every 250 ms while shown), onShow
 lv_obj_t* mainCreate();
-void mainUpdate(const LiveData& L, const Settings& S);
-void mainEvents(const LiveData& L, const Settings& S);  // overlays and messages, on every screen
+void mainUpdate();
+void mainEvents();  // overlays and messages, on every screen
 lv_obj_t* menuCreate();
 lv_obj_t* logCreate();
 void logUpdate();
@@ -139,4 +139,6 @@ void chartUpdate(lv_obj_t* chart, bool live);  // reads chartSnapshot()
 // ------------------------------------------------------------ helpers shared by the screens
 void settingsCopy(Settings& out);             // gSettings under the lock
 void liveCopy(LiveData& out);                 // gLive under the lock
+const LiveData& tuiLive();                    // the UI tick's snapshot of gLive
+const Settings& tuiSettings();                // ... and of gSettings
 void tApplyDisplaySettings();                 // brightness, rotation, theme from gSettings

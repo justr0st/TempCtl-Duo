@@ -14,6 +14,7 @@ BoardLimits boardLimits() { return BoardLimits{HAS_RS485 != 0, (uint8_t)LOCAL_CH
 bool settingsLoad(Settings& s) {
   const BoardLimits lim = boardLimits();
   settingsDefaults(s, lim);
+  if (storageBegin()) fsRecoverTmp(PATH, TMP);
   if (!storageBegin() || !fsExists(PATH)) {
     LogSerial.println("[settings] no /duo/settings.json - defaults");
     return false;

@@ -2,6 +2,7 @@
 // UI and the web server. Everything in here is protected by gLock.
 #pragma once
 #include <Arduino.h>
+#include <new>
 #include "config.h"
 #include "channel.h"
 #include "duo_program.h"
@@ -267,6 +268,20 @@ struct ScratchProg {
   explicit operator bool() const { return p != nullptr; }
   DuoProgram& operator*() { return *p; }
 };
+// A Settings copy on the heap for the time it is used (instead of a static or stack copy: the struct is
+// large and the CYD has little RAM). Check it like ScratchProg.
+struct ScratchSettings {
+  Settings* p;
+  ScratchSettings() : p((Settings*)malloc(sizeof(Settings))) {
+    if (p) new (p) Settings();
+  }
+  ~ScratchSettings() { free(p); }
+  ScratchSettings(const ScratchSettings&) = delete;
+  ScratchSettings& operator=(const ScratchSettings&) = delete;
+  explicit operator bool() const { return p != nullptr; }
+  Settings& operator*() { return *p; }
+  Settings* operator->() { return p; }
+};
 // "Start without saving" (web): starts program slot idx with this content instead of the stored one
 bool startDraft(int idx, const DuoProgram& p);
 // Running copy of the program as JSON (under gLock); false if there was no run
@@ -297,4 +312,4 @@ extern const uint16_t LIVE_PERIODS[LIVE_PERIODS_N];
 uint32_t liveMinEff();
 uint32_t iramPureFree();         // free IRAM-only heap (32-bit access only, not usable as DRAM)
 // /api/chart: v = "run" (current / last run with its forecast) or "live" (rolling window)
-void chartJson(String& out, bool run);
+bool chartJson(String& out, bool run);  // false: out of memory

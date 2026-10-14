@@ -128,7 +128,9 @@ static void ssrTick(void*) {
     const float d = ssrDuty[i];
     if (d > 0 && !safetyEstop() && now - ssrSetMs[i] < SSR_TIMEOUT_MS) {
       const uint32_t w = ssrWindowMs[i] ? ssrWindowMs[i] : 1000;
-      on = (now % w) < (uint32_t)(d * w);
+      // the top channel's window starts half a window later: the two heaters do not switch on at the same
+      // instant (lower peak mains current while both run part load)
+      on = ((now + (i ? w / 2 : 0)) % w) < (uint32_t)(d * w);
     }
     if (on != ssrLevel[i]) {
       ssrLevel[i] = on;
@@ -163,9 +165,9 @@ static uint32_t readFrame(int cs, int bits) {
   return v;
 }
 
-static TcReading readSensor(const Local& l) {
-  if (l.cfg.sensor == SENSOR_MAX6675) return tcDecode6675((uint16_t)readFrame(l.pins.cs, 16));
-  return tcDecode31855(readFrame(l.pins.cs, 32));
+static TcReading readSensor(uint8_t sensor, int cs) {
+  if (sensor == SENSOR_MAX6675) return tcDecode6675((uint16_t)readFrame(cs, 16));
+  return tcDecode31855(readFrame(cs, 32));
 }
 
 // ------------------------------------------------------------------ task
@@ -187,17 +189,19 @@ static void step(int ch, float dt) {
   Local& l = loc[ch];
   // read outside the lock (a few hundred microseconds)
   bool enabled;
-  Local snap;
+  uint8_t sensor = 0;
+  int cs = -1;
   {
     LockL g;
     enabled = l.enabled && l.pins.cs >= 0;
-    if (enabled) snap.cfg = l.cfg, snap.pins = l.pins;
+    sensor = l.cfg.sensor;
+    cs = l.pins.cs;
   }
   if (!enabled) {
     ssrSet(ch, 0, 1);
     return;
   }
-  const TcReading r = readSensor(snap);
+  const TcReading r = readSensor(sensor, cs);
   float duty = 0, window = 1;
   {
     LockL g;

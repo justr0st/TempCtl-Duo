@@ -1,5 +1,5 @@
 // Host-side tests. Build & run on a PC (ArduinoJson 7 headers, e.g. from .pio/libdeps/<env>/ArduinoJson/src):
-//   g++ -std=c++17 -I../src -I<ArduinoJson>/src host_test.cpp ../src/duo_program.cpp
+//   g++ -std=c++17 -Wall -Wextra -I../src -I<ArduinoJson>/src host_test.cpp ../src/duo_program.cpp
 //       ../src/run_engine.cpp ../src/settings.cpp ../src/tc_sensor.cpp ../src/pid.cpp ../src/runaway.cpp
 //       ../src/autotune.cpp ../src/ota_image.cpp -o host_test
 //   ./host_test
@@ -17,6 +17,7 @@
 #include "ota_image.h"
 #include "raw_hist.h"
 #include "backup.h"
+#include "host_check.h"
 #include <vector>
 #include <algorithm>
 #include "settings.h"
@@ -763,7 +764,7 @@ static void testPid() {
 // ------------------------------------------------------------------ runaway
 
 static void testRunaway() {
-  Runaway c{1, 80, 120, 5, 15, 60};
+  Runaway c{1, 80, 120, 5, 15, 60, 0, 0, 0, 0, 0};  // (the off / frozen checks are set below)
   RunawayMonitor m;
   // heating failed: 100 % for 120 s, PV rises only 2 degC
   uint8_t f = FAULT_NONE;
@@ -848,18 +849,18 @@ static void testGuard() {
   g.reset();
   f = FAULT_NONE;
   pv = 100;
-  for (t = 0; t < 110 && !f; ++t) f = g.update(c, 1, false, false, pv += 0.2f, pv);
+  for (t = 0; t < 110 && !f; ++t) { pv += 0.2f; f = g.update(c, 1, false, false, pv, pv); }
   CHECK(f == FAULT_NONE);
   // the other channel heats: no check
   g.reset();
   f = FAULT_NONE;
   pv = 30;
-  for (t = 0; t < 600 && !f; ++t) f = g.update(c, 1, false, true, pv += 0.3f, pv);
+  for (t = 0; t < 600 && !f; ++t) { pv += 0.3f; f = g.update(c, 1, false, true, pv, pv); }
   CHECK(f == FAULT_NONE);
   // slow drift (5 degC per minute) is fine
   g.reset();
   pv = 30;
-  for (t = 0; t < 900 && !f; ++t) f = g.update(c, 1, false, false, pv += 5.0f / 60, pv);
+  for (t = 0; t < 900 && !f; ++t) { pv += 5.0f / 60; f = g.update(c, 1, false, false, pv, pv); }
   CHECK(f == FAULT_NONE);
   // disabled
   Runaway c2 = c;
@@ -867,7 +868,7 @@ static void testGuard() {
   c2.frozenEnable = 0;
   g.reset();
   pv = 30;
-  for (t = 0; t < 600 && !f; ++t) f = g.update(c2, 1, false, false, pv += 1, pv);
+  for (t = 0; t < 600 && !f; ++t) { pv += 1; f = g.update(c2, 1, false, false, pv, pv); }
   for (t = 0; t < 600 && !f; ++t) f = g.update(c2, 1, true, false, 100, 100);
   CHECK(f == FAULT_NONE);
   // frozen: outputs on, the same raw reading for 120 s
@@ -1136,6 +1137,19 @@ static void testRawHist() {
   CHECK(a.n == 0);
 }
 
+static void testHostCheck() {
+  const char* names[2] = {"tempctl-duo", "Oven2"};
+  const char* ok[] = {"", "192.168.1.50", "192.168.1.50:80", "[fe80::1]", "tempctl-duo", "TempCtl-Duo.local",
+                      "tempctl-duo.local.", "tempctl-duo.fritz.box", "tempctl-duo.lan:80", "oven2.local", "OVEN2"};
+  for (const char* h : ok) CHECK(hostAllowed(h, names, 2));
+  const char* bad[] = {"evil.com", "tempctl-duo.evil.com", "tempctl-duox.local", "xtempctl-duo.local", "tempctl",
+                       "local", ":80", "1.2.3.4.evil.com", "oven2.com"};
+  for (const char* h : bad) CHECK(!hostAllowed(h, names, 2));
+  const char* one[2] = {"tempctl-duo", nullptr};
+  CHECK(hostAllowed("tempctl-duo", one, 2));
+  CHECK(!hostAllowed("x.local", one, 2));
+}
+
 static void testBackupLabel() {
   char b[48];
   backupLabel("2026-10-14_153012.json", b, sizeof(b));
@@ -1180,6 +1194,7 @@ int main() {
   testImageScanner();
   testRawHist();
   testBackupLabel();
+  testHostCheck();
   testAutotune();
   testTimeZones();
   printf(fails ? "%d FAILED\n" : "all tests passed\n", fails);

@@ -27,6 +27,33 @@ bool fsExists(const char* path) {
   return stat(full, &st) == 0;
 }
 
+// Safe save, step 2: the written temp file replaces the old one. LittleFS renames over an existing file
+// in one step, so there is always either the old or the new file; only if the rename is refused, the old
+// file is removed first (then a power cut in between leaves just the temp file: fsRecoverTmp() at boot).
+static bool replaceFile(const char* tmp, const char* path) {
+  if (LittleFS.rename(tmp, path)) return true;
+  if (fsExists(path) && !LittleFS.remove(path)) return false;
+  return LittleFS.rename(tmp, path);
+}
+
+// At boot: a temp file without its target = a save cut off between remove and rename. Taken over if it
+// is complete JSON, else removed. A temp file next to its target is a save cut off before the rename: the
+// target (the old content) is kept, the temp file removed.
+void fsRecoverTmp(const char* path, const char* tmp) {
+  if (!fsExists(tmp)) return;
+  if (!fsExists(path)) {
+    File f = LittleFS.open(tmp, "r");
+    JsonDocument d;
+    const bool good = f && !deserializeJson(d, f) && d.is<JsonObject>();
+    if (f) f.close();
+    if (good && LittleFS.rename(tmp, path)) {
+      LogSerial.printf("[fs] %s restored from %s (a save was cut off)\n", path, tmp);
+      return;
+    }
+  }
+  LittleFS.remove(tmp);
+}
+
 bool storageBegin() {
   static bool tried = false;
   if (tried) return fsOk;
@@ -105,7 +132,7 @@ bool programSave(int idx, const DuoProgram& p, char* err, size_t n) {
   const bool ok = serializeJson(d, f) == len;
   f.close();
   // write-then-rename so a power loss never leaves a half-written program
-  if (!ok || (fsExists(path) && !LittleFS.remove(path)) || !LittleFS.rename(tmp, path)) {
+  if (!ok || !replaceFile(tmp, path)) {
     LittleFS.remove(tmp);
     snprintf(err, n, "Writing %s failed (flash full?)", path);
     return false;
@@ -122,9 +149,11 @@ bool programSave(int idx, const DuoProgram& p, char* err, size_t n) {
 
 bool programDelete(int idx) {
   if (idx < 0 || idx >= PROG_MAX || !fsOk) return false;
-  char path[24];
+  char path[24], tmp[28];
   pathFor(idx, path, sizeof(path));
   if (fsExists(path) && !LittleFS.remove(path)) return false;
+  snprintf(tmp, sizeof(tmp), "/duo/prog%d.tmp", idx);
+  if (fsExists(tmp)) LittleFS.remove(tmp);  // (a leftover would come back at the next boot)
   {
     SumGuard g;
     memset(&sums[idx], 0, sizeof(sums[idx]));
@@ -155,8 +184,10 @@ void programStoreBegin() {
   char err[96];
   bool any = false;
   for (int i = 0; i < PROG_MAX; ++i) {
-    char path[24];
+    char path[24], tmp[28];
     pathFor(i, path, sizeof(path));
+    snprintf(tmp, sizeof(tmp), "/duo/prog%d.tmp", i);
+    if (fsOk) fsRecoverTmp(path, tmp);
     ProgSummary s;
     memset(&s, 0, sizeof(s));
     if (fsOk && fsExists(path)) {
@@ -189,7 +220,7 @@ static bool saveJson(const char* path, const char* tmp, JsonDocument& d) {
   const size_t len = measureJson(d);
   const bool ok = serializeJson(d, f) == len;
   f.close();
-  if (!ok || (fsExists(path) && !LittleFS.remove(path)) || !LittleFS.rename(tmp, path)) {
+  if (!ok || !replaceFile(tmp, path)) {
     LittleFS.remove(tmp);
     return false;
   }
@@ -231,7 +262,10 @@ bool runFileLoad(RunFileInfo& i, DuoProgram& p, RunPos& r, bool& havePos) {
   memset(&i, 0, sizeof(i));
   memset(&r, 0, sizeof(r));
   havePos = false;
-  if (!fsOk || !fsExists("/duo/run.json")) return false;
+  if (!fsOk) return false;
+  fsRecoverTmp("/duo/run.json", "/duo/run.tmp");
+  fsRecoverTmp("/duo/runpos.json", "/duo/runpos.tmp");
+  if (!fsExists("/duo/run.json")) return false;
   JsonDocument d;
   File f = LittleFS.open("/duo/run.json", "r");
   if (!f) return false;
@@ -273,4 +307,6 @@ void runFileClear() {
   if (!fsOk) return;
   LittleFS.remove("/duo/run.json");
   LittleFS.remove("/duo/runpos.json");
+  if (fsExists("/duo/run.tmp")) LittleFS.remove("/duo/run.tmp");  // (would come back at the next boot)
+  if (fsExists("/duo/runpos.tmp")) LittleFS.remove("/duo/runpos.tmp");
 }

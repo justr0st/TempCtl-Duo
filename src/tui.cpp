@@ -177,9 +177,22 @@ void tShow(TScreen s) {
 }
 
 // ------------------------------------------------------------ periodic update
-static void uiTimer(lv_timer_t*) {
-  static LiveData L;  // static: large
+// the snapshot of gLive / gSettings taken on every UI tick (one copy for all screens: the main screen
+// reads it directly)
+static LiveData& snapLive() {
+  static LiveData L;
+  return L;
+}
+static Settings& snapSettings() {
   static Settings S;
+  return S;
+}
+const LiveData& tuiLive() { return snapLive(); }
+const Settings& tuiSettings() { return snapSettings(); }
+
+static void uiTimer(lv_timer_t*) {
+  LiveData& L = snapLive();
+  Settings& S = snapSettings();
   {
     Guard g;
     L = gLive;
@@ -194,9 +207,9 @@ static void uiTimer(lv_timer_t*) {
     themeApply(appliedAccent, dark);
   }
   tuiBackground();
-  mainEvents(L, S);
+  mainEvents();
   switch (cur) {
-    case SCR_MAIN: mainUpdate(L, S); break;
+    case SCR_MAIN: mainUpdate(); break;
     case SCR_LOG: logUpdate(); break;
     case SCR_DISPLAY: displayUpdate(); break;
     case SCR_NETWORK: networkUpdate(); break;

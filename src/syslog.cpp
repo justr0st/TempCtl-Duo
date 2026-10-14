@@ -73,13 +73,18 @@ static bool ringAlloc() {
   return ring != nullptr;
 }
 
+// n bytes at ring offset at (< RING), in two pieces around the end
 static void put(size_t at, const void* src, size_t n) {
-  const uint8_t* s = (const uint8_t*)src;
-  for (size_t i = 0; i < n; ++i) ring[(at + i) % RING] = s[i];
+  at %= RING;
+  const size_t a = n < RING - at ? n : RING - at;
+  memcpy(ring + at, src, a);
+  if (n > a) memcpy(ring, (const uint8_t*)src + a, n - a);
 }
 static void get(size_t at, void* dst, size_t n) {
-  uint8_t* d = (uint8_t*)dst;
-  for (size_t i = 0; i < n; ++i) d[i] = ring[(at + i) % RING];
+  at %= RING;
+  const size_t a = n < RING - at ? n : RING - at;
+  memcpy(dst, ring + at, a);
+  if (n > a) memcpy((uint8_t*)dst + a, ring, n - a);
 }
 
 uint32_t syslogEpoch() {
@@ -133,15 +138,22 @@ static portMUX_TYPE teeMux = portMUX_INITIALIZER_UNLOCKED;
 
 void syslogTee(const uint8_t* b, size_t n) {
   char done[sizeof(teeLine)];
-  for (size_t i = 0; i < n; ++i) {
+  size_t i = 0;
+  while (i < n) {
     size_t emit = 0;
-    portENTER_CRITICAL(&teeMux);
-    if (b[i] == '\n' || teeLen >= sizeof(teeLine) - 1) {
-      emit = teeLen;
-      memcpy(done, teeLine, teeLen);
-      teeLen = 0;
+    portENTER_CRITICAL(&teeMux);  // once per line (or per call), not per byte
+    for (; i < n; ++i) {
+      if (b[i] == '\n' || teeLen >= sizeof(teeLine) - 1) {
+        emit = teeLen;
+        memcpy(done, teeLine, teeLen);
+        teeLen = 0;
+        if (b[i] != '\n' && b[i] != '\r') teeLine[teeLen++] = (char)b[i];
+        ++i;
+        if (emit) break;
+        continue;
+      }
+      if (b[i] != '\r') teeLine[teeLen++] = (char)b[i];
     }
-    if (b[i] != '\n' && b[i] != '\r') teeLine[teeLen++] = (char)b[i];
     portEXIT_CRITICAL(&teeMux);
     if (emit) {
       done[emit] = 0;
@@ -154,40 +166,49 @@ uint32_t syslogSeq() { return seqNext - 1; }
 uint32_t syslogFirst() { return seqFirst; }
 uint32_t syslogBoot() { return bootNo; }
 
+// Where the last read stopped (offset of record curSeq; 0: none): the next read starts there instead of
+// walking from the oldest record (thousands with PSRAM). Records keep their place until they are dropped.
+static size_t curPos = 0;
+static uint32_t curSeq = 0;
+
 int syslogRead(uint32_t since, size_t maxBytes, void (*fn)(const SysLine& l, void* user), void* user) {
   SysLine* l = (SysLine*)malloc(sizeof(SysLine));
   if (!l) return 0;
   int count = 0;
   size_t bytes = 0;
   uint32_t want = since + 1;
-  size_t pos = 0;      // offset of record posSeq (records keep their place until they are dropped)
-  uint32_t posSeq = 0;  // 0: not known yet
   for (;;) {
-    bool got = false;
+    bool got = false, more = false;
     portENTER_CRITICAL(&mux);
     if (ring && want < seqNext) {
       if (want < seqFirst) want = seqFirst;
-      if (!posSeq || posSeq < seqFirst || posSeq > want) {  // (start, or dropped meanwhile): from the oldest
-        pos = head;
-        posSeq = seqFirst;
+      if (!curSeq || curSeq < seqFirst || curSeq > want) {  // (none yet, dropped, or past it): the oldest
+        curPos = head;
+        curSeq = seqFirst;
       }
-      while (posSeq < want) {
+      // at most 64 records per critical section (interrupts are off in it)
+      for (int k = 0; curSeq < want && k < 64; ++k) {
         uint8_t n;
-        get(pos, &n, 1);
-        pos = (pos + HDR + n) % RING;
-        ++posSeq;
+        get(curPos, &n, 1);
+        curPos = (curPos + HDR + n) % RING;
+        ++curSeq;
       }
-      uint8_t h[HDR];
-      get(pos, h, HDR);
-      l->seq = want;
-      l->kind = (LogKind)h[1];
-      memcpy(&l->up, h + 2, 4);
-      memcpy(&l->epoch, h + 6, 4);
-      get(pos + HDR, l->text, h[0]);
-      l->text[h[0]] = 0;
-      got = true;
+      if (curSeq < want) {
+        more = true;
+      } else {
+        uint8_t h[HDR];
+        get(curPos, h, HDR);
+        l->seq = want;
+        l->kind = (LogKind)h[1];
+        memcpy(&l->up, h + 2, 4);
+        memcpy(&l->epoch, h + 6, 4);
+        get(curPos + HDR, l->text, h[0]);
+        l->text[h[0]] = 0;
+        got = true;
+      }
     }
     portEXIT_CRITICAL(&mux);
+    if (more) continue;
     if (!got) break;
     fn(*l, user);
     ++count;

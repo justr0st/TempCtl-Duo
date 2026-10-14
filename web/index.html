@@ -724,7 +724,7 @@ let logSeq=0, logList=[], prevState='idle', askedSave=false;
 async function api(path,body,ms){
   if(SER.on) return serReq(path,body,ms);
   if(OFF) throw new Error('not connected');
-  const o=body===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)};
+  const o=body===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json','X-TempCtl':'1'},body:JSON.stringify(body)};  // (the device refuses POSTs without X-TempCtl)
   const ctl=new AbortController(), to=setTimeout(()=>ctl.abort(),ms||8000); o.signal=ctl.signal;
   try{const r=await fetch(path,o); return await r.json();} finally{clearTimeout(to);}
 }
@@ -2181,7 +2181,7 @@ $('fwGo').onclick=async()=>{ const f=FW.file, r=FW.img; if(!f||!r) return; const
   if(!await ask(`Install firmware ${r.version} (now ${FW.info.version})? The upload takes about a minute; the device then restarts. The outputs stay off.`,'Install')) return;
   FW.phase='upload'; fwShow(); setMsg('fwMsg','Uploading…'); fwBar(0);
   const fd=new FormData(); fd.append('fw',f,f.name); const x=new XMLHttpRequest();
-  x.open('POST','/api/ota?size='+f.size); x.timeout=300000;
+  x.open('POST','/api/ota?size='+f.size); x.setRequestHeader('X-TempCtl','1'); x.timeout=300000;
   x.upload.onprogress=e=>{ if(e.lengthComputable) fwBar(e.loaded/e.total*100,`${Math.round(e.loaded/e.total*100)} % (${Math.round(e.loaded/1024)} kB)`); };
   x.onload=()=>{ let j={}; try{ j=JSON.parse(x.responseText); }catch(e){}
     if(j.ok){ fwBar(100,'written'); setMsg('fwMsg',`Firmware ${j.version||r.version} written — the device restarts, the page reconnects by itself…`); fwExpect(j.version||r.version); }
@@ -2299,11 +2299,13 @@ function updTools(){
 const tch=()=>+$('tCh').value;
 $('bFind').onclick=async()=>{ const from=+$('scFrom').value, to=+$('scTo').value, ch=tch();
   if(!(to>=from)||to-from>2000){ setMsg('scOut','Range: “To” ≥ “From”, at most 2000 registers.',true); return; }
-  setMsg('scOut','Scanning, this takes a few seconds…'); $('bFind').disabled=true;
+  setMsg('scOut','Scanning, this takes up to 20 s…'); $('bFind').disabled=true;
   try{ await postCfg({tools:{scanFrom:from,scanTo:to}}); const r=await api('/api/mb/findsp',{ch,from,to},90000);
     if(!r.ok){ setMsg('scOut',r.err||'Failed',true); return; }
-    if(!r.candidates.length){ setMsg('scOut',`No register in this range holds ${f1(r.reference)}. Try another range.`); return; }
-    $('scOut').className='msg'; $('scOut').innerHTML=`Registers holding ${f1(r.reference)}:<div class="row">${r.candidates.map(a=>`<button data-usesp="${a}">Use ${a} as setpoint address</button>`).join('')}</div>`;
+    const part=r.stoppedAt!=null?` Scanned ${from} … ${r.stoppedAt} (the device scans at most 300 registers / 20 s at a time): scan again from ${r.stoppedAt+1} for the rest.`:'';
+    if(r.stoppedAt!=null) $('scFrom').value=r.stoppedAt+1;
+    if(!r.candidates.length){ setMsg('scOut',`No register in this range holds ${f1(r.reference)}.${part||' Try another range.'}`); return; }
+    $('scOut').className='msg'; $('scOut').innerHTML=`Registers holding ${f1(r.reference)}:${esc(part)}<div class="row">${r.candidates.map(a=>`<button data-usesp="${a}">Use ${a} as setpoint address</button>`).join('')}</div>`;
   }catch(e){ setMsg('scOut','Device not reachable.',true); } finally{ $('bFind').disabled=false; } };
 $('scOut').onclick=async e=>{ const b=e.target.closest('button[data-usesp]'); if(!b) return; const ch=tch(), a=+b.dataset.usesp;
   const body={}; sp(body,`channels.${ch}.modbus.reg.sp`,a); const r=await postCfg(body); if(r.err){ setMsg('scOut',r.err,true); return; } CFG=r;
@@ -2518,9 +2520,15 @@ async function poll(){
     await updateLog();
     await pageUpdate();
   }catch(e){ $('linkDot').className='dot'; $('linkTxt').textContent='Device not reachable'; toShell({state:'lost'}); }
-  finally{ polling=false; if(OFF&&!SER.on) return; pollTimer=setTimeout(poll,live&&live.pollMs?Math.max(250,Math.min(1000,live.pollMs)):1000); }
+  finally{ polling=false; if(OFF&&!SER.on) return;
+    if(document.hidden){ pollTimer=0; return; }  // a hidden tab does not poll (visibilitychange starts it again; over USB the PING keeps the session)
+    pollTimer=setTimeout(poll,live&&live.pollMs?Math.max(250,Math.min(1000,live.pollMs)):1000); }
 }
-function frame(){ if(lastChart===0&&!drag&&page==='status'){ renderChart(); lastChart=1; } $('clk').textContent=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); requestAnimationFrame(frame); }
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden&&!polling&&!pollTimer&&(!OFF||SER.on)) poll(); });
+let clkMin=-1;  // the sidebar clock: written when the minute changes, not on every frame
+function frame(){ if(lastChart===0&&!drag&&page==='status'){ renderChart(); lastChart=1; }
+  const d=new Date(), m=d.getHours()*60+d.getMinutes(); if(m!==clkMin){ clkMin=m; $('clk').textContent=d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }
+  requestAnimationFrame(frame); }
 // Served by a device: its API answers here. Otherwise (launcher on localhost, GitHub Pages): the
 // connect screen (USB / Wi-Fi).
 async function start(){

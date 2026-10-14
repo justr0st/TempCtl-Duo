@@ -17,6 +17,7 @@
 #include "version.h"
 #include "raw_hist.h"
 #include <esp_system.h>
+#include <esp_task_wdt.h>
 #include <esp_rom_sys.h>
 
 Settings gSettings;
@@ -273,32 +274,39 @@ static uint32_t liveK() {
 static uint32_t liveSpan() { return liveMinEff() * 60; }
 
 // The live view: CHART_N bins of k slots, aligned to the slot count so that a bin doesn't change
-// once it is complete (the newest is partial). fn(j, pv, sp, lo, hi) per bin, 0.1 degC (INT32_MIN =
-// none): PV and SP of the newest reading, lowest and highest reading. Under gLock.
+// once it is complete (the newest is partial). Bin b (counted since boot) covers the slots b*k ..
+// b*k+k-1 that are still kept: PV and SP of the newest reading, lowest and highest reading, 0.1 degC
+// (INT32_MIN = none). Under gLock.
+static void liveBin(uint32_t k, int64_t b, int32_t* pv, int32_t* sp, int32_t* lo, int32_t* hi) {
+  const uint32_t tot = gHist->liveTotal, oldest = liveOldest();
+  for (int c = 0; c < NUM_CHANNELS; ++c) pv[c] = sp[c] = lo[c] = hi[c] = INT32_MIN;
+  if (!tot || b < 0) return;
+  int64_t s0 = b * k, s1 = s0 + k;
+  if (s1 > tot) s1 = tot;
+  if (s0 < oldest) s0 = oldest;
+  LiveSlot x;
+  for (int64_t sl = s0; sl < s1; ++sl) {
+    liveGet((uint32_t)sl, x);
+    for (int c = 0; c < NUM_CHANNELS; ++c) {
+      if (x.sp[c] != INT16_MIN) sp[c] = x.sp[c];
+      if (x.pv[c] == INT16_MIN) continue;
+      pv[c] = x.pv[c];
+      if (lo[c] == INT32_MIN || x.lo[c] < lo[c]) lo[c] = x.lo[c];
+      if (hi[c] == INT32_MIN || x.hi[c] > hi[c]) hi[c] = x.hi[c];
+    }
+  }
+}
+
+// the newest bin
+static int64_t liveLastBin(uint32_t k) { return gHist->liveTotal ? (int64_t)(gHist->liveTotal - 1) / k : 0; }
+
+// fn(j, pv, sp, lo, hi) for the bins j = 0 .. CHART_N-1 of the view (newest at the end)
 template <typename F>
 static void liveBins(uint32_t k, F fn) {
-  const uint32_t tot = gHist->liveTotal, oldest = liveOldest();
-  const int64_t last = tot ? (int64_t)(tot - 1) / k : 0;  // newest bin
+  const int64_t last = liveLastBin(k);
   for (int j = 0; j < CHART_N; ++j) {
     int32_t pv[NUM_CHANNELS], sp[NUM_CHANNELS], lo[NUM_CHANNELS], hi[NUM_CHANNELS];
-    for (int c = 0; c < NUM_CHANNELS; ++c) pv[c] = sp[c] = lo[c] = hi[c] = INT32_MIN;
-    const int64_t b = last - (CHART_N - 1 - j);
-    if (tot && b >= 0) {
-      int64_t s0 = b * k, s1 = s0 + k;
-      if (s1 > tot) s1 = tot;
-      if (s0 < oldest) s0 = oldest;
-      LiveSlot x;
-      for (int64_t sl = s0; sl < s1; ++sl) {
-        liveGet((uint32_t)sl, x);
-        for (int c = 0; c < NUM_CHANNELS; ++c) {
-          if (x.sp[c] != INT16_MIN) sp[c] = x.sp[c];
-          if (x.pv[c] == INT16_MIN) continue;
-          pv[c] = x.pv[c];
-          if (lo[c] == INT32_MIN || x.lo[c] < lo[c]) lo[c] = x.lo[c];
-          if (hi[c] == INT32_MIN || x.hi[c] > hi[c]) hi[c] = x.hi[c];
-        }
-      }
-    }
+    liveBin(k, last - (CHART_N - 1 - j), pv, sp, lo, hi);
     fn(j, pv, sp, lo, hi);
   }
 }
@@ -311,32 +319,77 @@ static uint32_t liveShift(uint32_t k) {
   return (k - (tot - last * k)) * LIVE_SAMPLE_SEC;
 }
 
-enum LiveField { LV_PV, LV_SP, LV_LO, LV_HI };
-// One row of the live view (field f of channel c) into out[CHART_N]. With PSRAM the whole view is
-// kept (rebuilt once per slot: a 24 h view reads 86400 slots); without, each row is computed.
-static void liveRow(uint32_t k, LiveField f, int c, int32_t* out) {
+
 #ifdef BOARD_HAS_PSRAM
-  static uint32_t vTotal = UINT32_MAX, vK = 0;
-  if (gHist->liveTotal != vTotal || k != vK) {
-    vTotal = gHist->liveTotal;
-    vK = k;
-    liveBins(k, [](int j, const int32_t* pv, const int32_t* sp, const int32_t* lo, const int32_t* hi) {
-      for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
-        gHist->livePv[ch][j].v = pv[ch];
-        gHist->liveSp[ch][j].v = sp[ch];
-        gHist->liveLo[ch][j].v = lo[ch];
-        gHist->liveHi[ch][j].v = hi[ch];
-      }
-    });
+// The whole view is kept (gHist->livePv ..). A new slot changes only the newest bin; when new bins
+// start the rows move left; slots dropped from the ring's old end change the oldest bins. So only those
+// bins are computed again (a 24 h view would otherwise read 86 400 slots every second).
+static void liveViewSet(int j, const int32_t* pv, const int32_t* sp, const int32_t* lo, const int32_t* hi) {
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    gHist->livePv[ch][j].v = pv[ch];
+    gHist->liveSp[ch][j].v = sp[ch];
+    gHist->liveLo[ch][j].v = lo[ch];
+    gHist->liveHi[ch][j].v = hi[ch];
   }
-  const TenthRow* r = f == LV_PV ? gHist->livePv : f == LV_SP ? gHist->liveSp : f == LV_LO ? gHist->liveLo : gHist->liveHi;
-  for (int j = 0; j < CHART_N; ++j) out[j] = r[c][j].v;
+}
+
+static void liveViewBin(uint32_t k, int64_t last, int j) {
+  int32_t pv[NUM_CHANNELS], sp[NUM_CHANNELS], lo[NUM_CHANNELS], hi[NUM_CHANNELS];
+  liveBin(k, last - (CHART_N - 1 - j), pv, sp, lo, hi);
+  liveViewSet(j, pv, sp, lo, hi);
+}
+
+static void liveViewUpdate(uint32_t k) {
+  static bool valid = false;
+  static uint32_t vTotal = 0, vK = 0;
+  const uint32_t tot = gHist->liveTotal;
+  if (valid && k == vK && tot == vTotal) return;
+  const int64_t last = liveLastBin(k);
+  const int64_t moved = valid && k == vK && tot > vTotal && vTotal ? last - (int64_t)(vTotal - 1) / k : CHART_N;
+  if (moved >= CHART_N) {  // all of it
+    liveBins(k, liveViewSet);
+  } else {
+    const int m = (int)moved;
+    if (m > 0) {
+      TenthRow* rows[4] = {gHist->livePv, gHist->liveSp, gHist->liveLo, gHist->liveHi};
+      for (TenthRow* r : rows)
+        for (int ch = 0; ch < NUM_CHANNELS; ++ch) memmove(&r[ch][0], &r[ch][m], (CHART_N - m) * sizeof(Tenth));
+    }
+    // the bin that was the newest (it may have got more slots) and the new ones
+    for (int j = CHART_N - 1 - m; j < CHART_N; ++j) liveViewBin(k, last, j);
+    // the oldest bins, if they reach back to slots the ring no longer keeps
+    const uint32_t oldest = liveOldest();
+    for (int j = 0; j < CHART_N - 1 - m && (last - (CHART_N - 1 - j)) * (int64_t)k < (int64_t)oldest; ++j)
+      liveViewBin(k, last, j);
+  }
+  valid = true;
+  vTotal = tot;
+  vK = k;
+}
+#endif
+
+// fn(j, pv, sp, lo, hi) for every bin of the live view (as liveBins). With PSRAM the whole view is
+// kept (liveViewUpdate); without, it is computed (one pass over the history). Under gLock.
+template <typename F>
+static void liveRows(uint32_t k, F fn) {
+#ifdef BOARD_HAS_PSRAM
+  liveViewUpdate(k);
+  for (int j = 0; j < CHART_N; ++j) {
+    int32_t pv[NUM_CHANNELS], sp[NUM_CHANNELS], lo[NUM_CHANNELS], hi[NUM_CHANNELS];
+    for (int c = 0; c < NUM_CHANNELS; ++c) {
+      pv[c] = gHist->livePv[c][j].v;
+      sp[c] = gHist->liveSp[c][j].v;
+      lo[c] = gHist->liveLo[c][j].v;
+      hi[c] = gHist->liveHi[c][j].v;
+    }
+    fn(j, pv, sp, lo, hi);
+  }
 #else
-  liveBins(k, [&](int j, const int32_t* pv, const int32_t* sp, const int32_t* lo, const int32_t* hi) {
-    out[j] = (f == LV_PV ? pv : f == LV_SP ? sp : f == LV_LO ? lo : hi)[c];
-  });
+  liveBins(k, fn);
 #endif
 }
+
+static int16_t i16(int32_t v) { return v == INT32_MIN ? (int16_t)INT16_MIN : (int16_t)v; }
 
 size_t liveCsv(uint32_t& from, char* buf, size_t n, uint8_t pvMask, uint8_t spMask) {
   size_t len = 0;
@@ -586,12 +639,18 @@ static void planFn(const PlanSeg& g, void* u) {
   }
 }
 
-// Preview of the selected program (gHist->plan), recomputed when the selection or the stored program
-// changed, when a start temperature (PV) moved by 1 degC or more, or every 10 s. The program is loaded
-// into a temporary buffer each time (no permanent 3.9 kB copy: DRAM is short on the CYD).
+// Preview of the selected program (gHist->plan), recomputed when the selection or the stored program changed
+// or a start temperature (PV) moved by PREVIEW_PV_STEP or more. S3: the parsed program is kept in PSRAM, so
+// only a new selection / a saved program reads the file again. CYD: no permanent 3.9 kB copy (DRAM is short):
+// the file is read for each recompute, so the PV step is larger there.
+#ifdef BOARD_HAS_PSRAM
+static constexpr float PREVIEW_PV_STEP = 1.0f;
+static DuoProgram* selProg = nullptr;  // PSRAM: the parsed selected program (selLoaded / selGen)
+#else
+static constexpr float PREVIEW_PV_STEP = 5.0f;
+#endif
 static float selTotal = 0;
 static float selPvKey[NUM_CHANNELS] = {NAN, NAN};
-static uint32_t selAt = 0;
 static bool selForce = true;
 
 static float updatePreview(const float* pv) {
@@ -604,18 +663,27 @@ static float updatePreview(const float* pv) {
   bool moved = false;
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
     const float a = pv ? pv[ch] : NAN, b = selPvKey[ch];
-    if (isnan(a) != isnan(b) || (!isnan(a) && fabsf(a - b) >= 1.0f)) moved = true;
+    if (isnan(a) != isnan(b) || (!isnan(a) && fabsf(a - b) >= PREVIEW_PV_STEP)) moved = true;
   }
-  if (!selForce && sel == selLoaded && gen == selGen && !moved && millis() - selAt < 10000) return selTotal;
+  const bool reload = selForce || sel != selLoaded || gen != selGen;
+  if (!reload && !moved) return selTotal;
+#ifdef BOARD_HAS_PSRAM
+  if (!selProg) selProg = (DuoProgram*)heap_caps_malloc(sizeof(DuoProgram), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  DuoProgram* p = selProg;
+#else
   DuoProgram* p = (DuoProgram*)malloc(sizeof(DuoProgram));
+#endif
   if (!p) return selTotal;  // try again next time
+  char err[96];
+#ifdef BOARD_HAS_PSRAM
+  if (reload) selValid = programLoad(sel, *p, err, sizeof(err));  // (else: the kept copy)
+#else
+  selValid = programLoad(sel, *p, err, sizeof(err));
+#endif
   selForce = false;
   selLoaded = sel;
   selGen = gen;
-  selAt = millis();
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) selPvKey[ch] = pv ? pv[ch] : NAN;
-  char err[96];
-  selValid = programLoad(sel, *p, err, sizeof(err));
   const float total = selValid ? programPreview(*p, nullptr, nullptr, nullptr) : 0;
   {
     Guard g;
@@ -630,7 +698,9 @@ static float updatePreview(const float* pv) {
       strlcpy(gHist->planName, p->name, sizeof(gHist->planName));
     }
   }
+#ifndef BOARD_HAS_PSRAM
   free(p);
+#endif
   selTotal = total;
   return total;
 }
@@ -695,35 +765,60 @@ void chartSnapshot(ChartData& d, bool live) {
   d.binSec = k * LIVE_SAMPLE_SEC;
   d.span = liveSpan();
   d.elapsed = 0;
-  int32_t row[CHART_N];
-  auto put = [&](Tenth16* dst) {
-    for (int i = 0; i < CHART_N; ++i) dst[i].v = row[i] == INT32_MIN ? (int16_t)INT16_MIN : (int16_t)row[i];
-  };
-  liveRow(k, LV_PV, B, row);
-  put(d.pv);
-  liveRow(k, LV_SP, B, row);
-  put(d.sp);
-  liveRow(k, LV_PV, T, row);
-  put(d.pvT);
-  liveRow(k, LV_SP, T, row);
-  put(d.spT);
+  liveRows(k, [&](int j, const int32_t* pv, const int32_t* sp, const int32_t* lo, const int32_t* hi) {
+    d.pv[j].v = i16(pv[B]);
+    d.sp[j].v = i16(sp[B]);
+    d.pvT[j].v = i16(pv[T]);
+    d.spT[j].v = i16(sp[T]);
 #ifdef CHART_LOHI
-  liveRow(k, LV_LO, B, row);
-  put(d.lo);
-  liveRow(k, LV_HI, B, row);
-  put(d.hi);
-  liveRow(k, LV_LO, T, row);
-  put(d.loT);
-  liveRow(k, LV_HI, T, row);
-  put(d.hiT);
+    d.lo[j].v = i16(lo[B]);
+    d.hi[j].v = i16(hi[B]);
+    d.loT[j].v = i16(lo[T]);
+    d.hiT[j].v = i16(hi[T]);
+#else
+    (void)lo;
+    (void)hi;
 #endif
+  });
   for (int i = 0; i < CHART_N; ++i) {
     d.plan[i] = gHist->plan[B][i];
     d.planT[i] = gHist->plan[T][i];
   }
 }
 
-// ---- /api/chart (web task; built under gLock, sent afterwards)
+// ---- /api/chart (web task). Numbers are appended through a small buffer (no String temporaries);
+// 0.1 degC values are formatted from the integer (float printf is slow and runs under gLock).
+
+static void jInt(String& o, long v) {
+  char b[16];
+  snprintf(b, sizeof(b), "%ld", v);
+  o += b;
+}
+static void jUns(String& o, unsigned long v) {
+  char b[16];
+  snprintf(b, sizeof(b), "%lu", v);
+  o += b;
+}
+// v in 0.1 degC as "123.4" (INT32_MIN: "null"); the same text as jNum(v * 0.1f)
+static void jTenth(String& o, int32_t v) {
+  if (v == INT32_MIN) {
+    o += "null";
+    return;
+  }
+  char b[16];
+  char* p = b + sizeof(b);
+  *--p = 0;
+  uint32_t a = v < 0 ? 0u - (uint32_t)v : (uint32_t)v;
+  *--p = (char)('0' + a % 10);
+  a /= 10;
+  *--p = '.';
+  do {
+    *--p = (char)('0' + a % 10);
+    a /= 10;
+  } while (a);
+  if (v < 0) *--p = '-';
+  o += p;
+}
 
 static void jNum(String& o, float v, const char* fmt = "%.1f") {
   if (isnan(v) || isinf(v)) {
@@ -749,7 +844,7 @@ static void jDeltas(String& o, const char* key, TenthRow* pv, TenthRow* ext, boo
       const int32_t p = pv[c][i].v, x = ext[c][i].v;
       int32_t d = (p == INT32_MIN || x == INT32_MIN) ? 0 : below ? p - x : x - p;
       if (d < 0) d = 0;
-      o += String((long)d);
+      jInt(o, (long)d);
     }
     o += ']';
   }
@@ -760,7 +855,7 @@ static void jArr(String& o, const Tenth* a, int n) {
   o += '[';
   for (int i = 0; i < n; ++i) {
     if (i) o += ',';
-    jNum(o, a[i]);
+    jTenth(o, a[i].v);
   }
   o += ']';
 }
@@ -787,9 +882,9 @@ static void fcFlush(FcSink& k, int ch) {
   o += ',';
   jNum(o, g.idle ? NAN : g.v1);
   o += ',';
-  o += String((int)g.src);
+  jInt(o, (int)g.src);
   o += ',';
-  o += String((g.idle ? 1 : 0) | (g.ramp ? 2 : 0));
+  jInt(o, (g.idle ? 1 : 0) | (g.ramp ? 2 : 0));
   o += ']';
   k.has[ch] = false;
 }
@@ -823,11 +918,11 @@ static void jEv(String& o, const PlanEv& e) {
   o += '[';
   jNum(o, e.t);
   o += ',';
-  o += String((int)e.type);
+  jInt(o, (int)e.type);
   o += ',';
-  o += e.ch == 0xFF ? String(-1) : String((int)e.ch);
+  jInt(o, e.ch == 0xFF ? -1 : (int)e.ch);
   o += ',';
-  o += String((int)e.idx);
+  jInt(o, (int)e.idx);
   o += ']';
 }
 
@@ -837,68 +932,80 @@ static void fcEv(const PlanEv& e, void* u) {
   jEv(k.ev, e);
 }
 
-void chartJson(String& o, bool run) {
+bool chartJson(String& o, bool run) {
   o.reserve(run ? 11000 : 8500);
   if (!run) {
-    Guard g;
-    const uint32_t k = liveK(), sh = liveShift(k);
-    const uint32_t have = (gHist->liveTotal - liveOldest()) * LIVE_SAMPLE_SEC;
+    // the rows are taken under gLock (one pass), the text is made after it
+    struct Rows {
+      int16_t pv[NUM_CHANNELS][CHART_N], sp[NUM_CHANNELS][CHART_N];
+      int16_t dlo[NUM_CHANNELS][CHART_N], dhi[NUM_CHANNELS][CHART_N];  // see jDeltas
+    };
+    Rows* r = (Rows*)malloc(sizeof(Rows));  // 4.8 kB
+    if (!r) {
+      o = "";
+      return false;
+    }
+    uint32_t k, sh, have, span, cap;
+    unsigned long ms;
+    {
+      Guard g;
+      k = liveK();
+      sh = liveShift(k);
+      have = (gHist->liveTotal - liveOldest()) * LIVE_SAMPLE_SEC;
+      span = liveSpan();
+      cap = liveHistSec();
+      ms = millis();
+      liveRows(k, [&](int j, const int32_t* pv, const int32_t* sp, const int32_t* lo, const int32_t* hi) {
+        for (int c = 0; c < NUM_CHANNELS; ++c) {
+          r->pv[c][j] = i16(pv[c]);
+          r->sp[c][j] = i16(sp[c]);
+          const bool no = pv[c] == INT32_MIN;
+          const int32_t dl = no || lo[c] == INT32_MIN ? 0 : pv[c] - lo[c];
+          const int32_t dh = no || hi[c] == INT32_MIN ? 0 : hi[c] - pv[c];
+          r->dlo[c][j] = (int16_t)(dl < 0 ? 0 : dl > INT16_MAX ? INT16_MAX : dl);
+          r->dhi[c][j] = (int16_t)(dh < 0 ? 0 : dh > INT16_MAX ? INT16_MAX : dh);
+        }
+      });
+    }
     // bin: seconds per point; the newest point is now, the others end `sh` s later than a whole
     // number of bins before it; have / cap: seconds recorded / the history's size
     o = "{\"mode\":\"live\",\"bin\":";
-    o += String(k * LIVE_SAMPLE_SEC);
+    jUns(o, (unsigned long)(k * LIVE_SAMPLE_SEC));
     o += ",\"span\":";
-    o += String(liveSpan());
+    jUns(o, (unsigned long)span);
     o += ",\"sh\":";
-    o += String(sh);
+    jUns(o, (unsigned long)sh);
     o += ",\"have\":";
-    o += String(have);
+    jUns(o, (unsigned long)have);
     o += ",\"cap\":";
-    o += String(liveHistSec());
+    jUns(o, (unsigned long)cap);
     // device millis of this answer ("now" of the chart) and the per-channel size of the every-reading
     // history (GET /api/raw; 0: none)
     o += ",\"ms\":";
-    o += String((unsigned long)millis());
+    jUns(o, ms);
     o += ",\"raw\":";
-    o += String((unsigned long)rawCap());
-    int32_t pv[CHART_N], x[CHART_N];  // 2.4 kB of stack
-    auto arr = [&](const int32_t* a, const int32_t* ref, bool below) {
-      o += '[';
-      for (int i = 0; i < CHART_N; ++i) {
-        if (i) o += ',';
-        if (!ref) {
-          jNum(o, a[i] == INT32_MIN ? NAN : a[i] * 0.1f);
-          continue;
+    jUns(o, (unsigned long)rawCap());
+    auto rows = [&](const char* key, int16_t (*a)[CHART_N], bool tenths) {
+      o += key;
+      for (int c = 0; c < NUM_CHANNELS; ++c) {
+        o += c ? ",[" : "[";
+        for (int i = 0; i < CHART_N; ++i) {
+          if (i) o += ',';
+          if (tenths) jTenth(o, a[c][i] == INT16_MIN ? INT32_MIN : a[c][i]);
+          else jInt(o, a[c][i]);
         }
-        int32_t d = (a[i] == INT32_MIN || ref[i] == INT32_MIN) ? 0 : below ? ref[i] - a[i] : a[i] - ref[i];
-        o += String((long)(d < 0 ? 0 : d));
+        o += ']';
       }
       o += ']';
     };
-    o += ",\"pv\":[";
-    for (int c = 0; c < NUM_CHANNELS; ++c) {
-      if (c) o += ',';
-      liveRow(k, LV_PV, c, pv);
-      arr(pv, nullptr, false);
-    }
-    o += "],\"sp\":[";
-    for (int c = 0; c < NUM_CHANNELS; ++c) {
-      if (c) o += ',';
-      liveRow(k, LV_SP, c, x);
-      arr(x, nullptr, false);
-    }
+    rows(",\"pv\":[", r->pv, true);
+    rows(",\"sp\":[", r->sp, true);
     // "dlo" / "dhi" as for the run (see jDeltas)
-    for (int f = 0; f < 2; ++f) {
-      o += f ? "],\"dhi\":[" : "],\"dlo\":[";
-      for (int c = 0; c < NUM_CHANNELS; ++c) {
-        if (c) o += ',';
-        liveRow(k, LV_PV, c, pv);
-        liveRow(k, f ? LV_HI : LV_LO, c, x);
-        arr(x, pv, f == 0);
-      }
-    }
-    o += "]}";
-    return;
+    rows(",\"dlo\":[", r->dlo, false);
+    rows(",\"dhi\":[", r->dhi, false);
+    o += '}';
+    free(r);
+    return true;
   }
   static FcSink sink;  // web task only
   for (int c = 0; c < NUM_CHANNELS; ++c) {
@@ -909,7 +1016,7 @@ void chartJson(String& o, bool run) {
   Guard g;
   if (!gHist->runValid) {
     o = "{\"mode\":\"none\"}";
-    return;
+    return true;
   }
   const bool active = gEngSnap.active();
   float rem = 0;
@@ -922,7 +1029,7 @@ void chartJson(String& o, bool run) {
   o = "{\"mode\":\"";
   o += active ? "run" : "last";
   o += "\",\"gen\":";
-  o += String(gHist->runGen);
+  jUns(o, (unsigned long)gHist->runGen);
   o += ",\"name\":\"";
   for (const char* p = gHist->runName; *p; ++p) {
     if (*p == '"' || *p == '\\') o += '\\';
@@ -936,22 +1043,22 @@ void chartJson(String& o, bool run) {
   jNum(o, gEngSnap.elapsed());
   // run time against device millis (raw_hist.h RunAnchors): "ra" anchors, "rn" the newest point
   o += ",\"ms\":";
-  o += String((unsigned long)millis());
+  jUns(o, (unsigned long)millis());
   o += ",\"raw\":";
-  o += String((unsigned long)rawCap());
+  jUns(o, (unsigned long)rawCap());
   o += ",\"ra\":[";
   for (int i = 0; i < runAnch.n; ++i) {
     if (i) o += ',';
     o += '[';
-    o += String((unsigned long)runAnch.ms[i]);
+    jUns(o, (unsigned long)runAnch.ms[i]);
     o += ',';
-    o += String((long)runAnch.rt[i]);
+    jInt(o, (long)runAnch.rt[i]);
     o += ']';
   }
   o += "],\"rn\":[";
-  o += String((unsigned long)runAnch.lastMs);
+  jUns(o, (unsigned long)runAnch.lastMs);
   o += ',';
-  o += String((long)runAnch.lastRt);
+  jInt(o, (long)runAnch.lastRt);
   o += ']';
   o += ",\"rem\":";
   jNum(o, rem);
@@ -989,6 +1096,7 @@ void chartJson(String& o, bool run) {
   o += "],\"ev\":[";
   o += sink.ev;
   o += "]}}";
+  return true;
 }
 
 // ------------------------------------------------------------------ commands
@@ -1604,7 +1712,15 @@ static void processRequest(BusRequest& r) {
     uint16_t to = r.to;
     if (to < r.from) to = r.from;
     if (to - r.from > 300) to = r.from + 300;
+    // at most FINDSP_MS: the control task polls nothing else meanwhile (r.to = the last address scanned)
+    constexpr uint32_t FINDSP_MS = 20000;
+    const uint32_t t0 = millis();
+    r.to = to;
     for (uint32_t a = r.from; a <= to && r.n < 64; ++a) {
+      if (millis() - t0 > FINDSP_MS) {
+        r.to = (uint16_t)(a - 1);
+        break;
+      }
       if (a == reg.spEff || a == reg.pv) continue;
       int16_t raw;
       if (ctl.readRaw((uint16_t)a, raw) != MbResult::Ok) continue;
@@ -2267,7 +2383,7 @@ void appInit() {
   runProg = (DuoProgram*)calloc(1, sizeof(DuoProgram));
   // chart values: 6 x 2 x CHART_N words. No PSRAM (CYD): in the IRAM heap, which the rest of the
   // firmware can't use (32-bit access only); DRAM is what runs short there (Wi-Fi, LVGL, web)
-  // (with PSRAM 4 more for the live view, see liveRow())
+  // (with PSRAM 4 more for the live view, see liveViewUpdate())
 #ifdef BOARD_HAS_PSRAM
   constexpr int HV_ROWS = 10;
 #else
@@ -2404,7 +2520,15 @@ bool busRequest(BusRequest& r, uint32_t timeoutMs) {
   xSemaphoreTake(reqDone, 0);  // clear stale signal
   reqSlot = r;
   reqPending = true;
-  const bool done = xSemaphoreTake(reqDone, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
+  // wait in 1 s slices and keep the caller's task watchdog fed: the web / console tools wait in the loop task,
+  // whose watchdog restarts the board after 15 s (a find-setpoint scan can take longer)
+  bool done = false;
+  for (uint32_t waited = 0; !done && waited < timeoutMs;) {
+    const uint32_t slice = timeoutMs - waited < 1000 ? timeoutMs - waited : 1000;
+    done = xSemaphoreTake(reqDone, pdMS_TO_TICKS(slice)) == pdTRUE;
+    waited += slice;
+    esp_task_wdt_reset();  // (a task the watchdog does not watch: no effect)
+  }
   if (done) r = reqSlot;
   else strlcpy(r.err, "Timed out waiting for the control task", sizeof(r.err));
   xSemaphoreGive(reqMutex);
@@ -2421,13 +2545,25 @@ void saveSettingsAndNotify() {
   sendCmd(CMD_SETTINGS_CHANGED);
 }
 
-void saveSettingsQuiet() {
-  static Settings copy;  // callers are the UI and web (same loop task)
+// (no memory for the heap copy: on the stack, in a function of its own so that the usual way needs no
+// stack room for it)
+static void __attribute__((noinline)) saveSettingsStack() {
+  Settings copy;
   {
     Guard g;
     copy = gSettings;
   }
   settingsSave(copy);
+}
+
+void saveSettingsQuiet() {
+  ScratchSettings copy;
+  if (!copy) return saveSettingsStack();
+  {
+    Guard g;
+    *copy = gSettings;
+  }
+  settingsSave(*copy);
 }
 
 bool runProgramCopy(DuoProgram& out) {

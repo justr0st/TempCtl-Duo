@@ -102,7 +102,13 @@ static bool edRun = false;                 // showing the running copy (run edit
 static uint32_t edLoadedGen = 0;
 
 static lv_obj_t *edScr, *edName, *edInfo, *edUndo, *edSave, *edBody, *edHead[2], *edTab[2], *edAdd[2], *edEmptyBox;
-static Settings ES;  // settings copy (channel names, limits)
+// the channel names and setpoint limits, copied when the editor opens (not the whole Settings: RAM)
+static struct {
+  struct {
+    char name[CH_NAME_LEN];
+    float spMin, spMax;
+  } ch[NUM_CHANNELS];
+} ES;
 
 static DuoProgram* allocProg() {
   void* p = heap_caps_malloc(sizeof(DuoProgram), MALLOC_CAP_SPIRAM);
@@ -1000,7 +1006,14 @@ static void edRefresh() {
 static void edLoad() {
   if (!ed) ed = allocProg();
   if (!ed) return;
-  settingsCopy(ES);
+  {
+    Guard g;
+    for (int c = 0; c < NUM_CHANNELS; ++c) {
+      strlcpy(ES.ch[c].name, gSettings.ch[c].name, sizeof(ES.ch[c].name));
+      ES.ch[c].spMin = gSettings.ch[c].spMin;
+      ES.ch[c].spMax = gSettings.ch[c].spMax;
+    }
+  }
   LiveData L;
   liveCopy(L);
   const bool active = L.state == RunState::Running || L.state == RunState::Paused;

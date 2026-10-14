@@ -194,7 +194,7 @@ class RunEngine {
   bool edited_ = false;
   bool used_[NUM_CHANNELS] = {false, false};
   Gen g_[NUM_CHANNELS] = {};
-  Lane seq_ = {0, Stage::None, 0};
+  Lane seq_ = {0, Stage::None, 0, 0};
   Lane lane_[NUM_CHANNELS] = {};
   float el_ = 0;
   float band_ = 5;

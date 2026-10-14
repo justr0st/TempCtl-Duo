@@ -605,6 +605,16 @@ the first line of `setup()`, SSR off when the task stops refreshing it (1.5 s), 
 Modbus channels get the same runaway checks with the controller's output (Ypid); a fault switches the
 controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /api/ack` clears it.
 
+**Request checks** (no password, but other web pages must not reach the device): every **POST needs the
+header `X-TempCtl: 1`**, otherwise 403. A browser only sends such a header cross-site after a CORS check,
+which the device never answers, so a script on some other website open on a PC in the workshop can't
+switch anything. Own scripts add it, e.g.
+`curl -H "X-TempCtl: 1" -H "Content-Type: application/json" -d '{"sp":150}' http://tempctl-duo.local/api/manual`
+(PowerShell: `-Headers @{"X-TempCtl"="1"}`). The **`Host` header** must be the device: an IP address, its
+host name, or the host name with a local suffix (`.local`, `.lan`, `.home`, `.fritz.box`, … see
+`src/host_check.h`); other names get 403 (DNS rebinding), each refused name is logged once. The serial
+console's api path has no such checks.
+
 | Method | Path | Body / query |
 |---|---|---|
 | GET | `/api/live` | web page, polled every second: both channels (pv, sp, out, outOn (outputs on), state, target, kept, canExtend, manual, fault, autotune, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg; `intr` while a run interrupted by a reset can be resumed: reason, exact, el, i / st / left per channel), `sel`, `accent`, `progGen`, `cfgGen` (changes with every settings save), `logSeq`, `sysSeq` (newest system log line), `boot` (start number), `time` (device clock, UTC s; 0 = unknown), `tz` (time zone, "" = not set), `sd` (S3: card, logging, file, err) |
@@ -650,7 +660,7 @@ controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /a
 | POST | `/api/screen/restart` | sets the display and the touch controller up again (reset + init), redraws; the device keeps running (result in the serial log) |
 | GET | `/api/mb/read?addr=&n=&fn=&ch=` | raw registers (`ch`: channel whose controller address is used, default 0; also in the POST tools below) |
 | POST | `/api/mb/write` | `{"addr","value"}` raw |
-| POST | `/api/mb/findsp` | `{"from","to"}` |
+| POST | `/api/mb/findsp` | `{"from","to"}`: scans at most 20 s (the loop's watchdog); `stoppedAt` = the last address scanned when it stopped early (scan on from there) |
 | GET/POST | `/api/params` | PMA parameters (`?ch=` / `"ch"`) |
 | POST | `/api/action` | `{"i":index}` PMA actions (self-tuning, outputs off, …) |
 
@@ -698,7 +708,7 @@ tools/launcher/           local app: Go launcher (build.sh → dist/tempctl-duo-
 test/ui_host/             touch UI preview on a PC (screenshots, random-tap test)
 test/console_host/        serial console on a PC (scripted commands -> output)
 src/console.*             serial console (section 4b), LogSerial (log lines that don't break typed input)
-test/host_test.cpp        g++ -std=c++17 -Isrc -I<ArduinoJson>/src test/host_test.cpp src/duo_program.cpp src/run_engine.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp src/ota_image.cpp && ./a.out
+test/host_test.cpp        g++ -std=c++17 -Wall -Wextra -Isrc -I<ArduinoJson>/src test/host_test.cpp src/duo_program.cpp src/run_engine.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp src/ota_image.cpp && ./a.out
 ```
 
 ## 7. Safety

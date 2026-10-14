@@ -23,6 +23,9 @@ struct ProgSummary {
 // more than once. False = no file system (settings and programs not persistent).
 bool storageBegin();
 bool fsExists(const char* path);  // without the error log of LittleFS.exists()
+// At boot, before reading `path`: a temp file left by a cut-off safe save becomes `path` if `path` is missing
+// and the temp file is complete JSON; otherwise it is removed.
+void fsRecoverTmp(const char* path, const char* tmp);
 
 // Reads the summaries of all slots; creates the examples on the first start.
 void programStoreBegin();
