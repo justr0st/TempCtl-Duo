@@ -583,7 +583,14 @@ so it is not opened from the device but from the **local app**:
   connection never touches a running program; after 15 s without the page the device returns to the
   human console. CSV downloads work over USB too.
 - The device's own copy of the page is marked (`data-device`, by `tools/web_embed.py`), the launcher's
-  copy `data-launcher`; without a mark (GitHub Pages, planned) the page shows the connect screen.
+  copy `data-launcher`; without a mark (the hosted page) the page shows the connect screen.
+- **Hosted page** (Cloudflare Workers static assets, no install at all): `https://tempctl-duo.<account
+  subdomain>.workers.dev`, Chrome / Edge. The same connect screen: USB (Web Serial) or Wi-Fi = open the
+  device's own `http://` page (an https page may not call the device's http API itself). No device search
+  and no tabs (those need the local app). Deployed by Cloudflare Workers Builds on every push to `main`:
+  build command `python3 tools/build_site.py dist --web` (without `shell.html`, with a `_headers` file:
+  security headers, fonts cached for a year), deploy command `npx wrangler deploy` (`wrangler.jsonc`:
+  name `tempctl-duo`, assets from `dist/`).
 
 ## 5. Web API
 
@@ -685,7 +692,8 @@ hardware/s3-schematic/    KiCad schematic of the S3 device (+ PDF / PNG)
 hardware/cyd-schematic/   KiCad schematics of the three CYD wirings (+ PDF / PNG)
 hardware/gen/             generator of both (Python 3: python3 make.py ..)
 web/, tools/web_embed.py  web page + fonts → src/web_assets.h (generated before each build)
-tools/build_site.py       the same page as static files (device URL layout), for the launcher / GitHub Pages
+tools/build_site.py       the same page as static files (device URL layout), for the launcher / the hosted page
+wrangler.jsonc            the hosted page: Cloudflare Workers static assets (dist/, built by build_site.py --web)
 tools/launcher/           local app: Go launcher (build.sh → dist/tempctl-duo-<version>.exe), section 5b
 test/ui_host/             touch UI preview on a PC (screenshots, random-tap test)
 test/console_host/        serial console on a PC (scripted commands -> output)

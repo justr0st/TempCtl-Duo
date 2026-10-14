@@ -1,0 +1,11 @@
+// The hosted page (spec 7b): Cloudflare Workers static assets, no Worker code. Workers Builds runs
+//   python3 tools/build_site.py dist --web     (build command)
+//   npx wrangler deploy                        (deploy command; uses this file)
+// on every push to main -> https://tempctl-duo.<account subdomain>.workers.dev
+{
+  "name": "tempctl-duo",
+  "compatibility_date": "2026-10-14",
+  "assets": {
+    "directory": "dist"
+  }
+}
