@@ -129,7 +129,7 @@ static const uint8_t PANEL_FIXUP[] = {
 #endif
 
 static void backlightInit() {
-  ledcSetup(0, 5000, 8);
+  ledcSetup(0, LEDC_PWM_HZ, 8);
   ledcAttachPin(PIN_BACKLIGHT, 0);
   ledcWrite(0, 0);  // dark until the first frame is drawn
 }

@@ -31,7 +31,7 @@ static void writeRaw(uint32_t rgb) {
 static void ledInit() {
   const uint8_t pins[3] = {PIN_LED_R, PIN_LED_G, PIN_LED_B};
   for (uint8_t i = 0; i < 3; ++i) {
-    ledcSetup(1 + i, 5000, 8);
+    ledcSetup(1 + i, LEDC_PWM_HZ, 8);  // (channel 1 shares the backlight's timer)
     ledcWrite(1 + i, 255);  // off before the pin is attached (duty 0 would light it)
     ledcAttachPin(pins[i], 1 + i);
   }

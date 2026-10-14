@@ -57,6 +57,9 @@ TempCtl Duo is a copy of TempCtl (made 2026-09-28 from TempCtl commit `47995c9`,
 - Commit only when Rost asks. Commit messages: mention only the most significant changes. Leave
   `.vscode/settings.json` (his local editor settings) out unless he says otherwise.
 - Answers short and direct; Rost usually tests on hardware and reports back ("works", a log, a photo).
+- This document lives in the Claude project (`claude/tempctl-duo-spec.md`); **the repo keeps a copy at the same path,
+  updated with every commit** (since 1.0.46; `docs/SPEC.md` only points to it). Old untracked files go to `.old/`
+  (ignored).
 - Ask before large design decisions (AskUserQuestion); otherwise make the reasonable choice and say so.
 
 ### Tools and file handling
@@ -141,14 +144,38 @@ Unusable / kept free:
 | SSR bottom | 21 | J3 | 10 kΩ pull-down (off during reset/flash) |
 | SSR top | 47 | J3 | 10 kΩ pull-down |
 | Status LED (on-board WS2812) | 48 | — | status colours, see below |
-| Spare | 4, 5, 6 | J1 | e.g. buzzer, door / E-stop input |
+| SSR supply relay | 4 | J1 | +5 V common of both SSR inputs; active-high DC SSR driven directly (1.0.38) |
+| E-stop input | 5 | J1 | NC contact to GND, internal pull-up; `safety.estop`, off by default (1.0.38) |
+| Alarm buzzer | 6 | J1 | LEDC channel 6, 2.7 kHz; `safety.sound` (1.0.38) |
 
 **Status LED (decided)**: green = idle · blue = running · amber blinking = waiting for bottom / program
 pause / action required · red blinking = fault · purple = AP mode. Priority when several apply: fault >
 amber > purple > blue > green. Low brightness (≈ 20 %). **CYD: the on-board RGB LED (external WS2812 on IO17 in `cyd-2xlocal-2x485`) with the same
 colours** (Rost, 2026-09-29; replaces "blue LED only"): PWM on LEDC channels 1–3, active low.
 
-Wiring picture: `claude/wiring/s3-wiring.png` (2026-09-30; display pins drawn in J1 order, VCC on 5 V).
+Wiring picture: `claude/wiring/s3-wiring.png` (2026-09-30; display pins drawn in J1 order, VCC on 5 V;
+1.0.38: relay / E-stop / buzzer on J1-4/5/6 as net labels, SSR "+" inputs on "5V relay"). Generator:
+`/home/claude/wire/gen_s3.py` (cloud only; render with `node shot.js <svg>`).
+**SSR supply relay (decided 2026-10-13, Rost): only an active-high DC solid-state relay driven directly by
+GPIO4** (input + = GPIO4, − = GND; output 5 V → OUT+, OUT− → both SSR "+" inputs; input ≤ 20 mA at 3.3 V,
+output ≥ 0.5 A DC). No relay modules, no level setting, no optional (DNP) parts: the relay-variant sheet
+`s3-relay-wiring.png`, `relay.activeLow` (settings, touch, serial, web) and the RGND / E-stop RC options
+were removed. GPIO4 is an output, low, from `localCtrlEarlyInit()`.
+Setting `safety.relay` (decided 2026-10-13, Rost; default on): a switch in web Settings › Safety (the note
+block on the Channels page was removed), touch System, serial `safety.relay`. Off = no relay fitted: GPIO4
+stays low, no relay state in live / info, no "SSR supply relay off" events (`localCtrlRelayEnable`,
+`localCtrlRelayUsed`).
+Schematic (2026-10-13): `hardware/s3-schematic/` — KiCad 7 project (A3, one sheet: DevKitC-1 with J1/J3 pin
+numbers, display, RS485 + PMA terminals (RGND not connected), 2 × MAX31855 + CS pull-ups, 2 × BC337 SSR
+drivers + SSRs, K1 DC SSR supply relay, E-stop SW1, buzzer BZ1 with R7 100 Ω), net labels between the
+blocks, PDF / PNG. Written by a Python generator (`hardware/gen/`: no KiCad in the cloud — hand-written KiCad 7
+file format, checked by reading it back with `verify.py`; ERC to be run in KiCad by Rost).
+CYD schematics (2026-10-13): `hardware/cyd-schematic/` — one KiCad project per env (`TempCtl-Duo-CYD-A/B/C`
+= `cyd-1xlocal-1x485` / `cyd-2xlocal` / `cyd-2xlocal-2x485`), same generator (`hardware/gen/make.py`). The
+CYD is one symbol with its connectors (pin numbers P3-n, CN1-n, SD-n via the micro-SD breakout, P4-n, P1-n,
+LED-R/G/B pads on C); RS485 + PMA (A, C), MAX31855s (C: 10 k pull-up on the IO4 CS), BC337 SSR drivers, SSR
++ inputs on 5 V from P1-1 VIN, speaker LS1 on P4 (all), WS2812 status LED on IO17 from 3V3 (C). No E-stop,
+no supply relay. The CYD wiring pictures show the P4 speaker too.
 Display on J1, all process I/O on J3 (separate cable bundles). All pins become `#define`s in the
 per-board header (`src/board_s3.h`, section 3) — one place to change for a v1.1 board or a different
 wiring.
@@ -305,6 +332,16 @@ two-channel run engine (9.3).
 
 ## 6. Touch UI (LVGL 9.6 + LVGL Pro Editor)
 
+> **Changed 2026-10-02 (Rost, step 6): the new screens are hand-written LVGL C code** (`src/tui_*.cpp`),
+> not LVGL Pro XML — the exporter can't run in the cloud, and C is leaner (helps the CYD's RAM). Previews
+> are rendered on the PC (`test/ui_host`) for Rost's review. Order: **S3 first** (done in 1.0.19), then the
+> lean 320×240 set for the CYD (done in 1.0.21; the exported TempCtl 1.2 screens below are no longer built,
+> and **removed in 1.0.28**: `ui/`, `src/ui.cpp`, `src/ui_gen.*`, `src/program.*` — the text below about
+> them is history).
+> Look = the web page (Barlow / Barlow Semi Condensed via `tools/lv_font_gen.py`, the web palette, accent-
+> derived channel colours, dark / light from the touch setting). The rest of this section describes the
+> old exported UI (still used on the CYD).
+
 - LVGL 9.5+ has no open-source XML loader; the UI is **C code exported by LVGL Pro Editor** from the
   XML in `ui/` ("Export C code", `project.xml` `lvgl_version="9.5.0"` — the editor offers at most 9.5;
   the export compiles fine with 9.6). XML and exported files are committed together. After XML changes
@@ -395,6 +432,51 @@ two-channel run engine (9.3).
 
 ## 7. Web UI
 
+- **Look (decided 2026-10-14, Rost; version 1.0.40): frosted glass after his NVBHarvester tool**, worked out on a
+  concept page (claude.ai artifact "TempCtl Duo Glass Concept") and moved into `web/index.html` as one CSS block at
+  the end of the style (`html:root …` rules = class specificity, no class needed: the device / launcher copies
+  rewrite the exact `<html lang="en">` tag) plus a few scripts. Layout, Barlow, accent and channel colours stay.
+  - Backdrop: mesh gradient tinted by the accent + SVG grain (fixed, painted once). Sidebar and panels: translucent
+    glass, `backdrop-filter: blur(22px) saturate(1.25)`, 18 px radius; only these blur (controls on them are plain
+    translucent fills). `prefers-reduced-transparency: reduce` → no blur. Buttons and fields: pills / 12 px.
+  - Logo (new colours from `logo/TempCtl.svg`, Rost 2026-10-13: light blue square #86C9FF, gear #0062D3,
+    thermometer #FF5555): `web/icons/logo.svg`, `favicon.ico` (16/32/48), `apple-touch-icon.png` (180, square);
+    54 px in the sidebar, no frame, soft blue glow.
+  - Title bar: stays on top; behind it a copy of the backdrop (blurred), faded out at its bottom edge; its opacity
+    follows the scroll (`--tf`: 0 at the top of the page, 1 when the first card reaches the top).
+  - Channel cards: the channel colour as a glowing strip on the top edge. The "Manual" switch on the cards looks
+    like the sidebar's power button (CSS only; off glass, on channel colour).
+  - Output on (manual or program, live `outOn`): the card turns into the channel colour — 20 % tint over the glass,
+    4 px edge in the lit channel colour, soft glow, no top strip; back to normal when the output is off (Rost,
+    2026-10-14).
+  - The backdrop's lower-left gradient follows the accent in dark mode too (was a fixed teal).
+  - Channel colours: same rule (split-complementary, 4.5:1), now against the frosted card colour (#E4EBEF light,
+    #1A2329 dark). Extra "lit" colours `--vB` / `--vT` (same hue, full saturation, only 1.6:1 in light mode) for
+    strips, glows, meters, the tab arc and the sidebar dots, so the yellow stays vivid in light mode; text and
+    chart lines keep the contrast-fitted colour.
+  - Channels page tabs: css-tip "rounded tab" shapes (`shapeTabs()`): first tab flush with the card's left edge
+    (".left" variant), the others curve out into the card's top edge; the inactive tab tucks under the selected
+    one's foot, its fill lighter (dark) / darker (light), the card's top line runs on under it. The selected tab
+    and the card share one frosted background (`.tabbg`, clipped to the union of both shapes: no seam); outlines
+    are 1 px paths on the card border's pixel grid; the card's top edge is open under the selected tab
+    (`--g0` / `--g1`). Reshaped on tab change, resize, fonts ready and card size changes (ResizeObserver).
+  - Dropdown lists: solid theme colour for the options (the translucent field colour made them light).
+- **Chart: every reading (decided 2026-10-14, Rost; version 1.0.41)**: the web chart draws each PV reading of the
+  polling (250 ms … 10 s) instead of the 1-s / per-bin slots, live view and run chart. Device (`src/raw_hist.h`,
+  host-tested): per channel a ring of (millis, PV) pairs, 2 words each (32-bit access: the CYD keeps it in its IRAM
+  heap), one entry per poll that brought a new value (`ChannelLive.lastOkMs` changed; two Modbus controllers are
+  read in turns), a gap entry (PV −32768) when a channel has no valid reading. S3 2 MB PSRAM = 131 072 per channel
+  (36 h at 1 s, 9 h at 250 ms), CYD 600 per channel (10 min at 1 s; allocated before the live history, which gets
+  that much less of the IRAM heap). Run time against millis: `RunAnchors` (start, pause, continue, jumps; linear in
+  between), sent with the run chart (`ra`, `rn`). `GET /api/raw?a0=&a1=&win=&max=` (binary, see README). Page:
+  `rawPull()` each poll (only readings after the newest it has; the whole window again when the window grows, e.g.
+  a longer live period), `applyRaw()` puts them on the chart (live: seconds before the chart's `ms`; run: run time
+  from the anchors, after a finished run nothing), older than the first kept reading the slots as before. More
+  points than pixels: per pixel column first / lowest / highest / last (`thin()`), so no peak is lost; zoomed in,
+  every reading. Over USB (Web Serial) the slots as before. Touch chart unchanged (slots). Tested in the mock:
+  12 h at 250 ms = 167 000 readings, 19 requests, 52 ms to place and draw.
+  - Cost: about +5 kB gzipped page (70 kB); no RAM or CPU change on the device; the blur is GPU work in the
+    browser.
 - `src/web_page.h` (≈ 54 kB, one PROGMEM raw string `R"HTML(…)HTML"` — must not contain `)HTML"`).
   Self-contained (works in AP mode): inline CSS/JS/SVG icons, system fonts, always dark.
 - Look (after MoldControl by servomold / HMI Project, iF Design 2025): dark panels, pale cyan controls
@@ -552,6 +634,18 @@ needed.
      (e.g. `justr0st/tempctl-duo-web`, updated by a script/Action from the firmware repo) while the
      firmware repo stays private. The page contains no secrets — access to a device still needs the
      local serial-port permission or the device's own address. Optionally cached for offline use.
+     **Alternative: Cloudflare Pages** (asked 2026-10-13, not decided): free plan, its Git integration
+     also builds from a **private** GitHub repo (or Direct Upload of the built folder with `wrangler`);
+     build command `python3 tools/build_site.py <out>`. Same limit as GitHub Pages: an https page reaches
+     a device only via Web Serial (the device's http API is mixed content).
+     **Chosen (Rost, 2026-10-14; 1.0.45, b16a94b): Cloudflare Workers static assets** (the dashboard's "Create application"
+     now leads to Workers; Pages only via a side link). `wrangler.jsonc` (name `tempctl-duo`, assets `dist/`),
+     Workers Builds on push to `main`: build `python3 tools/build_site.py dist --web` (no shell.html, `_headers`:
+     nosniff, no-referrer, DENY framing, Permissions-Policy serial=(self); `/f/*` cached a year), deploy
+     `npx wrangler deploy` → `https://tempctl-duo.<account subdomain>.workers.dev`. No device search / tabs there.
+     Live since 2026-10-14: https://tempctl-duo.just-r0st.workers.dev/ (checked: page = repo's index.html, connect screen,
+     fonts load, headers as in `_headers`, HTML / icons revalidated, fonts cached a year, shell.html not deployed).
+     Rost (2026-10-14): Web Serial from the hosted page works.
   2. **Local app, no installation** — *the delivery for now*. **Decided: one Go executable**
      (`tempctl-duo.exe`, ≈ 6 MB, Windows first; macOS/Linux builds possible from the same source) with
      the page files embedded (`embed`), serving them on **`http://localhost:8765`** (fixed) and opening
@@ -679,6 +773,43 @@ Rebuild these in `/tmp` if the container was reset (they were not kept in the re
   - A runaway fault stops the run (both channels, end action "outputs off" on the faulted channel),
     shows an alarm on screen and web, and must be acknowledged.
 
+### 9.2a Protections (decided 2026-10-13, Rost picked from a list; version 1.0.38)
+CFG = a setting, on by default unless noted. Channel ones live in the channel's Protection subsection
+(web Channels, touch Channels, serial `b./t.<type>.runaway.*`), general ones on the Settings page
+(web Settings › Safety, touch System, serial `safety.*`).
+- **Heating while off** (stuck SSR / controller), CFG, `runaway.offEnable/offRise/offSec`, default 10 °C
+  in 60 s: outputs off but the PV rises offRise within offSec (rise counted from the lowest reading; a new
+  window after offSec). Starts 120 s after the outputs went off (heat still flowing) and pauses while the
+  other channel heats (its heat reaches this sensor — e.g. the top TC on the board while the bottom
+  heats). Modbus: only after this device wrote "outputs off" (`offKnown_`). Fault `FAULT_OFFHEAT`
+  (latched; local: SSR relay off).
+- **Reading frozen**, CFG, `runaway.frozenEnable/frozenSec`, default 120 s: outputs on and the unfiltered
+  reading (local: converter value before the median; Modbus: PV) did not change at all. `FAULT_FROZEN`.
+- **Converter too hot** (local, MAX31855 cold junction), CFG `local.cjEnable/cjMax`, default 70 °C:
+  latched while heating (`FAULT_CJHOT`); outputs can't be switched on above it; Acknowledge refused until
+  5 °C below.
+- **Forgotten manual mode**, CFG off by default, `safety.manualIdle/manualIdleMin` (30 min): manual mode
+  ends after that long without user activity (touch press, web POST, serial command, any `sendCmd`
+  except the settings notification); counted from the later of activity and manual-on (also the kept
+  setpoint after a run); a message + "action" beeps 1 min before.
+- **Start temperature**: warning only (no setting): at Start, a used channel within 10 °C of (or above)
+  its first target → "Warning: <ch> starts at X °C, near or above its first target Y °C".
+- **E-stop input**, CFG off by default, `safety.estop`, S3 GPIO5, NC contact to GND (pull-up), read every
+  50 ms (active after 2 readings, released after 10). Active: SSR timer and local task force the SSRs
+  off, relay off ("SSR supply relay off: E-stop"), control task stops the run (no end action), manual /
+  autotune off, Modbus outputs off; start / resume / manual / autotune refused while open. Not a latched
+  fault: released = "Emergency stop released", outputs stay off until switched on again. Web: banner on
+  the Dashboard + channel badges; touch: tile text + blinking badge. CYD: none (no free pin).
+- **Alarm sound**, CFG `safety.sound`: S3 GPIO6, CYD IO26 (speaker amplifier P4 — Rost asked for IO35,
+  which is input only). LEDC channel 6 (timer 3), 2.7 kHz, esp_timer 50 ms patterns: fault / E-stop 3
+  long beeps every 3 s; "Action required" pause + manual-idle warning 2 short beeps every 10 s; run
+  finished 3 short beeps once. Any user activity mutes the current level until it clears or a higher one
+  comes. Test beep: `POST /api/beep`, touch switch on.
+- **Chip temperature** (S3 only), CFG `safety.chipWarn/chipMaxC` (80 °C): `temperatureRead()` every 30 s
+  (only while enabled), warning event above, "back to" 5 °C below; live `safety.chipC`.
+- Module `safety.*` (E-stop, buzzer, activity, chip temperature); `GuardMonitor` in `runaway.*` (host
+  tested: testGuard).
+
 ### 9.3 Programs — two program types (agreed 2026-09-28)
 Replaces two earlier drafts ("one program per channel from a shared pool" and "parallel channel
 sequences with 'wait for previous phases' barriers"). Chosen after comparing the models on charts.
@@ -772,9 +903,14 @@ sequences with 'wait for previous phases' barriers"). Chosen after comparing the
     outside a run a hold can be dragged back to the end of its ramp. **When no program is
     running, the channels are edited independently** — moving a point of one channel moves only that
     channel's later steps (agreed); during a run see 9.3.4.
-- **"Convert to Timeline"** (web; decided: **later, not in the first version**): for a Sequence without
-  "wait for bottom" phases, one way only. When it comes, it shows a **warning that the conversion can't
-  be reversed** (a Timeline can't be turned back into a Sequence) before converting.
+- **"Convert to Timeline"** (web; done in 1.0.32): one way only, with a **warning that the conversion
+  can't be reversed**. Decided 2026-10-12 (Rost): Sequences **with** "wait for bottom" convert too — the
+  waits are dropped (the warning lists the phases; the Timeline runs on the programmed times, as the
+  preview does); the dialog asks each time **Replace this program** (the draft in the same slot, Undo
+  brings the Sequence back until saved) or **Create a new program** (first empty slot, "… (Timeline)",
+  unsaved draft). Mapping: one clock phase by phase; a channel that keeps its state gets its last hold
+  (or Idle) lengthened to the next phase that gives it a target; a Both phase's bottom jump = ramp-0
+  step (Idle = idle step); a Pause phase = pause step in the bottom list (top if the bottom is unused).
 - **Starting a run with unsaved changes** (decided): Start asks **"Save and start" / "Start without
   saving" / "Cancel"**. "Start without saving" sends the draft to the device as the run's copy; after the
   run the usual "save the run's changes?" question comes (9.3.4). Same on touch and web.
@@ -981,8 +1117,12 @@ sequences with 'wait for previous phases' barriers"). Chosen after comparing the
   3. **Lead-free BGA (Timeline)**: bottom 150/60/150 · 165/30/150 · Idle 60; top Idle 120 · 150/40/20 ·
      190/40/30 · 225/30/20 · 245/20/30 · 150/40/0.
   Values are starting points, to be tuned on the real station.
-- **SD slot (decided): not used now** — SD_CS is only driven high to keep the card deselected. Later
-  maybe CSV run logging on the S3 (the CYD's SD pins carry the thermocouples).
+- **SD run logs (S3, 1.0.32; decided 2026-10-12)**: one CSV per program run in `/runs` on the card,
+  **every 1 s, full detail** (time_utc, run_s, where, per channel pv / sp / prog / out / state) plus a row
+  per event during the run (kind, event); **web list on the System page** (Download / Delete) + the card
+  in a PC. The CYD has none (its SD pins carry the thermocouples). Shared SPI bus: the screen check frees
+  the bus every second, so the card is mounted only while used, under `lcdBusLock()` (the check skips
+  that second: "busy (SD card)").
 
 ### 9.10 Proposed implementation order
 1. **Bring-up on the S3**: new env, per-board headers (S3 + CYD), ST7796 via LVGL + DMA, own FT6336U
@@ -1000,8 +1140,8 @@ sequences with 'wait for previous phases' barriers"). Chosen after comparing the
 8. Serial console (7a) — can come early (after step 2), it helps with bring-up and Wi-Fi setup;
    then the `api` mode and the Web Serial page (7b). Test the DTR/RTS auto-reset behaviour early.
 9. Identity (9.8) — can be done in step 1 already (name, host, AP, version 1.0.0).
-10. Later / planned: the page on GitHub Pages (7b, option 1); maybe CSV run logging to SD (S3);
-    "Convert to Timeline" with an irreversibility warning (9.3.3).
+10. Later / planned: the page on GitHub Pages (7b, option 1). (SD run logs and Convert to Timeline:
+    done in 1.0.32.)
 
 #### 9.10.1 State of step 1 (2026-09-29)
 Implemented (both envs compile and link without warnings in our files; host tests pass):
@@ -1210,8 +1350,8 @@ control only") until the new UIs; **order of the next steps: 5 → 7 → 6** (we
   (extend, hold, ramp, target, save, next, continue), `/api/status` `run` extended, `/api/history?both=1`,
   CSV with both channels. Old page: program editor locked with a note, "Next phase" becomes "Continue" in
   a program pause. Old touch UI: Program tab read-only (bottom channel as steps), Next = Continue.
-- Not done yet (later sub-step, before or with step 7): **"Run interrupted by a reset"** (`/duo/run.json`
-  + RTC memory, resume button) and "Start without saving" (start from a draft sent by the web page).
+- Done later: "Run interrupted by a reset" (1.0.18, see 9.10.8) and "Start without saving" (start from a
+  draft sent by the web page).
 - To test now (bare S3): `/api/programs` shows the 3 examples; `/api/program?i=0` returns the JSON;
   POST a changed program back (and a wrong one → error message); Start program 1 → "Cannot start: …
   uses Top, which is off" (default top = Off), with top set to `local` → "no valid temperature from …".
@@ -1227,7 +1367,7 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
 - `web/index.html` = the new page (one file), built from the 9.3 simulator: sidebar (Status, links to
   `/old`, link status, network, clock, CSV download, theme Auto/Dark/Light in localStorage), run panel,
   chart (both channels: PV thick, SP thin, state lanes, phase lines + times, Timeline hold-end times, pause
-  marks, forecast dashed, End; zoom/scroll/pinch as in the simulator; "Live" = last 5 min), channel cards
+  marks, forecast dashed, End; zoom/scroll/pinch as in the simulator; "Live" = the chosen period of the live history), channel cards
   (target ±1/±5 + Set, Extend hold +10 s/+30 s/+1 min, manual switch + SP when the channel isn't in the
   running program, fault + Acknowledge, "why" line), Action required overlay, save-after-run dialog,
   event log. Palette in JS by the spec 6 rule from `accent` (split-complementary ±150°, SP +0.12 L,
@@ -1406,17 +1546,571 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   `pv`, 0 = none, keeps `/api/chart` small); the page draws each slot through both extremes (nearer one
   first). The visible dips are thermocouple noise (median-of-3 already in the local task): hardware hint
   stays 10 nF across T+/T−, twisted leads away from mains wiring.
-- Next: 7d "Run interrupted by a reset", then step 6 (touch UI, incl. the polling interval in Setup).
+- **1.0.17 (Rost: period setting, long history, export, auto scale)**: live history ring in RAM (lost on
+  restart, no flash wear), one slot per second, 12 bytes for both channels: PV (last reading) and SP as
+  int16 tenths, lowest / highest reading as one byte each below / above PV (0.1 °C up to 19.9 °C, then
+  2 °C steps up to 130 °C, rounded outwards). No median of N: it would hide the peaks 1.0.16 made
+  visible; last + min + max keeps them and is as compact. Size: S3 24 h (1 MB PSRAM); CYD only the
+  IRAM-only heap (iram0.text ends at 0x400941DC → ~48 kB, the run rows take 14 kB; the old "IRAM free"
+  also counted the D/IRAM part, which is DRAM): as many 5-min steps up to 1 h as leave 8 kB free —
+  about 30 min (boot log `[hist] live history N min`; `[mem]` now prints IRAM-only free). The CYD has
+  no cached view rows (computed from the ring per request); the S3 keeps 4 view rows, rebuilt once per
+  slot. `display.liveMin` (5…1440, clamped to the history) = Live period for web and touch; the view is
+  300 bins of k = period / 300 slots aligned to the slot count (complete bins don't change), newest
+  partial (`sh`). Page: Period select (5, 10, 15, 30 min, 1, 2, 4, 8, 12, 24 h up to the history, plus
+  the whole history), "N recorded" / "memory holds N", Export CSV; Live Y axis always 0 … highest value
+  in view (incl. the newest reading) on a round step. `/api/history.csv` streams (no Content-Length,
+  ends with the connection; ~4 MB / 86400 rows on the S3) time_s, uptime_s, per channel pv, min, max,
+  sp; `/api/log.csv` without a run = the same.
+- **1.0.18 = step 7d "Run interrupted by a reset"** (9.3.5). Engine: `RunPos position()` (run time;
+  Sequence phase + stage; Timeline step, stage and seconds left per channel) and `resumeAt()` (host-tested):
+  Sequence = the phase from its beginning, channels the phase starts begin at the measured PV, the other
+  channel gets the target of the phases before it **at once** (jump; decided by me, Rost may change it);
+  Timeline = at the run time, ramp from the measured PV in the time left, hold / idle with the time left,
+  a pause asks for Continue again, a finished lane keeps its last target. Firmware: `/duo/run.json`
+  (slot, run id, edited, saved controller gradients, running copy) at the start and after each run edit /
+  save; `/duo/runpos.json` on every phase / step / stage change and every 60 s; RTC_NOINIT record (magic,
+  run id, position, checksum) every cycle — exact after a reset, the flash position after a power loss
+  ("about"). Files and record removed when the run ends. Boot: offer + log entry with the reset reason;
+  outputs-off written to the program's channels. Resume (`POST /api/run {"cmd":"recover"}`) runs the
+  start checks ("Cannot resume: …"), keeps the saved gradient to restore at the end; Dismiss
+  (`"dismiss"`) = outputs off, gradient and front lock restored. Starting another program ends the offer
+  (after a confirmation on the page; the old gradients carry over to the channels the new run takes).
+  `/api/live` `run.intr`; the page shows a banner in the run panel (Resume from phase N / Resume at
+  m:ss, Dismiss). Chart after a resume: history before the resume is gone (RAM), lanes empty there.
+  Not yet: touch Resume / Dismiss buttons (step 6; the touch message line shows the offer), serial
+  `resume run` (step 8).
+  Rost's S3 test (2026-10-02): offer and "about" after a power loss OK; the page's event log missed the
+  boot / interruption entries (it asked for entries after the old sequence number, the device had started
+  again at 1) → the page now notices a restart (`logSeq` or `up` went back), marks it and reloads the log.
+  Also in 1.0.18 (Rost): the history records a setpoint only while it is active (Modbus: run, manual,
+  kept / set by the end action, until manual off or a fault; local: while the output is on); the Live
+  legend switches PV / SP per channel (chart, Y scale, export; localStorage `lvis`); Export CSV =
+  `/api/history.csv?pv=<mask>&sp=<mask>` (only those columns, rows without values left out).
+- **1.0.19 = step 6 for the S3** (new touch UI, `src/tui_*.cpp`, see section 6 note): main screen as in
+  the agreed mockup (header with program / phase / state / time and run buttons, chart of both channels
+  with program ↔ live on tap, two channel tiles with PV, SP, output, status, target stepper (run target
+  or manual SP, sent 0.7 s after the last tap), manual switch, "+ Hold" (+10 s / +30 s / +1 min / +5 min),
+  Acknowledge), overlays on every screen ("Action required", "Run interrupted by a reset" with Resume /
+  Later / Dismiss, "Save the run's changes?", messages), menu with Programs (list + table editor: Sequence
+  one table, Timeline two tables; undo, save, start / start without saving, rename, delete; during a run
+  run edits of targets and times), Channels (general, Modbus, thermocouple, PID + autotune, runaway, RS485
+  bus; registers and two-point calibration stay web-only), Network (scan, password with eye, AP password,
+  host name, fixed IP), Display (brightness, dark, accent presets, rotation, live period), System (polling
+  interval, band, info, restart), Event log. `chartSnapshot(d, live)` gives the live view during a run too;
+  `runProgramCopy()` for the editor. Montserrat 16 / 20 enabled (symbols). Host harness: 28 screenshots,
+  random-tap test (ASan / UBSan clean). The old exported UI is not built on the S3 (`UI_V2`).
+  Rost's review of the previews (2026-10-06): chart without a tile (on the screen background), the
+  program / forecast curves dashed in the SP colour at 50 % opacity (even dashes along the whole curve);
+  setting rows without tiles and closer together; accent ring no longer clipped; "Manual" label removed,
+  the manual switch is now an on / off button (power symbol) filled with the channel's PV colour while on.
+  First test on the S3 (2026-10-08): the screen stayed dark on Rost's clone DevKitC, whose 5 V pin sits
+  behind a diode (the display's 5 V supply too low); bridged, the screen works. The touch chart lost points
+  while moving (1.45 px per point, every 2nd point skipped, so peaks / noise changed from second to
+  second): now gathered per pixel column (first / lowest / highest / last value), and the PV of each point
+  carries its lowest / highest reading (`ChartData.lo/hi`, S3 only), so short peaks show like on the web.
+- 1.0.18 + 1.0.19 tested on the S3 and CYD (2026-10-09, mostly OK; committed as 1.0.19). **Modbus is a beta
+  feature from now on**: Rost has no Modbus controller, so everything Modbus / RS485 stays in the firmware but
+  is labelled "beta" (touch: channel type, Modbus heading, RS485 tab; web: type, sections, Modbus tools) and is
+  left out of the test lists until a controller is available.
+- **1.0.20** (Rost's test results):
+  - End action "keep setpoint" / "end setpoint": the channel goes on in **manual mode** with that setpoint
+    (manual button on, stepper shows it; the button switches the outputs off).
+  - Resume after a reset: ramps keep their **planned speed** = |target − previous target| / ramp time
+    (first ramp: the speed saved with the position, `RunPos.slope`, runpos.json 4th value), from the measured
+    temperature. Sequence: the ramp takes as long as that needs. Timeline: the hold after it takes up the
+    difference (`Lane.hold0`), so later steps keep their run time and the channels stay in step (Rost's choice).
+  - Restart reason: a requested restart (touch / web) leaves a note in RTC memory, the next boot logs
+    "restart on the touch screen / from the web page"; the restart itself is orderly (outputs off, no more
+    drawing, backlight off, 0.4 s, then restart). A panic now logs "crash, rst N" (ROM reset code). Rost saw
+    "crash" after every restart on the S3: if it stays "crash while restarting", the serial log just before the
+    ROM banner has the panic.
+  - Touch: the header shows the selected program once another one is chosen after a run; stepper − / + held
+    longer than 3 s steps by 5 °C (round values), back to 1 °C after release; the "Run interrupted" dialog
+    closes when resumed / dismissed on the web page; messages on the main screen sit over the lower edge of
+    the chart (the tile controls stay free), elsewhere at the bottom; tile status "Autotune 200 °C" /
+    "Autotune done"; the keyboard has a close button (no change); the Display screen follows changes made on
+    the web page.
+  - Charts (web and touch): SP lines at 50 % with the area below them filled at 20 % (Rost: fill under SP,
+    not PV); live periods 1 min … 24 h
+    (`LIVE_PERIODS`, at most what the history holds: the CYD's "whole history" 35 min entry is gone, 30 min is
+    its longest); display.liveMin 1…1440.
+  - S3 internal RAM went down to about 3 kB free (Rost, touch System info): LVGL allocated every object,
+    style and label text with malloc(), which keeps blocks under 4 kB in internal RAM, and the touch screens
+    stay created once visited. LVGL now allocates in PSRAM (`LV_STDLIB_CUSTOM`, src/lv_mem_psram.c; internal
+    only when PSRAM is full), the touch chart's snapshot too (6 kB). The live history and chart rows were in
+    PSRAM already. The S3 also logs `[mem] running` once a minute now (+ PSRAM free).
+  - Missing files are checked with stat() (no "does not exist, no permits for creation" errors at boot).
+  - Open: CYD "[mem] running" minimum went down to 2.3 kB with the page open and weak Wi-Fi (free stays
+    about 43 kB, so no leak); watch it, a lower peak for /api/chart may be needed. The old CYD screens log two
+    LVGL "deprecated flag" warnings at boot (generated code, goes with step 6 for the CYD).
+- 1.0.20 committed (2adf575, 2026-10-09). Rost: open / untested points (Modbus, run tests on the CYD, 1.0.20
+  items) are revisited later; development goes on.
+- **1.0.21 = step 6 for the CYD** (2026-10-09): the CYD runs the new touch UI too (`UI_V2` in board_cyd.h);
+  one code for both sizes, `TUI_SMALL` (SCREEN_W < 400) in tui.h with size constants (`T_HDR`, `T_BTN`,
+  `T_DLG_W`). 320×240 set as decided (9.7, 9.3.3):
+  - main: header (program / where, badge, time; tap: program picker), chart 76 px, two tiles (name, status,
+    PV, **one SP button** = the setpoint in force (ramping: the moving one) in the SP colour, else the one
+    that would be applied; tap: number pad for the run target or the manual setpoint; output bar, "Out x %",
+    manual button / + Hold / Acknowledge), **bottom bar: Menu, Run, Stop, Next**; messages over the chart.
+  - editor: **Sequence = one line per phase** (# | type | "150° 1:00 / 1:00", "B 160° · T 150° …" | option),
+    tap → the phase menu with its values first ("Preheater target: 150 °C" → number pad), then type, wait,
+    insert / move / delete; during a run only the values. **Timeline = one table + channel switch** (buttons
+    "Preheater · 3" / "IR head · 6").
+  - popups, pages, lists, channel settings, network, display, system, log: compact sizes.
+  - RAM: only the main screen stays; other screens are built when opened and deleted when left (with the
+    editor's draft and undo steps, `progEditRelease()`); undo 2 steps on the CYD (a program is ~3.9 kB).
+    The touch chart's copy has no lo/hi on the CYD (`CHART_LOHI` only with PSRAM, 2.4 kB). PC measurement
+    (64-bit, so ESP32 needs less): main screen 43 kB, biggest other screen +73 kB (channels), back on main
+    +23 kB (allocator / caches, not growing; malloc tracking shows no leak).
+  - System info: "RAM x kB free (lowest y)" = the internal byte-addressable heap (was ESP.getFreeHeap(),
+    which counts the CYD's IRAM-only heap too).
+  - CYD flash image 1.77 MB (56 %, was 65 %: the old exported screens and their fonts are no longer linked).
+    `ui/`, `src/ui.cpp`, `src/ui_gen.c` are not built any more (to be removed once Rost has the new UI
+    running on the CYD).
+- 1.0.21 tested by Rost on the CYD and committed (db87cbc, 2026-10-09): screens fine; lowest free RAM
+  14 kB after adding steps to a program without saving and scrolling through the Channels screen.
+- **1.0.22 = step 8, part 1: the serial console (7a)** (2026-10-09), `src/console.cpp`:
+  - S3: native USB port, TinyUSB CDC (`USBCDC`, ARDUINO_USB_MODE=0), product name "TempCtl Duo"; banner +
+    help when a terminal raises DTR, one line on the UART log ("serial console on the USB port"); writes
+    only while DTR is set (tx timeout 20 ms, never stalls the loop). CYD: `Serial`, shared with the log.
+  - All log output goes through `LogSerial` (`Serial.print*` replaced): on the shared port a log line first
+    clears the typed line (`\r ESC[K`), the console shows "> " + the typed text again afterwards.
+  - Commands as in 7a, with these choices: **`wifi ap [pw=]`** (the AP name is fixed, `TempCtl-Duo-XXXX`
+    per 9.8, so no `ap=<SSID>`; a given `ap=` gets a note); `wifi connect` keeps the new network only
+    after it connected (then saved), on failure the previous SSID / password are restored; results:
+    wrong password (auth fail / handshake timeouts / MIC failure), network not found (2 × NO_AP_FOUND),
+    timeout (25 s); scan list `n  SSID  rssi dBm  auth  ch n` (net.cpp keeps the details of the last scan,
+    `netScanDetail`). Added **`dismiss run`** next to `resume run`, and `save` / `discard` answer the
+    "run changed the program" question. `start` refuses while an interrupted run is offered (resume /
+    dismiss first). `reboot` (also `restart`; refused during a run, like touch / web; logs "Restart
+    requested from the serial console"). `api on|off` comes with 7b.
+  - Events: S3 prints new event-log entries on the console port (the CYD's log already shows them);
+    "Action required" block every 30 s; interrupted run once (again for a newly opened terminal).
+  - RAM: command snapshot (LiveData + Settings) on the heap only while a command runs; scan list (800 B)
+    from the first scan on. CYD static RAM +0.5 kB; S3 +12 kB (TinyUSB).
+  - Fixed on the way: `millis() | 1` as "non-zero now" can be 1 ms ahead, so `millis() - t` wrapped (the
+    requested restart sometimes skipped its 0.4 s; touch UI timers fired early) → explicit `if (!t) t = 1`
+    / `tTickNow()`.
+  - PC test `test/console_host` (shims for Print / Stream / WiFi, stubs for the app layer): scripted typing.
+- CYD colours (Rost's photo, 2026-10-09): every colour had red and blue swapped (pink accent shown violet,
+  blue as orange, the swatch row in the wrong colours; neutrals unaffected, so the old UI hid it too) →
+  `LCD_BGR 0` in board_cyd.h (this panel is RGB; other CYD revisions may need 1). In 1.0.22.
+- 1.0.22 tested by Rost (CYD colours fixed, console fine) and committed (bf9a2b3, 2026-10-09).
+- **1.0.23 = more console commands** (2026-10-09, help previewed and agreed with Rost):
+  - `help` in sections (STATUS, MANUAL CONTROL, PROGRAMS AND RUNS, AUTOTUNE, WI-FI, SETTINGS, DEVICE);
+    `help <section>` prints one; `help settings` (also `help set` / `help get`) the full settings page:
+    every key with its range / choices, one `e.g.` line per section. Unknown section → error + the list.
+  - `watch` (one status line per second, any key stops), `info` (firmware, board, uptime, internal RAM
+    free / lowest / largest block, PSRAM, live history length, network, web URL, programs), `log [n]`
+    (last n event-log entries, default 20), `ack b|t` (CMD_ACK_FAULT).
+  - `tune b|t start temp=<C>` (local channel, 50 … maxTemp − 20, not during a run, no fault), `stop`,
+    `accept` (kp / ki / kd into the channel settings, saved) / `discard`; `tune b|t` prints its state;
+    `status` shows the autotune state of a local channel.
+  - `get [prefix]` / `set k=v …` (up to 8): the web API keys (settingsToJson / settingsFromJson /
+    settingsValidate), `b.` / `t.` = channels[0/1], sections bus / run / wifi / display. Value checked per
+    type first (number range, int, on/off, choice, IP, register address or empty, accent preset name or
+    #RRGGBB, parity none|even|odd); any error → "nothing changed". Applied to a copy, validated, then
+    taken over; each key is reported as stored, or "(adjusted: it depends on other settings)", e.g.
+    spMax after a lower maxTemp. Saved + notified at once; Wi-Fi keys re-apply Wi-Fi. Modbus / bus keys
+    hidden on boards without RS485 (except pollMs). Allowed during a run (like touch / web).
+  - `factory reset yes`: settingsDefaults (Wi-Fi included, programs kept), save, restart; refused during
+    a run; without `yes` only a warning.
+  - `touch cal` (CYD only): overlay on the top layer with 4 crosses 24 px from the corners; the raw
+    XPT2046 values are averaged while pressed; result extrapolated to the screen edges (clamped 0..4095),
+    rejected if a raw span < 300; 60 s timeout; any key on the console cancels; saved + used at once
+    (`touchSetCal`). UI harness: simulated taps give x 199 … 3850, y 3700 … 301 (expected 200 … 3850,
+    3700 … 300).
+  - `wifi forget`: clears SSID / password, saved, access point only (its name printed).
+  - Builds: S3 flash 1.83 MB, static RAM 92.1 kB; CYD 57.5–57.8 % of the app partition, 79.0–79.5 kB.
+  - Rost's test on CYD + S3 (2026-10-09): touch cal, set (spMax adjusted), info, factory reset, help
+    settings, static IP fine. Fixed: `watch` stopped at once with a CR LF terminal (the LF counted as
+    "any key"; the LF of CR LF is now dropped before the watch / calibration key checks); `set set k=v`
+    ignored the stray word (now an error, also more than 8 pairs); Wi-Fi re-applied after the `set`
+    report (its log lines no longer cut into it); the restart reason was cut to 19 characters ("factory
+    res"; RTC note 48 now, magic RST2, reason worked out once); `factory reset` names the real AP;
+    "access point started" logged once (mode + softAP both fire AP_START).
+- 1.0.23 committed (5430930, 2026-10-09) after Rost's test.
+- **1.0.24** (2026-10-09, Rost's requests):
+  - Custom accent colour. Web: a 7th "Custom" choice whose circle holds an `<input type=color>` (rainbow
+    circle until a custom colour is used, then that colour; the "Custom" text opens the picker too); saved
+    on the picker's `change`. Touch: a 7th circle with a pen (outlined; filled with the colour when a
+    custom one is active) opens "Custom colour": swatch + #RRGGBB, sliders Hue (scale of 6 two-colour
+    gradient segments under a knob-only slider), Saturation, Brightness (20 … 100; darker is no usable
+    accent), Cancel / OK. The colour stays exact if no slider is moved (HSV round trip is not exact).
+    S3 setting hints now wrap (were cut at 280 px).
+  - Screen restart without a device restart: web System → "Restart screen" (`POST /api/screen/restart`),
+    serial `screen restart` (also `screen reset`). Done in the UI task: touch controller (FT6336: I2C bus
+    recovery = up to 9 SCL clocks + STOP, reset pin, Wire set up again, chip id read; XPT2046: SPI + IRQ
+    set up again), pending press dropped (`lv_indev_reset`), display controller: hardware reset (S3 pin
+    14; CYD none) and LVGL's whole init sequence sent by a short-lived second LVGL display on the same SPI
+    device, PANEL_FIXUP + invert, rotation set again (MADCTL), everything redrawn, brightness again. The
+    console reports "display set up / touch controller answers / does NOT answer", or after 5 s "the
+    screen task does not respond". Not on the touch screen itself.
+  - Console: Up / Down keys recall the last commands (20, 1 kB ring; lines with `pw=` and password
+    entries not kept; ESC [ A/B and ESC O A/B). A key that stops `watch` / cancels `touch cal` is used up
+    whole (an arrow's sequence does not recall). A `pw=` value stays masked when the line is shown again
+    after a log line (was shown in clear).
+  - Builds: S3 static RAM 93.2 kB; CYD 80.1–80.6 kB (+1.1 kB: history).
+- 1.0.24 committed (7ec0973, 2026-10-09, before Rost's test; he asked to commit).
+- **1.0.25 = automatic screen check** (2026-10-09, Rost: "is it possible to detect an unresponsive screen?"):
+  - Setting `display.screenCheck` (default on; web Display switch, touch Display row "Screen check",
+    `set display.screenCheck=`). Every second in the UI task (`screenWatch`, tui.cpp; was 5 s).
+  - Display: LCD MISO now used (S3 GPIO13 shared with the unused SD card; CYD GPIO12). `lcdCheck()` reads
+    0Ah (power: bits 4 sleep out + 2 display on), 0Bh MADCTL (bits MY MX MV BGR vs the driver's
+    madctl_reg), 0Ch (bits 2..0 = 5). Reads at 4 MHz half duplex: the display's SPI device is removed,
+    a slow one (command phase 8 bits + 8 bits in, same CS) added for the reads, then the display's added
+    again (devCfg kept). ILI9341: index register D9h = 10h before each read (TFT_eSPI readcommand8).
+    The first read right after the init decides whether the status reads back at all (all three as set
+    up); otherwise the display part stays off ("[lcd] status: ... check off").
+  - Touch: FT6336 chip id read (`touchCheck`), must match the id found at boot; not found at boot = no
+    check. XPT2046: -1 (cannot be asked).
+  - Stuck press (both): pressed and moved <= 3 px for 60 s → touch restart (3 tries until a release).
+  - Two failed checks in a row → restart of that part (display failure: display, plus touch if that
+    failed too); max one automatic restart per 30 s; 3 in a row without a passing check → event "restarting
+    did not help", stops until a check passes. Each restart: event "Screen restarted automatically: ...".
+  - Console `screen check`: display values (power / MADCTL / format), touch state, on/off, automatic
+    restarts so far. On the hardware: check the boot line "[lcd] status: ..." — if it says "check off",
+    the read needs adjusting (dummy clock / D9 index quirk).
+  - Rost's S3 boot log: "power 0xBC, MADCTL 0x78 (0x28 expected), pixel format 0xFF" = value | value << 1
+    for all three (0x9C, 0x28, 0x55): the panel answers correctly, the hardware SPI sampled each bit while
+    the line already changed to the next. → The status is read in software (~60 kHz): device removed,
+    bus freed (spi_bus_free), pins as GPIOs, reads, then spi_bus_initialize + add device again. Sampling
+    point chosen at boot from two (late in the high phase / late in the low phase): the one that reads
+    the setup back; the boot line then shows "OK (sample n), check on" or both raw sets for diagnosis.
+  - Verified on the hardware (Rost, 2026-10-09): S3 "power 9C, MADCTL 28, format 55: OK (sample 1)";
+    CYD "power 9C, MADCTL 20, format 05: OK (sample 0)" (ILI9341 with the D9h index read works; its
+    format reads 05). The two panels need different sampling points, so the boot-time choice stays.
+  - Hidden serial command `screen check test` (not in the help): DISPOFF (28h) + SLPIN (10h) to the
+    panel, resets the automatic-restart limits; refused when the check is off or the status is not
+    readable. Expected: two failed checks → "Screen restarted automatically: display lost its setup".
+  - Tested by Rost on S3 and CYD (2026-10-09): `screen check test` → power 08 → restarted, screen back.
+    Then the interval 5 s → 1 s (Rost; cost ~1–2 ms per check: software read + SPI bus set up again,
+    one I2C read; a hanging display is noticed after ~2 s).
+- 1.0.25 committed (858126d, 2026-10-09) after Rost's test on both boards.
+- **Step 8 part 2 = 7b, in three commits** (Rost: "continue with the development", 2026-10-09):
+  1. **1.0.26 device `api` mode** — 2. 1.0.27 the page (connect screen + serial transport, same
+  index.html) — 3. 1.0.28 the Go launcher. Simplification against 7b: no pushed `status`; the page
+  polls `/api/live` over serial exactly as over HTTP (same page code; the polling is the keep-alive).
+  - 1.0.26: console.cpp `api on` → `{"t":"hello","api":1,"fw","name","board","variant","host"}`; request
+    lines `{"id","m":GET|POST|PING,"p":"/api/...?q","b":{}}` → `webApiRequest()` (web.cpp): SerialReq
+    context, `reqHas/reqArg/parseBody/reqUri` read from it, `sendBody/sendStream` answer as JSON lines
+    (`{"id","code","body":<raw JSON>}`; text: `{"id","code","type","chunk"}`… `{"id","end":true}`, 1 kB
+    pieces with `apiFlush(8192)`); one route table (`ROUTES`) for HTTP and serial. Output queue (heap,
+    grows, freed after big answers) written as the port takes it (`availableForWrite`); mutex because
+    log lines come from other tasks. CYD: log lines in api mode → `{"t":"log","m"}` (dropped while
+    > 8 kB queued, then "(n log lines dropped)"); S3: the log stays on the UART. `api off` or 15 s
+    without a request → `{"t":"bye","why"}` and the human console. Request lines up to 16 kB (buffer
+    grows, freed after). Buffers: S3 USB CDC RX 4 kB; CYD Serial RX 4 kB / TX 2 kB (was 256 / 0).
+  - **Page (part 2)**: web/index.html gets a transport layer: `api()` uses `serReq()` when connected
+    over USB (JSON lines; text answers assembled from chunks; per-request timeout ≥ 15 s, re-armed per
+    chunk). Off the device (no `data-device` mark — web_embed.py marks the device's copy; the launcher
+    marks its copy `data-launcher`) the page shows a connect screen: USB cable (`requestPort`, open
+    115200 with DTR + RTS on: no CYD auto-reset, S3 sends only with DTR) or Wi-Fi (address → the
+    device's page; remembered). "api on" up to 5 × (CYD may reset on open), hello's `api` checked
+    against `API_OK = [1]`. Auto-connect on load to the remembered port (USB ids, until "Disconnect
+    USB"); `navigator.serial` `connect` → reload (fresh state, also after a device restart); a non-JSON
+    line while connected (CYD restarted) → "api on" again; a `bye` not asked for → "api on" again.
+    PING every 5 s when idle. CSV links fetched over USB and saved as files. Playwright test with a
+    simulated port answering from the mock server (mock/ser.js).
+  - **Launcher (part 3)**: tools/launcher (Go, no dependencies): embeds the site (tools/build_site.py:
+    device URL layout), serves `http://localhost:8765` (127.0.0.1 + ::1), `/launcher/id`,
+    `/launcher/alive` (the page calls it every 5 s; ends 30 s after the last one, or 2 min without
+    any), `/api/*` → 404. Port taken: our launcher → just open a window; else a message box. Opens
+    Chrome (Program Files / LocalAppData) or Edge with `--app=`, else the default browser. build.sh:
+    version from src/version.h, Windows exe with `-H windowsgui` (6.6 MB), `all` also macOS / Linux.
+  - Rost's test (2026-10-09): console api OK (live, chart, CSV chunks, POST); launcher over USB "works
+    perfectly". Added: `help api` (also `help json`): how to use the api mode, with examples. Device
+    search (Rost chose it for "firewall prompt for network access"): launcher discover.go — legacy
+    unicast mDNS PTR queries for `_tempctl._tcp` + `_http._tcp` from a UDP socket bound to each IPv4
+    address (Windows asks once: "Allow access"), answers checked via GET /api/live (fw + run present),
+    devices kept 30 s; `/launcher/devices` → {devices:[{host,ip,port,fw,board,variant,net}],searching};
+    the connect screen (launcher only) lists them every 3 s, a click opens http://ip/. Firmware
+    announces `_tempctl._tcp` port 80 with TXT fw / board / api (net.cpp). Tested with a fake responder.
+  - Tabs (Rost, 2026-10-09, look of Windows Terminal tabs): web/shell.html = the launcher window at `/`
+    (tab bar: icon USB / Wi-Fi / logo + status dot ok/lost, title, ×, middle click closes, "+" new tab;
+    active tab in the page colour, separators between inactive ones; light / dark by the system).
+    Each tab an iframe (`allow="serial"`): `/app?tab=<id>` (the page; USB session of its own, per-tab
+    storage keys `tcd.usb.<id>` / `tcd.auto.<id>`) or the device's own page over Wi-Fi (checked first
+    with a no-cors fetch; "does not answer" note, retried every 5 s). The pages report to the shell
+    by postMessage `{tcd:1, open|usb|disconnect|state}`; the shell sends `{close}` (USB: api off).
+    Tabs saved (`tcd.tabs`) and restored. A device's page shown in a tab has **Disconnect** (bottom
+    left) → the tab goes back to the connect screen. Auto-connect tries all granted ports with the
+    tab's USB ids (another tab may hold one). Keyboard shortcuts left out (Ctrl+T/W belong to the
+    browser). Tested with Playwright: found device opened, USB tab, Disconnect, restore, close.
+- Committed 2026-10-10: **1.0.26** (99410ae) serial api mode + help api; **1.0.27** (6e04872) Web Serial
+  page, launcher, device search, tabs. Next 1.0.28. (Delete permission per session is needed for git.)
+- **1.0.28 = old touch UI removed** (Rost chose it, 2026-10-10): `ui/` (LVGL Pro project, 3 MB), `src/ui.cpp`,
+  `src/ui_gen.c/.h`, `src/program.*` (legacy TempCtl step view; its host test and `loadLegacyView` too),
+  the `UI_V2` switch (board headers, `#ifdef` around tui_*), the old palette API (`uiPaletteNames/Count`),
+  `symlink://ui` in platformio.ini, the ui/ lines in .gitignore, README 4a "old touch UI" and the layout
+  lines. Kept: the legacy fields of `/api/status` (published API) and `Settings::themePalette` (in the
+  JSON, unused). Flash and RAM unchanged (the linker had dropped the old UI already).
+- 1.0.28 committed (23960da, 2026-10-10). Line endings: the repo mixes CRLF and LF files; writing a CRLF
+  file back with LF shows it as fully rewritten (happened unnoticed in 1.0.22-1.0.25 for settings.cpp,
+  lcd.cpp, tui_menu.cpp, web.cpp, index.html, app_state.cpp, console.cpp, net.cpp, tui.cpp, README;
+  fixed before the 1.0.28 commit by amending).
+- **1.0.29** (a8d0237, 2026-10-10, Rost agreed): `.gitattributes` — `* text=auto` (stored LF; Git for Windows
+  checks out CRLF with its default core.autocrlf=true), `*.sh text eol=lf`, png / ico / woff2 / ttf / exe
+  binary; 36 CRLF files renormalized (content unchanged: the diff ignoring CR is only .gitattributes and
+  version.h). Since then line endings of written files no longer matter for commits. Note: some files
+  in "Claude outputs/" are tracked (the wiring PNGs).
+- Rost's retest (2026-10-11): OK — 1-min chart period, stepper acceleration, restart reason, end action →
+  manual mode; the Wi-Fi "Scanning…" freeze (section 10) never seen since the fix → closed. Still to
+  retest: resume keeps the ramp speed, dialog auto-close / toast position, autotune status; program runs
+  on the CYD; CYD memory peak with the page open (2.3 kB once); Modbus (no controller yet).
+- Rost (2026-10-11): dialogs / toasts OK. Found: manual screen restarts not logged; the **S3** showed a blank
+  white screen in the morning with nothing in the log (manual restart from the web helped); wants a full
+  scrollable, colour-coded log on the System page. Decided with Rost: the log holds **everything**
+  (events + technical serial lines); **events survive restarts** (flash).
+- **1.0.30** (2026-10-11):
+  - src/syslog.*: kinds (0 technical, 1 event, 2 run, 3 warning, 4 error; `logClassify` by words);
+    byte ring of all lines [len, kind, uptime, epoch, text] (S3 256 kB PSRAM ≈ 7000 lines, CYD 4 kB
+    ≈ 50); LogPort::write tees every serial log line (logEvent's "[event]" lines are stored by logEvent
+    with their kind); boot number in /duo/boot.txt; events saved to /duo/events.txt ("boot\tepoch\tup\t
+    kind\ttext", from the event ring, at most every 30 s and before a requested restart; > 40 kB →
+    newest 300 kept). Wall clock: NTP once on Wi-Fi (configTime UTC), else the page POSTs /api/time.
+    Host test of the ring (eviction, order, cut at 199, byte limit, tee).
+  - LogEntry + kind + epoch, LOG_LEN 96 → 120; `logRun()` for phase / step / end; say() → run if the text
+    is about the program / run, else event. Touch Event log and serial `log` show the kinds (colours /
+    "ERROR:" "warning:"). /api/log adds kind + epoch; /api/syslog, /api/eventlog.txt, POST /api/time;
+    live: sysSeq, boot, time.
+  - Web System page: Log panel (filters per kind, search, download; earlier starts from the file as
+    sections; time = local wall time when known, else +uptime); Status page event log coloured.
+  - Screen: manual restart (web / serial) → event "Screen restarted from … - before: display OK (regs
+    9C 28 55 00), touch OK" (to learn what the white screen was); display check reads 0Dh too and
+    compares 0Ah (all mode bits incl. booster), 0Ch, 0Dh with the values right after the init (MADCTL
+    with the driver's current value) — a panel with the booster off (white, setup intact) is caught now.
+  - RAM: CYD static +1.6 kB (LOG_LEN), heap −4 kB (ring); S3 ring in PSRAM.
+  - Fix after Rost's test: the System log showed one text on every line (or "�"). ArduinoJson ≥ 7.3 keeps a
+    `const char[]` as a pointer (taken for a string literal); syslogRead reuses (and frees) one SysLine,
+    so all lines pointed to the last text / freed memory. Now `x.add(JsonString(l.text))` (copied). Rule:
+    texts from reused or freed buffers go in as JsonString / String. Also: log texts cut to fit (120 / 199
+    bytes, long serial lines split by the tee) no longer end in half a UTF-8 character (`utf8Fit`).
+  - Rost's S3 showed "check off": the automatic screen check was switched off there, which is why the
+    white screen was not restarted (System → Display "Restart a hanging screen by itself").
+- **1.0.31** (2026-10-12): channel outputs on → highlighted tile. ChannelLive.outOn (Modbus: outputsOn_,
+  local: PID on or autotune), /api/live + /api/channels `outOn`. Touch main screen: style tileOn[ch] —
+  border 4 px in the PV colour, background lv_color_mix(PV, panel, 20 %), padding 3 px less so the content
+  stays in place (LVGL counts the border into the content area). Web channel card `.chan.on`: 4 px border,
+  color-mix 20 % background, padding 14/11/11. Checked: UI harness shots (both boards, dark / light),
+  Playwright (card content at the same x on / off).
+  Then: the orange inset ring of a manual card (.chan.man) is removed (the outputs-on style shows it);
+  the web manual switch turns manual off at once (no "Switch off?" question), like the touch button.
+- **1.0.32** (2026-10-12): Convert to Timeline (web, `seqToTl` in index.html) and SD run logs (S3).
+  - Convert: checked against the page's preview model (400 random Sequences: same per-channel curves,
+    same pause times, codec round trip) and the device's run engine (300 random Sequences without
+    waits, both types simulated side by side: same setpoints / idle every 0.5 s, same end time); UI
+    test: dialog, Replace + Undo, Create a new program.
+  - src/sdlog.*: PSRAM double buffer 2 × 64 kB (≈ 15 min of rows if the card is not written),
+    writer task flushes every 30 s / at the run end / at half full; IDF sdspi + FAT on SPI2_HOST
+    (`esp_vfs_fat_sdspi_mount` with the display's bus; unmount removes only the SD device; CS driven high
+    again), never formats; file names `YYYY-MM-DD_HHMMSS_<program>.csv` (UTC) or
+    `start<N>_run<M>_<program>.csv`, `_2` … if taken. Web: `/api/sd`, `/api/sd/file?name=` (≤ 4 MB,
+    copied to PSRAM first so the bus is free while it is sent), `POST /api/sd/delete`; live `sd`.
+    Host test of the logger with a folder as the card (names, CSV widths / quoting, no card, list, load,
+    delete, the running file protected, dropped rows reported). Static RAM: S3 +0.4 kB, CYD +0.1 kB.
+  - To watch on the hardware: the SD card on the display's MISO (the screen check reads the display
+    on the same line), UI stutter while the card is written (sdspi holds the bus during busy waits),
+    a run start without a card (the probe takes the bus for a moment).
+- **1.0.33** (2026-10-12, Rost's video): (1) "Run changed" was not closed on the touch screen when
+  answered on the web — the web's "Keep the stored program" only closed its own dialog. New
+  `CMD_DISCARD_RUN` (`/api/run {"cmd":"discard"}`, touch Discard, serial `discard`) marks the question
+  answered (event "Run changes not saved …"); touch closes its dialog when `runEdited` goes false (or a
+  run starts), the web closes `saveDlg` the same way, serial drops its pending question. (2) The chart's SP
+  fill moved only with the history (every 2 s / one run bin): `chartHead()` now also takes the active SP
+  from each `/api/live` poll (`headSp`: controller SP, else program / manual SP while the outputs are on)
+  and extends the SP line + fill to it, like the PV head; the join distance is max(8 s, 2.5 bins).
+- **1.0.34** (2026-10-12): Rost's S3 restarted by a watchdog when he stopped a run (1.0.33; no backtrace
+  available, the RAM log is lost with the reset). Likely the new SD writer: the SDK's task watchdog also
+  watches IDLE on core 0, the writer task had no core affinity (priority 1 > idle), and the sdspi driver
+  waits for the card in polling loops without yielding (esp_timer); with no card the MISO line floats
+  and noise can look like answers -> long busy retries. Fixes: writer pinned to core 1; internal
+  pull-up on MISO before each mount (no card -> 0xFF -> fails at once); mount done step by step
+  (sdspi_host_init_device, sdmmc_card_init, ff_diskio_register_sdmmc, esp_vfs_fat_register, f_mount) so
+  every failure removes the SD device from the bus again (a device left on the bus would make the screen
+  check's spi_bus_free fail); readRegs checks spi_bus_free and puts the LCD device back if another
+  device is still there; the control task no longer writes the card (a run start waits up to 2 s for
+  the writer to close the previous log). Diagnosis: src/crumbs.* - stage codes of the loop (UI, screen
+  check, LVGL, LCD SPI wait, console, web + request path), the control task (cmd n, request, poll, cycle,
+  waiting) and the SD card (bus wait, mount, read/write, unmount) in RTC memory; after a watchdog / crash
+  the boot logs an Error event "task watchdog - loop: LCD SPI wait 15.0s; control: waiting 0.0s; SD:
+  mount 15.2s". Reset reasons now "task watchdog" / "interrupt watchdog" / "watchdog".
+- **1.0.35** (2026-10-13): the breadcrumbs caught it: "crash, rst 12 - loop: web /api/sd 0.1s; SD: mount
+  0.1s" — the reset at the end of a run was the **web handler mounting the card in the loop task**
+  (System page: the SD panel reloads its list when a run starts / ends; most likely a stack overflow:
+  FATFS with long names + the SD driver on top of the loop's web / LVGL stack). Rost's files also showed
+  rows lost: 1.0.33 file cut mid-row (reset during a write), 1.0.34 file row 0 then 32 s+ (the write at
+  30 s failed and the swapped buffer was already gone). Now: **all card work in the SD task** (12 kB stack,
+  core 1): web list / load / delete are requests to it (the web waits up to 8 s, "SD card busy - try
+  again" otherwise; an abandoned request is cleaned up by the SD task); rows go from the double buffer
+  into `pend` (192 kB PSRAM) which is emptied only when the card took it — a failed write is retried
+  every 5 s (warning event once "SD card: writing the run log failed (…) - trying again", a warning row in
+  the file if pend overflowed), at the run end 3 tries 1 s apart, then "SD card: the end of the run log
+  could not be written". Mount: one retry when a card answered but failed; SD clock 10 MHz (shared lines
+  with the display). Host test: failed write in the middle -> all 61 rows in order + one warning row;
+  web requests through the SD task; end with a failing card gives up with the event.
+- **1.0.36** (2026-10-13): 1.0.35 confirmed by Rost (runs logged completely, no crash at stop). Time zone
+  (decided: CSV times **local without offset**, zone **from the browser + setting**): `Settings.tzName`
+  ("Europe/Berlin" / "UTC+02:00" / "" = UTC; only the name is stored, `tzLookup()` gives the POSIX rule —
+  75 zones with summer time rules in settings.cpp, plus UTC±hh[:mm] fixed); applied by `syslogLoop`
+  (setenv TZ + tzset when it changes). Auto: the page POSTs `/api/time {zone, fixed}` once while
+  `live.tz` is "" (the device takes it only while unset; event "Time zone set from the browser").
+  Setting: web System › Clock (select from `/api/timezones` + the browser's offset), touch System › Time
+  zone (two steps: region, then place; tChoice now up to 40 rows), serial `set time.zone=…`, `help time`
+  lists the zones. SD CSV: column `time` = "2026-10-13 01:05:35" (local), file names local; the web shows
+  file times as written. Host test: offsets of Berlin / London / Kyiv / New York / Sydney / Kolkata /
+  fixed, the Berlin change on 25.10.2026, every list rule parsed by glibc, settings JSON. Static RAM:
+  CYD +0.7 kB (tzName in ~10 Settings copies, the touch lists).
+- **1.0.37** (2026-10-13, Rost's list): web pages **Settings** (was System, cog icon; `#/system` still
+  works) and **Log** (SD run logs + system log); "RS485 bus" with the yellow beta badge (form groups take
+  `beta:true`); title bar 60 px on every page, the jump buttons only when the Status page is one column
+  (≤ 1100 px); after a run: **Export CSV** (`/api/log.csv`) + **Back to preview**; sidebar section on
+  every page (program, state · time, play/pause + stop = the run bar's buttons; per channel PV · state and
+  a manual on/off button; SSR relay state) between the pages and the footer, thin lines between; the two
+  CSV links removed from the footer. Fault waiting for Acknowledge: blinking red warning badge on the top
+  edge of the channel card (web) and tile (touch, 500 ms). **SSR supply relay** (decided: S3 GPIO 4,
+  level selectable `relay.activeLow`, S3 only): local task, after each 250 ms step: on = some enabled
+  local channel has outputs on / autotune, and no local channel has a fault; off at once on a fault
+  (event "SSR supply relay off: <fault>"); the pin stays an input until the settings set the level
+  (then level first, output second). Settings: web Channels › SSR supply relay, touch System, serial
+  `set relay.activeLow=on`; live `relay`, config `limits.relay`.
+- **1.0.38** (2026-10-13): protections of 9.2a; web **Dashboard** (was Status; `#/dashboard` works),
+  Settings page jump buttons (Device / Wi-Fi / Safety / Display / Clock, one column only; a second row
+  below the title on phones) and a Safety tile; Channels page: "All channels" tile (polling, link-loss
+  pause, bottom band, SSR relay), the channel tile with **page tabs** (name, colour dot, type) attached
+  to it, subsections apart with a thin line (`.seps`), PID autotune inside "PID control", the RS485 bus
+  inside the tile of a Modbus channel (one shared bus), "Protection" subsection. Touch: Channels rows for
+  the new checks, System rows (manual timeout, E-stop, sound, chip warning) and info (E-stop contact,
+  chip temperature). Serial: `safety.*` keys, `info` safety line. SSR supply relay: only an active-high
+  DC SSR on GPIO4 (`relay.activeLow` removed; the pin is low from the first line of setup); the S3
+  schematic in `hardware/s3-schematic/`. Static RAM CYD 84.6 kB.
+- **1.0.39** (2026-10-13): firmware update without USB (9.11): web upload (S3 + CYD), SD card (S3),
+  image check, rollback; CYD OTA partition table; each board embeds only its own web page. CYD wiring pictures with
+  the P4 speaker, CYD KiCad schematics (`hardware/cyd-schematic/`, generator moved to `hardware/gen/`).
+  Door / lid switch and 5 V supply check dropped for good (Rost, 2026-10-13: not planned anymore).
+  Web: drag and drop of firmware.bin; SSR supply relay switch `safety.relay` in Settings › Safety (the note
+  block on the Channels page removed).
+- **1.0.40** (2026-10-14): web page in the frosted-glass look (section 7, "Look"), new logo colours (web icons). Dashboard cards
+  in the channel colour while the output is on. Touch menu: Programs, Channels, System and Event log use the web
+  sidebar's line icons (`src/tui_icons.c`: A8 alpha maps, 24 px, drawn in the accent via the image recolour of
+  `S_.acc`); Network and Display keep their LVGL symbols.
+- **1.0.41** (2026-10-14): the web chart draws every reading of the polling (section 7, "Chart: every reading").
+- **1.0.42** (2026-10-14, c083734): backup of settings + programs on the SD card (9.12); tested by Rost.
+- Rost's hardware results (2026-10-14): S3 4" display 180° rotation of picture and touch OK; web firmware upload on
+  the S3 OK (CYD not tried yet); touch menu icons OK on the S3; a run without an SD card runs normally (a couple of
+  touch hiccups at the start = the card probe). **Open**: (1) with a card inserted, the touch stutters about once a
+  second during a run — a held stepper never reaches the 5 °C steps (the press seems to be released each second);
+  (2) "Check the SD card" for firmware.bin answers "SD card busy - try again" (likely: reading the whole 1.9 MB
+  file through the image scanner takes longer than the 8 s the web / touch / serial wait).
+- **1.0.43** (2026-10-14, 4e4510c, tested by Rost: SD check 0.5 s, gaps bridged): Rost: the stutter is only in the **bottom-left corner** of the
+  panel, with or without card (probably the panel). (a) The SD firmware check runs in the SD task in the background
+  (`sdlogFirmwareCheckStart` / `sdlogFirmwareCheckResult`; 16 kB DMA-RAM reads with open/read; log "[sd] firmware.bin
+  checked: n kB in x s"); web `GET /api/ota/sd?start=1` then polls (`{"busy":true}`), touch toast + lv_timer poll,
+  serial `fw sd` prints when done (`fwPoll`). (b) Touch drop-out statistics (release + press within 150 ms, by reason
+  lift-up / no point / I2C error; logged once a minute, totals in serial `screen check`). (c) `TOUCH_USE_INT 1` on the S3
+  with a run-time check (every 25th read regardless; 3 touches found with the line high → polling again). (d) KiCad 10
+  ERC (Rost's reports): the only error "Output and Output connected" = the two MAX31855 SO pins on one line → SO and
+  the display's SDO are `tri_state` now; the "doesn't match copy in library 'power'" warnings → the power symbols are
+  in the project library (`TempCtlDuo:GND` …). `.gitignore`: KiCad `.history/`, backups, `.kicad_prl`, `*.rpt`.
+- Rost (2026-10-14): ERC 0 errors / 0 warnings; INT line works; SD install and rollback (power pulled during the
+  30 s probation) work; the SD check took ~30 s (whole file, display slow meanwhile). Touch log: only "no point"
+  drop-outs (no lift-up, no I2C errors), all over the panel, most bottom-left → (e) gaps of up to 2 reads (~60 ms)
+  are bridged (press kept at its last point; lift-up releases at once), stats now "bridged by length / longer";
+  log wording avoids "error" (the line was classified as an Error). (f) `OTA_IMAGE_ID` in `.rodata_custom_desc`
+  (right after esp_app_desc: address +0x100, file offset 288); the SD check stops at the first 16 kB block that
+  has it, size = file size (`ImageScanner::setSize`); older images: whole file. Causes of the gaps to test:
+  backlight PWM (5 kHz LEDC; brightness 100 % = steady), USB supply noise / no earth, SPI display traffic.
+  Rost's check: 31 bridged gaps per minute at 50 % brightness, 19 at 100 % (none longer): the backlight PWM adds
+  some, the rest is the panel / supply. Bridged fine. **1.0.46: backlight PWM 20 kHz** (`LEDC_PWM_HZ` in config.h;
+  the CYD's RGB status LED shares channel 0's timer, so the same) — Rost compares the gap count at 50 %.
+  SD card writes during a run: no screen hiccups (Rost).
+- **1.0.44** (2026-10-14, 46bae3a, tested by Rost): **slide off to cancel** on the touch screen (Rost, 2026-10-14): a press released more than
+  10 px (CYD 6 px) outside the widget it started on does nothing; `slideOffCancels()` in tui.cpp is an event
+  callback on the touch indev (its events come before the widget's): RELEASED outside → `lv_indev_reset` (widget gets
+  only INDEV_RESET: no RELEASED / CLICKED, so no switch toggle either); LONG_PRESSED(_REPEAT) outside →
+  `lv_indev_stop_processing` (stepper repeats pause). Not for sliders, button matrix (keyboard / number pad),
+  keyboard, text areas; scrolls cancel clicks already. UI host test `slide()`: slid away = no backup, 5 px = click.
+- **1.0.45** (2026-10-14, b16a94b): hosted page on Cloudflare Workers static assets (7b, "Chosen").
+- **1.0.46** (2026-10-14): backlight PWM 5 → 20 kHz; `docs/SPEC.md` = pointer to `claude/tempctl-duo-spec.md` (the repo
+  copy of this document, updated with each commit); old untracked files moved to `.old/` (ignored).
+- Next: step 7b is done, the old UI removed. Open: the older untested points (Modbus beta, runs on the CYD, ...); later GitHub Pages (7b
+  option 1) and a release build of the launcher.
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
   add phase, save (POST body checked), start without saving, new Timeline in an empty slot with a pause
   text, phone width (no sideways scrolling).
 
-Keep the TempCtl conventions (full web/touch parity, colours via named styles, texts in
-`translations.xml`, widgets bound by name, exported UI code committed) unless Rost decides otherwise.
+Keep the conventions (full web/touch parity, colours via named styles) unless Rost decides otherwise
+(the LVGL Pro ones — translations.xml, widgets bound by name, exported code — ended with the old UI).
+
+### 9.11 Firmware update without USB (decided 2026-10-13, Rost; version 1.0.39)
+Decisions: web upload on S3 **and** CYD (CYD gets an OTA partition table), SD card update on the S3 with a
+button + confirmation, self-test + rollback.
+- Module `ota.*`: one stream API for both sources (`otaBegin(src,total)` / `otaWrite` / `otaEnd` /
+  `otaAbort`, Arduino `Update` into the next OTA slot), status for web / touch (`otaStatus`), the
+  conditions `otaCanStart` (second slot present, no run active or paused, no channel outputs on — manual,
+  autotune —, not already busy / on probation).
+- Image check (`ota_image.*`, pure, host-tested): ESP image magic 0xE9, chip id at byte 12 (0 ESP32,
+  9 ESP32-S3, `BOARD_CHIP`), and the id string `TCDUO-IMAGE|<BOARD_ID>|<version>|end` (`OTA_IMAGE_ID` in
+  ota.cpp, logged at boot so the linker keeps it; `BOARD_ID` = env name in board_*.h). Found while the
+  image streams (across chunk borders); an image for another env is refused (header / chip at once,
+  the id at the end before `Update.end`). The web page does the same checks on the file before uploading.
+- Web: `POST /api/ota?size=` multipart (WebServer upload callback in the loop task; the whole upload runs
+  inside one `handleClient()`: `esp_task_wdt_reset()` per chunk, touch overlay refreshed via
+  `uiOtaRefresh()` every 300 ms); answer `{ok, version}`, restart 2 s later (`otaLoop` →
+  `appRequestRestart`). `GET /api/ota` (info), live `ota` while running / on probation. Upload only when
+  the page is served by the device (not over Web Serial). The file comes from "Choose firmware file…" or
+  by drag and drop onto the dashed box around it (highlighted while dragging; several files → the first
+  `.bin`; ignored while an update runs; a file dropped elsewhere on the page is not opened by the browser).
+- SD (S3): `/firmware.bin` in the card root. `GET /api/ota/sd` = SD task request RQ_FWCHECK (reads the
+  whole file through the scanner, ~3 s); `POST /api/ota/sd` starts `installFirmware()` in the SD task (card
+  mounted under `lcdBusLock` for the whole install, ~20–30 s; the display keeps drawing, the screen check
+  waits), then renames it `firmware.done`. Touch System › Firmware update › SD card (check + dialog),
+  serial `fw`, `fw sd`, `fw sd install yes`.
+- Rollback: the core's sdkconfig has `CONFIG_APP_ROLLBACK_ENABLE`; `extern "C" verifyRollbackLater()`
+  returns true, so a new image stays PENDING_VERIFY until `otaLoop` marks it valid (30 s after the start
+  and > 10 control cycles). `/duo/ota.json` {from, to, src} written at the end of an update: the new
+  firmware logs "Firmware updated from A to B - checking it for 30 s" (note kept until confirmed), the old
+  one after a rollback "Firmware update to B failed: it did not start correctly, A runs again".
+- CYD flash: `partitions_cyd_ota.csv` (nvs, otadata, app0/app1 0x1E0000 each, spiffs 0x30000 = 192 kB,
+  no coredump). The first USB upload with it erases LittleFS (settings, programs: back up first). To fit,
+  `tools/web_embed.py` compiles only each board's own page (`#ifdef BOARD_HAS_PSRAM`: page with fonts +
+  font files on the S3; `#ifndef`: the page without fonts, served at `/`, on the CYD); CYD image ≈ 1.77 MB
+  (90 % of a slot), S3 1.92 MB of 6.25 MB.
+- Touch: full-screen overlay (lv_layer_sys) while running / written: version, source, %, bar.
+
+### 9.12 Backup on the SD card (decided 2026-10-14, Rost; version 1.0.42)
+Decisions (Rost picked the proposals): web, touch and serial; list + restore (settings, programs or both) +
+delete on the web; only by hand (no automatic backups); S3 only (the CYD's SD pins carry the thermocouples).
+- One file per backup: `/backup/<local yyyy-mm-dd_hhmmss>.json` (`_2` … if taken; without a clock
+  `start<boot>_<n>.json`), `{"fmt":1,"kind":"tempctl-duo-backup","fw","board","host","time","settings":{as GET
+  /api/config without limits and passSet},"programs":[{"i","program"}]}` (the used slots). Same pieces as the
+  web's backup files, so the web file restore takes a backup file too (settings: its `settings`). Wi-Fi
+  passwords are not in it; restoring keeps the stored ones.
+- `src/backup.*` (S3 only, `HAS_SD` in config.h; stubs elsewhere): `backupCreate` (JSON built in the calling
+  task, PSRAM buffer handed to the SD task: request `RQ_BACKUP`, which frees it in any case), `backupInfo`
+  (time, fw, settings, program count, slot list + mask), `backupRestore(name, BACKUP_SETTINGS|PROGRAMS)`:
+  refused during a run; settings first (`settingsFromJson` + `settingsValidate` on a copy, as POST
+  /api/config; changed network settings → "used after a restart"), then each program checked
+  (`progFromJson` with the channel names, `progCheckLimits` against the restored limits) and saved into its
+  slot; slots not in the backup stay. Result text + event "Restored from the SD card backup/…". One backup
+  operation at a time (`Busy`). `backupLabel()` (header, host-tested) makes "2026-10-14 15:30:12".
+- `sdlog`: list / load / delete take a folder (`SdDir`: `SD_RUNS` *.csv, `SD_BACKUPS` *.json).
+- Web: `GET/POST /api/backup`, `GET /api/backup/info`, `POST /api/backup/restore`, `POST /api/backup/delete`,
+  `GET /api/backup/file`; Tools › Backup › "SD card" (shown when live `sd` exists): Back up to SD card,
+  Refresh, list newest first (Restore… / Download / Delete); Restore… reads the info and asks with
+  "Restore both" / "Settings only" / "Programs only" / Cancel, then reloads settings / programs (drafts of
+  the restored slots dropped).
+- Touch System: "Backup to SD card" (Back up → toast with the name) and "Restore from SD card" (Choose… →
+  list of up to 40 backups → "Restore what?" → confirmation with date, firmware and slots → result dialog).
+- Serial: `backup sd`, `backup sd list`, `backup sd restore n=<n> [settings|programs] [yes]` (without yes:
+  what it holds), `backup sd delete n=<n> yes`; `help backup`. CYD: "no SD slot".
+- Tests: host (backupLabel), console host S3 build (`BOARD=s3 test/console_host/build.sh`), UI host shots
+  14e–14i, mock + Playwright (`mock/backup.js`).
 
 ## 10. Open items carried over from TempCtl
 
-- Sporadic freeze once seen on the Wi-Fi "Scanning…" screen (not reproduced). The assert handler and
+- (Closed 2026-10-11: not seen again since the assert handler / loop watchdog fix.) Sporadic freeze once seen on the Wi-Fi "Scanning…" screen (not reproduced). The assert handler and
   loop watchdog now turn a freeze into a restart with a backtrace; ask for the log if it happens.
   Suspect: Arduino WiFi scan timeout (`_scanTimeout` = 20 × 300 ms) → our retry calls
   `scanNetworks`/`scanDelete` while the old hardware scan finishes (race with `_scanDone` in the event

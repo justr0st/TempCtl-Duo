@@ -18,6 +18,11 @@
 #define HAS_SD 0
 #endif
 
+// Backlight PWM (LEDC channel 0, 8 bit). 20 kHz (was 5 kHz until 1.0.46): inaudible, fewer touch gaps on the S3's
+// capacitive panel at part brightness. The CYD's RGB status LED (channels 1..3) shares channel 0's timer, so it
+// runs at the same frequency.
+#define LEDC_PWM_HZ 20000
+
 // Chart resolution (points). Live: the chosen period (display.liveMin) in CHART_N
 // bins of the live history. Running: the program timeline (plus some spare time)
 // is divided into CHART_N bins.
