@@ -352,6 +352,11 @@ AddressSanitizer); `BOARD=cyd ./build.sh` does the same for the 320×240 set (`u
 `python3 sheet.py [cyd] [names]` converts the shots and puts them on one sheet, `MEM=1 BOARD=cyd ./build.sh`
 + `./uihost_mem mem` prints the heap used per screen.
 
+**Slide off to cancel** (both boards): a press released away from the widget it started on (more than 10 px
+outside it, CYD 6 px) does nothing — no click, no switch toggle; a held stepper stops repeating while the
+finger is outside. Sliders and the keyboard / number keys behave as before. (`slideOffCancels` in tui.cpp:
+an event handler on the touch input resets it on such a release, before the widget sees it.)
+
 ### Automatic screen check (setting "Screen check", `display.screenCheck`, on by default)
 
 Every second the firmware checks the screen hardware and restarts a part that hangs, without restarting

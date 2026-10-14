@@ -203,6 +203,7 @@ int lcdCheck(char* i, size_t n) { snprintf(i, n, "host"); return 1; }
 bool lcdTestBreak() { return true; }
 void lcdSetBrightness(uint8_t) {}
 static int tx = -1, ty = -1;
+static int backupsMade = 0;  // (backupCreate stub: the slide-off test)
 bool touchInit(const TouchCal&) { return true; }
 void touchSetRotation(bool) {}
 bool touchRead(int32_t* x, int32_t* y) {
@@ -232,6 +233,18 @@ static void run(uint32_t ms) {
 static void tap(int x, int y) {
   tx = x, ty = y;
   run(80);
+  tx = ty = -1;
+  run(300);
+}
+// press at (x, y), slide to (x2, y2) in steps, release there
+static void slide(int x, int y, int x2, int y2) {
+  tx = x, ty = y;
+  run(80);
+  for (int k = 1; k <= 8; ++k) {
+    tx = x + (x2 - x) * k / 8, ty = y + (y2 - y) * k / 8;
+    run(30);
+  }
+  run(50);
   tx = ty = -1;
   run(300);
 }
@@ -552,6 +565,12 @@ int main(int argc, char** argv) {
     run(100);
     shot("14e0-system-backup");
     if (findText(lv_screen_active(), "Back up", x, y)) {
+      slide(x, y, x - 120, y + 60);  // pressed, slid away, released: cancelled
+      printf("[host] slide-off cancel: %s\n", backupsMade == 0 ? "ok (no backup)" : "FAILED (backup made)");
+      slide(x, y, x + 5, y + 4);  // a little jitter: still a click
+      printf("[host] small slide: %s\n", backupsMade == 1 ? "ok (clicked)" : "FAILED");
+      tModalClose();
+      run(5000);
       tap(x, y);
       run(300);
       shot("14e-backup-saved");
@@ -686,7 +705,11 @@ int sdlogList(SdFile* out, int max, uint32_t& totalKb, uint32_t& freeKb, char*, 
       }
   return n;
 }
-bool backupCreate(char* name, size_t nn, char*, size_t) { snprintf(name, nn, "%s", BK_NAMES[0]); return true; }
+bool backupCreate(char* name, size_t nn, char*, size_t) {
+  ++backupsMade;
+  snprintf(name, nn, "%s", BK_NAMES[0]);
+  return true;
+}
 bool backupInfo(const char*, BackupInfo& i, char*, size_t) {
   memset(&i, 0, sizeof(i));
   strcpy(i.time, "2026-10-02 09:05:12");

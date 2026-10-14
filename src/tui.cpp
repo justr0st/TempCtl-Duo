@@ -81,6 +81,32 @@ static void touchCb(lv_indev_t*, lv_indev_data_t* data) {
   }
 }
 
+// Slide off to cancel (Rost): a press that is released away from the widget it started on does nothing (LVGL
+// keeps a pressed widget pressed when the finger leaves it and would click it on release). The touch input's
+// own event comes before the widget's: on a release outside, the input is reset, so the widget gets neither
+// RELEASED (switches would toggle there) nor CLICKED, only INDEV_RESET (pressed look removed). Long-press repeats
+// (steppers) pause while the finger is outside. Sliders and the keyboard / number keys (button matrix: it
+// takes the key under the finger itself) keep LVGL's behaviour; a scroll has cancelled the click already.
+static constexpr int32_t SLIDE_MARGIN = TUI_SMALL ? 6 : 10;  // px of play around the widget (finger jitter)
+static void slideOffCancels(lv_event_t* e) {
+  const lv_event_code_t code = lv_event_get_code(e);
+  if (code != LV_EVENT_RELEASED && code != LV_EVENT_LONG_PRESSED && code != LV_EVENT_LONG_PRESSED_REPEAT) return;
+  lv_indev_t* in = (lv_indev_t*)lv_event_get_current_target(e);
+  lv_obj_t* obj = (lv_obj_t*)lv_event_get_param(e);
+  if (!in || !obj || lv_indev_get_scroll_obj(in)) return;
+  if (lv_obj_check_type(obj, &lv_slider_class) || lv_obj_check_type(obj, &lv_buttonmatrix_class) ||
+      lv_obj_check_type(obj, &lv_keyboard_class) || lv_obj_check_type(obj, &lv_textarea_class))
+    return;
+  lv_point_t p;
+  lv_indev_get_point(in, &p);
+  lv_area_t a;
+  lv_obj_get_coords(obj, &a);
+  if (p.x >= a.x1 - SLIDE_MARGIN && p.x <= a.x2 + SLIDE_MARGIN && p.y >= a.y1 - SLIDE_MARGIN && p.y <= a.y2 + SLIDE_MARGIN)
+    return;
+  if (code == LV_EVENT_RELEASED) lv_indev_reset(in, obj);
+  else lv_indev_stop_processing(in);  // (this repeat only; it goes on when the finger is back)
+}
+
 static uint32_t tickCb() { return millis(); }
 
 void uiSetBrightness(uint8_t b) {
@@ -208,6 +234,7 @@ void uiInit() {
   lv_indev_t* indev = lv_indev_create();
   lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(indev, touchCb);
+  lv_indev_add_event_cb(indev, slideOffCancels, LV_EVENT_ALL, nullptr);
 
   Settings S;
   settingsCopy(S);
