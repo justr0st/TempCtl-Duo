@@ -2023,7 +2023,8 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   backlight PWM (5 kHz LEDC; brightness 100 % = steady), USB supply noise / no earth, SPI display traffic.
   Rost's check: 31 bridged gaps per minute at 50 % brightness, 19 at 100 % (none longer): the backlight PWM adds
   some, the rest is the panel / supply. Bridged fine. **1.0.46: backlight PWM 20 kHz** (`LEDC_PWM_HZ` in config.h;
-  the CYD's RGB status LED shares channel 0's timer, so the same) — Rost compares the gap count at 50 %.
+  the CYD's RGB status LED shares channel 0's timer, so the same). Rost (20 kHz): 50 % 2–20 gaps / min (was 31); 100 %
+  (255, steady) once 83–144, minutes later 1–5 → sporadic, supply / environment dependent; all bridged, none longer.
   SD card writes during a run: no screen hiccups (Rost).
 - **1.0.44** (2026-10-14, 46bae3a, tested by Rost): **slide off to cancel** on the touch screen (Rost, 2026-10-14): a press released more than
   10 px (CYD 6 px) outside the widget it started on does nothing; `slideOffCancels()` in tui.cpp is an event
@@ -2032,8 +2033,10 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   `lv_indev_stop_processing` (stepper repeats pause). Not for sliders, button matrix (keyboard / number pad),
   keyboard, text areas; scrolls cancel clicks already. UI host test `slide()`: slid away = no backup, 5 px = click.
 - **1.0.45** (2026-10-14, b16a94b): hosted page on Cloudflare Workers static assets (7b, "Chosen").
-- **1.0.46** (2026-10-14): backlight PWM 5 → 20 kHz; `docs/SPEC.md` = pointer to `claude/tempctl-duo-spec.md` (the repo
+- **1.0.46** (2026-10-14, 2811e83): backlight PWM 5 → 20 kHz; `docs/SPEC.md` = pointer to `claude/tempctl-duo-spec.md` (the repo
   copy of this document, updated with each commit); old untracked files moved to `.old/` (ignored).
+- **1.0.47** (2026-10-14): web Settings › Display brightness label: 10 (the lowest) = "1 %", linear up to "99 %", "100 %"
+  only at 255 (fully on, no PWM) — Rost; "100 %" at 254 had hidden that the backlight still switched.
 - Next: step 7b is done, the old UI removed. Open: the older untested points (Modbus beta, runs on the CYD, ...); later GitHub Pages (7b
   option 1) and a release build of the launcher.
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
