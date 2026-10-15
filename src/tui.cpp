@@ -282,7 +282,7 @@ static void screenRestartAsked() {
   if (dl > 0) snprintf(ds, sizeof(ds), "display OK (%s)", d);
   else if (dl == 0) snprintf(ds, sizeof(ds), "display LOST (%s)", d);
   else snprintf(ds, sizeof(ds), "display not readable");
-  logEvent("Screen restarted %s - before: %s, touch %s", scrFrom, ds, tc > 0 ? "OK" : tc == 0 ? "NO ANSWER" : "?");
+  logKind(tc > 0 ? LK_EVENT : LK_WARN, "Screen restarted %s - before: %s, touch %s", scrFrom, ds, tc > 0 ? "OK" : tc == 0 ? "NO ANSWER" : "?");
   screenRestartNow(3);
 }
 
@@ -332,7 +332,7 @@ static bool gaveUp = false;
 static void autoRestart(int what, const char* why) {
   if (lastAuto && millis() - lastAuto < 30000) return;
   if (autoInARow >= 3) {
-    if (!gaveUp) logEvent("Screen check: restarting did not help (%s) - no more automatic restarts for now", why);
+    if (!gaveUp) logWarn("Screen check: restarting did not help (%s) - no more automatic restarts for now", why);
     gaveUp = true;
     return;
   }
@@ -340,7 +340,7 @@ static void autoRestart(int what, const char* why) {
   if (!lastAuto) lastAuto = 1;
   ++autoInARow;
   ++autoRestarts;
-  logEvent("Screen restarted automatically: %s", why);
+  logWarn("Screen restarted automatically: %s", why);
   screenRestartNow(what);
   touchFails = lcdFails = 0;
 }
@@ -382,7 +382,7 @@ static void screenWatch() {
       autoRestart(1, "touch stuck pressed in one place for a minute");
     } else if (stuckRestarts == 3) {
       ++stuckRestarts;
-      logEvent("Screen check: touch still stuck after 3 restarts - left as it is");
+      logWarn("Screen check: touch still stuck after 3 restarts - left as it is");
     }
   }
 }

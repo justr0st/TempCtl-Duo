@@ -4,6 +4,7 @@
 #   LVGL=<lvgl 9.6 source> AJ=<ArduinoJson src> ./build.sh && ./uihost && python3 sheet.py
 #   BOARD=cyd ./build.sh && ./uihost_cyd && python3 sheet.py cyd   the 320x240 set (CYD), shots_cyd/
 #   ./uihost monkey 4000   random taps on every screen (with AddressSanitizer)
+#   ./uihost stepper   tile + / - while the device takes the new setpoint over late (exit code 0 = ok)
 #   MEM=1 BOARD=cyd ./build.sh && ./uihost_mem mem   heap per screen, malloc tracking (memtrack.cpp)
 set -e
 cd "$(dirname "$0")"

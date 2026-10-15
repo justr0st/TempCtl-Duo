@@ -38,6 +38,11 @@ class Controller {
   const RegMap& reg() const { return m_.reg; }
 
   static ValueFlag classify(int16_t raw);
+  // a raw register value as readScaled() gives it (NaN unless the flag is VAL_OK)
+  void scaled(int16_t raw, float& v, uint8_t& flag) const {
+    flag = classify(raw);
+    v = (flag == VAL_OK) ? raw / (m_.reg.scale > 0 ? m_.reg.scale : 1.0f) : NAN;
+  }
   static const char* flagName(uint8_t f);
 
  private:

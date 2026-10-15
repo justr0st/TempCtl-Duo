@@ -1137,6 +1137,43 @@ static void testRawHist() {
   CHECK(a.n == 0);
 }
 
+// ArduinoJson 7.3+ keeps a const char[] (a field of a const struct) as a pointer like a string literal: the
+// texts must be copied, the source may be gone or reused before the document is written (1.0.48: the web's
+// settings page showed scrambled names; backups had every program named like the last one)
+static void testJsonCopies() {
+  JsonDocument d;
+  {
+    Settings* s = new Settings();
+    settingsDefaults(*s, S3);
+    strcpy(s->ch[0].name, "Preheater");
+    strcpy(s->hostname, "duo-host");
+    strcpy(s->tzName, "Europe/Kyiv");
+    settingsToJson(*s, d.to<JsonObject>(), true);
+    memset(s, 'x', sizeof(Settings));  // (reused memory)
+    delete s;
+  }
+  std::string out;
+  serializeJson(d, out);
+  CHECK(out.find("\"Preheater\"") != std::string::npos);
+  CHECK(out.find("\"duo-host\"") != std::string::npos);
+  CHECK(out.find("\"Europe/Kyiv\"") != std::string::npos);
+  CHECK(out.find("xxxx") == std::string::npos);
+  // programs into one document through one buffer (as backupCreate)
+  JsonDocument b;
+  JsonArray a = b["programs"].to<JsonArray>();
+  DuoProgram* p = new DuoProgram();
+  for (int i = 0; i < 3; ++i) {
+    progExample(i, *p);
+    progToJson(*p, a.add<JsonObject>());
+  }
+  char last[sizeof(p->name)];
+  strcpy(last, p->name);
+  delete p;
+  JsonArrayConst ac = b["programs"];
+  CHECK(strcmp(ac[0]["name"] | "", ac[2]["name"] | "") != 0);
+  CHECK(!strcmp(ac[2]["name"] | "", last));
+}
+
 static void testHostCheck() {
   const char* names[2] = {"tempctl-duo", "Oven2"};
   const char* ok[] = {"", "192.168.1.50", "192.168.1.50:80", "[fe80::1]", "tempctl-duo", "TempCtl-Duo.local",
@@ -1195,6 +1232,7 @@ int main() {
   testRawHist();
   testBackupLabel();
   testHostCheck();
+  testJsonCopies();
   testAutotune();
   testTimeZones();
   printf(fails ? "%d FAILED\n" : "all tests passed\n", fails);

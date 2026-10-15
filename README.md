@@ -348,7 +348,7 @@ lists, messages), `tui_main.cpp`, `tui_chart.cpp`, `tui_menu.cpp` (menu, log, di
 `src/fonts/tfont_*.c`, made by `tools/lv_font_gen.py` from `tools/fonts/*.ttf` (OFL); LVGL's Montserrat
 supplies the symbols. **Preview without a board**: `test/ui_host/build.sh` builds the screens for the PC
 and renders screenshots of the main states (and `./uihost monkey` taps around at random under
-AddressSanitizer); `BOARD=cyd ./build.sh` does the same for the 320×240 set (`uihost_cyd`, `shots_cyd/`),
+AddressSanitizer, `./uihost stepper` checks the tile's + / - while the device takes a value over late); `BOARD=cyd ./build.sh` does the same for the 320×240 set (`uihost_cyd`, `shots_cyd/`),
 `python3 sheet.py [cyd] [names]` converts the shots and puts them on one sheet, `MEM=1 BOARD=cyd ./build.sh`
 + `./uihost_mem mem` prints the heap used per screen.
 
@@ -617,7 +617,7 @@ console's api path has no such checks.
 
 | Method | Path | Body / query |
 |---|---|---|
-| GET | `/api/live` | web page, polled every second: both channels (pv, sp, out, outOn (outputs on), state, target, kept, canExtend, manual, fault, autotune, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg; `intr` while a run interrupted by a reset can be resumed: reason, exact, el, i / st / left per channel), `sel`, `accent`, `progGen`, `cfgGen` (changes with every settings save), `logSeq`, `sysSeq` (newest system log line), `boot` (start number), `time` (device clock, UTC s; 0 = unknown), `tz` (time zone, "" = not set), `sd` (S3: card, logging, file, err) |
+| GET | `/api/live` | web page, polled every second: both channels (pv, sp, out, outOn (outputs on), state, target, kept, canExtend, manual, fault, autotune, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg; `intr` while a run interrupted by a reset can be resumed: reason, exact, el, i / st / left per channel), `sel`, `accent`, `progGen`, `cfgGen` (changes with every settings save), `logSeq`, `sysSeq` (newest system log line), `boot` (start number), `time` (device clock, UTC s; 0 = unknown), `tz` (time zone, "" = not set), `sd` (S3: card, logging, file, err); `?a0=&a1=` (device millis, as `/api/raw`): also `raw` [[ms, pv in 0.1 °C or null, …], …] = the PV readings after them, up to 32 per channel (more: `rawMore`, the page then uses `/api/raw`) |
 | GET | `/api/chart?v=run` | current / last run: 300 bins of `pv`, `sp` and state lanes `st` per channel, past events `ev` [t, type, ch, idx], forecast `fc` (`seg` [t0, t1, v0, v1, src, flags] per channel, `ev`; times from now) |
 | GET | `/api/chart?v=live` | the live period (`display.liveMin`) in 300 points of `pv` / `sp` / `dlo` / `dhi` per channel; `bin` s per point, `span`, `sh` (the points before the newest end `sh` s later than whole bins before now), `have` / `cap` (s recorded / s the history holds), `ms` (device millis), `raw` (readings kept per channel; run view: also `ra` / `rn`, run time against millis) |
 | GET | `/api/raw?a0=&a1=&win=&max=` | every PV reading of both channels after `a0` / `a1` (device millis), at most `win` s old, `max` (8192) per channel. Binary, little-endian: uint32 now, n0, n1, 1; then 8-byte records uint32 millis, int16 PV in 0.1 °C (−32768 = no reading). Wi-Fi only. The web chart draws these; S3 keeps 131 072 per channel (2 MB PSRAM: 36 h at 1 s polling, 9 h at 250 ms), CYD 600 (10 min at 1 s) |
@@ -660,8 +660,9 @@ console's api path has no such checks.
 | POST | `/api/screen/restart` | sets the display and the touch controller up again (reset + init), redraws; the device keeps running (result in the serial log) |
 | GET | `/api/mb/read?addr=&n=&fn=&ch=` | raw registers (`ch`: channel whose controller address is used, default 0; also in the POST tools below) |
 | POST | `/api/mb/write` | `{"addr","value"}` raw |
-| POST | `/api/mb/findsp` | `{"from","to"}`: scans at most 20 s (the loop's watchdog); `stoppedAt` = the last address scanned when it stopped early (scan on from there) |
-| GET/POST | `/api/params` | PMA parameters (`?ch=` / `"ch"`) |
+| POST | `/api/mb/findsp` | `{"from","to"}`: starts the scan in the background (at most 20 s) → `{"busy":true}` |
+| GET | `/api/mb/findsp` | `{"busy":true}` while it runs, then `ok`, `err`, `reference`, `candidates`, `stoppedAt` (the time limit stopped it there: scan on from the next address); `{"none":true}`: none started |
+| GET/POST | `/api/params` | PMA parameters (`?ch=` / `"ch"`). GET reads them in the background: `{"busy":true,"done","total"}` until all are read (ask again), then `supported`, `params`, `actions` |
 | POST | `/api/action` | `{"i":index}` PMA actions (self-tuning, outputs off, …) |
 
 The web UI has no login. Keep it on a trusted network.
@@ -671,7 +672,7 @@ The web UI has no login. Keep it on a trusted network.
 ```
 platformio.ini            environments s3, cyd-1xlocal-1x485, cyd-2xlocal, cyd-2xlocal-2x485; libraries
 partitions_cyd_ota.csv    CYD flash layout: two firmware slots (OTA) + 192 kB file system
-include/lv_conf.h         LVGL 9.6 configuration
+include/lv_conf.h         LVGL 9.6 configuration (only what differs from LVGL's defaults)
 src/version.h             product name, version, host / AP name
 src/config.h              selects the board header, chart size
 src/board_s3.h, board_cyd.h  pins, display, touch and LED per board

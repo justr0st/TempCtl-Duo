@@ -8,33 +8,15 @@
 #include "duo_program.h"
 #include "run_engine.h"
 #include "program_store.h"
-#include "run_engine.h"
 #include "settings.h"
+#include "syslog.h"
 
-// The old touch / web UIs (until steps 6 and 7) show the bottom channel
-// (ENGINE_CH); the flat fields below mirror it. Both channels are in `ch`,
-// the run in the run fields.
+// The channel the run engine's Sequence and the old /api/status flat fields refer to (the bottom).
+// Both channels are in LiveData::ch, the run in the run fields.
 constexpr int ENGINE_CH = CH_BOTTOM;
 
 struct LiveData {
   ChannelLive ch[NUM_CHANNELS];
-  // ---- mirror of ch[ENGINE_CH] (+ its setpoint-write errors) ----
-  // link
-  bool commOk;
-  uint32_t okCount, errCount;
-  uint32_t lastOkMs;
-  char lastErr[80];
-  // process values
-  bool pvValid; float pv; uint8_t pvFlag;
-  bool spEffValid; float spEff;
-  bool outValid; float out;
-  bool statusValid; uint16_t status;
-  bool alarmValid; uint16_t alarm;
-  // manual setpoint
-  bool manualOn;
-  float manualSp;
-  bool manualSynced;  // manual setpoint (and outputs on/off) written
-
   // ---- run (both channels) ----
   RunState state;
   uint8_t progType;   // PROG_SEQ / PROG_TL of the running / last program
@@ -58,17 +40,6 @@ struct LiveData {
   bool spSyncedCh[NUM_CHANNELS];    // last setpoint write succeeded
   uint32_t spWritesCh[NUM_CHANNELS];
 
-  // ---- legacy run view for the old UIs (bottom channel / Sequence phase) ----
-  Stage phase;
-  int16_t step;
-  uint16_t stepCount;
-  float phaseEl, phaseDur, total;
-  bool soakWait;
-  float hostSp;       // run setpoint of the bottom channel
-  float target;
-  bool spSynced;
-  float lastWrittenSp;
-  uint32_t spWrites;  // count of SP writes (EEPROM wear indicator)
   char runMsg[128];
 
   // ---- "Run interrupted by a reset" offer (spec 9.3.5); the program is runProg / runName ----
@@ -106,8 +77,14 @@ struct LogEntry {
   char msg[LOG_LEN];
 };
 // any task; the kind comes from the words (errors, warnings), else "event" / "run"
+// The kind is given by the caller (the colour in the logs), not guessed from the text
 void logEvent(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 void logRun(const char* fmt, ...) __attribute__((format(printf, 1, 2)));  // run records (start, phases, end)
+void logWarn(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+void logError(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+void logKind(LogKind k, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+// warning / error by the words of the text, else def: only for texts without user names (reset reasons)
+void logAuto(LogKind def, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 uint32_t logSeq();                                        // newest entry
 int logSince(uint32_t seq, LogEntry* out, int max);       // entries after seq, oldest first
 
@@ -256,6 +233,11 @@ uint32_t controlCycles();  // control cycles since the start (alive check: firmw
 unsigned controlTaskStackFree();  // bytes of the control task's stack never used so far
 bool sendCmd(CmdType c, int arg = 0, float value = 0, int idx = -1, uint8_t sub = 0);
 bool busRequest(BusRequest& r, uint32_t timeoutMs = 20000);  // blocks until done
+// The same without waiting (loop task): busStart() hands the request over (false: another one runs);
+// busCheck() is 0 while it runs, then 1 with the answer in r (r.ok; r.err also after timeoutMs), -1 if
+// none was started
+bool busStart(const BusRequest& r, uint32_t timeoutMs);
+int busCheck(BusRequest& r);
 void saveSettingsAndNotify();    // persist gSettings and tell the control task (reopens the link)
 void saveSettingsQuiet();        // persist gSettings only (display, selection, manual SP)
 // A temporary program buffer (≈ 3.9 kB, heap) for the loop task (UI, web), freed at the end of the scope

@@ -106,22 +106,17 @@ static RunFileInfo cleanInfo;
 
 // ------------------------------------------------------------------ helpers
 
-// status message (web run.msg, touch message line) + event log + serial
-static void say(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-static void say(const char* fmt, ...) {
+// status message (web run.msg, touch message line) + event log (kind k: LK_RUN run records, LK_EVENT, LK_WARN,
+// LK_ERROR) + serial
+static void say(LogKind k, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+static void say(LogKind k, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
   vsnprintf(runMsg, sizeof(runMsg), fmt, ap);
   va_end(ap);
-  // run records (start, pauses, run edits, end) get the run colour in the log, the rest are events
-  static const char* const RUN_WORDS[] = {"Program", "program", "phase", "Phase", "Run ", "run ", "Stopped", "Paused",
-                                          "resumed", "Action required", nullptr};
-  bool run = false;
-  for (const char* const* w = RUN_WORDS; *w && !run; ++w) run = strstr(runMsg, *w) != nullptr;
-  if (run) logRun("%s", runMsg);
-  else logEvent("%s", runMsg);
+  logKind(k, "%s", runMsg);
 }
-static void setMsg(const char* m) { say("%s", m); }
+static void setMsg(LogKind k, const char* m) { say(k, "%s", m); }
 
 static float clampSp(int ch, float v) {
   if (v < s.ch[ch].spMin) v = s.ch[ch].spMin;
@@ -573,11 +568,13 @@ static uint32_t logNext = 1;
 static portMUX_TYPE logMux = portMUX_INITIALIZER_UNLOCKED;
 static volatile float logRunT = NAN;
 
-static void logAddV(LogKind def, const char* fmt, va_list ap) {
+// k: the entry's kind as the caller gives it (not guessed from the text: names are user text); auto:
+// warnings and errors found by their words (only for texts the firmware writes itself, e.g. reset reasons)
+static void logAddV(LogKind k, bool autoKind, const char* fmt, va_list ap) {
   char m[LOG_LEN];
   if (vsnprintf(m, sizeof(m), fmt, ap) >= (int)sizeof(m)) m[utf8Fit(m, sizeof(m) - 1)] = 0;
   const float rt = logRunT;
-  const LogKind k = logClassify(m, def);
+  if (autoKind) k = logClassify(m, k);
   LogSerial.printf("[event] %s\n", m);
   syslogAdd(k, m, strlen(m));
   sdlogEvent(k, m);  // (a row in the SD run log while a run is logged)
@@ -592,17 +589,30 @@ static void logAddV(LogKind def, const char* fmt, va_list ap) {
   portEXIT_CRITICAL(&logMux);
 }
 
-void logEvent(const char* fmt, ...) {
+#define LOG_FN(name, kind, autoKind)  \
+  void name(const char* fmt, ...) {    \
+    va_list ap;                        \
+    va_start(ap, fmt);                 \
+    logAddV(kind, autoKind, fmt, ap);  \
+    va_end(ap);                        \
+  }
+LOG_FN(logEvent, LK_EVENT, false)
+LOG_FN(logRun, LK_RUN, false)
+LOG_FN(logWarn, LK_WARN, false)
+LOG_FN(logError, LK_ERROR, false)
+#undef LOG_FN
+
+void logKind(LogKind k, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  logAddV(LK_EVENT, fmt, ap);
+  logAddV(k, false, fmt, ap);
   va_end(ap);
 }
 
-void logRun(const char* fmt, ...) {
+void logAuto(LogKind def, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  logAddV(LK_RUN, fmt, ap);
+  logAddV(def, true, fmt, ap);
   va_end(ap);
 }
 
@@ -732,7 +742,7 @@ void chartSnapshot(ChartData& d, bool live) {
   const bool active = gLive.state == RunState::Running || gLive.state == RunState::Paused;
   d.run = !live && active && gHist->runValid;
   d.planActive = d.run;
-  d.spActive = d.run || gLive.manualOn;
+  d.spActive = d.run || gLive.ch[ENGINE_CH].manualOn;
   const int T = CH_TOP, B = ENGINE_CH;
   if (d.run) {
     d.binSec = gHist->runBin;
@@ -1205,11 +1215,11 @@ static void sdRow(const float* pv, const bool* pvOk, const float* spNow, const C
 static void startProgram(int idx, bool draft) {
   if (eng.active()) return;
   if (safetyEstop()) {
-    setMsg("Cannot start: E-stop active");
+    setMsg(LK_WARN, "Cannot start: E-stop active");
     return;
   }
   if (anyFault()) {
-    setMsg("Cannot start: acknowledge the channel fault first");
+    setMsg(LK_WARN, "Cannot start: acknowledge the channel fault first");
     return;
   }
   if (idx < 0 || idx >= PROG_MAX) {
@@ -1239,18 +1249,18 @@ static void startProgram(int idx, bool draft) {
     }
   }
   if (!loaded) {
-    say("Cannot start: %s", err);
+    say(LK_WARN, "Cannot start: %s", err);
     return;
   }
   if (progItems(p) == 0) {
-    say("Cannot start: \"%s\" has no phases/steps", p.name);
+    say(LK_WARN, "Cannot start: \"%s\" has no phases/steps", p.name);
     return;
   }
   float pv[NUM_CHANNELS];
   bool ok[NUM_CHANNELS];
   if (!runChecks(p, pv, ok, "Cannot start")) return;
   if (!eng.start(&p, pv, ok, s.bottomBand)) {
-    setMsg("Cannot start: the program has no phases/steps");
+    setMsg(LK_WARN, "Cannot start: the program has no phases/steps");
     return;
   }
   runIdx = (int8_t)idx;
@@ -1270,7 +1280,7 @@ static void startProgram(int idx, bool draft) {
   saveRunFile();
   runTrack(true);
   sdlogStart(p, false);
-  say("Program \"%s\" started%s", p.name, draft ? " (unsaved changes)" : "");
+  say(LK_RUN, "Program \"%s\" started%s", p.name, draft ? " (unsaved changes)" : "");
   startTempWarning(p, pv, ok);
 }
 
@@ -1284,7 +1294,7 @@ static void startTempWarning(const DuoProgram& p, const float* pv, const bool* o
       const Seg* g = progSeg(p, ch, i);
       if (!g) continue;
       if (pv[ch] >= g->t - START_WARN_BAND)
-        say("Warning: %s starts at %.0f \xC2\xB0" "C, near or above its first target %.0f \xC2\xB0" "C", s.ch[ch].name,
+        say(LK_WARN, "Warning: %s starts at %.0f \xC2\xB0" "C, near or above its first target %.0f \xC2\xB0" "C", s.ch[ch].name,
             pv[ch], g->t);
       break;
     }
@@ -1308,24 +1318,24 @@ static bool runChecks(const DuoProgram& p, float* pv, bool* ok, const char* verb
     if (!progUses(p, ch)) continue;
     const char* n = names[ch];
     if (s.ch[ch].type == CH_OFF) {
-      say("%s: \"%s\" uses %s, which is off (Settings)", verb, p.name, n);
+      say(LK_WARN, "%s: \"%s\" uses %s, which is off (Settings)", verb, p.name, n);
       return false;
     }
     if (tuning(ch)) {
-      say("%s: autotune is running on %s", verb, n);
+      say(LK_WARN, "%s: autotune is running on %s", verb, n);
       return false;
     }
     if (!chan(ch).spConfigured()) {
-      say("%s: %s has no setpoint register (web: Controller)", verb, n);
+      say(LK_WARN, "%s: %s has no setpoint register (web: Controller)", verb, n);
       return false;
     }
     if (!ok[ch]) {
-      say("%s: no valid temperature from %s", verb, n);
+      say(LK_WARN, "%s: no valid temperature from %s", verb, n);
       return false;
     }
   }
   if (!progCheckLimits(p, lo, hi, err, sizeof(err), names)) {
-    say("%s: %s", verb, err);
+    say(LK_WARN, "%s: %s", verb, err);
     return false;
   }
   // The controller silently clamps setpoints to SP.LO..SP.Hi: check before starting
@@ -1340,7 +1350,7 @@ static bool runChecks(const DuoProgram& p, float* pv, bool* ok, const char* verb
     const float cl[NUM_CHANNELS] = {ch == 0 ? l : -1e9f, ch == 1 ? l : -1e9f};
     const float chh[NUM_CHANNELS] = {ch == 0 ? h : 1e9f, ch == 1 ? h : 1e9f};
     if (!progCheckLimits(p, cl, chh, err, sizeof(err), names)) {
-      say("%s (controller limits): %.90s", verb, err);
+      say(LK_WARN, "%s (controller limits): %.90s", verb, err);
       return false;
     }
   }
@@ -1379,15 +1389,15 @@ static void takeChannels(const DuoProgram& p, const RunFileInfo* ri) {
 static void resumeInterrupted() {
   if (eng.active()) return;
   if (safetyEstop()) {
-    setMsg("Cannot resume: E-stop active");
+    setMsg(LK_WARN, "Cannot resume: E-stop active");
     return;
   }
   if (!intr.valid) {
-    setMsg("No interrupted run to resume");
+    setMsg(LK_WARN, "No interrupted run to resume");
     return;
   }
   if (anyFault()) {
-    setMsg("Cannot resume: acknowledge the channel fault first");
+    setMsg(LK_WARN, "Cannot resume: acknowledge the channel fault first");
     return;
   }
   DuoProgram& p = *runProg;  // the running copy, loaded from /duo/run.json at boot
@@ -1395,7 +1405,7 @@ static void resumeInterrupted() {
   bool ok[NUM_CHANNELS];
   if (!runChecks(p, pv, ok, "Cannot resume")) return;
   if (!eng.resumeAt(&p, intr.pos, pv, ok, s.bottomBand, intr.info.edited)) {
-    setMsg("Cannot resume: the interrupted phase is not in the program");
+    setMsg(LK_WARN, "Cannot resume: the interrupted phase is not in the program");
     return;
   }
   runIdx = intr.info.slot;
@@ -1416,8 +1426,8 @@ static void resumeInterrupted() {
   runTrack(true);
   sdlogStart(p, true);
   const int t = (int)eng.elapsed();
-  if (p.type == PROG_SEQ) say("Program \"%s\" resumed: phase %d again (run time %d:%02d)", p.name, eng.seq().idx + 1, t / 60, t % 60);
-  else say("Program \"%s\" resumed at run time %d:%02d", p.name, t / 60, t % 60);
+  if (p.type == PROG_SEQ) say(LK_RUN, "Program \"%s\" resumed: phase %d again (run time %d:%02d)", p.name, eng.seq().idx + 1, t / 60, t % 60);
+  else say(LK_RUN, "Program \"%s\" resumed at run time %d:%02d", p.name, t / 60, t % 60);
 }
 
 static void dismissInterrupted() {
@@ -1429,7 +1439,7 @@ static void dismissInterrupted() {
   }
   intr.valid = false;
   runForget();
-  setMsg("Interrupted run dismissed");
+  setMsg(LK_RUN, "Interrupted run dismissed");
 }
 
 // outputs off (+ the controller's gradient and front panel back) for a dismissed run
@@ -1450,28 +1460,28 @@ static void manualSwitch(int ch, bool on) {
   const char* name = s.ch[ch].name;
   if (on) {
     if (inRun(ch)) {
-      say("%s is in the running program (stop it first)", name);
+      say(LK_WARN, "%s is in the running program (stop it first)", name);
       return;
     }
     if (c.type() == CH_OFF) {
-      say("%s is off (Settings: channel type)", name);
+      say(LK_WARN, "%s is off (Settings: channel type)", name);
       return;
     }
     if (safetyEstop()) {
-      say("%s: E-stop active", name);
+      say(LK_WARN, "%s: E-stop active", name);
       return;
     }
     char ft[64];
     if (c.fault(ft, sizeof(ft))) {
-      say("%s: acknowledge the fault first (%s)", name, ft);
+      say(LK_WARN, "%s: acknowledge the fault first (%s)", name, ft);
       return;
     }
     if (tuning(ch)) {
-      say("%s: autotune is running (stop it first)", name);
+      say(LK_WARN, "%s: autotune is running (stop it first)", name);
       return;
     }
     if (!c.spConfigured()) {
-      setMsg("Set the setpoint register address first (web: Controller)");
+      setMsg(LK_WARN, "Set the setpoint register address first (web: Controller)");
       return;
     }
     m.on = true;
@@ -1479,14 +1489,14 @@ static void manualSwitch(int ch, bool on) {
     m.offPending = false;
     m.onMs = millis();
     m.idleWarned = false;
-    say("%s: manual setpoint on", name);
+    say(LK_EVENT, "%s: manual setpoint on", name);
   } else {
     if (!m.on) return;
     m.on = false;
     spHeld[ch] = false;
     m.pending = false;
     m.offPending = c.canSwitchOff();
-    say(m.offPending ? "%s: manual off, outputs switched off"
+    say(LK_EVENT, m.offPending ? "%s: manual off, outputs switched off"
                                                   : "%s: manual off (no outputs-off register: controller keeps its setpoint)",
              name);
   }
@@ -1502,7 +1512,7 @@ static void applySettings(const Settings& prev, bool first) {
     const bool typeChanged = first || prev.ch[i].type != s.ch[i].type;
     if (typeChanged && !first && inRun(i)) {
       eng.stop();
-      say("Stopped: type of channel %s changed", s.ch[i].name);
+      say(LK_RUN, "Stopped: type of channel %s changed", s.ch[i].name);
     }
     slots[i].configure(i, &bus, s.ch[i]);
     if (!first && !man[i].on) man[i].sp = s.ch[i].manualSp;  // may have been changed through the API
@@ -1520,11 +1530,11 @@ static void applySettings(const Settings& prev, bool first) {
 static void runEdit(const Cmd& c) {
   const int ch = c.arg;
   if (!eng.active()) {
-    setMsg("No program is running");
+    setMsg(LK_WARN, "No program is running");
     return;
   }
   if (ch < 0 || ch >= NUM_CHANNELS) {
-    setMsg("Run edit: channel must be 0 (bottom) or 1 (top)");
+    setMsg(LK_WARN, "Run edit: channel must be 0 (bottom) or 1 (top)");
     return;
   }
   char err[96] = "";
@@ -1553,16 +1563,16 @@ static void runEdit(const Cmd& c) {
     runInfo.edited = 1;
     saveRunFile();  // the running copy survives a reset
     static const char* const W[] = {"hold time", "hold extended", "ramp time", "target"};
-    say("Run edit (%s, %s): %s%.1f", name, c.sub < 4 ? W[c.sub] : "?",
+    say(LK_RUN, "Run edit (%s, %s): %s%.1f", name, c.sub < 4 ? W[c.sub] : "?",
              c.sub == EDIT_EXTEND && c.value > 0 ? "+" : "", c.value);
   } else {
-    say("Run edit not possible: %s", err);
+    say(LK_WARN, "Run edit not possible: %s", err);
   }
 }
 
 static void saveRun() {
   if (runIdx < 0 || editCount == 0) {
-    setMsg("No run edits to save");
+    setMsg(LK_WARN, "No run edits to save");
     return;
   }
   char err[96];
@@ -1575,9 +1585,9 @@ static void saveRun() {
     savedCount = editCount;
     runInfo.edited = 0;
     saveRunFile();
-    say("Run changes saved into \"%s\"", runProg->name);
+    say(LK_RUN, "Run changes saved into \"%s\"", runProg->name);
   } else {
-    say("Saving the run changes failed: %s", err);
+    say(LK_ERROR, "Saving the run changes failed: %s", err);
   }
 }
 
@@ -1593,21 +1603,21 @@ static void handleCmd(const Cmd& c) {
   switch (c.type) {
     case CMD_START: startProgram(c.arg, c.sub == 1); break;
     case CMD_PAUSE:
-      if (eng.state() == RunState::Running) { eng.pause(); setMsg("Paused"); }
+      if (eng.state() == RunState::Running) { eng.pause(); setMsg(LK_RUN, "Paused"); }
       break;
     case CMD_RESUME:
-      if (eng.state() == RunState::Paused) { eng.resume(); setMsg("Resumed"); }
+      if (eng.state() == RunState::Paused) { eng.resume(); setMsg(LK_RUN, "Resumed"); }
       break;
     case CMD_STOP:
-      if (eng.active()) { eng.stop(); setMsg("Stopped by user"); }
+      if (eng.active()) { eng.stop(); setMsg(LK_RUN, "Stopped by user"); }
       break;
     case CMD_NEXT:
-      if (eng.progPaused()) { eng.cont(); setMsg("Continued"); }
-      else if (eng.next()) setMsg("Next phase");
-      else if (eng.active() && eng.type() == PROG_TL) setMsg("Next phase is not available for Timeline programs");
+      if (eng.progPaused()) { eng.cont(); setMsg(LK_RUN, "Continued"); }
+      else if (eng.next()) setMsg(LK_RUN, "Next phase");
+      else if (eng.active() && eng.type() == PROG_TL) setMsg(LK_WARN, "Next phase is not available for Timeline programs");
       break;
     case CMD_CONTINUE:
-      if (eng.cont()) setMsg("Continued");
+      if (eng.cont()) setMsg(LK_RUN, "Continued");
       break;
     case CMD_RUN_EDIT: runEdit(c); break;
     case CMD_SAVE_RUN: saveRun(); break;
@@ -1630,9 +1640,9 @@ static void handleCmd(const Cmd& c) {
       if (c.arg < 0 || c.arg >= NUM_CHANNELS) break;
       char err[80] = "";
       if (chan(c.arg).ack(err, sizeof(err))) {
-        say("%s: fault acknowledged", s.ch[c.arg].name);
+        say(LK_EVENT, "%s: fault acknowledged", s.ch[c.arg].name);
       } else {
-        say("%s: fault not cleared: %s", s.ch[c.arg].name, err);
+        say(LK_WARN, "%s: fault not cleared: %s", s.ch[c.arg].name, err);
       }
       break;
     }
@@ -1640,31 +1650,31 @@ static void handleCmd(const Cmd& c) {
       if (c.arg < 0 || c.arg >= NUM_CHANNELS) break;
       const char* name = s.ch[c.arg].name;
       if (s.ch[c.arg].type != CH_LOCAL) {
-        say("%s: autotune is for local channels (Modbus controllers tune themselves)", name);
+        say(LK_WARN, "%s: autotune is for local channels (Modbus controllers tune themselves)", name);
         break;
       }
       if (inRun(c.arg)) {
-        say("%s: stop the program before the autotune", name);
+        say(LK_WARN, "%s: stop the program before the autotune", name);
         break;
       }
       if (safetyEstop()) {
-        say("%s: autotune not started: E-stop active", name);
+        say(LK_WARN, "%s: autotune not started: E-stop active", name);
         break;
       }
       Manual& m = man[c.arg];  // the tune takes over the channel
       m.on = m.pending = m.offPending = false;
       char err[96];
       if (localCtrlTuneStart(c.arg, c.value, err, sizeof(err))) {
-        say("%s: autotune started at %.0f C", name, c.value);
+        say(LK_EVENT, "%s: autotune started at %.0f C", name, c.value);
       } else {
-        say("%s: autotune not started: %s", name, err);
+        say(LK_WARN, "%s: autotune not started: %s", name, err);
       }
       break;
     }
     case CMD_TUNE_STOP:
       if (c.arg < 0 || c.arg >= NUM_CHANNELS) break;
       localCtrlTuneStop(c.arg);
-      say("%s: autotune stopped", s.ch[c.arg].name);
+      say(LK_EVENT, "%s: autotune stopped", s.ch[c.arg].name);
       break;
     case CMD_MANUAL_SP:
       if (c.arg < 0 || c.arg >= NUM_CHANNELS) break;
@@ -1757,7 +1767,7 @@ static void pollChannel(int i) {
   }
   if (changed && c.type() != CH_OFF) {  // log link changes, not every failed poll
     if (ok) logEvent("%s (%s): link ok", s.ch[i].name, channelTypeName(c.type()));
-    else logEvent("%s (%s): %s", s.ch[i].name, channelTypeName(c.type()), err);
+    else logError("%s (%s): %s", s.ch[i].name, channelTypeName(c.type()), err);
   }
   // autotune finished / failed: log it once
   static bool wasTuning[NUM_CHANNELS];
@@ -1771,8 +1781,8 @@ static void pollChannel(int i) {
         logEvent("%s: autotune %s -> kp %.3f ki %.4f kd %.2f (accept or discard)", s.ch[i].name, t.msg, t.res.kp,
                       t.res.ki, t.res.kd);
       else
-        logEvent("%s: autotune failed: %s", s.ch[i].name, t.msg);
-      say("%s: autotune %s", s.ch[i].name, t.state == TuneState::Done ? "done - accept or discard (web)" : t.msg);
+        logError("%s: autotune failed: %s", s.ch[i].name, t.msg);
+      say(t.state == TuneState::Done ? LK_EVENT : LK_WARN, "%s: autotune %s", s.ch[i].name, t.state == TuneState::Done ? "done - accept or discard (web)" : t.msg);
     }
     wasTuning[i] = ls.tuning;
   } else {
@@ -1796,9 +1806,9 @@ static void pollChannel(int i) {
     if (eng.active()) {
       // a fault stops the run (spec 9.2, 9.3.5); on the faulted channel the outputs stay off
       eng.stop();
-      say("Stopped: %s fault: %s - acknowledge it (web)", s.ch[i].name, ft);
+      say(LK_ERROR, "Stopped: %s fault: %s - acknowledge it (web)", s.ch[i].name, ft);
     } else {
-      say("%s fault: %s - acknowledge it (web)", s.ch[i].name, ft);
+      say(LK_ERROR, "%s fault: %s - acknowledge it (web)", s.ch[i].name, ft);
     }
   }
 }
@@ -1955,8 +1965,8 @@ static void safetyCycle(const bool* commOk) {
     }
   }
   if (es != wasEstop) {
-    if (es) say("E-stop: all outputs off%s", eng.active() || prevState == RunState::Running || prevState == RunState::Paused ? ", program stopped" : "");
-    else say("Emergency stop released: switch on again when ready");
+    if (es) say(LK_ERROR, "E-stop: all outputs off%s", eng.active() || prevState == RunState::Running || prevState == RunState::Paused ? ", program stopped" : "");
+    else say(LK_EVENT, "Emergency stop released: switch on again when ready");
     wasEstop = es;
   }
   // manual mode without user activity
@@ -1974,9 +1984,9 @@ static void safetyCycle(const bool* commOk) {
       const uint32_t idle = now - from;
       if (idle >= limit) {
         manualSwitch(i, false);
-        say("%s: manual mode ended after %u min without activity", s.ch[i].name, (unsigned)s.manualIdleMin);
+        say(LK_EVENT, "%s: manual mode ended after %u min without activity", s.ch[i].name, (unsigned)s.manualIdleMin);
       } else if (idle + 60000UL >= limit) {
-        if (!m.idleWarned) say("%s: manual mode ends in 1 min (no activity) - touch the screen to keep it", s.ch[i].name);
+        if (!m.idleWarned) say(LK_WARN, "%s: manual mode ends in 1 min (no activity) - touch the screen to keep it", s.ch[i].name);
         m.idleWarned = idleWarn = true;
       } else {
         m.idleWarned = false;
@@ -2000,7 +2010,7 @@ static void safetyCycle(const bool* commOk) {
     const float t = safetyChipTemp();
     if (!isnan(t) && !chipHot && t > s.chipMaxC) {
       chipHot = true;
-      logEvent("Warning: chip temperature %.0f \xC2\xB0" "C (limit %.0f \xC2\xB0" "C) - check the cooling", t, s.chipMaxC);
+      logWarn("Warning: chip temperature %.0f \xC2\xB0" "C (limit %.0f \xC2\xB0" "C) - check the cooling", t, s.chipMaxC);
     } else if (!isnan(t) && chipHot && t < s.chipMaxC - 5) {
       chipHot = false;
       logEvent("Chip temperature back to %.0f \xC2\xB0" "C", t);
@@ -2040,7 +2050,7 @@ static void cycle(float dt) {
     for (int i = 0; i < NUM_CHANNELS; ++i) {
       if (!inRun(i) || millis() - lastOk[i] <= (uint32_t)s.commLossSec * 1000UL) continue;
       eng.pause();
-      say("Paused: no answer from %s for %us", s.ch[i].name, s.commLossSec);
+      say(LK_WARN, "Paused: no answer from %s for %us", s.ch[i].name, s.commLossSec);
       break;
     }
   }
@@ -2049,7 +2059,7 @@ static void cycle(float dt) {
   eng.tick(dt, pv, pvOk);
   if (eng.progPaused() && !wasPause) {
     const char* t = eng.pauseText();
-    say("%s%s%s - press Continue", eng.pauseMsg() ? "Action required" : "Program pause",
+    say(LK_RUN, "%s%s%s - press Continue", eng.pauseMsg() ? "Action required" : "Program pause",
              *t ? ": " : "", t);
   }
   for (int i = 0; i < NUM_CHANNELS; ++i) lastErr[i][0] = 0;
@@ -2106,7 +2116,7 @@ static void cycle(float dt) {
     endOpen |= d.endPending;
     endDone |= !d.endPending;
   }
-  if (endDone && !endOpen && st == RunState::Finished) setMsg("Program finished");
+  if (endDone && !endOpen && st == RunState::Finished) setMsg(LK_RUN, "Program finished");
   prevState = st;
 
   float remaining;
@@ -2209,38 +2219,6 @@ static void cycle(float dt) {
     L.manualSp = man[i].sp;
     L.manualSynced = !man[i].pending && !man[i].offPending;
     if (lastErr[i][0]) strlcpy(L.lastErr, lastErr[i], sizeof(L.lastErr));
-  }
-  // legacy views for the old UIs: bottom channel, Sequence phase / bottom step
-  {
-    const ChannelLive& E = gLive.ch[ENGINE_CH];
-    gLive.commOk = E.commOk;
-    gLive.okCount = E.okCount;
-    gLive.errCount = E.errCount;
-    gLive.lastOkMs = E.lastOkMs;
-    strlcpy(gLive.lastErr, E.lastErr, sizeof(gLive.lastErr));
-    gLive.pvValid = E.pvValid; gLive.pv = E.pv; gLive.pvFlag = E.pvFlag;
-    gLive.spEffValid = E.spEffValid; gLive.spEff = E.spEff;
-    gLive.outValid = E.outValid; gLive.out = E.out;
-    gLive.statusValid = E.statusValid; gLive.status = E.status;
-    gLive.alarmValid = E.alarmValid; gLive.alarm = E.alarm;
-    gLive.manualOn = E.manualOn;
-    gLive.manualSp = E.manualSp;
-    gLive.manualSynced = E.manualSynced;
-    const bool tl = gLive.progType == PROG_TL;
-    const int lc = (tl && gLive.steps[ENGINE_CH] == 0) ? CH_TOP : ENGINE_CH;  // Timeline lane shown
-    const StageInfo& si = tl ? gLive.lane[lc] : gLive.seq;
-    gLive.phase = si.st;
-    gLive.step = si.idx;
-    gLive.stepCount = tl ? gLive.steps[lc] : gLive.phases;
-    gLive.phaseEl = si.el;
-    gLive.phaseDur = si.dur > si.el ? si.dur : si.el;  // wait / pause: nothing "left"
-    gLive.total = gLive.elapsed + remaining;
-    gLive.soakWait = gLive.waiting;
-    gLive.hostSp = out[ENGINE_CH].sp;
-    gLive.target = out[ENGINE_CH].target;  // NaN while the bottom is idle
-    gLive.spSynced = gLive.spSyncedCh[ENGINE_CH];
-    gLive.lastWrittenSp = drv[ENGINE_CH].lastWritten;
-    gLive.spWrites = drv[ENGINE_CH].spWrites;
   }
   strlcpy(gLive.runMsg, runMsg, sizeof(gLive.runMsg));
   gLive.intrValid = intr.valid;
@@ -2372,7 +2350,7 @@ static void checkInterrupted() {
   char where[48];
   if (p.type == PROG_SEQ) snprintf(where, sizeof(where), "phase %d of %d", intr.pos.i[0] + 1, p.nPh);
   else snprintf(where, sizeof(where), "timeline");
-  logEvent("Run interrupted by a reset (%s): \"%s\", %s, run time %s%d:%02d", intr.reason, p.name, where,
+  logWarn("Run interrupted by a reset (%s): \"%s\", %s, run time %s%d:%02d", intr.reason, p.name, where,
            rtcOk ? "" : "about ", t / 60, t % 60);
   snprintf(runMsg, sizeof(runMsg), "Run interrupted by a reset (%s): \"%.40s\" - Resume or Dismiss on the web page", intr.reason, p.name);
 }
@@ -2464,8 +2442,6 @@ void appInit() {
   reqMutex = xSemaphoreCreateMutex();
   reqDone = xSemaphoreCreateBinary();
   memset(&gLive, 0, sizeof(gLive));
-  gLive.hostSp = gLive.target = gLive.lastWrittenSp = NAN;
-  gLive.step = -1;
   gLive.runProg = -1;
   for (int i = 0; i < NUM_CHANNELS; ++i) gLive.run[i] = eng.out(i);
   if (!settingsLoad(gSettings)) settingsSave(gSettings);
@@ -2486,11 +2462,10 @@ void appInit() {
     const bool bad = strstr(why, "watchdog") || strstr(why, "crash");
     if (crumbReport(b, sizeof(b)) && bad && b[0]) {
       LogSerial.printf("[boot] %s - %s\n", why, b);
-      logEvent("%s - %s", why, b);
+      logAuto(LK_EVENT, "%s - %s", why, b);
     }
   }
   checkInterrupted();
-  gLive.manualSp = gSettings.ch[ENGINE_CH].manualSp;
   histResetLive();
   statusLedBegin();
 }
@@ -2512,7 +2487,41 @@ bool sendCmd(CmdType c, int arg, float value, int idx, uint8_t sub) {
   return xQueueSend(cmdQ, &m, pdMS_TO_TICKS(50)) == pdTRUE;
 }
 
+// a background request (busStart) holds the slot; all callers are in the loop task
+static bool busAsync = false;
+static uint32_t busAsyncAt = 0, busAsyncMs = 0;
+
+bool busStart(const BusRequest& r, uint32_t timeoutMs) {
+  if (busAsync || xSemaphoreTake(reqMutex, 0) != pdTRUE) return false;
+  xSemaphoreTake(reqDone, 0);  // clear stale signal
+  reqSlot = r;
+  reqPending = true;
+  busAsync = true;
+  busAsyncAt = millis();
+  busAsyncMs = timeoutMs;
+  return true;
+}
+
+int busCheck(BusRequest& r) {
+  if (!busAsync) return -1;
+  if (xSemaphoreTake(reqDone, 0) == pdTRUE) {
+    r = reqSlot;
+  } else if (millis() - busAsyncAt < busAsyncMs) {
+    return 0;
+  } else {
+    strlcpy(r.err, "Timed out waiting for the control task", sizeof(r.err));
+    r.ok = false;
+  }
+  busAsync = false;
+  xSemaphoreGive(reqMutex);
+  return 1;
+}
+
 bool busRequest(BusRequest& r, uint32_t timeoutMs) {
+  if (busAsync) {  // (the same task holds the slot: waiting would only block)
+    strlcpy(r.err, "Bus tool busy", sizeof(r.err));
+    return false;
+  }
   if (xSemaphoreTake(reqMutex, pdMS_TO_TICKS(timeoutMs)) != pdTRUE) {
     strlcpy(r.err, "Bus tool busy", sizeof(r.err));
     return false;
@@ -2598,7 +2607,6 @@ void setManualSp(float v, int ch) {
     v = constrain(v, c.spMin, c.spMax);
     c.manualSp = v;
     gLive.ch[ch].manualSp = v;
-    if (ch == ENGINE_CH) gLive.manualSp = v;
   }
   saveSettingsQuiet();
   sendCmd(CMD_MANUAL_SP, ch, v);

@@ -232,7 +232,7 @@ static void segOut(JsonObject o, const Seg& s, bool rampHold) {
 
 void progToJson(const DuoProgram& p, JsonObject o) {
   o["fmt"] = PROG_FMT;
-  o["name"] = p.name;
+  o["name"] = JsonString(p.name);  // copied: a const char[] would be kept as a pointer (ArduinoJson 7.3+)
   o["type"] = progTypeName(p.type);
   if (p.type == PROG_SEQ) {
     JsonArray a = o["phases"].to<JsonArray>();

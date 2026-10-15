@@ -48,7 +48,7 @@ size_t ModbusMaster::transact(const uint8_t* req, size_t reqLen, uint8_t* resp, 
     if (n > 0 && (uint32_t)(micros() - lastByte) > gapUs) break;
     if (n == 0 && (millis() - t0) > timeoutMs_) break;
     if ((millis() - t0) > (uint32_t)timeoutMs_ + 200) break;
-    delayMicroseconds(200);
+    vTaskDelay(1);  // wait 1 ms and let other tasks run (the UART driver buffers the answer meanwhile)
   }
   lastTxEnd_ = micros();
   return n;

@@ -2038,7 +2038,7 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   copy of this document, updated with each commit); old untracked files moved to `.old/` (ignored).
 - **1.0.47** (2026-10-14, e0450f7): web Settings › Display brightness label: 10 (the lowest) = "1 %", linear up to "99 %", "100 %"
   only at 255 (fully on, no PWM) — Rost; "100 %" at 254 had hidden that the backlight still switched.
-- **1.0.48** (2026-10-15): fixes from the code review (Claude Docs "TempCtl Duo code review",
+- **1.0.48** (2026-10-15, 24b3add): fixes from the code review (Claude Docs "TempCtl Duo code review",
   b16a94b; Rost picked the order):
   - **Fix 2, atomic saves**: programs, run.json / runpos.json and settings rename the `.tmp` file over the old one
     (remove + rename only if that fails); at boot a `.tmp` that parses is renamed into place when its file is
@@ -2071,6 +2071,61 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
     with two memcpy; the serial tee takes its lock once per line. Host-simulated against a reference.
   - **R8** host test: increment before the call, missing initialisers; builds with `-Wall -Wextra` (README).
     **R9** `.vscode/settings.json` untracked (.gitignore), old `Claude outputs/*` moved to `.old/`.
+- **1.0.49** (2026-10-15): the rest of the code review (Rost: "go on with the fixes"; his
+  scripts don't POST to the device, so the X-TempCtl header needs nothing more):
+  - **P10**: the channel settings field table (getters / setters were lambdas: with C++11 the table was built
+    in RAM at start, 1.9 kB on the CYD) uses named functions now and stays in flash. Left: the touch edit
+    copies `E` (tui_chan) and `nEdit` (tui_menu), 664 B each, kept for simplicity.
+  - **P2**: `/api/live?a0=&a1=` also answers the new PV readings (up to 32 per channel, else `rawMore`); the
+    page asks `/api/raw` only to fill the start and to catch up (e.g. after a hidden tab): one request per
+    poll instead of two.
+  - **P1**: the web chart's svg stays; its three parts (axes, run lanes / events, data) are replaced only when
+    their text changed (a preview: nothing per poll; live: axes + data; run: data).
+  - **Fix 3 (full)**: find-SP and reading the PMA parameters run as background jobs in the loop task
+    (`busStart` / `busCheck`, web `job`, moved on in `webLoop`): POST /api/mb/findsp starts, GET asks;
+    GET /api/params answers busy with progress until all are read; the page polls. Touch / console tools
+    (`busRequest`) say "Bus tool busy" at once while a job holds the bus.
+  - **P6**: Modbus waits for an answer with `vTaskDelay(1)` instead of busy-waiting; PV, SP.EF and output
+    are read in one request when they lie within 8 registers (PMA 13293..13295); a controller answering that
+    with an exception is read register by register from then on (until the settings change).
+  - **R2**: the LiveData mirror of the bottom channel and the legacy run view are gone; `/api/status`
+    computes its flat fields (same names and values) from `ch[ENGINE_CH]`, `seq` / `lane`, `run[]`.
+    `run_engine.h` included once.
+  - **R3**: log entries get their kind from the caller (`logEvent`, `logRun`, `logWarn`, `logError`,
+    `logKind`, `say(kind, ...)`), no longer guessed from the text (a program called "Fault test" was an
+    error); refusals ("Cannot start: ...") are warnings. The word list stays for serial log lines and
+    reset reasons (`logAuto`).
+  - **R7**: `include/lv_conf.h` holds only the settings that differ from LVGL's defaults (51 lines instead of
+    2655); checked: all 636 LV_ macros evaluate the same for both boards, firmware sizes identical.
+  - **Bug found by Rost in 1.0.48** (web Channels page full of JSON fragments as names and texts): ArduinoJson
+    7.3+ keeps a `const char[]` - which a text field of a const struct is - as a pointer, like a string
+    literal. 1.0.48's `/api/config` freed its settings copy before the answer was written, so the names
+    pointed into reused memory. Fixed where documents are built (`settingsToJson`, `progToJson`, web
+    answers): texts go in as `JsonString(...)` (copied). The same cause made **SD backups since 1.0.42 name
+    every program like the last one** (`backupCreate` loads all programs through one buffer); the settings
+    in them were fine. Host test `testJsonCopies` (a use-after-free without the fix).
+  - Still open from the review: Fix 1 PIN (optional), P5 run-view chart under gLock / static live fields,
+    R1 (split app_state.cpp), R4 (console command table), R5 (split the page), R6 (history comments).
+  - Rost's tests of 1.0.48 / the 1.0.49 work (2026-10-15): live and run charts on the web smooth (also after
+    switching tabs); log colours right; channel names on the touch fine (only the web showed the junk); SD
+    backup redone and restored: works; Modbus "Controller type" loads its register defaults; reading the PMA
+    parameters without a controller: the touch screen slows down a little while a request waits, fine after.
+  - **Touch +/- setpoint jumped back** (Rost): after the value was sent, the tile showed the snapshot's old
+    value until the control task took the new one over (next cycle), and a + / - in that time went on from
+    the old value, so the new one was lost. Now the tile keeps showing (and stepping from) the value sent
+    until the device reports it, at most 3 s (`Tile::sent`). UI host scenario `./uihost stepper` (device takes
+    the value over 600 ms late): before the fix the old value showed 15 times and the second press was lost.
+  - **Web "Last run" button** (Rost): on the Dashboard chart's program preview, when the device still has the
+    selected program's last run (finished / stopped, until a restart or the next run): shows that run again
+    (the counterpart of "Back to preview").
+- **Planned** (Rost, 2026-10-15):
+  - Web Channels page: the Save / Revert bar at the bottom of a card is not aligned with the card's sides.
+  - Touch Channels screen: changes saved on the web show only after leaving and opening the screen again
+    (the other way round they show at once).
+  - Touch Channels screen: the RS485 tab only when a channel is a Modbus channel.
+  - SD card: sometimes not found at the first read or write, works on the next attempt.
+  - Touch Channels screen: after a value is entered with the keyboard / number pad, the list jumps back to
+    the top (it should stay where it was).
 - Next: step 7b is done, the old UI removed. Open: the older untested points (Modbus beta, runs on the CYD, ...); later GitHub Pages (7b
   option 1) and a release build of the launcher.
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,

@@ -24,12 +24,14 @@ struct Tile {
   uint32_t pendAt;     // last stepper press
   uint32_t downAt;     // - / + pressed down (held > 3 s: steps of 5 degC)
   bool repeated;       // the press repeated (no extra step on release)
-  int8_t spStyled;
+  int8_t spStyled;     // 320x240: the SP button shows the SP colour (-1 unknown)
   int8_t onStyled;     // the tile shows "outputs on" (-1 unknown)
-  bool faultStyled;    // the status text shows the fault colour     // 320x240: the SP button shows the SP colour (-1 unknown)
+  bool faultStyled;    // the status text shows the fault colour
   bool runTarget;      // the stepper edits the run's target (else the manual setpoint)
   float lo, hi;        // setpoint limits
   float shown;         // value the stepper shows
+  float sent;          // value sent, shown until the device reports it (NaN = none): the control task takes
+  uint32_t sentAt;     // it over in its next cycle, until then the snapshot still has the old one
 };
 static Tile tiles[NUM_CHANNELS];
 
@@ -110,6 +112,8 @@ static void onChart(lv_event_t*) {
 // ------------------------------------------------------------ channel tiles
 static void sendTarget(int ch, float v) {
   Tile& t = tiles[ch];
+  t.sent = v;
+  t.sentAt = lv_tick_get();
   if (t.runTarget) sendCmd(CMD_RUN_EDIT, ch, v, -1, EDIT_TARGET);
   else setManualSp(v, ch);
 }
@@ -205,6 +209,7 @@ static void tileCreate(int ch, lv_obj_t* parent, int x, int y, int w, int h) {
   Tile& t = tiles[ch];
   t.pend = NAN;
   t.shown = NAN;
+  t.sent = NAN;
   t.onStyled = -1;
   t.box = tPanel(parent);
   lv_obj_set_pos(t.box, x, y);
@@ -283,6 +288,7 @@ static void tileCreateSmall(int ch, lv_obj_t* parent, int x, int y, int w, int h
   Tile& t = tiles[ch];
   t.pend = NAN;
   t.shown = NAN;
+  t.sent = NAN;
   t.spStyled = -1;
   t.onStyled = -1;
   t.box = tPanel(parent);
@@ -422,14 +428,18 @@ static void tileUpdate(int ch) {
   t.runTarget = runCh && !isnan(o.target) && !o.idle;
   t.lo = S.ch[ch].spMin;
   t.hi = S.ch[ch].spMax;
-  t.shown = t.runTarget ? o.target : C.manualSp;  // (after a run: the kept / end setpoint)
   if (!isnan(t.pend) && lv_tick_elaps(t.pendAt) > 700) {  // send after the last press
     sendTarget(ch, t.pend);
     t.pend = NAN;
   }
+  // what the device reports (after a run: the kept / end setpoint); a value just sent is shown (and stepped
+  // from) until the report has it, at most 3 s (refused or limited: then the report)
+  const float rep = t.runTarget ? o.target : C.manualSp;
+  if (!isnan(t.sent) && ((!isnan(rep) && fabsf(rep - t.sent) < 0.05f) || lv_tick_elaps(t.sentAt) > 3000)) t.sent = NAN;
+  t.shown = isnan(t.sent) ? rep : t.sent;
 #if TUI_SMALL
   // the button shows the setpoint in force (ramping: the moving one), else what would be applied
-  const float shown = !isnan(sp) ? sp : t.shown;
+  const float shown = !isnan(t.sent) ? t.sent : !isnan(sp) ? sp : t.shown;  // (a value just entered: that one)
   if (isnan(shown)) strlcpy(b, "\xE2\x80\x94", sizeof(b));
   else snprintf(b, sizeof(b), "%.0f\xC2\xB0" "C", shown);
   tButtonText(t.value, b);

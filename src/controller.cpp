@@ -43,8 +43,7 @@ MbResult Controller::readScaled(uint16_t addr, float& v, uint8_t& flag) {
   int16_t raw = 0;
   const MbResult r = readRaw(addr, raw);
   if (r != MbResult::Ok) return r;
-  flag = classify(raw);
-  v = (flag == VAL_OK) ? raw / (m_.reg.scale > 0 ? m_.reg.scale : 1.0f) : NAN;
+  scaled(raw, v, flag);
   return r;
 }
 

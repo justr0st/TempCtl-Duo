@@ -45,7 +45,16 @@ bool sendCmd(CmdType c, int arg, float value, int idx, uint8_t sub) {
   return true;
 }
 void selectProgram(int idx) { gSettings.selProgram = idx; }
-void setManualSp(float v, int ch) { gSettings.ch[ch].manualSp = v; printf("[host] manual sp %d = %.1f\n", ch, v); }
+// the control task takes a new manual setpoint over in a later cycle (host: hostSpLag ms after it was set)
+static float hostSpNew[2] = {NAN, NAN};
+static uint32_t hostSpAt[2];
+static uint32_t hostSpLag = 0;
+void setManualSp(float v, int ch) {
+  gSettings.ch[ch].manualSp = v;
+  printf("[host] manual sp %d = %.1f\n", ch, v);
+  if (!hostSpLag) gLive.ch[ch].manualSp = v;
+  else hostSpNew[ch] = v, hostSpAt[ch] = now_;
+}
 void saveSettingsQuiet() {}
 void saveSettingsAndNotify() {}
 BoardLimits boardLimits() { return BoardLimits{true, 2}; }
@@ -54,6 +63,9 @@ const uint16_t LIVE_PERIODS[LIVE_PERIODS_N] = {1, 5, 10, 15, 30, 60, 120, 240, 4
 uint32_t liveMinEff() { return gSettings.liveMin ? gSettings.liveMin : 5; }
 void appRequestRestart(const char* from) { printf("[host] restart %s\n", from); }
 void logEvent(const char* fmt, ...) {}
+void logWarn(const char* fmt, ...) {}
+void logError(const char* fmt, ...) {}
+void logKind(LogKind, const char* fmt, ...) {}
 
 static std::vector<LogEntry> logv;
 uint32_t logSeq() { return logv.size(); }
@@ -226,6 +238,8 @@ void touchStats(char* i, size_t n) { snprintf(i, n, "host"); }
 static void run(uint32_t ms) {
   for (uint32_t t = 0; t < ms; t += 10) {
     now_ += 10;
+    for (int c = 0; c < 2; ++c)
+      if (!isnan(hostSpNew[c]) && now_ - hostSpAt[c] >= hostSpLag) gLive.ch[c].manualSp = hostSpNew[c], hostSpNew[c] = NAN;
     lv_timer_handler();
   }
 }
@@ -435,6 +449,38 @@ int main(int argc, char** argv) {
       printf("round %d   %ld\n", k, used() - base);
     }
     return 0;
+  }
+#endif
+#if !TUI_SMALL
+  // + on a tile while the device takes the new manual setpoint over only 600 ms later: the old value must not
+  // show again, and a + in that time must go on from the new one
+  if (argc > 1 && !strcmp(argv[1], "stepper")) {
+    baseState();
+    uiInit();
+    run(500);
+    hostSpLag = 600;
+    int x, y, bad = 0;
+    if (!findText(lv_screen_active(), "120 \xC2\xB0" "C", x, y)) return printf("[host] stepper: no 120 button\n"), 1;
+    // the + of the first tile is right of its value button
+    lv_obj_t* scr = lv_screen_active();
+    (void)scr;
+    const int px = x + 37 + 4 + 19;
+    tap(px, y);  // 121 pending
+    for (int k = 0; k < 30; ++k) {  // 1.5 s: sent after 0.7 s, taken over 0.6 s later
+      run(50);
+      int a, b;
+      if (findText(lv_screen_active(), "120 \xC2\xB0" "C", a, b)) ++bad;
+    }
+    printf("[host] stepper: old value shown %d times; device %.0f\n", bad, gLive.ch[0].manualSp);
+    // + right after the send, before the device has it: must go on from the new value (121 -> 122 -> 123)
+    tap(px, y);  // 122 pending
+    run(450);    // sent; the device takes it 600 ms later
+    tap(px, y);  // 123
+    run(1500);
+    int a, b;
+    const bool ok123 = findText(lv_screen_active(), "123 \xC2\xB0" "C", a, b);
+    printf("[host] stepper: press during the takeover -> %s; device %.0f\n", ok123 ? "123" : "NOT 123", gLive.ch[0].manualSp);
+    return bad || !ok123 || gLive.ch[0].manualSp != 123;
   }
 #endif
   if (argc > 1 && !strcmp(argv[1], "monkey")) {

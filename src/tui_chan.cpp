@@ -43,96 +43,388 @@ static bool offOn(const Settings& s, int c) { return isOn(s, c) && ra(s, c).offE
 static bool frozenOn(const Settings& s, int c) { return isOn(s, c) && ra(s, c).frozenEnable; }
 static bool cjOn(const Settings& s, int c) { return isLoc(s, c) && s.ch[c].loc.cjEnable; }
 
-#define G(expr) [](const Settings& s, int c) -> float { (void)c; return (float)(expr); }
-#define S(lhs, type) [](Settings& s, int c, float v) { (void)c; lhs = (type)v; }
+static const uint32_t BAUDS[] = {2400, 4800, 9600, 19200, 38400};
+
+// field accessors (named functions, not lambdas: with C++11 the table could then not be a constant and
+// would be built in RAM at start)
+static float fg1(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].type);
+}
+static void fs2(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].type = (uint8_t)v;
+}
+static float fg3(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].endAction);
+}
+static void fs4(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].endAction = (uint8_t)v;
+}
+static float fg5(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].endSp);
+}
+static void fs6(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].endSp = (float)v;
+}
+static bool fl7(const Settings& s, int c) { return isOn(s, c) && s.ch[c].endAction == END_SET_SP; }
+static float fg8(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].spMin);
+}
+static void fs9(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].spMin = (float)v;
+}
+static float fg10(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].spMax);
+}
+static void fs11(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].spMax = (float)v;
+}
+static float fg12(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].mb.slaveId);
+}
+static void fs13(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].mb.slaveId = (uint8_t)v;
+}
+static float fg14(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].mb.profile);
+}
+static void fl15(Settings& s, int c, float v) {  // a new type loads its register defaults
+  if ((uint8_t)v != s.ch[c].mb.profile) regMapDefaults(s.ch[c].mb.reg, (uint8_t)v);
+  s.ch[c].mb.profile = (uint8_t)v;
+}
+static float fg16(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].mb.rampMode);
+}
+static void fs17(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].mb.rampMode = (uint8_t)v;
+}
+static float fg18(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].mb.minStep);
+}
+static void fs19(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].mb.minStep = (float)v;
+}
+static float fg20(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].mb.minWriteSec);
+}
+static void fs21(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].mb.minWriteSec = (uint16_t)v;
+}
+static float fg22(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].mb.lockFront);
+}
+static void fs23(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].mb.lockFront = (uint8_t)v;
+}
+static float fg24(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].loc.sensor);
+}
+static void fs25(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].loc.sensor = (uint8_t)v;
+}
+static float fg26(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].loc.calOffset);
+}
+static void fs27(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].loc.calOffset = (float)v;
+}
+static float fg28(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].loc.calGain);
+}
+static void fs29(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].loc.calGain = (float)v;
+}
+static float fg30(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].loc.kp);
+}
+static void fs31(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].loc.kp = (float)v;
+}
+static float fg32(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].loc.ki);
+}
+static void fs33(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].loc.ki = (float)v;
+}
+static float fg34(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].loc.kd);
+}
+static void fs35(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].loc.kd = (float)v;
+}
+static float fg36(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].loc.windowSec);
+}
+static void fs37(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].loc.windowSec = (float)v;
+}
+static float fg38(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].loc.maxOut);
+}
+static void fs39(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].loc.maxOut = (float)v;
+}
+static float fg40(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].loc.maxTemp);
+}
+static void fs41(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].loc.maxTemp = (float)v;
+}
+static float fg42(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].loc.cjEnable);
+}
+static void fs43(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].loc.cjEnable = (uint8_t)v;
+}
+static float fg44(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.ch[c].loc.cjMax);
+}
+static void fs45(Settings& s, int c, float v) {
+  (void)c;
+  s.ch[c].loc.cjMax = (float)v;
+}
+static float fg46(const Settings& s, int c) {
+  (void)c;
+  return (float)(ra(s, c).enable);
+}
+static void fs47(Settings& s, int c, float v) {
+  (void)c;
+  ra(s, c).enable = (uint8_t)v;
+}
+static float fg48(const Settings& s, int c) {
+  (void)c;
+  return (float)(ra(s, c).minOut);
+}
+static void fs49(Settings& s, int c, float v) {
+  (void)c;
+  ra(s, c).minOut = (float)v;
+}
+static float fg50(const Settings& s, int c) {
+  (void)c;
+  return (float)(ra(s, c).heatSec);
+}
+static void fs51(Settings& s, int c, float v) {
+  (void)c;
+  ra(s, c).heatSec = (uint16_t)v;
+}
+static float fg52(const Settings& s, int c) {
+  (void)c;
+  return (float)(ra(s, c).minRise);
+}
+static void fs53(Settings& s, int c, float v) {
+  (void)c;
+  ra(s, c).minRise = (float)v;
+}
+static float fg54(const Settings& s, int c) {
+  (void)c;
+  return (float)(ra(s, c).holdBand);
+}
+static void fs55(Settings& s, int c, float v) {
+  (void)c;
+  ra(s, c).holdBand = (float)v;
+}
+static float fg56(const Settings& s, int c) {
+  (void)c;
+  return (float)(ra(s, c).holdSec);
+}
+static void fs57(Settings& s, int c, float v) {
+  (void)c;
+  ra(s, c).holdSec = (uint16_t)v;
+}
+static float fg58(const Settings& s, int c) {
+  (void)c;
+  return (float)(ra(s, c).offEnable);
+}
+static void fs59(Settings& s, int c, float v) {
+  (void)c;
+  ra(s, c).offEnable = (uint8_t)v;
+}
+static float fg60(const Settings& s, int c) {
+  (void)c;
+  return (float)(ra(s, c).offRise);
+}
+static void fs61(Settings& s, int c, float v) {
+  (void)c;
+  ra(s, c).offRise = (float)v;
+}
+static float fg62(const Settings& s, int c) {
+  (void)c;
+  return (float)(ra(s, c).offSec);
+}
+static void fs63(Settings& s, int c, float v) {
+  (void)c;
+  ra(s, c).offSec = (uint16_t)v;
+}
+static float fg64(const Settings& s, int c) {
+  (void)c;
+  return (float)(ra(s, c).frozenEnable);
+}
+static void fs65(Settings& s, int c, float v) {
+  (void)c;
+  ra(s, c).frozenEnable = (uint8_t)v;
+}
+static float fg66(const Settings& s, int c) {
+  (void)c;
+  return (float)(ra(s, c).frozenSec);
+}
+static void fs67(Settings& s, int c, float v) {
+  (void)c;
+  ra(s, c).frozenSec = (uint16_t)v;
+}
+static float fl68(const Settings& s, int) {
+  for (int i = 0; i < 5; ++i)
+    if (BAUDS[i] == s.baud) return i;
+  return 2;
+}
+static void fl69(Settings& s, int, float v) { s.baud = BAUDS[(int)v]; }
+static float fg70(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.parity);
+}
+static void fs71(Settings& s, int c, float v) {
+  (void)c;
+  s.parity = (uint8_t)v;
+}
+static float fg72(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.stopBits - 1);
+}
+static void fl73(Settings& s, int, float v) { s.stopBits = (uint8_t)v + 1; }
+static float fg74(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.timeoutMs);
+}
+static void fs75(Settings& s, int c, float v) {
+  (void)c;
+  s.timeoutMs = (uint16_t)v;
+}
+static float fg76(const Settings& s, int c) {
+  (void)c;
+  return (float)(s.commLossSec);
+}
+static void fs77(Settings& s, int c, float v) {
+  (void)c;
+  s.commLossSec = (uint16_t)v;
+}
 
 static const Field CH_FIELDS[] = {
     {F_SEL, "Type", nullptr, 0, 0, 0, nullptr, "Off (not used)\nModbus controller (beta)\nLocal (thermocouple + SSR)",
-     G(s.ch[c].type), S(s.ch[c].type, uint8_t), nullptr},
+     fg1, fs2, nullptr},
     {F_SEL, "When the program ends or stops", nullptr, 0, 0, 0, nullptr,
-     "Keep the last setpoint\nGo to the end setpoint\nSwitch the outputs off", G(s.ch[c].endAction),
-     S(s.ch[c].endAction, uint8_t), isOn},
-    {F_NUM, "End setpoint", nullptr, -200, 1500, 1, "\xC2\xB0" "C", nullptr, G(s.ch[c].endSp), S(s.ch[c].endSp, float),
-     [](const Settings& s, int c) { return isOn(s, c) && s.ch[c].endAction == END_SET_SP; }},
-    {F_NUM, "Lowest setpoint", nullptr, -200, 1500, 1, "\xC2\xB0" "C", nullptr, G(s.ch[c].spMin), S(s.ch[c].spMin, float), isOn},
+     "Keep the last setpoint\nGo to the end setpoint\nSwitch the outputs off", fg3,
+     fs4, isOn},
+    {F_NUM, "End setpoint", nullptr, -200, 1500, 1, "\xC2\xB0" "C", nullptr, fg5, fs6,
+     fl7},
+    {F_NUM, "Lowest setpoint", nullptr, -200, 1500, 1, "\xC2\xB0" "C", nullptr, fg8, fs9, isOn},
     {F_NUM, "Highest setpoint", "Local: at most the cut-off temperature \xE2\x88\x92 10 \xC2\xB0" "C", -200, 1500, 1,
-     "\xC2\xB0" "C", nullptr, G(s.ch[c].spMax), S(s.ch[c].spMax, float), isOn},
+     "\xC2\xB0" "C", nullptr, fg10, fs11, isOn},
     // Modbus
     {F_HEAD, "Modbus controller (beta)", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, isMb},
-    {F_NUM, "Slave address", nullptr, 1, 247, 0, "", nullptr, G(s.ch[c].mb.slaveId), S(s.ch[c].mb.slaveId, uint8_t), isMb},
+    {F_NUM, "Slave address", nullptr, 1, 247, 0, "", nullptr, fg12, fs13, isMb},
     {F_SEL, "Controller type", "A new type loads its register defaults", 0, 0, 0, nullptr,
-     "PMA KS 40-1 / 41-1 / 42-1\nGeneric Modbus RTU", G(s.ch[c].mb.profile),
-     [](Settings& s, int c, float v) {
-       if ((uint8_t)v != s.ch[c].mb.profile) regMapDefaults(s.ch[c].mb.reg, (uint8_t)v);
-       s.ch[c].mb.profile = (uint8_t)v;
-     },
+     "PMA KS 40-1 / 41-1 / 42-1\nGeneric Modbus RTU", fg14,
+     fl15,
      isMb},
     {F_SEL, "Setpoint ramps", nullptr, 0, 0, 0, nullptr, "ESP32 writes setpoint steps\nController ramps (r.SP)",
-     G(s.ch[c].mb.rampMode), S(s.ch[c].mb.rampMode, uint8_t), isMb},
-    {F_NUM, "Min. step between writes", nullptr, 0.1f, 100, 1, "\xC2\xB0" "C", nullptr, G(s.ch[c].mb.minStep),
-     S(s.ch[c].mb.minStep, float), isHostRamp},
-    {F_NUM, "Min. time between writes", nullptr, 1, 3600, 0, "s", nullptr, G(s.ch[c].mb.minWriteSec),
-     S(s.ch[c].mb.minWriteSec, uint16_t), isHostRamp},
-    {F_SW, "Lock the front panel while running", nullptr, 0, 0, 0, nullptr, nullptr, G(s.ch[c].mb.lockFront),
-     S(s.ch[c].mb.lockFront, uint8_t), isMb},
+     fg16, fs17, isMb},
+    {F_NUM, "Min. step between writes", nullptr, 0.1f, 100, 1, "\xC2\xB0" "C", nullptr, fg18,
+     fs19, isHostRamp},
+    {F_NUM, "Min. time between writes", nullptr, 1, 3600, 0, "s", nullptr, fg20,
+     fs21, isHostRamp},
+    {F_SW, "Lock the front panel while running", nullptr, 0, 0, 0, nullptr, nullptr, fg22,
+     fs23, isMb},
     {F_NOTE, "Register addresses: web page, Channels.", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, isMb},
     // local
     {F_HEAD, "Thermocouple", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, isLoc},
-    {F_SEL, "Converter", nullptr, 0, 0, 0, nullptr, "MAX31855\nMAX6675", G(s.ch[c].loc.sensor), S(s.ch[c].loc.sensor, uint8_t),
+    {F_SEL, "Converter", nullptr, 0, 0, 0, nullptr, "MAX31855\nMAX6675", fg24, fs25,
      isLoc},
     {F_NUM, "Calibration offset", "Calibrated = raw \xC3\x97 gain + offset", -50, 50, 2, "\xC2\xB0" "C", nullptr,
-     G(s.ch[c].loc.calOffset), S(s.ch[c].loc.calOffset, float), isLoc},
-    {F_NUM, "Calibration gain", nullptr, 0.5f, 2, 4, "", nullptr, G(s.ch[c].loc.calGain), S(s.ch[c].loc.calGain, float), isLoc},
+     fg26, fs27, isLoc},
+    {F_NUM, "Calibration gain", nullptr, 0.5f, 2, 4, "", nullptr, fg28, fs29, isLoc},
     {F_HEAD, "PID control", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, isLoc},
-    {F_NUM, "Kp", "% output per \xC2\xB0" "C", 0, 1000, 2, "", nullptr, G(s.ch[c].loc.kp), S(s.ch[c].loc.kp, float), isLoc},
-    {F_NUM, "Ki", "% per \xC2\xB0" "C\xC2\xB7s", 0, 100, 4, "", nullptr, G(s.ch[c].loc.ki), S(s.ch[c].loc.ki, float), isLoc},
-    {F_NUM, "Kd", "%\xC2\xB7s per \xC2\xB0" "C", 0, 10000, 1, "", nullptr, G(s.ch[c].loc.kd), S(s.ch[c].loc.kd, float), isLoc},
+    {F_NUM, "Kp", "% output per \xC2\xB0" "C", 0, 1000, 2, "", nullptr, fg30, fs31, isLoc},
+    {F_NUM, "Ki", "% per \xC2\xB0" "C\xC2\xB7s", 0, 100, 4, "", nullptr, fg32, fs33, isLoc},
+    {F_NUM, "Kd", "%\xC2\xB7s per \xC2\xB0" "C", 0, 10000, 1, "", nullptr, fg34, fs35, isLoc},
     {F_NUM, "SSR window", "The SSR is on for the output share of every window", 0.2f, 10, 1, "s", nullptr,
-     G(s.ch[c].loc.windowSec), S(s.ch[c].loc.windowSec, float), isLoc},
-    {F_NUM, "Max. output", nullptr, 0, 100, 0, "%", nullptr, G(s.ch[c].loc.maxOut), S(s.ch[c].loc.maxOut, float), isLoc},
-    {F_NUM, "Cut-off temperature", "Outputs off above", 50, 600, 0, "\xC2\xB0" "C", nullptr, G(s.ch[c].loc.maxTemp),
-     S(s.ch[c].loc.maxTemp, float), isLoc},
+     fg36, fs37, isLoc},
+    {F_NUM, "Max. output", nullptr, 0, 100, 0, "%", nullptr, fg38, fs39, isLoc},
+    {F_NUM, "Cut-off temperature", "Outputs off above", 50, 600, 0, "\xC2\xB0" "C", nullptr, fg40,
+     fs41, isLoc},
     {F_SW, "Converter too hot: fault", "MAX31855 cold junction (the converter's own temperature)", 0, 0, 0, nullptr, nullptr,
-     G(s.ch[c].loc.cjEnable), S(s.ch[c].loc.cjEnable, uint8_t), isLoc},
-    {F_NUM, "\xE2\x80\xA6 above", nullptr, 30, 125, 0, "\xC2\xB0" "C", nullptr, G(s.ch[c].loc.cjMax), S(s.ch[c].loc.cjMax, float), cjOn},
+     fg42, fs43, isLoc},
+    {F_NUM, "\xE2\x80\xA6 above", nullptr, 30, 125, 0, "\xC2\xB0" "C", nullptr, fg44, fs45, cjOn},
     // runaway (values of the channel's type)
     {F_HEAD, "Thermal runaway protection", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, isOn},
-    {F_SW, "Runaway detection", nullptr, 0, 0, 0, nullptr, nullptr, G(ra(s, c).enable), S(ra(s, c).enable, uint8_t), isOn},
-    {F_NUM, "Heating failed: output at least", nullptr, 0, 100, 0, "%", nullptr, G(ra(s, c).minOut), S(ra(s, c).minOut, float), raOn},
-    {F_NUM, "\xE2\x80\xA6 for", nullptr, 10, 3600, 0, "s", nullptr, G(ra(s, c).heatSec), S(ra(s, c).heatSec, uint16_t), raOn},
-    {F_NUM, "\xE2\x80\xA6 with a rise below", nullptr, 0.5f, 100, 1, "\xC2\xB0" "C", nullptr, G(ra(s, c).minRise),
-     S(ra(s, c).minRise, float), raOn},
+    {F_SW, "Runaway detection", nullptr, 0, 0, 0, nullptr, nullptr, fg46, fs47, isOn},
+    {F_NUM, "Heating failed: output at least", nullptr, 0, 100, 0, "%", nullptr, fg48, fs49, raOn},
+    {F_NUM, "\xE2\x80\xA6 for", nullptr, 10, 3600, 0, "s", nullptr, fg50, fs51, raOn},
+    {F_NUM, "\xE2\x80\xA6 with a rise below", nullptr, 0.5f, 100, 1, "\xC2\xB0" "C", nullptr, fg52,
+     fs53, raOn},
     {F_NUM, "Holding: PV off the setpoint by more than \xC2\xB1", nullptr, 1, 200, 0, "\xC2\xB0" "C", nullptr,
-     G(ra(s, c).holdBand), S(ra(s, c).holdBand, float), raOn},
-    {F_NUM, "\xE2\x80\xA6 for longer than", nullptr, 5, 3600, 0, "s", nullptr, G(ra(s, c).holdSec), S(ra(s, c).holdSec, uint16_t), raOn},
+     fg54, fs55, raOn},
+    {F_NUM, "\xE2\x80\xA6 for longer than", nullptr, 5, 3600, 0, "s", nullptr, fg56, fs57, raOn},
     {F_SW, "Heating while off (stuck SSR)", "Checked from 2 min after off, not while the other channel heats", 0, 0, 0,
-     nullptr, nullptr, G(ra(s, c).offEnable), S(ra(s, c).offEnable, uint8_t), isOn},
-    {F_NUM, "\xE2\x80\xA6 PV rises by", nullptr, 2, 100, 1, "\xC2\xB0" "C", nullptr, G(ra(s, c).offRise), S(ra(s, c).offRise, float), offOn},
-    {F_NUM, "\xE2\x80\xA6 within", nullptr, 10, 3600, 0, "s", nullptr, G(ra(s, c).offSec), S(ra(s, c).offSec, uint16_t), offOn},
+     nullptr, nullptr, fg58, fs59, isOn},
+    {F_NUM, "\xE2\x80\xA6 PV rises by", nullptr, 2, 100, 1, "\xC2\xB0" "C", nullptr, fg60, fs61, offOn},
+    {F_NUM, "\xE2\x80\xA6 within", nullptr, 10, 3600, 0, "s", nullptr, fg62, fs63, offOn},
     {F_SW, "Reading frozen", "Outputs on, but the reading does not change at all", 0, 0, 0, nullptr, nullptr,
-     G(ra(s, c).frozenEnable), S(ra(s, c).frozenEnable, uint8_t), isOn},
-    {F_NUM, "\xE2\x80\xA6 for", nullptr, 10, 3600, 0, "s", nullptr, G(ra(s, c).frozenSec), S(ra(s, c).frozenSec, uint16_t), frozenOn},
+     fg64, fs65, isOn},
+    {F_NUM, "\xE2\x80\xA6 for", nullptr, 10, 3600, 0, "s", nullptr, fg66, fs67, frozenOn},
 };
 
-static const uint32_t BAUDS[] = {2400, 4800, 9600, 19200, 38400};
 static const Field BUS_FIELDS[] = {
     {F_NOTE, "Shared by both Modbus channels. Modbus is beta: not tested with a controller yet.", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, nullptr},
     {F_SEL, "Baud rate", nullptr, 0, 0, 0, nullptr, "2400\n4800\n9600\n19200\n38400",
-     [](const Settings& s, int) -> float {
-       for (int i = 0; i < 5; ++i)
-         if (BAUDS[i] == s.baud) return i;
-       return 2;
-     },
-     [](Settings& s, int, float v) { s.baud = BAUDS[(int)v]; }, nullptr},
-    {F_SEL, "Parity", nullptr, 0, 0, 0, nullptr, "None\nEven\nOdd", G(s.parity), S(s.parity, uint8_t), nullptr},
-    {F_SEL, "Stop bits", nullptr, 0, 0, 0, nullptr, "1\n2", G(s.stopBits - 1), [](Settings& s, int, float v) { s.stopBits = (uint8_t)v + 1; },
+     fl68,
+     fl69, nullptr},
+    {F_SEL, "Parity", nullptr, 0, 0, 0, nullptr, "None\nEven\nOdd", fg70, fs71, nullptr},
+    {F_SEL, "Stop bits", nullptr, 0, 0, 0, nullptr, "1\n2", fg72, fl73,
      nullptr},
-    {F_NUM, "Response timeout", nullptr, 50, 2000, 0, "ms", nullptr, G(s.timeoutMs), S(s.timeoutMs, uint16_t), nullptr},
-    {F_NUM, "Pause the run after no answer for", "0 = never pause", 0, 3600, 0, "s", nullptr, G(s.commLossSec),
-     S(s.commLossSec, uint16_t), nullptr},
+    {F_NUM, "Response timeout", nullptr, 50, 2000, 0, "ms", nullptr, fg74, fs75, nullptr},
+    {F_NUM, "Pause the run after no answer for", "0 = never pause", 0, 3600, 0, "s", nullptr, fg76,
+     fs77, nullptr},
 };
-#undef G
-#undef S
 
 static const Field* fieldsOf(int& n) {
   if (tab == 2) {

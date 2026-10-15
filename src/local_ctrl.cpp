@@ -332,7 +332,7 @@ static void relayUpdate() {
   if (on == relayOn) return;
   relayOn = on;
   relayWrite(on);
-  if (!on && used && (fault || estop)) logEvent("SSR supply relay off: %s", estop ? "E-stop" : why && *why ? why : "fault");
+  if (!on && used && (fault || estop)) logError("SSR supply relay off: %s", estop ? "E-stop" : why && *why ? why : "fault");
 }
 #else
 bool localCtrlRelayWired() { return false; }

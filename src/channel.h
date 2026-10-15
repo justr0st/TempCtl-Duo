@@ -70,6 +70,7 @@ class ModbusChannel : public Channel {
     ctl_.attach(bus, m);
     runaway_.reset();
     guard_.reset();
+    noBlock_ = false;
   }
   uint8_t type() const override { return CH_MODBUS; }
   bool onBus() const override { return true; }
@@ -95,6 +96,7 @@ class ModbusChannel : public Channel {
   uint32_t lastPollMs_ = 0;
   uint8_t fault_ = FAULT_NONE;
   char faultText_[64] = "";
+  bool noBlock_ = false;  // the controller refused reading PV / SP.EF / output in one block
 };
 
 // Thermocouple + SSR + PID on the ESP32; the work is done by the local task

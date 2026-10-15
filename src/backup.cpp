@@ -207,7 +207,7 @@ bool backupRestore(const char* name, uint8_t what, char* msg, size_t n) {
   snprintf(msg, n, "%s%s%s restored.%s%s%s", sets ? "Settings" : "", sets && progs ? " and " : "", progs ? p : "",
            bad[0] ? " Not restored: " : "", bad, net ? (bad[0] ? ". Network settings: used after a restart." : " Network settings: used after a restart.") : bad[0] ? "." : "");
   const bool ok = !bad[0];
-  logEvent("Restored from the SD card backup/%s: %s", name, msg);
+  logKind(ok ? LK_EVENT : LK_WARN, "Restored from the SD card backup/%s: %s", name, msg);
   return ok;
 }
 

@@ -310,7 +310,7 @@ static void tuneJson(JsonObject o, int ch) {
   setNum(a["sp"], t.sp);
   a["cycle"] = t.cycle;
   a["elapsed"] = (int)t.elapsed;
-  a["msg"] = t.msg;
+  a["msg"] = JsonString(t.msg);
   if (t.state == TuneState::Done) {
     a["kp"] = t.res.kp;
     a["ki"] = t.res.ki;
@@ -327,32 +327,35 @@ static void stageJson(JsonObject o, const StageInfo& si) {
   o["dur"] = roundf(si.dur * 10) / 10;
 }
 
-// "run" object of /api/status: the fields of the old page (bottom channel /
-// Sequence phase) plus the Duo run state for both channels
+// "run" object of /api/status: the fields of the old page (bottom channel / Sequence phase; for a
+// Timeline the bottom's lane, the top's when the bottom has no steps) plus the Duo run state for both channels
 static void runStatusJson(JsonObject r, const LiveData& L) {
+  const bool tl = L.progType == PROG_TL;
+  const int lc = (tl && L.steps[ENGINE_CH] == 0) ? CH_TOP : ENGINE_CH;
+  const StageInfo& si = tl ? L.lane[lc] : L.seq;
   r["state"] = runStateName(L.state);
-  r["phase"] = stageName(L.phase);  // legacy: ramp / hold / wait / ...
-  r["step"] = L.step;
-  r["phaseEl"] = L.phaseEl;
-  r["phaseDur"] = L.phaseDur;
+  r["phase"] = stageName(si.st);  // legacy: ramp / hold / wait / ...
+  r["step"] = si.idx;
+  r["phaseEl"] = si.el;
+  r["phaseDur"] = si.dur > si.el ? si.dur : si.el;  // wait / pause: nothing "left"
   r["elapsed"] = L.elapsed;
-  r["total"] = L.total;
+  r["total"] = L.elapsed + L.remaining;
   r["remaining"] = L.remaining;
-  r["soakWait"] = L.soakWait;
-  setNum(r["hostSp"], L.hostSp);
-  setNum(r["target"], L.target);
-  r["spSynced"] = L.spSynced;
-  r["spWrites"] = L.spWrites;
-  r["msg"] = L.runMsg;
+  r["soakWait"] = L.waiting;
+  setNum(r["hostSp"], L.run[ENGINE_CH].sp);
+  setNum(r["target"], L.run[ENGINE_CH].target);  // NaN while the bottom is idle
+  r["spSynced"] = L.spSyncedCh[ENGINE_CH];
+  r["spWrites"] = L.spWritesCh[ENGINE_CH];
+  r["msg"] = JsonString(L.runMsg);
   r["prog"] = L.runProg;
-  r["name"] = L.runName;
-  r["steps"] = L.stepCount;
+  r["name"] = JsonString(L.runName);
+  r["steps"] = tl ? L.steps[lc] : L.phases;
   if (L.runProg < 0) return;
   r["type"] = progTypeName(L.progType);
   r["waiting"] = L.waiting;
   r["progPause"] = L.progPause;
   r["actionRequired"] = L.pauseMsg;
-  r["pauseText"] = L.pauseText;
+  r["pauseText"] = JsonString(L.pauseText);
   r["edited"] = L.runEdited;
   if (L.progType == PROG_SEQ) {
     stageJson(r["seq"].to<JsonObject>(), L.seq);
@@ -376,35 +379,40 @@ static void runStatusJson(JsonObject r, const LiveData& L) {
   }
 }
 
+// The old page's status (TempCtl 1.2): the flat fields are the bottom channel
 static void handleStatus() {
-  LiveData L;
-  Settings S;
+  std::unique_ptr<LiveData> lp(new (std::nothrow) LiveData());
+  ScratchSettings sp;
+  if (!lp || !sp) return sendError("Out of memory - try again", 503);
+  const LiveData& L = *lp;
+  const Settings& S = *sp;
   {
     Guard g;
-    L = gLive;
-    S = gSettings;
+    *lp = gLive;
+    *sp = gSettings;
   }
+  const ChannelLive& B = L.ch[ENGINE_CH];
   JsonDocument d;
   JsonObject c = d["comm"].to<JsonObject>();
-  c["ok"] = L.commOk;
-  c["okCount"] = L.okCount;
-  c["errCount"] = L.errCount;
-  c["err"] = L.lastErr;
-  setNum(d["pv"], L.pvValid ? L.pv : NAN);
-  d["pvFlag"] = Controller::flagName(L.pvFlag);
-  setNum(d["spEff"], L.spEffValid ? L.spEff : NAN);
-  setNum(d["out"], L.outValid ? L.out : NAN);
-  if (L.statusValid) {
-    d["status"] = L.status;
-    if (S.ch[ENGINE_CH].mb.profile == PROFILE_PMA_KS4X) d["mode"] = pmaModeText(L.status);
+  c["ok"] = B.commOk;
+  c["okCount"] = B.okCount;
+  c["errCount"] = B.errCount;
+  c["err"] = JsonString(B.lastErr);
+  setNum(d["pv"], B.pvValid ? B.pv : NAN);
+  d["pvFlag"] = Controller::flagName(B.pvFlag);
+  setNum(d["spEff"], B.spEffValid ? B.spEff : NAN);
+  setNum(d["out"], B.outValid ? B.out : NAN);
+  if (B.statusValid) {
+    d["status"] = B.status;
+    if (S.ch[ENGINE_CH].mb.profile == PROFILE_PMA_KS4X) d["mode"] = pmaModeText(B.status);
   }
-  if (L.alarmValid) d["alarm"] = L.alarm;
+  if (B.alarmValid) d["alarm"] = B.alarm;
   JsonObject r = d["run"].to<JsonObject>();
   runStatusJson(r, L);
   JsonObject m = d["manual"].to<JsonObject>();
-  m["on"] = L.manualOn;
+  m["on"] = B.manualOn;
   setNum(m["sp"], S.ch[ENGINE_CH].manualSp);
-  m["synced"] = L.manualSynced;
+  m["synced"] = B.manualSynced;
   d["sel"] = S.selProgram;
   {
     ProgSummary ps;
@@ -425,10 +433,10 @@ static void handleStatus() {
   for (int i = 0; i < NUM_CHANNELS; ++i) {
     const ChannelLive& C = L.ch[i];
     JsonObject o = chs.add<JsonObject>();
-    o["name"] = C.name;
+    o["name"] = JsonString(C.name);
     o["type"] = channelTypeName(C.type);
     o["ok"] = C.commOk;
-    o["err"] = C.lastErr;
+    o["err"] = JsonString(C.lastErr);
     setNum(o["pv"], C.pvValid ? C.pv : NAN);
     o["pvFlag"] = Controller::flagName(C.pvFlag);
     setNum(o["sp"], C.spEffValid ? C.spEff : NAN);
@@ -535,7 +543,7 @@ static void handleGetPrograms() {
       o["total"] = 0;
       continue;
     }
-    o["name"] = p.name;
+    o["name"] = JsonString(p.name);
     o["type"] = progTypeName(p.type);
     o["steps"] = p.items;  // phases (Sequence) / steps of both channels (Timeline)
     o["total"] = p.total;
@@ -622,13 +630,14 @@ static void handleSelect() {
 
 // GET: the running (or last) program's running copy, with its run edits
 static void handleGetRun() {
-  JsonDocument d;
-  LiveData L;
+  std::unique_ptr<LiveData> lp(new (std::nothrow) LiveData());
+  if (!lp) return sendError("Out of memory - try again", 503);
   {
     Guard g;
-    L = gLive;
+    *lp = gLive;
   }
-  runStatusJson(d["run"].to<JsonObject>(), L);
+  JsonDocument d;
+  runStatusJson(d["run"].to<JsonObject>(), *lp);
   if (!runProgramJson(d["program"].to<JsonObject>())) d.remove("program");
   sendJson(d);
 }
@@ -972,7 +981,110 @@ static void handleMbWrite() {
   sendJson(d);
 }
 
+// ------------------------------------------------------------ background bus tools
+// The find-setpoint scan (up to 20 s) and reading all PMA parameters (up to 3 s each) take too long to wait
+// for in a handler: the loop task (touch screen, web) would stand still. The handler starts a job and
+// answers {"busy":true,...}; webLoop() moves it on; the page asks again (GET) until the result comes.
+// One job at a time; a result not fetched within 60 s is dropped.
+enum : uint8_t { JOB_NONE, JOB_FINDSP, JOB_PARAMS };
+static struct {
+  uint8_t kind = JOB_NONE;
+  uint8_t ch = 0;
+  bool running = false, waiting = false;  // waiting: a request is with the control task
+  int i = 0, n = 0;                       // parameters: next / count
+  uint16_t want = 0;                      // find-SP: the requested end address
+  float scale = 1;
+  uint32_t doneAt = 0;
+  BusRequest r;
+  JsonDocument res;                       // parameters: the answer being built
+} job;
+
+static void jobClear() {
+  job.kind = JOB_NONE;
+  job.running = job.waiting = false;
+  job.res.clear();
+}
+
+static void paramsAnswerStart(bool supported) {
+  job.res.clear();
+  job.res["supported"] = supported;
+  job.res["params"].to<JsonArray>();
+  JsonArray aa = job.res["actions"].to<JsonArray>();
+  if (supported) {
+    int n;
+    const ActionDef* a = pmaActions(n);
+    for (int i = 0; i < n; ++i) aa.add(a[i].label);
+  }
+}
+
+static void jobStep() {
+  if (job.kind == JOB_NONE) return;
+  if (!job.running) {
+    if (millis() - job.doneAt > 60000) jobClear();
+    return;
+  }
+  if (job.waiting) {
+    if (busCheck(job.r) == 0) return;
+    job.waiting = false;
+    if (job.kind == JOB_FINDSP) {
+      job.running = false;
+      job.doneAt = millis();
+      return;
+    }
+    // a parameter's value
+    int n;
+    const ParamDef* p = pmaParams(n);
+    JsonObject o = job.res["params"].as<JsonArray>().add<JsonObject>();
+    const ParamDef& d = p[job.i];
+    o["name"] = d.name;
+    o["addr"] = d.addr;
+    o["scaled"] = d.scaled != 0;
+    o["desc"] = d.desc;
+    if (job.r.ok) {
+      const int16_t raw = job.r.values[0];
+      if (Controller::classify(raw) == VAL_OFF) o["value"] = "off";
+      else if (d.scaled) o["value"] = raw / job.scale;
+      else o["value"] = raw;
+    } else {
+      o["err"] = job.r.err;
+    }
+    ++job.i;
+  }
+  if (job.kind == JOB_PARAMS) {
+    if (job.i >= job.n) {
+      job.running = false;
+      job.doneAt = millis();
+      return;
+    }
+    int n;
+    const ParamDef* p = pmaParams(n);
+    BusRequest r{};
+    r.ch = job.ch;
+    r.op = BUS_READ;
+    r.addr = p[job.i].addr;
+    r.count = 1;
+    job.r = r;
+    if (!busStart(job.r, 3000)) return;  // (a tool of the touch screen or console runs: next time)
+    job.waiting = true;
+  }
+}
+
+static void jobBusy() {
+  JsonDocument d;
+  d["busy"] = true;
+  if (job.kind == JOB_PARAMS) {
+    d["done"] = job.i;
+    d["total"] = job.n;
+  }
+  sendJson(d);
+}
+
+// POST {"ch","from","to"}: starts the scan ({"busy":true}); GET: {"busy":true} while it runs, then the result
+// {"ok","err","stoppedAt" (the time limit stopped it there: scan on from stoppedAt + 1),"reference",
+// "candidates"} ({"busy":false,"none":true}: none started)
 static void handleFindSp() {
+  if (job.kind != JOB_NONE && job.running)
+    return job.kind == JOB_FINDSP ? jobBusy() : sendError("Another bus tool is running - try again", 503);
   JsonDocument b;
   parseBody(b);
   BusRequest r{};
@@ -983,59 +1095,72 @@ static void handleFindSp() {
     r.from = b["from"] | gSettings.scanFrom;
     r.to = b["to"] | gSettings.scanTo;
   }
-  const uint16_t want = r.to;
-  const bool ok = busRequest(r, 30000);  // (the scan stops after 20 s by itself)
+  jobClear();
+  job.r = r;
+  job.want = r.to;
+  if (!busStart(job.r, 30000)) return sendError("Bus tool busy - try again", 503);  // (the scan stops after 20 s)
+  job.kind = JOB_FINDSP;
+  job.ch = r.ch;
+  job.running = job.waiting = true;
+  return jobBusy();
+}
+static void handleFindSpResult() {
+  if (job.kind != JOB_FINDSP) {
+    JsonDocument d;
+    d["busy"] = false;
+    d["none"] = true;
+    return sendJson(d);
+  }
+  if (job.running) return jobBusy();
+  const BusRequest& r = job.r;
   JsonDocument d;
-  d["ok"] = ok;
-  if (!ok) d["err"] = r.err;
-  else if (r.to < want && r.to >= r.from) d["stoppedAt"] = r.to;  // time limit: scan the rest from stoppedAt + 1
+  d["ok"] = r.ok;
+  if (!r.ok) d["err"] = r.err;
+  else if (r.to < job.want && r.to >= r.from) d["stoppedAt"] = r.to;
   d["reference"] = r.refValue;
   JsonArray a = d["candidates"].to<JsonArray>();
   for (int i = 0; i < r.n; ++i) a.add((uint16_t)r.values[i]);
+  jobClear();
   sendJson(d);
 }
 
 // ------------------------------------------------------------ controller parameters
+// GET ?ch=n: the PMA parameters of channel n, read one after the other in the background: {"busy":true,
+// "done","total"} until all are read, then {"supported","params":[{"name","addr","scaled","desc","value" or
+// "err"}],"actions"}. Asking again while a finished answer for the channel waits returns it.
 static void handleGetParams() {
+  const uint8_t ch = argCh();
+  if (job.kind == JOB_PARAMS && job.ch == ch) {
+    if (job.running) return jobBusy();
+    String out;
+    serializeJson(job.res, out);
+    jobClear();
+    return sendText(200, "application/json", out);
+  }
+  if (job.kind != JOB_NONE && job.running) return sendError("Another bus tool is running - try again", 503);
   uint8_t profile;
   float scale;
-  const uint8_t ch = argCh();
   {
     Guard g;
     profile = gSettings.ch[ch].mb.profile;
     scale = gSettings.ch[ch].mb.reg.scale;
   }
-  JsonDocument d;
-  d["supported"] = profile == PROFILE_PMA_KS4X;
-  JsonArray pa = d["params"].to<JsonArray>();
-  JsonArray aa = d["actions"].to<JsonArray>();
-  if (profile == PROFILE_PMA_KS4X) {
-    int n;
-    const ParamDef* p = pmaParams(n);
-    for (int i = 0; i < n; ++i) {
-      JsonObject o = pa.add<JsonObject>();
-      o["name"] = p[i].name;
-      o["addr"] = p[i].addr;
-      o["scaled"] = p[i].scaled != 0;
-      o["desc"] = p[i].desc;
-      BusRequest r{};
-      r.ch = ch;
-      r.op = BUS_READ;
-      r.addr = p[i].addr;
-      r.count = 1;
-      if (busRequest(r, 3000)) {
-        const int16_t raw = r.values[0];
-        if (Controller::classify(raw) == VAL_OFF) o["value"] = "off";
-        else if (p[i].scaled) o["value"] = raw / scale;
-        else o["value"] = raw;
-      } else {
-        o["err"] = r.err;
-      }
-    }
-    const ActionDef* a = pmaActions(n);
-    for (int i = 0; i < n; ++i) aa.add(a[i].label);
+  jobClear();
+  paramsAnswerStart(profile == PROFILE_PMA_KS4X);
+  if (profile != PROFILE_PMA_KS4X) {  // nothing to read
+    String out;
+    serializeJson(job.res, out);
+    jobClear();
+    return sendText(200, "application/json", out);
   }
-  sendJson(d);
+  job.kind = JOB_PARAMS;
+  job.ch = ch;
+  job.scale = scale > 0 ? scale : 1;
+  pmaParams(job.n);
+  job.i = 0;
+  job.running = true;
+  jobStep();  // (the first request)
+  jobBusy();
 }
 
 static void handlePostParam() {
@@ -1224,6 +1349,42 @@ static void sendAsset(const WebAsset& a) {
 
 static const char* const CH_KEYS[NUM_CHANNELS] = {"b", "t"};
 
+// ?a0=&a1= (device millis, as GET /api/raw): the new PV readings after them, so that the page needs no
+// second request per poll: "raw":[[ms, pv, ms, pv, ...], [...]] (pv in 0.1 degC, null = no reading). More
+// than LIVE_RAW_MAX for a channel (a tab that was hidden): "rawMore":true instead, the page uses /api/raw.
+// Not over the serial link (as /api/raw).
+static constexpr uint32_t LIVE_RAW_MAX = 32;
+static void liveRaw(JsonDocument& d) {
+  if (sreq || !rawCap() || !reqHas("a0") || !reqHas("a1")) return;
+  uint32_t after[NUM_CHANNELS];
+  for (int c = 0; c < NUM_CHANNELS; ++c) {
+    const char k[3] = {'a', (char)('0' + c), 0};
+    after[c] = (uint32_t)strtoul(reqArg(k).c_str(), nullptr, 10);
+  }
+  RawPlan p;
+  rawPlan(after, 0, LIVE_RAW_MAX + 1, p);
+  for (int c = 0; c < NUM_CHANNELS; ++c)
+    if (p.n[c] > LIVE_RAW_MAX) {
+      d["rawMore"] = true;
+      return;
+    }
+  JsonArray a = d["raw"].to<JsonArray>();
+  uint8_t buf[LIVE_RAW_MAX * 8];
+  for (int c = 0; c < NUM_CHANNELS; ++c) {
+    JsonArray x = a.add<JsonArray>();
+    const uint32_t n = rawCopy(c, p.from[c], p.n[c], buf);
+    for (uint32_t k = 0; k < n; ++k) {
+      const uint8_t* r = buf + k * 8;
+      const uint32_t ms = (uint32_t)r[0] | (uint32_t)r[1] << 8 | (uint32_t)r[2] << 16 | (uint32_t)r[3] << 24;
+      const int16_t pv = (int16_t)((uint16_t)r[4] | (uint16_t)r[5] << 8);
+      if (!ms) continue;  // (overwritten meanwhile)
+      x.add(ms);
+      if (pv == INT16_MIN) x.add(nullptr);  // (RAW_NONE: a gap)
+      else x.add(pv);
+    }
+  }
+}
+
 // Everything the Status page polls (1 s): both channels, run state, counters
 static void handleLive() {
   // gLive (on the heap: 1 kB) and the few settings this answer needs, under the lock
@@ -1303,13 +1464,13 @@ static void handleLive() {
   r["state"] = runStateName(L.state);
   r["prog"] = L.runProg;
   if (L.runProg >= 0) {
-    r["name"] = L.runName;
+    r["name"] = JsonString(L.runName);
     r["type"] = progTypeName(L.progType);
     r["el"] = roundf(L.elapsed * 10) / 10;
     r["rem"] = roundf(L.remaining * 10) / 10;
     r["progPause"] = L.progPause;
     r["actionRequired"] = L.pauseMsg;
-    r["pauseText"] = L.pauseText;
+    r["pauseText"] = JsonString(L.pauseText);
     r["edited"] = L.runEdited;
     r["waiting"] = L.waiting;
     if (L.progType == PROG_SEQ) {
@@ -1317,10 +1478,10 @@ static void handleLive() {
       r["phases"] = L.phases;
     }
   }
-  r["msg"] = L.runMsg;
+  r["msg"] = JsonString(L.runMsg);
   if (L.intrValid) {  // "Run interrupted by a reset": where it was (program = prog / name / type)
     JsonObject x = r["intr"].to<JsonObject>();
-    x["reason"] = L.intrReason;
+    x["reason"] = JsonString(L.intrReason);
     x["exact"] = L.intrExact;
     x["el"] = roundf(L.intrPos.el);
     JsonArray xi = x["i"].to<JsonArray>(), xs = x["st"].to<JsonArray>(), xl = x["left"].to<JsonArray>();
@@ -1337,10 +1498,10 @@ static void handleLive() {
     const ChOut& o = L.run[i];
     JsonObject c = a.add<JsonObject>();
     c["key"] = CH_KEYS[i];
-    c["name"] = C.name;
+    c["name"] = JsonString(C.name);
     c["type"] = channelTypeName(C.type);
     c["ok"] = C.commOk;
-    c["err"] = C.lastErr;
+    c["err"] = JsonString(C.lastErr);
     setNum(c["pv"], C.pvValid ? C.pv : NAN);
     c["pvFlag"] = Controller::flagName(C.pvFlag);
     setNum(c["sp"], C.spEffValid ? C.spEff : NAN);
@@ -1370,6 +1531,7 @@ static void handleLive() {
     m["synced"] = C.manualSynced;
     if (C.type == CH_LOCAL) tuneJson(c, i);
   }
+  liveRaw(d);
   sendJson(d);
 }
 
@@ -1726,6 +1888,7 @@ static const Route ROUTES[] = {
     {"/api/mb/read", HTTP_GET, handleMbRead},
     {"/api/mb/write", HTTP_POST, handleMbWrite},
     {"/api/mb/findsp", HTTP_POST, handleFindSp},
+    {"/api/mb/findsp", HTTP_GET, handleFindSpResult},
     {"/api/params", HTTP_GET, handleGetParams},
     {"/api/params", HTTP_POST, handlePostParam},
     {"/api/action", HTTP_POST, handleAction},
@@ -1768,6 +1931,7 @@ void webBegin() {
 
 void webLoop() {
   server.handleClient();
+  jobStep();
   if (restartAt && (int32_t)(millis() - restartAt) >= 0) {
     restartAt = 0;
     appRequestRestart("from the web page");

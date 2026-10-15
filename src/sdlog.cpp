@@ -292,7 +292,7 @@ static void flush(bool closing) {
     }
   } else if (!ok && !failing) {
     failing = true;
-    logEvent("SD card: writing the run log failed (%s) - trying again", err);  // (a row in the buffer too)
+    logWarn("SD card: writing the run log failed (%s) - trying again", err);  // (a row in the buffer too)
   } else if (ok && failing) {
     failing = false;
     LogSerial.println("[sd] run log written again");
@@ -350,7 +350,7 @@ static void writerTask(void*) {
     const uint32_t wait = failing ? RETRY_MS : FLUSH_MS;
     if (startPending || end || n > BUF / 2 || ((n || pendLen) && millis() - lastFlush >= wait)) {
       if (end && failing && ++closeTries > 3) {  // the run ended and the card still fails: give up
-        logEvent("SD card: the end of the run log could not be written (%s)", lastErr);
+        logWarn("SD card: the end of the run log could not be written (%s)", lastErr);
         xSemaphoreTake(wmx, portMAX_DELAY);
         pendLen = 0;
         open_ = endPending = failing = false;
@@ -709,14 +709,14 @@ static void installFirmware() {
     if (!otaEnd(err, sizeof(err))) return false;
     written = true;
     unlink(FW_DONE);  // installed: renamed, so it is not offered again
-    if (rename(FW_FILE, FW_DONE) != 0) logEvent("SD card: firmware.bin could not be renamed (delete it in a PC)");
+    if (rename(FW_FILE, FW_DONE) != 0) logWarn("SD card: firmware.bin could not be renamed (delete it in a PC)");
     return true;
   }, 10000);
   if (!ok && !written) {
     OtaStatus o;
     otaStatus(o);
     if (o.phase == OTA_RUNNING) otaAbort(err);  // (card lost after the start)
-    else if (o.phase != OTA_FAILED) logEvent("Firmware update from the SD card not started: %s", err);
+    else if (o.phase != OTA_FAILED) logWarn("Firmware update from the SD card not started: %s", err);
   }
 }
 

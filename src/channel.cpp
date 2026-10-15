@@ -38,14 +38,44 @@ bool ModbusChannel::poll(ChannelLive& L, char* err, size_t n) {
   uint8_t pvFlag = VAL_OK, f = 0;
   bool pvOk = false, spOk = false, outOk = false, stOk = false, alOk = false;
   err[0] = 0;
+  // PV, SP.EF and output in one request when they lie within 8 registers (PMA: 13293..13295); a controller
+  // that answers that with an exception is read register by register from then on
+  uint16_t lo = reg.pv, hi = reg.pv;
+  for (uint16_t a : {reg.spEff, reg.out})
+    if (a != REG_UNSET && reg.pv != REG_UNSET) {
+      if (a < lo) lo = a;
+      if (a > hi) hi = a;
+    }
+  bool block = !noBlock_ && reg.pv != REG_UNSET && hi > lo && hi - lo < 8;
+  int16_t b[8];
+  MbResult br = MbResult::Ok;
+  if (block) {
+    br = ctl_.readBlock(lo, hi - lo + 1, b);
+    if (br == MbResult::Exception) {
+      noBlock_ = true;
+      block = false;
+    }
+  }
   if (reg.pv == REG_UNSET) {
     snprintf(err, n, "PV register not configured");
   } else {
-    const MbResult r = ctl_.readScaled(reg.pv, pv, pvFlag);
+    const MbResult r = block ? br : ctl_.readScaled(reg.pv, pv, pvFlag);
     if (r == MbResult::Ok) {
+      if (block) {
+        ctl_.scaled(b[reg.pv - lo], pv, pvFlag);
+        if (reg.spEff != REG_UNSET) {
+          ctl_.scaled(b[reg.spEff - lo], spEff, f);
+          spOk = (f == VAL_OK);
+        }
+        if (reg.out != REG_UNSET) {
+          ctl_.scaled(b[reg.out - lo], out, f);
+          outOk = (f == VAL_OK);
+        }
+      } else {
+        if (reg.spEff != REG_UNSET && ctl_.readScaled(reg.spEff, spEff, f) == MbResult::Ok) spOk = (f == VAL_OK);
+        if (reg.out != REG_UNSET && ctl_.readScaled(reg.out, out, f) == MbResult::Ok) outOk = (f == VAL_OK);
+      }
       pvOk = (pvFlag == VAL_OK);
-      if (reg.spEff != REG_UNSET && ctl_.readScaled(reg.spEff, spEff, f) == MbResult::Ok) spOk = (f == VAL_OK);
-      if (reg.out != REG_UNSET && ctl_.readScaled(reg.out, out, f) == MbResult::Ok) outOk = (f == VAL_OK);
       if (reg.status != REG_UNSET) stOk = ctl_.readRaw(reg.status, st) == MbResult::Ok;
       if (reg.alarm != REG_UNSET) alOk = ctl_.readRaw(reg.alarm, al) == MbResult::Ok;
     } else {

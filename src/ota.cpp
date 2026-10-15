@@ -120,7 +120,7 @@ void otaAbort(const char* why) {
   if (st.phase != OTA_RUNNING) return;
   Update.abort();
   fail(why);
-  logEvent("Firmware update failed: %s", why);
+  logError("Firmware update failed: %s", why);
 }
 
 bool otaEnd(char* err, size_t n) {
@@ -138,7 +138,7 @@ bool otaEnd(char* err, size_t n) {
     char m[96];
     snprintf(m, sizeof(m), "the image is not valid: %s", Update.errorString());
     fail(m);
-    logEvent("Firmware update failed: %s", m);
+    logError("Firmware update failed: %s", m);
     snprintf(err, n, "%s", m);
     return false;
   }
@@ -180,7 +180,7 @@ void otaBootReport() {
   }
   LittleFS.remove(NOTE);
   if (ok && !strcmp(from, FW_VERSION))
-    logEvent("Firmware update to %s failed: it did not start correctly, %s runs again (rollback)", to, FW_VERSION);
+    logError("Firmware update to %s failed: it did not start correctly, %s runs again (rollback)", to, FW_VERSION);
 }
 
 void otaLoop() {

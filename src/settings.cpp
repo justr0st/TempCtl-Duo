@@ -461,6 +461,8 @@ static void runawayToJson(const Runaway& r, JsonObject o) {
   o["frozenSec"] = r.frozenSec;
 }
 
+// (Text fields go in as JsonString: ArduinoJson 7.3+ keeps a const char[] - the type of a field of a const
+// struct - as a pointer, like a string literal, and the copy may be gone before the document is written.)
 void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
   o["fmt"] = SETTINGS_FMT;
   JsonObject b = o["bus"].to<JsonObject>();
@@ -473,14 +475,14 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
   JsonObject r = o["run"].to<JsonObject>();
   r["bottomBand"] = s.bottomBand;
   JsonObject w = o["wifi"].to<JsonObject>();
-  w["ssid"] = s.ssid;
-  w["hostname"] = s.hostname;
+  w["ssid"] = JsonString(s.ssid);
+  w["hostname"] = JsonString(s.hostname);
   w["staticIp"] = s.staticIp != 0;
   char a[16];
   const auto ipSet = [&](const char* key, const uint8_t* v) {
     if (ip32(v)) snprintf(a, sizeof(a), "%u.%u.%u.%u", v[0], v[1], v[2], v[3]);
     else a[0] = 0;
-    w[key] = a;  // a char array is copied into the document (a const char* is not, before 7.3)
+    w[key] = a;  // (a char array is copied)
   };
   ipSet("ip", s.ip);
   ipSet("subnet", s.subnet);
@@ -491,8 +493,8 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
     w["passSet"] = s.pass[0] != 0;
     w["apPassSet"] = s.apPass[0] != 0;
   } else {
-    w["pass"] = s.pass;
-    w["apPass"] = s.apPass;
+    w["pass"] = JsonString(s.pass);
+    w["apPass"] = JsonString(s.apPass);
   }
   JsonObject d = o["display"].to<JsonObject>();
   d["brightness"] = s.brightness;
@@ -508,7 +510,7 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
   JsonArray tc = d["touchCal"].to<JsonArray>();
   tc.add(s.tsMinX); tc.add(s.tsMaxX); tc.add(s.tsMinY); tc.add(s.tsMaxY);
   JsonObject tz = o["time"].to<JsonObject>();
-  tz["zone"] = s.tzName;
+  tz["zone"] = JsonString(s.tzName);
   JsonObject sf = o["safety"].to<JsonObject>();
   sf["manualIdle"] = s.manualIdle != 0;
   sf["manualIdleMin"] = s.manualIdleMin;
@@ -525,7 +527,7 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
   for (int i = 0; i < NUM_CHANNELS; ++i) {
     const ChannelSettings& c = s.ch[i];
     JsonObject j = chs.add<JsonObject>();
-    j["name"] = c.name;
+    j["name"] = JsonString(c.name);
     j["type"] = TYPE_NAMES[c.type <= CH_LOCAL ? c.type : 0];
     j["endAction"] = END_NAMES[c.endAction <= END_OUTPUTS_OFF ? c.endAction : 0];
     j["endSp"] = c.endSp;
