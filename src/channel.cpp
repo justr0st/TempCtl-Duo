@@ -166,7 +166,7 @@ bool LocalChannel::poll(ChannelLive& L, char* err, size_t n) {
   L.pvValid = st.fresh;
   L.pv = st.fresh ? st.pv : NAN;
   L.pvFlag = 0;
-  L.spEffValid = st.on && !isnan(st.sp);
+  L.spEffValid = (st.on || st.tuning) && !isnan(st.sp);  // (autotune: the test temperature)
   L.spEff = L.spEffValid ? st.sp : NAN;
   L.outValid = true;
   L.out = st.out;

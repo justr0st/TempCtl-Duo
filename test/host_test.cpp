@@ -905,6 +905,26 @@ static void testGuard() {
   b.ch[0].loc.cjMax = 500;
   settingsValidate(b, BoardLimits{true, 2}, msg, sizeof(msg));
   CHECK(b.manualIdleMin == 2 && b.ch[0].loc.runaway.offSec == 10 && b.ch[0].loc.cjMax == 125);
+  // read interval, median filter, autotune limit (1.0.51): defaults = the behaviour before the settings
+  CHECK(st.ch[0].loc.readMs == 250 && st.ch[0].loc.median == 1 && st.ch[0].loc.medianN == 3 && st.ch[0].loc.tuneMaxMin == 70);
+  Settings m = st;
+  m.ch[0].loc.readMs = 100;
+  m.ch[0].loc.median = 0;
+  m.ch[0].loc.medianN = 7;
+  m.ch[0].loc.tuneMaxMin = 120;
+  JsonDocument dm;
+  settingsToJson(m, dm.to<JsonObject>(), false);
+  Settings mb = st;
+  CHECK(settingsFromJson(dm.as<JsonObjectConst>(), mb, msg, sizeof(msg)));
+  CHECK(mb.ch[0].loc.readMs == 100 && mb.ch[0].loc.median == 0 && mb.ch[0].loc.medianN == 7 && mb.ch[0].loc.tuneMaxMin == 120);
+  mb.ch[0].loc.medianN = 4;  // even: the next odd
+  mb.ch[1].loc.medianN = 11;
+  mb.ch[0].loc.tuneMaxMin = 5;
+  mb.ch[1].loc.sensor = SENSOR_MAX6675;  // MAX6675: from 250 ms
+  mb.ch[1].loc.readMs = 100;
+  settingsValidate(mb, BoardLimits{true, 2}, msg, sizeof(msg));
+  CHECK(mb.ch[0].loc.medianN == 5 && mb.ch[1].loc.medianN == 9 && mb.ch[0].loc.tuneMaxMin == 10);
+  CHECK(mb.ch[1].loc.readMs == 250 && mb.ch[0].loc.readMs == 100);
 }
 
 // ------------------------------------------------------------------ firmware image check (ota_image)

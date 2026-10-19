@@ -502,6 +502,20 @@ int main(int argc, char** argv) {
     const bool on1 = lv_obj_has_state(sw2, LV_STATE_CHECKED);
     printf("[host] chan: switch %d -> %d; scroll %d before, %d after (want equal, > 0)\n", on0, on1, (int)y0, (int)y1);
     fails += on0 == on1 || y0 <= 0 || y0 != y1;
+    // the thermocouple and PID / autotune rows (screenshots)
+    for (const char* t : {"Read every", "Autotune time limit"}) {
+      lv_obj_t* r = label(t);
+      if (!r) {
+        printf("[host] chan: no row \"%s\"\n", t);
+        ++fails;
+        continue;
+      }
+      lv_obj_t* bd = lv_obj_get_parent(lv_obj_get_parent(lv_obj_get_parent(r)));
+      lv_area_t ra;
+      lv_obj_get_coords(r, &ra);
+      lv_obj_scroll_to_y(bd, lv_obj_get_scroll_y(bd) + ra.y1 - 60, LV_ANIM_OFF);
+      shot(t[0] == 'R' ? "24c-chan-sensor" : "24d-chan-tune");
+    }
     return fails;
   }
 #if !TUI_SMALL

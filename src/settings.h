@@ -79,6 +79,10 @@ struct LocalChannelSettings {
   uint8_t cjEnable;     // converter too hot: cold junction (MAX31855) above cjMax degC
   float cjMax;
   Runaway runaway;
+  uint16_t readMs;      // thermocouple read interval, 100 ... 1000 ms (MAX6675: at least 250, its conversion time)
+  uint8_t median;       // median filter on the readings (spikes) on / off
+  uint8_t medianN;      // ... over the last 3, 5, 7 or 9 readings
+  uint16_t tuneMaxMin;  // autotune gives up after this many minutes (10 ... 240)
 };
 
 constexpr size_t CH_NAME_LEN = 17;  // 16 characters

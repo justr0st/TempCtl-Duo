@@ -17,7 +17,7 @@ struct TuneConfig {
   float sp;           // test temperature
   float outMax;       // output limit % (relay high <= outMax)
   float hyst = 0.5f;  // relay hysteresis degC
-  float maxSec = 1800;  // give up after this time
+  float maxSec = 4200;  // give up after this time
   float maxOver = 40;   // fail if the PV goes this far above sp
   int cycles = 5;       // cycles to measure (after 2 settling cycles)
 };

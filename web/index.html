@@ -52,6 +52,8 @@ nav small{color:var(--muted);font-weight:400;margin-left:auto;font-size:12px}
 .sch .ib{grid-row:1/3;grid-column:3;width:32px;height:32px;min-height:32px}
 .sch .ib svg{fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round}
 .sch .ib.on{background:var(--c);border-color:var(--c);color:var(--panel)}
+.sch .ib.at{color:var(--c);border-color:var(--c)}  /* autotune: stop / review / clear */
+#tuneDlg table{margin:8px 0}#tuneDlg input{width:110px}
 #sRelay{color:var(--muted)}
 /* channel card: a fault waits for Acknowledge - blinking badge on the top edge */
 .fwarn{position:absolute;top:-15px;left:50%;transform:translateX(-50%);width:30px;height:30px;border-radius:50%;background:var(--panel);border:2px solid var(--danger);display:flex;align-items:center;justify-content:center;animation:fblink 1s steps(1) infinite;z-index:1}
@@ -87,6 +89,13 @@ button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
 .seg button{border:0;border-radius:0;min-height:30px;padding:3px 12px}
 .seg button[aria-pressed=true]{background:var(--sunk);box-shadow:inset 0 -2px 0 var(--acc)}
 .chartbox{margin:0 -4px;touch-action:pan-y;user-select:none;-webkit-user-select:none}
+.chartbox{position:relative}
+#chHover,#rpHov{pointer-events:none}  /* (the hover line and dots never take a click: the handles stay draggable) */
+.ctip{position:absolute;z-index:3;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12.5px;
+  box-shadow:0 4px 14px rgba(0,0,0,.25);white-space:nowrap;font-variant-numeric:tabular-nums}
+.ctip .th{color:var(--muted);margin-bottom:3px}
+.ctip .tr{display:flex;align-items:center;gap:6px;line-height:1.55}.ctip .tr i{width:12px;height:2px;border-radius:1px;flex:none}
+.ctip .tr span{flex:1;padding-right:10px}.ctip .tr b{font-weight:600}
 .chartbox svg{display:block;width:100%;height:auto}
 .zbar{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap}
 .zbar button{min-width:38px;padding:4px 10px}
@@ -529,6 +538,7 @@ html:root .conn .head img{width:56px;height:56px;filter:drop-shadow(0 0 6px rgba
   <nav>
     <a href="#/" data-pg="status" class="on" aria-current="page"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 4-7 5 9"/><path d="M3 21h18"/></svg>Dashboard</a>
     <a href="#/programs" data-pg="programs"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Programs</a>
+    <a href="#/replay" data-pg="replay"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v4h4"/><path d="M10 8.5v7l5.5-3.5z"/></svg>CSV replay</a>
     <a href="#/channels" data-pg="channels"><svg viewBox="0 0 24 24"><path d="M10 13.5V5a2 2 0 0 1 4 0v8.5a4 4 0 1 1-4 0z"/><path d="M12 9v6"/></svg>Channels</a>
     <a href="#/log" data-pg="log"><svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>Log</a>
     <a href="#/settings" data-pg="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</a>
@@ -572,7 +582,7 @@ html:root .conn .head img{width:56px;height:56px;filter:drop-shadow(0 0 6px rgba
   <div class="intr" id="intr" hidden role="alert"><div class="t"><b>Run interrupted by a reset</b> <span id="intrTxt"></span><small id="intrNote"></small></div>
     <span class="btns"><button class="pri" id="bRecover">Resume</button><button id="bDismiss">Dismiss</button></span></div>
   <div class="bar" style="margin-bottom:6px">
-    <span class="seg" role="group" aria-label="Chart"><button id="vProg" aria-pressed="true">Program</button><button id="vLive" aria-pressed="false">Live</button></span>
+    <span class="seg" role="group" aria-label="Chart"><button id="vProg" aria-pressed="false">Program</button><button id="vLive" aria-pressed="true">Live</button></span>
     <label class="f" id="lmWrap" hidden>Period <select id="liveMin" aria-label="Live chart period"></select></label>
     <span class="zr" id="chartCap"></span>
     <a class="btn" id="histCsv" href="/api/history.csv" download hidden title="Everything the device keeps in memory, one row per second">Export CSV</a>
@@ -607,6 +617,20 @@ html:root .conn .head img{width:56px;height:56px;filter:drop-shadow(0 0 6px rgba
   <div class="plist" id="plist"></div>
   <div class="msg" id="plMsg"></div>
 </section>
+</div>
+
+<div class="pg" id="pg-replay" hidden>
+<section class="panel" aria-label="CSV replay">
+  <div class="bar"><button id="rpOpen" class="pri">Open CSV file…</button><button id="rpHist" title="Everything the device keeps in memory (live history)">Device history</button><button id="rpRun" title="The last program run (since the device started)">Last run</button>
+    <span class="zr" id="rpName"></span></div>
+  <p class="hint" id="rpHint">Open a CSV file made by TempCtl Duo (Export CSV on the Dashboard, the SD card's run logs) or drop one here. The wheel or two fingers zoom, dragging moves the time axis, Shift + drag zooms to a range, a double click shows all.</p>
+  <div class="chartbox" id="rpBox"></div>
+  <div class="zbar" id="rpBar" hidden><button id="rpOut" aria-label="Zoom out">−</button><button id="rpIn" aria-label="Zoom in">+</button><button id="rpFit">Fit</button><span class="zr" id="rpRange"></span>
+    <span class="sep"></span><button id="rpCrop" title="Keep only the time range shown">Crop to view</button><button id="rpUncrop" hidden>Undo crop</button><button id="rpSave" title="The rows of the time range kept (the whole file without a crop)">Save CSV</button></div>
+  <div class="legend" id="rpLeg"></div>
+  <div class="msg" id="rpMsg"></div>
+</section>
+<input type="file" id="rpFile" accept=".csv,text/csv" hidden>
 </div>
 
 <div class="pg" id="pg-channels" hidden>
@@ -707,6 +731,13 @@ html:root .conn .head img{width:56px;height:56px;filter:drop-shadow(0 0 6px rgba
   <p>This run changed the program (targets, ramps or holds). Save them into the stored program, or keep the program as it was.</p>
   <div class="btns"><button id="dSave" class="pri">Save to program</button><button id="dDiscard">Keep the stored program</button></div>
 </dialog>
+<dialog id="tuneDlg" aria-labelledby="tdTitle">
+  <h2 id="tdTitle">Autotune done</h2>
+  <p id="tdTxt"></p>
+  <table class="t"><thead><tr><th></th><th>Current</th><th>New</th></tr></thead><tbody id="tdBody"></tbody></table>
+  <div class="msg" id="tdMsg"></div>
+  <div class="btns"><button id="tdAccept" class="pri">Accept</button><button id="tdEdit">Edit…</button><button id="tdDismiss">Dismiss</button><button id="tdLater">Later</button></div>
+</dialog>
 <dialog id="chDlg"><p id="chTxt" style="white-space:pre-line"></p><div class="btns" id="chBtns"></div></dialog>
 <input type="file" id="fileIn" accept=".json,application/json" hidden>
 <dialog id="askDlg"><p id="askTxt"></p><div class="btns"><button id="askOk" class="pri">OK</button><button id="askNo">Cancel</button></div></dialog>
@@ -720,7 +751,7 @@ const f1=v=>v==null?'–':(+v).toFixed(1);
 const CH=[0,1], KEY=['B','T'], PV=['var(--pvB)','var(--pvT)'], SP=['var(--spB)','var(--spT)'];
 let tabsHtml=''; const TAB_R=12, TAB_TR=12;  // channel tabs (shapeTabs)
 const EV={PHASE:1,STEP:2,RAMP_END:3,HOLD_END:4,PAUSE:5,CONT:6,END:7,STOP:8};
-let live=null, progs=null, progsGen=-1, runProg=null, runProgAt=0, chartAt=0, view='prog', showLast=true, edKey='';
+let live=null, progs=null, progsGen=-1, runProg=null, runProgAt=0, chartAt=0, view='live', showLast=true, edKey='';  // view: the live chart first (Rost); a run switches to its program view
 let logSeq=0, logList=[], prevState='idle', askedSave=false;
 
 async function api(path,body,ms){
@@ -946,7 +977,7 @@ function fillProgSelect(){ if(!progs) return; const s=$('prog'), cur=live?live.s
     const lab=q?`${esc(q.name)} (${q.type==='tl'?'timeline':'sequence'}${!dirty&&p.used?', '+fmt(p.total):''})`:'(empty)';
     return `<option value="${i}">${i+1} ${lab}${dirty?' – unsaved':''}</option>`; }).join('');
   if(s.dataset.h!==h){ s.innerHTML=h; s.dataset.h=h; } s.value=String(cur); }
-$('prog').onchange=async e=>{ const i=+e.target.value; showLast=false; await api('/api/select',{i}); if(live) live.sel=i; await loadSaved(i); chartAt=0; edKey=''; poll(); };
+$('prog').onchange=async e=>{ const i=+e.target.value; showLast=false; await api('/api/select',{i}); if(live) live.sel=i; await loadSaved(i); chartAt=0; edKey=''; if(view!=='prog') setView('prog'); else poll(); };  // (a program chosen: its chart)
 
 // Plan of a program from its start (as the device's preview: programmed times, waits met at once, pauses 0 s)
 function planProgram(p,pv){
@@ -1191,8 +1222,14 @@ function renderChart(){
   let s='';  // axes (grid, scales, lane frames), then (clipped) the run's lanes and events, then the data
   for(let v=YMIN;v<=YMAX+1e-9;v+=YSTEP) s+=`<line x1="${CL}" x2="${CW-CR}" y1="${Y(v)}" y2="${Y(v)}" style="stroke:var(--line)"/><text x="${CL-6}" y="${Y(v)+4}" text-anchor="end" style="fill:var(--muted);font-size:12px">${v}</text>`;
   s+=`<text x="${CL-6}" y="${PT-8}" text-anchor="end" style="fill:var(--muted);font-size:12px">°C</text>`;
-  const step=tickStep();
-  for(let t=Math.ceil(V0/step)*step;t<=V1+1e-6;t+=step) s+=`<text x="${X(t)}" y="${PB+18}" text-anchor="middle" style="fill:var(--muted);font-size:12px">${(t<0?'−':'')+(step>=3600&&t?Math.abs(t)/3600+' h':fmt(Math.abs(t)))}</text>`;
+  const step=tickStep(), tl=a=>(step>=3600&&a?a/3600+' h':fmt(a));
+  if(M.kind==='live'){
+    // live: the marks are times before now, so they stay where they are while the curves move left (counted
+    // from the right edge = now); solid vertical grid lines at them, as many as the width and period allow
+    for(let k=0;V1-k*step>=V0-1e-6;k++){ const x=X(V1-k*step);
+      if(k) s+=`<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${PT}" y2="${PB}" style="stroke:var(--line)"/>`;
+      s+=`<text x="${x.toFixed(1)}" y="${PB+18}" text-anchor="${k?'middle':'end'}" style="fill:var(--muted);font-size:12px">${k?'−'+tl(k*step):'now'}</text>`; }
+  } else for(let t=Math.ceil(V0/step)*step;t<=V1+1e-6;t+=step) s+=`<text x="${X(t)}" y="${PB+18}" text-anchor="middle" style="fill:var(--muted);font-size:12px">${(t<0?'−':'')+tl(Math.abs(t))}</text>`;
   const prog=M.kind!=='live', lv=!prog;
   if(legendKind!==(lv?'live':'prog')) legend();
   if(prog){ for(const i of CH){ s+=`<text x="${CL-6}" y="${LANE[i]+13}" text-anchor="end" style="fill:${PV[i]};font-size:12px;font-weight:600">${esc(chName(i).slice(0,CW<600?4:9))}</text><rect x="${CL}" y="${LANE[i]}" width="${plotW()}" height="${LH}" style="fill:none;stroke:var(--line)"/>`; }
@@ -1244,8 +1281,9 @@ function renderChart(){
   if(!box.querySelector('svg')||box.dataset.sk!==sk){ box.dataset.sk=sk; CHG={};
     box.innerHTML=`<svg width="${CW}" height="${CHh}" viewBox="0 0 ${CW} ${CHh}" role="img" aria-label="Setpoints and temperatures of both channels over time">`+
       `<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" style="fill:var(--amber)"/></pattern><clipPath id="pclip"><rect x="${CL}" y="0" width="${plotW()}" height="${CHh}"/></clipPath></defs>`+
-      `<g id="chAxes"></g><g clip-path="url(#pclip)"><g id="chBack"></g><g id="chData"></g></g><g id="ghost"></g></svg>`; }
+      `<g id="chAxes"></g><g clip-path="url(#pclip)"><g id="chBack"></g><g id="chData"></g><g id="chHover"></g></g><g id="ghost"></g></svg><div class="ctip" id="ctip" hidden></div>`; }
   chartPart('chAxes',sAxes); chartPart('chBack',sBack); chartPart('chData',s); $('ghost').textContent='';
+  drawHover();
   const zs=$('zscroll'); $('zbar').hidden=!prog; zs.hidden=zv.fit; $('zfit').disabled=zv.fit;
   if(!zv.fit){ zs.max=Math.max(0,xfull-zv.span); zs.step=1; if(document.activeElement!==zs) zs.value=zv.v0; }
   $('zrange').textContent=zv.fit?'Whole program':`${fmt(V0)} – ${fmt(V1)}`;
@@ -1289,6 +1327,35 @@ $('chartbox').addEventListener('pointerup',ev=>{ panUp(ev); if(drag) dragEnd(); 
 $('chartbox').addEventListener('wheel',ev=>{ if(!M||M.kind==='live') return;
   if(ev.ctrlKey||ev.metaKey){ ev.preventDefault(); zoomAt(tAtX(svgPt(ev).x),ev.deltaY>0?1.25:.8); }
   else if(!zv.fit&&(ev.shiftKey||Math.abs(ev.deltaX)>Math.abs(ev.deltaY))){ ev.preventDefault(); zv.v0+=(ev.shiftKey?ev.deltaY:ev.deltaX)/plotW()*zv.span; afterView(); } },{passive:false});
+// ---- hover (Rost): a dotted line at the pointer, a dot on each curve, a box with the time and the values
+// (mouse / pen; a finger on the live chart). Shared helpers with the CSV replay page.
+function nearPt(pts,t,tol){ if(!pts||!pts.length) return null; let lo=0,hi=pts.length-1;
+  while(lo<hi){ const m=(lo+hi)>>1; if(pts[m][0]<t) lo=m+1; else hi=m; }
+  let b=null; for(const k of [lo-1,lo,lo+1]) if(k>=0&&k<pts.length&&pts[k][1]!=null){ const d=Math.abs(pts[k][0]-t); if(d<=tol&&(!b||d<b.d)) b={d,t:pts[k][0],v:pts[k][1]}; }
+  return b; }
+function segAt(segs,t){ for(const g of segs||[]){ if(g.fl&1||g.v0==null||t<g.t0||t>g.t1) continue; return {t,v:g.t1>g.t0?g.v0+(g.v1-g.v0)*(t-g.t0)/(g.t1-g.t0):g.v1}; } return null; }
+function tipHtml(title,rows){ return `<div class="th">${esc(title)}</div>`+rows.map(r=>`<div class="tr"><i style="background:${r.c}${r.thin?';opacity:.6':''}"></i><span>${esc(r.n)}</span><b>${r.v}</b></div>`).join(''); }
+function tipPlace(tip,box,x,top){ tip.hidden=false; const w=tip.offsetWidth, bw=box.clientWidth; tip.style.left=Math.max(0,x+14+w>bw?x-14-w:x+14)+'px'; tip.style.top=top+'px'; }
+const hoverDot=(x,y,c)=>`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.5" style="fill:${c};stroke:var(--panel);stroke-width:2"/>`;
+let hovX=null;
+function drawHover(){ const g=$('chHover'), tip=$('ctip'); if(!g||!tip) return;
+  if(hovX==null||!M||drag||hovX<CL||hovX>CW-CR){ if(g.firstChild) g.textContent=''; tip.hidden=true; return; }
+  const t=tAtX(hovX), lv=M.kind==='live', tol=Math.max((V1-V0)/plotW()*10,(M.bin||1)*1.5);
+  let d=`<line x1="${hovX.toFixed(1)}" x2="${hovX.toFixed(1)}" y1="${PT}" y2="${PB}" style="stroke:var(--muted);stroke-dasharray:2 3"/>`; const rows=[];
+  for(const i of CH){ const h=M.hist[i]||{pv:[],sp:[]};
+    if(!lv||LVIS.pv[i]){ let p=nearPt(h.pv,t,tol); if(M.head&&M.head.v[i]!=null&&Math.abs(M.head.t-t)<=tol&&(!p||Math.abs(M.head.t-t)<p.d)) p={t:M.head.t,v:M.head.v[i]};
+      if(p){ d+=hoverDot(X(p.t),Y(p.v),PV[i]); rows.push({c:PV[i],n:chName(i)+' PV',v:f1(p.v)+' °C'}); } }
+    if(!lv||LVIS.sp[i]){ const q=nearPt(h.sp,t,tol)||(lv?null:segAt(M.segs[i],t));
+      if(q){ d+=hoverDot(X(q.t),Y(q.v),SP[i]); rows.push({c:SP[i],n:chName(i)+(M.kind==='preview'||!nearPt(h.sp,t,tol)?' plan':' SP'),v:f1(q.v)+' °C',thin:true}); } } }
+  g.innerHTML=d;
+  const title=lv?`${new Date(M.at+t*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})} (−${fmt(V1-t)})`:(M.kind==='preview'?'':'Run time ')+fmt(t);
+  tip.innerHTML=tipHtml(title,rows.length?rows:[{c:'transparent',n:'No values here',v:''}]); tipPlace(tip,$('chartbox'),hovX,PT+2); }
+$('chartbox').addEventListener('pointermove',ev=>{ const touch=ev.pointerType==='touch';
+  if((touch&&!(M&&M.kind==='live'))||(!touch&&ev.buttons)||drag||pz){ if(hovX!=null){ hovX=null; drawHover(); } return; }
+  if(!$('chartbox').querySelector('svg')) return; hovX=svgPt(ev).x; drawHover(); });
+$('chartbox').addEventListener('pointerdown',ev=>{ if(ev.pointerType==='touch'&&M&&M.kind==='live'&&$('chartbox').querySelector('svg')){ hovX=svgPt(ev).x; drawHover(); } else if(hovX!=null){ hovX=null; drawHover(); } });
+$('chartbox').addEventListener('pointerleave',()=>{ hovX=null; drawHover(); });
+$('chartbox').addEventListener('pointerup',ev=>{ if(ev.pointerType==='touch'){ setTimeout(()=>{ hovX=null; drawHover(); },1500); } });
 const zc=()=>M&&M.now!=null&&M.now>=V0&&M.now<=V1?M.now:(V0+V1)/2;
 $('zin').onclick=()=>zoomAt(zc(),1/1.6); $('zout').onclick=()=>zoomAt(zc(),1.6); $('zfit').onclick=()=>{zv.fit=true;lastChart=0;};
 $('zscroll').oninput=e=>{zv.v0=+e.target.value;afterView();};
@@ -1310,6 +1377,7 @@ function buildChans(){
     </div>
     <div class="why" id="why${i}"></div>
     <div class="row flt" id="flt${i}" hidden><span id="fltT${i}"></span><button data-ack="${i}">Acknowledge</button></div>
+    <div class="row" id="atRow${i}" hidden><span class="lbl">Autotune</span><button data-atx="stop" data-ch="${i}">Stop autotune</button><button data-atx="review" data-ch="${i}" class="pri">Review the result…</button><button data-atx="clear" data-ch="${i}">Clear</button></div>
     <div id="runRows${i}" hidden>
       <div class="row"><span class="lbl">Target</span>
         <button data-dt="${i}" data-v="-5" aria-label="Target minus 5 °C">−5</button><button data-dt="${i}" data-v="-1" aria-label="Target minus 1 °C">−1</button>
@@ -1328,6 +1396,36 @@ function buildChans(){
     $('tg'+i).onkeydown=e=>{ if(e.key==='Enter') document.querySelector(`[data-set="${i}"]`).click(); };
   }
 }
+$('chans').addEventListener('click',e=>{ const b=e.target.closest('[data-atx]'); if(b) tuneAction(+b.dataset.ch,b.dataset.atx); });
+// ---- autotune from the Dashboard and the sidebar: stop it, clear a failed / stopped one, review a result
+async function tuneAction(i,a){
+  if(a==='stop'){ if(!await ask(`Stop the autotune of ${chName(i)}? Its outputs go off.`,'Stop autotune')) return; await api('/api/autotune',{ch:i,cmd:'stop'}); }
+  else if(a==='clear') await api('/api/autotune',{ch:i,cmd:'discard'});
+  else if(a==='review'&&live&&live.ch[i].autotune) return tuneDialog(i,live.ch[i].autotune);
+  poll(); }
+// a finished autotune: the dialog opens by itself once per result while the Dashboard is shown
+const tuneAsked={};
+function tuneOffer(i,a){ const k=`${a.ku}/${a.pu}/${a.kp}`; if(tuneAsked[i]===k) return; if(page!=='status'||$('tuneDlg').open||document.querySelector('dialog[open]')) return;
+  tuneAsked[i]=k; tuneDialog(i,a); }
+let tuneCh=-1, tuneEdit=false;
+async function tuneDialog(i,a){
+  if(!CFG) await loadCfg();
+  const l=CFG&&CFG.channels[i]?CFG.channels[i].local:null; tuneCh=i; tuneEdit=false;
+  $('tdTitle').textContent=`${chName(i)}: autotune done`;
+  $('tdTxt').textContent=`Test at ${f1(a.sp)} °C: Ku ${(+a.ku).toFixed(2)}, Pu ${Math.round(a.pu)} s. Accept the proposed PID values, edit them first, or dismiss them (the current values stay).`;
+  const cur=k=>l?(+l[k]):NaN, D={kp:3,ki:5,kd:2};
+  $('tdBody').innerHTML=['kp','ki','kd'].map(k=>`<tr><td>${k[0].toUpperCase()+k.slice(1)}</td><td class="n">${isNaN(cur(k))?'–':cur(k).toFixed(D[k])}</td>
+    <td class="n"><span id="tdv_${k}">${(+a[k]).toFixed(D[k])}</span><input type="number" id="tdi_${k}" step="any" value="${(+a[k]).toFixed(D[k])}" hidden aria-label="New ${k}"></td></tr>`).join('');
+  $('tdAccept').textContent='Accept'; $('tdEdit').hidden=false; setMsg('tdMsg','');
+  $('tuneDlg').showModal(); }
+$('tdEdit').onclick=()=>{ tuneEdit=true; for(const k of ['kp','ki','kd']){ $('tdv_'+k).hidden=true; $('tdi_'+k).hidden=false; } $('tdEdit').hidden=true; $('tdAccept').textContent='Save these values'; $('tdi_kp').focus(); };
+$('tdAccept').onclick=async()=>{ const i=tuneCh; if(i<0) return;
+  if(!tuneEdit){ const r=await api('/api/autotune',{ch:i,cmd:'accept'}); if(r.err) return setMsg('tdMsg',r.err,true); }
+  else { const body={}, v={}; for(const k of ['kp','ki','kd']){ v[k]=parseFloat($('tdi_'+k).value); if(isNaN(v[k])||v[k]<0) return setMsg('tdMsg','Enter numbers (0 or more).',true); sp(body,`channels.${i}.local.${k}`,v[k]); }
+    const r=await postCfg(body); if(r.err) return setMsg('tdMsg',r.err,true); CFG=r; await api('/api/autotune',{ch:i,cmd:'discard'}); }
+  $('tuneDlg').close(); await loadCfg(); note(`${chName(i)}: new PID values saved.`); poll(); };
+$('tdDismiss').onclick=async()=>{ const i=tuneCh; $('tuneDlg').close(); if(i>=0) await api('/api/autotune',{ch:i,cmd:'discard'}); poll(); };
+$('tdLater').onclick=()=>$('tuneDlg').close();
 $('chans').addEventListener('click',async e=>{
   const b=e.target.closest('button'); if(!b||!live) return;
   const d=b.dataset;
@@ -1345,7 +1443,7 @@ function whyText(c,i,r,active){
   if(c.type==='off') return 'Channel off (Settings).';
   if(c.fault) return '';
   if(estopOn()) return 'E-stop: outputs off.';
-  if(c.autotune) return `Autotune ${c.autotune.state}: ${c.autotune.msg}`;
+  if(c.autotune){ const a=c.autotune; return a.state==='running'?`Autotune at ${f1(a.sp)} °C: ${a.msg} (${fmt(a.elapsed)}).`:a.state==='done'?`Autotune ${a.msg} — review the result.`:`Autotune failed: ${a.msg}.`; }
   if(!active||!c.inProgram){
     if(active) return `No ${r.type==='tl'?'steps':'phases'} for this channel in “${r.name}”: controlled manually.`;
     if(c.manual.on) return `Manual setpoint ${f1(c.manual.sp)} °C${c.manual.synced?'':' (writing…)'}.`;
@@ -1376,8 +1474,9 @@ function updateChans(){
     $('pv'+i).textContent=c.pv!=null?f1(c.pv)+' °C':(c.ok&&c.pvFlag&&c.pvFlag!=='ok'?c.pvFlag:'–');
     $('sp'+i).textContent=c.sp!=null?f1(c.sp)+' °C':(active&&c.inProgram&&c.idle?'off':'–');
     $('out'+i).style.width=(c.out!=null?Math.max(0,Math.min(100,c.out)):0)+'%'; $('ov'+i).textContent=c.out!=null?Math.round(c.out)+' %':'';
-    let st=c.fault?'Fault':active&&c.inProgram?ST_TXT[c.state]||c.state:c.manual.on?'Manual':c.type==='off'?'Off':c.ok?'Idle':'No link';
-    $('st'+i).textContent=st; $('st'+i).className='state '+(c.fault||(!c.ok&&c.type!=='off')?'fault':active&&c.inProgram?(c.state==='halt'||c.state==='pause'||c.state==='wait'?'pause':'run'):c.manual.on?'man':'');
+    const tune=c.autotune&&(c.autotune.state==='running'||c.autotune.state==='done')?c.autotune.state:'';  // (the touch screen shows the same)
+    let st=c.fault?'Fault':active&&c.inProgram?ST_TXT[c.state]||c.state:tune==='running'?'Autotune':tune==='done'?'Autotune done':c.manual.on?'Manual':c.type==='off'?'Off':c.ok?'Idle':'No link';
+    $('st'+i).textContent=st; $('st'+i).className='state '+(c.fault||(!c.ok&&c.type!=='off')?'fault':active&&c.inProgram?(c.state==='halt'||c.state==='pause'||c.state==='wait'?'pause':'run'):tune==='running'?'run':tune==='done'?'pause':c.manual.on?'man':'');
     $('card'+i).classList.toggle('on',!!c.outOn);
     $('why'+i).textContent=whyText(c,i,r,active);
     $('flt'+i).hidden=!c.fault; $('fltT'+i).textContent=c.fault?'Fault: '+c.fault:''; $('fwn'+i).hidden=!c.fault&&!(estopOn()&&c.type!=='off');
@@ -1386,7 +1485,10 @@ function updateChans(){
     document.querySelectorAll(`[data-dt="${i}"],[data-set="${i}"]`).forEach(b=>b.disabled=!canT);
     const tg=$('tg'+i); tg.disabled=!canT; if(document.activeElement!==tg) tg.value=c.target!=null?Math.round(c.target*10)/10:''; tg.min=c.spMin; tg.max=c.spMax;
     document.querySelectorAll(`[data-ex="${i}"]`).forEach(b=>b.disabled=!c.canExtend);
-    $('manRow'+i).hidden=!man||!!c.autotune;
+    const at=c.autotune?c.autotune.state:'';  // running / done / failed (stopped, time limit, ...)
+    $('manRow'+i).hidden=!man||at==='running'||at==='done';
+    $('atRow'+i).hidden=!at; for(const b of $('atRow'+i).querySelectorAll('[data-atx]')) b.hidden=b.dataset.atx!==(at==='running'?'stop':at==='done'?'review':'clear');
+    if(at==='done') tuneOffer(i,c.autotune);
     const sw=$('man'+i); if(!sw.busy||Date.now()-sw.busy>1500){ sw.checked=c.manual.on; sw.busy=0; } sw.disabled=!!c.fault;
     const ms=$('manSp'+i); if(document.activeElement!==ms) ms.value=c.manual.sp!=null?c.manual.sp:''; ms.min=c.spMin; ms.max=c.spMax;
   }
@@ -1408,14 +1510,20 @@ function updSide(){
   const key=live.ch.map(c=>c.name).join('|');
   if($('sChs').dataset.k!==key){ $('sChs').dataset.k=key;
     $('sChs').innerHTML=CH.map(i=>`<div class="sch" style="--c:${PV[i]}"><i></i><span class="n">${esc(chName(i))}</span>
-      <button class="ib" data-sman="${i}"><svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.3 7.3a8 8 0 1 0 11.4 0"/></svg></button>
+      <button class="ib" data-sman="${i}" data-mode="man">${SIDE_ICON.man}</button>
       <span class="v" id="sv${i}"></span></div>`).join(''); }
   for(const i of CH){ const c=live.ch[i], inRun=active&&c.inProgram;
-    const st=c.fault?'Fault':estopOn()&&c.type!=='off'?'E-stop':!c.ok&&c.type!=='off'?'No link':c.type==='off'?'Off':inRun?(SIDE_ST[c.state]||c.state):c.autotune?'Autotune':c.manual.on?'Manual':'Idle';
+    const at=c.autotune?c.autotune.state:'';
+    const st=c.fault?'Fault':estopOn()&&c.type!=='off'?'E-stop':!c.ok&&c.type!=='off'?'No link':c.type==='off'?'Off':inRun?(SIDE_ST[c.state]||c.state):at==='running'?'Autotune':at==='done'?'Autotune done':c.manual.on?'Manual':'Idle';
     const v=$('sv'+i); v.textContent=(c.pv!=null?f1(c.pv)+' °C':'–')+' · '+st; v.classList.toggle('bad',!!c.fault);
     const b=document.querySelector(`[data-sman="${i}"]`); if(!b) continue;
-    b.classList.toggle('on',!!c.manual.on); b.disabled=inRun||c.type==='off'||!!c.fault||!!c.autotune;
-    const t=inRun?'In the program':c.manual.on?'Manual: switch off':'Manual: switch on'; b.title=t; b.setAttribute('aria-label',`${chName(i)}: ${t}`); }
+    // the button: manual on / off, or while an autotune exists: stop it / review its result / clear it
+    const mode=at==='running'?'stop':at==='done'?'review':at==='failed'?'clear':'man';
+    if(b.dataset.mode!==mode){ b.dataset.mode=mode; b.innerHTML=SIDE_ICON[mode]; }
+    b.classList.toggle('on',mode==='man'&&!!c.manual.on); b.classList.toggle('at',mode!=='man');
+    b.disabled=mode==='man'?inRun||c.type==='off'||!!c.fault:false;
+    const t=mode==='stop'?'Stop the autotune':mode==='review'?'Autotune done: review the result':mode==='clear'?'Clear the autotune message ('+(c.autotune.msg||'failed')+')':inRun?'In the program':c.manual.on?'Manual: switch off':'Manual: switch on';
+    b.title=t; b.setAttribute('aria-label',`${chName(i)}: ${t}`); }
   const rl=$('sRelay'); rl.hidden=live.relay==null; if(live.relay!=null) rl.textContent='SSR supply relay: '+(live.relay?'on':'off');
 }
 $('sPlay').onclick=()=>{ if(!live) return; const r=live.run;
@@ -1423,7 +1531,12 @@ $('sPlay').onclick=()=>{ if(!live) return; const r=live.run;
   else if(r.progPause) $('bPause').click();  // (continue)
   else $('bStart').click(); };  // start / resume (asks about unsaved changes, an interrupted run)
 $('sStop').onclick=()=>$('bStop').click();
+const SIDE_ICON={man:'<svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.3 7.3a8 8 0 1 0 11.4 0"/></svg>',
+  stop:'<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+  review:'<svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>',
+  clear:'<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>'};
 $('sChs').addEventListener('click',async e=>{ const b=e.target.closest('[data-sman]'); if(!b||!live) return; const i=+b.dataset.sman, c=live.ch[i];
+  if(b.dataset.mode&&b.dataset.mode!=='man') return tuneAction(i,b.dataset.mode);
   b.disabled=true;
   if(c.manual.on) await api('/api/manual',{ch:i,on:false});
   else await api('/api/manual',{ch:i,sp:c.manual.sp!=null?c.manual.sp:+$('manSp'+i).value,on:true});
@@ -1711,7 +1824,7 @@ function updateRun(){
   if(ended){ showLast=true; askedSave=false; chartAt=0; }
   if((r.state==='finished'||r.state==='stopped')&&r.edited&&!askedSave){ askedSave=true; if(!$('saveDlg').open) $('saveDlg').showModal(); }
   if($('saveDlg').open&&!r.edited) $('saveDlg').close();  // answered on the touch screen or over serial
-  if(r.state==='running'&&prevState!=='running'&&prevState!=='paused'){ runProg=null; zv.fit=true; showLast=true; }
+  if(r.state==='running'&&prevState!=='running'&&prevState!=='paused'){ runProg=null; zv.fit=true; showLast=true; if(view==='live') setView('prog'); }
   prevState=r.state;
 }
 const cmd=c=>api('/api/cmd',{cmd:c,prog:live?live.sel:-1}).then(()=>{chartAt=0;poll();});
@@ -1752,8 +1865,150 @@ async function updateLog(){
     return `<li class="k${l.kind||1}"><span title="${w.toLocaleString()}">${l.rt!=null?fmt(l.rt):w.toTimeString().slice(0,5)}</span>${esc(l.msg)}</li>`; }).join('')||'<li><span></span>No events yet.</li>';
 }
 
-/* ---------- pages (hash routes: #/programs, #/channels, #/log, #/settings, #/tools; anything else = Status) ---------- */
-const PAGES={status:'Dashboard',programs:'Programs',channels:'Channels',log:'Log',settings:'Settings',tools:'Tools'};
+/* ---------- CSV replay (Rost): a CSV of the device (history / last run export, SD run log) as a chart to zoom,
+   crop and save again; hover shows the values. Columns: time_s / run_s / time (wall clock), <ch>_pv, _sp,
+   _min, _max, _plan / _prog, _out; SD logs also kind, event (shown as marks). ---------- */
+const RP={lines:null,head:null,name:'',T:[],cols:{},ev:[],clock:false,t0:0,crop:null,v0:0,v1:1,hide:{},sel:null,hov:null,W:1000,H:420};
+const RP_CH=[['bottom',0],['top',1]];
+function csvSplit(l){ const out=[]; let cur='',q=false;
+  for(let k=0;k<l.length;k++){ const c=l[k];
+    if(q){ if(c==='"'){ if(l[k+1]==='"'){ cur+='"'; k++; } else q=false; } else cur+=c; }
+    else if(c==='"') q=true; else if(c===','){ out.push(cur); cur=''; } else cur+=c; }
+  out.push(cur); return out; }
+function rpLoad(text,name){
+  const lines=text.replace(/\r/g,'').split('\n').filter(l=>l.length);
+  if(lines.length<2) return setMsg('rpMsg','No rows in this file.',true);
+  const head=csvSplit(lines[0]).map(h=>h.trim()), ix=k=>head.indexOf(k);
+  const iT=ix('time'), iTs=ix('time_s'), iRun=ix('run_s');
+  const clock=iT>=0&&!isNaN(Date.parse(csvSplit(lines[1])[iT]?.replace(' ','T')));
+  if(!clock&&iTs<0&&iRun<0) return setMsg('rpMsg','Not a TempCtl Duo CSV: no time column (time, time_s or run_s).',true);
+  const T=[], cols={}, ev=[];
+  for(const [p] of RP_CH) for(const f of ['pv','sp','min','max','plan','prog','out']) if(ix(p+'_'+f)>=0) cols[p+'_'+f]=[];
+  const iK=ix('kind'), iE=ix('event'); let t0=null;
+  for(let r=1;r<lines.length;r++){ const v=csvSplit(lines[r]);
+    let t=clock?Date.parse(v[iT].replace(' ','T'))/1000:parseFloat(v[iTs>=0?iTs:iRun]);
+    if(isNaN(t)) t=T.length?T[T.length-1]:0;
+    if(clock){ if(t0==null) t0=t; t-=t0; }
+    T.push(t);
+    for(const k in cols){ const x=v[ix(k)]; cols[k].push(x===''||x==null||isNaN(+x)?null:+x); }
+    if(iE>=0&&v[iE]) ev.push({t,kind:iK>=0?v[iK]:'',text:v[iE]}); }
+  Object.assign(RP,{lines,head,name,T,cols,ev,clock,t0:clock?t0:0,crop:null,sel:null,hov:null});
+  rpFit(); $('rpName').textContent=`${name} · ${lines.length-1} rows · ${fmt(T[T.length-1]-T[0])}`; setMsg('rpMsg','');
+  $('rpBar').hidden=false; $('rpHint').hidden=true; rpLegend(); rpDraw(); }
+const rpRange=()=>{ const T=RP.T; let a=T[0],b=T[T.length-1]; for(const t of T){ if(t<a) a=t; if(t>b) b=t; } if(RP.crop){ a=Math.max(a,RP.crop[0]); b=Math.min(b,RP.crop[1]); } return [a,b>a?b:a+1]; };
+function rpFit(){ if(!RP.T.length) return; [RP.v0,RP.v1]=rpRange(); }
+function rpClamp(){ const [a,b]=rpRange(), span=Math.min(b-a,Math.max(5,RP.v1-RP.v0)); if(RP.v0<a) RP.v0=a; RP.v1=RP.v0+span; if(RP.v1>b){ RP.v1=b; RP.v0=b-span; } }
+// series: [key, label, colour, kind]; channels by the current names when connected
+function rpSeries(){ const s=[], C={}; for(const k in RP.cols) if(RP.cols[k].some(v=>v!=null)) C[k]=RP.cols[k];  // (columns with values only)
+  for(const [p,i] of RP_CH){ const nm=live?chName(i):(p==='bottom'?'Bottom':'Top');
+    if(C[p+'_min']&&C[p+'_max']) s.push({k:p+'_band',n:nm+' lowest / highest',c:PV[i],kind:'band',lo:C[p+'_min'],hi:C[p+'_max']});
+    if(C[p+'_pv']) s.push({k:p+'_pv',n:nm+' PV',c:PV[i],kind:'pv',v:C[p+'_pv']});
+    if(C[p+'_sp']) s.push({k:p+'_sp',n:nm+' SP',c:SP[i],kind:'sp',v:C[p+'_sp']});
+    const pl=C[p+'_plan']||C[p+'_prog']; if(pl) s.push({k:p+'_plan',n:nm+' program',c:SP[i],kind:'plan',v:pl});
+    if(C[p+'_out']) s.push({k:p+'_out',n:nm+' output',c:PV[i],kind:'out',v:C[p+'_out']}); }
+  return s; }
+function rpLegend(){ $('rpLeg').innerHTML='<span class="lh">Show:</span>'+rpSeries().filter(x=>x.kind!=='out').map(x=>`<button class="lt" data-rp="${x.k}" aria-pressed="${!RP.hide[x.k]}"><i class="sw" style="background:${x.c}${x.kind==='pv'?'':';height:4px'}${x.kind==='band'?';opacity:.35':''}"></i>${esc(x.n)}</button>`).join('')
+  +(RP.ev.length?`<button class="lt" data-rp="ev" aria-pressed="${!RP.hide.ev}"><i class="sw" style="background:var(--muted);height:4px"></i>Events (${RP.ev.length})</button>`:''); }
+$('rpLeg').addEventListener('click',e=>{ const b=e.target.closest('[data-rp]'); if(!b) return; RP.hide[b.dataset.rp]=!RP.hide[b.dataset.rp]; rpLegend(); rpDraw(); });
+const RL=46, RR=14, RT=14, RB=30;
+function rpX(t){ return RL+(RP.W-RL-RR)*(t-RP.v0)/(RP.v1-RP.v0); }
+function rpT(x){ return RP.v0+(x-RL)/(RP.W-RL-RR)*(RP.v1-RP.v0); }
+function rpTick(){ const px=RP.W-RL-RR, span=RP.v1-RP.v0; for(const st of [1,2,5,10,15,30,60,120,300,600,900,1800,3600,7200,10800,14400,21600,43200,86400]) if(px/(span/st)>=70) return st; return 172800; }
+const rpTimeTxt=(t,sec)=>{ if(RP.clock){ const d=new Date((RP.t0+t)*1000); return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:sec?'2-digit':undefined}); } return (t<0?'−':'')+fmt(Math.abs(t)); };
+// index range of the rows in [a, b] (rows sorted by time)
+function rpIdx(t){ const T=RP.T; let lo=0,hi=T.length; while(lo<hi){ const m=(lo+hi)>>1; if(T[m]<t) lo=m+1; else hi=m; } return lo; }
+function rpPath(v,y){ const i0=Math.max(0,rpIdx(RP.v0)-1), i1=Math.min(RP.T.length,rpIdx(RP.v1)+2), W=RP.W-RL-RR; let d='',pen=false,col=null,g=[];
+  const put=p=>{ d+=(pen?'L':'M')+p[0].toFixed(1)+','+p[1].toFixed(1); pen=true; };
+  const flush=()=>{ if(!g.length) return; let lo=g[0],hi=g[0]; for(const p of g){ if(p[1]<lo[1]) lo=p; if(p[1]>hi[1]) hi=p; } [g[0],lo,hi,g[g.length-1]].filter((p,k,a)=>a.indexOf(p)===k).sort((a,b)=>a[0]-b[0]).forEach(put); g=[]; };
+  const many=i1-i0>W*3;
+  for(let k=i0;k<i1;k++){ if(v[k]==null){ flush(); pen=false; continue; } const x=rpX(RP.T[k]), p=[x,y(v[k])];
+    if(!many){ put(p); continue; } const c=Math.floor(x); if(c!==col){ flush(); col=c; } g.push(p); }
+  flush(); return d; }
+function rpBand(lo,hi,y){ const i0=Math.max(0,rpIdx(RP.v0)-1), i1=Math.min(RP.T.length,rpIdx(RP.v1)+2), step=Math.max(1,Math.floor((i1-i0)/(RP.W*2)));
+  let top=[],bot=[],d=''; const end=()=>{ if(top.length>1) d+='M'+top.join('L')+'L'+bot.reverse().join('L')+'Z'; top=[]; bot=[]; };
+  for(let k=i0;k<i1;k+=step){ if(lo[k]==null||hi[k]==null){ end(); continue; } const x=rpX(RP.T[k]).toFixed(1); top.push(x+','+y(hi[k]).toFixed(1)); bot.push(x+','+y(lo[k]).toFixed(1)); }
+  end(); return d; }
+function rpDraw(){ const box=$('rpBox'); if(page!=='replay') return;
+  if(!RP.T.length){ box.innerHTML=''; return; }
+  RP.W=Math.max(280,Math.floor(box.clientWidth)||1000); RP.H=RP.W<600?320:Math.round(Math.min(480,Math.max(360,RP.W*0.42)));
+  const S=rpSeries().filter(x=>!RP.hide[x.k]&&x.kind!=='out'), i0=Math.max(0,rpIdx(RP.v0)), i1=Math.min(RP.T.length,rpIdx(RP.v1)+1);
+  let mn=Infinity,mx=-Infinity; for(const x of S) for(const a of x.kind==='band'?[x.lo,x.hi]:[x.v]) for(let k=i0;k<i1;k++){ const v=a[k]; if(v!=null){ if(v<mn) mn=v; if(v>mx) mx=v; } }
+  if(!isFinite(mn)){ mn=0; mx=100; } const pad=Math.max(1,(mx-mn)*0.06); let lo=mn-pad, hi=mx+pad;
+  const ys=[0.5,1,2,5,10,20,25,50,100,200].find(st=>(hi-lo)/st<=8)||500; lo=Math.floor(lo/ys)*ys; hi=Math.ceil(hi/ys)*ys;
+  const PBr=RP.H-RB, y=v=>PBr-(PBr-RT)*(v-lo)/(hi-lo);
+  let s=`<svg width="${RP.W}" height="${RP.H}" viewBox="0 0 ${RP.W} ${RP.H}" role="img" aria-label="CSV replay chart"><defs><clipPath id="rpclip"><rect x="${RL}" y="0" width="${RP.W-RL-RR}" height="${RP.H}"/></clipPath></defs>`;
+  for(let v=lo;v<=hi+1e-9;v+=ys) s+=`<line x1="${RL}" x2="${RP.W-RR}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" style="stroke:var(--line)"/><text x="${RL-6}" y="${(y(v)+4).toFixed(1)}" text-anchor="end" style="fill:var(--muted);font-size:12px">${+v.toFixed(1)}</text>`;
+  const st=rpTick(), base=RP.clock?RP.t0:0;
+  for(let t=Math.ceil((RP.v0+base)/st)*st-base;t<=RP.v1+1e-6;t+=st){ const x=rpX(t).toFixed(1);
+    s+=`<line x1="${x}" x2="${x}" y1="${RT}" y2="${PBr}" style="stroke:var(--line)"/><text x="${x}" y="${PBr+18}" text-anchor="middle" style="fill:var(--muted);font-size:12px">${rpTimeTxt(t,st<60)}</text>`; }
+  s+=`<g clip-path="url(#rpclip)">`;
+  if(!RP.hide.ev) for(const e of RP.ev){ if(e.t<RP.v0||e.t>RP.v1) continue; const x=rpX(e.t).toFixed(1); s+=`<line x1="${x}" x2="${x}" y1="${RT}" y2="${PBr}" style="stroke:${e.kind==='error'?'var(--danger)':e.kind==='warning'?'var(--amber)':'var(--muted)'};stroke-dasharray:2 4;opacity:.8"/>`; }
+  for(const x of S){ if(x.kind==='band') s+=`<path d="${rpBand(x.lo,x.hi,y)}" style="fill:${x.c};opacity:.16;stroke:none"/>`; }
+  for(const x of S){ if(x.kind==='band') continue; const st=x.kind==='pv'?'stroke-width:2.2':x.kind==='sp'?'stroke-width:1.6;opacity:.6':'stroke-width:1.8;stroke-dasharray:6 4;opacity:.9';
+    s+=`<path d="${rpPath(x.v,y)}" style="fill:none;stroke:${x.c};stroke-linejoin:round;${st}"/>`; }
+  if(RP.sel) s+=`<rect x="${Math.min(RP.sel[0],RP.sel[1])}" y="${RT}" width="${Math.abs(RP.sel[1]-RP.sel[0])}" height="${PBr-RT}" style="fill:var(--acc);opacity:.15"/>`;
+  s+=`<g id="rpHov"></g></g></svg><div class="ctip" id="rpTip" hidden></div>`;
+  box.innerHTML=s; RP.y=y; RP.PB=PBr;
+  $('rpRange').textContent=`${rpTimeTxt(RP.v0,true)} – ${rpTimeTxt(RP.v1,true)}`+(RP.crop?' (cropped)':'');
+  $('rpUncrop').hidden=!RP.crop; rpHover(); }
+function rpHover(){ const g=$('rpHov'), tip=$('rpTip'); if(!g||!tip) return;
+  const x=RP.hov; if(x==null||x<RL||x>RP.W-RR||RP.drag){ g.textContent=''; tip.hidden=true; return; }
+  const t=rpT(x), k=(()=>{ const i=rpIdx(t); return i>0&&(i>=RP.T.length||t-RP.T[i-1]<RP.T[i]-t)?i-1:i; })(), tol=(RP.v1-RP.v0)/(RP.W-RL-RR)*12;
+  let d=`<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${RT}" y2="${RP.PB}" style="stroke:var(--muted);stroke-dasharray:2 3"/>`; const rows=[];
+  if(k<RP.T.length&&Math.abs(RP.T[k]-t)<=Math.max(tol,(RP.v1-RP.v0)/50)){ const tk=RP.T[k];
+    for(const s of rpSeries()){ if(RP.hide[s.k]&&s.kind!=='out') continue;
+      if(s.kind==='band'){ if(s.lo[k]!=null) rows.push({c:s.c,n:s.n,v:`${f1(s.lo[k])} … ${f1(s.hi[k])} °C`,thin:true}); continue; }
+      const v=s.v[k]; if(v==null) continue;
+      if(s.kind==='out'){ rows.push({c:s.c,n:s.n,v:Math.round(v)+' %',thin:true}); continue; }
+      d+=hoverDot(rpX(tk),RP.y(v),s.c); rows.push({c:s.c,n:s.n,v:f1(v)+' °C',thin:s.kind!=='pv'}); }
+    if(!RP.hide.ev) for(const e of RP.ev) if(Math.abs(e.t-t)<=tol) rows.push({c:e.kind==='error'?'var(--danger)':e.kind==='warning'?'var(--amber)':'var(--muted)',n:e.text.slice(0,70),v:'',thin:true});
+    g.innerHTML=d; tip.innerHTML=tipHtml(rpTimeTxt(tk,true)+(RP.clock?'':''),rows.length?rows:[{c:'transparent',n:'No values',v:''}]); tipPlace(tip,$('rpBox'),x,RT+2); }
+  else { g.innerHTML=d; tip.hidden=true; } }
+function rpPt(ev){ const svg=$('rpBox').querySelector('svg'); if(!svg) return null; const r=svg.getBoundingClientRect(); return (ev.clientX-r.left)*RP.W/r.width; }
+function rpZoom(t,f){ const span=Math.max(5,(RP.v1-RP.v0)*f), r=(t-RP.v0)/(RP.v1-RP.v0); RP.v0=t-r*span; RP.v1=RP.v0+span; rpClamp(); rpDraw(); }
+const rpP=new Map(); let rpPz=null;
+$('rpBox').addEventListener('wheel',e=>{ if(!RP.T.length) return; e.preventDefault(); const x=rpPt(e); if(x==null) return;
+  if(Math.abs(e.deltaX)>Math.abs(e.deltaY)){ const dt=e.deltaX/(RP.W-RL-RR)*(RP.v1-RP.v0); RP.v0+=dt; RP.v1+=dt; rpClamp(); rpDraw(); }
+  else rpZoom(rpT(x),e.deltaY>0?1.25:0.8); },{passive:false});
+$('rpBox').addEventListener('pointerdown',e=>{ const x=rpPt(e); if(x==null) return; if(e.pointerType==='mouse'&&e.button!==0) return;
+  try{ $('rpBox').setPointerCapture(e.pointerId); }catch(_){} rpP.set(e.pointerId,x);
+  if(e.shiftKey){ RP.sel=[x,x]; RP.drag='sel'; } else { RP.drag='pan'; rpPz={v0:RP.v0,v1:RP.v1,pts:new Map(rpP)}; }
+  if(e.pointerType==='touch'){ RP.hov=x; } rpHover(); });
+$('rpBox').addEventListener('pointermove',e=>{ const x=rpPt(e); if(x==null) return;
+  if(!RP.drag){ if(e.pointerType!=='touch'){ RP.hov=x; rpHover(); } return; }
+  rpP.set(e.pointerId,x);
+  if(RP.drag==='sel'){ RP.sel[1]=x; rpDraw(); return; }
+  const ids=[...rpPz.pts.keys()], span0=rpPz.v1-rpPz.v0, W=RP.W-RL-RR;
+  if(rpP.size>=2&&ids.length>=2){ const a0=rpPz.pts.get(ids[0]),b0=rpPz.pts.get(ids[1]),a1=rpP.get(ids[0]),b1=rpP.get(ids[1]); if(a1==null||b1==null) return;
+    const span=Math.max(5,span0*Math.max(10,Math.abs(b0-a0))/Math.max(10,Math.abs(b1-a1))), tm=rpPz.v0+((a0+b0)/2-RL)/W*span0; RP.v0=tm-((a1+b1)/2-RL)/W*span; RP.v1=RP.v0+span; }
+  else { const x0=rpPz.pts.get(e.pointerId); if(x0==null) return; RP.v0=rpPz.v0-(x-x0)/W*span0; RP.v1=RP.v0+span0; }
+  RP.hov=null; rpClamp(); rpDraw(); });
+const rpUp=e=>{ rpP.delete(e.pointerId);
+  if(RP.drag==='sel'&&RP.sel){ const a=rpT(Math.min(RP.sel[0],RP.sel[1])), b=rpT(Math.max(RP.sel[0],RP.sel[1])); RP.sel=null; if(b-a>=2){ RP.v0=a; RP.v1=b; rpClamp(); } }
+  if(!rpP.size){ RP.drag=null; rpPz=null; } else rpPz={v0:RP.v0,v1:RP.v1,pts:new Map(rpP)};
+  if(e.pointerType==='touch') setTimeout(()=>{ RP.hov=null; rpHover(); },1500); rpDraw(); };
+$('rpBox').addEventListener('pointerup',rpUp); $('rpBox').addEventListener('pointercancel',rpUp);
+$('rpBox').addEventListener('pointerleave',e=>{ if(e.pointerType!=='touch'){ RP.hov=null; rpHover(); } });
+$('rpBox').addEventListener('dblclick',()=>{ rpFit(); rpDraw(); });
+$('rpIn').onclick=()=>rpZoom((RP.v0+RP.v1)/2,1/1.6); $('rpOut').onclick=()=>rpZoom((RP.v0+RP.v1)/2,1.6); $('rpFit').onclick=()=>{ rpFit(); rpDraw(); };
+$('rpCrop').onclick=()=>{ if(!RP.T.length) return; RP.crop=[RP.v0,RP.v1]; rpDraw(); setMsg('rpMsg',`Cropped to ${rpTimeTxt(RP.v0,true)} – ${rpTimeTxt(RP.v1,true)}; Save CSV writes only these rows.`); };
+$('rpUncrop').onclick=()=>{ RP.crop=null; rpFit(); rpDraw(); setMsg('rpMsg',''); };
+$('rpSave').onclick=()=>{ if(!RP.lines) return; const [a,b]=RP.crop||[-Infinity,Infinity], out=[RP.lines[0]];
+  for(let k=0;k<RP.T.length;k++) if(RP.T[k]>=a&&RP.T[k]<=b) out.push(RP.lines[k+1]);
+  const nm=RP.name.replace(/\.csv$/i,'')+(RP.crop?'_crop':'')+'.csv', el=document.createElement('a');
+  el.href=URL.createObjectURL(new Blob([out.join('\n')+'\n'],{type:'text/csv'})); el.download=nm; document.body.appendChild(el); el.click(); setTimeout(()=>{ URL.revokeObjectURL(el.href); el.remove(); },500);
+  setMsg('rpMsg',`Saved ${out.length-1} rows as ${nm}.`); };
+$('rpOpen').onclick=()=>$('rpFile').click();
+$('rpFile').onchange=async()=>{ const f=$('rpFile').files[0]; if(!f) return; rpLoad(await f.text(),f.name); $('rpFile').value=''; };
+async function rpFetch(path,name){ if(OFF&&!SER.on) return setMsg('rpMsg','Not connected to a device.',true); setMsg('rpMsg','Loading…');
+  try{ const t=await apiText(path); if(!t) return setMsg('rpMsg','The device sent nothing.',true); rpLoad(t,name); }catch(e){ setMsg('rpMsg','Device not reachable.',true); } }
+$('rpHist').onclick=()=>rpFetch('/api/history.csv','tempctl-duo-history.csv');
+$('rpRun').onclick=()=>rpFetch('/api/log.csv','tempctl-duo-run.csv');
+$('pg-replay').addEventListener('dragover',e=>{ if([...e.dataTransfer.types].includes('Files')){ e.preventDefault(); e.dataTransfer.dropEffect='copy'; } });
+$('pg-replay').addEventListener('drop',async e=>{ const f=e.dataTransfer.files&&e.dataTransfer.files[0]; if(!f) return; e.preventDefault(); rpLoad(await f.text(),f.name); });
+new ResizeObserver(()=>{ if(page==='replay'&&RP.T.length&&Math.floor($('rpBox').clientWidth)!==RP.W) rpDraw(); }).observe($('rpBox'));
+/* ---------- pages (hash routes: #/programs, #/replay, #/channels, #/log, #/settings, #/tools; anything else = Status) ---------- */
+const PAGES={status:'Dashboard',programs:'Programs',replay:'CSV replay',channels:'Channels',log:'Log',settings:'Settings',tools:'Tools'};
 const PAGE_ALIAS={system:'settings',dashboard:'status'};  // (old links)
 let page='';
 function route(){
@@ -1763,7 +2018,7 @@ function route(){
   document.querySelectorAll('nav a[data-pg]').forEach(a=>{ const on=a.dataset.pg===pg; a.classList.toggle('on',on); if(on) a.setAttribute('aria-current','page'); else a.removeAttribute('aria-current'); });
   $('title').textContent=PAGES[pg]; $('jump').hidden=pg!=='status'; $('jumpS').hidden=pg!=='settings'; document.title=pg==='status'?'TempCtl Duo':PAGES[pg]+' – TempCtl Duo';
   $('side').classList.remove('open'); $('menu').setAttribute('aria-expanded','false');
-  if(changed){ window.scrollTo(0,0); if(pg==='status'){ lastChart=0; chartAt=0; } pageUpdate(true); requestAnimationFrame(()=>{ shapeTabs(); topFade(); }); }
+  if(changed){ window.scrollTo(0,0); if(pg==='status'){ lastChart=0; chartAt=0; } if(pg==='replay') rpDraw(); pageUpdate(true); requestAnimationFrame(()=>{ shapeTabs(); topFade(); }); }
 }
 window.addEventListener('hashchange',route);
 document.addEventListener('click',e=>{ const a=e.target.closest('a[data-jump]'); if(!a) return; e.preventDefault(); const t=$(a.dataset.jump); if(t) t.scrollIntoView({behavior:'smooth',block:'start'}); });
@@ -1918,7 +2173,7 @@ function renderProgs(force){
 async function openProg(i,type,prog){
   if(!runActive()&&live.sel!==i){ await api('/api/select',{i}); live.sel=i; showLast=false; }
   await loadSaved(i); if(type){ newDraft(i,type,prog); }
-  previewDraft(); edKey=''; chartAt=0; fillProgSelect(); location.hash='#/';
+  previewDraft(); edKey=''; chartAt=0; fillProgSelect(); location.hash='#/'; if(view!=='prog') setView('prog');  // (the program's chart, for its handles)
   setTimeout(()=>{ updateEditor(); $('edP').scrollIntoView({block:'start'}); if(type) $('pName').focus(); },60); poll(); }
 async function storedProg(i){ const r=await api('/api/program?i='+i); return r.used?r.program:null; }
 async function afterProgChange(i){ delete DRAFT[i]; delete SAVED[i]; savedGen[i]=-1; UNDO[i]=[]; REDO[i]=[]; await loadPrograms(); plKey=''; renderProgs(true); }
@@ -2049,14 +2304,18 @@ function chanGroups(i){ const P=`channels.${i}.`, ty=t=>g=>g(P+'type')===t;
    {h:'Thermocouple',show:ty('local'),extra:calHtml(i),fields:[
      {k:P+'local.sensor',l:'Converter',t:'sel',o:[['max31855','MAX31855'],['max6675','MAX6675']]},
      {k:P+'local.calOffset',l:'Calibration offset',t:'num',min:-50,max:50,step:0.01,u:'°C'},
-     {k:P+'local.calGain',l:'Calibration gain',t:'num',min:0.5,max:2,step:0.0001,h:'Calibrated = raw × gain + offset'}]},
+     {k:P+'local.calGain',l:'Calibration gain',t:'num',min:0.5,max:2,step:0.0001,h:'Calibrated = raw × gain + offset'},
+     {k:P+'local.readMs',l:'Read every',t:'num',min:100,max:1000,step:10,u:'ms',def:250,h:'MAX6675: at least 250 ms (its conversion time); MAX31855 converts in up to 100 ms'},
+     {k:P+'local.median',l:'Median filter',t:'sw',def:true,h:'Removes single-reading spikes; a change shows about half the window later'},
+     {k:P+'local.medianN',l:'… over the last',t:'sel',num:true,def:3,o:[[3,'3 readings'],[5,'5 readings'],[7,'7 readings'],[9,'9 readings']],show:g=>g(P+'type')==='local'&&g(P+'local.median')}]},
    {h:'PID control',show:ty('local'),extra:autotuneHtml(i),fields:[
      {k:P+'local.kp',l:'Kp',t:'num',min:0,max:1000,step:0.01,u:'% / °C'},
      {k:P+'local.ki',l:'Ki',t:'num',min:0,max:100,step:0.0001,u:'% / (°C·s)'},
      {k:P+'local.kd',l:'Kd',t:'num',min:0,max:10000,step:0.1,u:'%·s / °C'},
      {k:P+'local.windowSec',l:'SSR window',t:'num',min:0.2,max:10,step:0.1,u:'s',h:'The SSR is on for the output share of every window'},
      {k:P+'local.maxOut',l:'Max. output',t:'num',min:0,max:100,u:'%'},
-     {k:P+'local.maxTemp',l:'Max. temperature (outputs off above)',t:'num',min:50,max:600,u:'°C'}]},
+     {k:P+'local.maxTemp',l:'Max. temperature (outputs off above)',t:'num',min:50,max:600,u:'°C'},
+     {k:P+'local.tuneMaxMin',l:'Autotune time limit',t:'num',min:10,max:240,u:'min',def:70,h:'The autotune below gives up after this time'}]},
    {h:'Protection',show:g=>g(P+'type')!=='off',note:'A tripped check switches the outputs off, stops a running program and waits for Acknowledge. Modbus and local keep their own values; the ones of the selected type are used.',
     fields:runawayFields(P,'modbus').concat(runawayFields(P,'local'),[
      {k:P+'local.cjEnable',l:'Converter too hot',t:'sw',def:true,w:true,show:ty('local'),h:'The MAX31855’s own (cold-junction) temperature: a hot enclosure makes the readings drift.'},
@@ -2456,7 +2715,7 @@ function sdRender(){
   $('sdList').innerHTML=files.map(([n,size])=>{ const x=sdName(n), now=n===rec;
     return `<div class="sdrow"><span class="pn">${esc(x.prog)}${now?'<span class="state run">Recording</span>':''}</span>
       <span class="pm"><span>${esc(x.when)}</span><span>${fsize(size)}</span></span>
-      <span class="pa"><button data-sd="get" data-n="${esc(n)}">Download</button><button data-sd="del" data-n="${esc(n)}" class="danger" ${now?'disabled':''}>Delete</button></span></div>`; }).join('');
+      <span class="pa"><button data-sd="view" data-n="${esc(n)}" title="Open it on the CSV replay page">Replay</button><button data-sd="get" data-n="${esc(n)}">Download</button><button data-sd="del" data-n="${esc(n)}" class="danger" ${now?'disabled':''}>Delete</button></span></div>`; }).join('');
 }
 function sdUpdate(){
   const sd=live&&live.sd; $('sdP').hidden=!sd; if(!sd) return;
@@ -2470,6 +2729,7 @@ $('sdList').addEventListener('click',async e=>{ const b=e.target.closest('button
   try{ const path='/api/sd/file?name='+encodeURIComponent(n); let t;
     if(SER.on){ t=await serReq(path,undefined,120000); if(typeof t!=='string') throw new Error(t&&t.err||'not readable'); }
     else { const r=await fetch(path,{cache:'no-store'}); if(!r.ok){ let m='not readable'; try{ m=(await r.json()).err||m; }catch(x){} throw new Error(m); } t=await r.text(); }
+    if(b.dataset.sd==='view'){ setMsg('sdMsg',''); b.disabled=false; location.hash='#/replay'; rpLoad(t,'tempctl-duo-'+n); return; }
     const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([t],{type:'text/csv'})); a.download='tempctl-duo-'+n;
     document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },500); setMsg('sdMsg','');
   }catch(err){ setMsg('sdMsg','Download failed: '+err.message,true); }

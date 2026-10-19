@@ -2118,7 +2118,7 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   - **Web "Last run" button** (Rost): on the Dashboard chart's program preview, when the device still has the
     selected program's last run (finished / stopped, until a restart or the next run): shows that run again
     (the counterpart of "Back to preview").
-- **1.0.50** (2026-10-15; Rost's list after 1.0.49, 1f8464a):
+- **1.0.50** (2026-10-15, 890a207; Rost's list after 1.0.49, 1f8464a):
   - Web Channels page: the sticky Save / Revert bar reaches the card's edges in the glass style too (its
     padding is 16 / 18 px there, the bar's negative margins were for the plain style's 14 px).
   - Touch Channels screen: a save elsewhere (web, serial) shows within a second while nothing is being edited
@@ -2131,6 +2131,48 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   - SD card: the mount is tried once more after any failure (before: only when the card had answered),
     serial "[sd] ... - trying once more" / "the card answered the second time" to see how often it helps.
   - UI host `./uihost chan`: reload after a web save, RS485 tab, scroll kept (without the fix: 564 -> 0).
+- **1.0.51** (2026-10-19; Rost):
+  - Local channels, new settings (web Channels › Thermocouple / PID control, touch Channels, serial
+    `b.local.*`): **`readMs`** thermocouple read interval 100 … 1000 ms (default 250; MAX6675 at least 250, its
+    conversion time; clamped when saved); **`median`** on / off and **`medianN`** 3 / 5 / 7 / 9 readings (default on,
+    3 = the earlier fixed filter); **`tuneMaxMin`** autotune time limit 10 … 240 min (default 70 = Rost's
+    `maxSec = 4200` in autotune.h, which stays the struct default).
+  - Local task: a 50 ms tick, each channel reads when its interval is due (own dt for PID / autotune / checks);
+    "no reading" fault still after 3 bad readings but at least 750 ms of them; a reading counts as current
+    for 1 s or 2.5 intervals. The control task, the displays and the history still take the value at the
+    polling interval (`bus.pollMs`, 250 … 1000 ms), so a shorter read interval feeds the PID and the median
+    filter, not more chart points.
+  - Web channel card: the state badge says "Autotune" / "Autotune done" (it said "Idle"; the touch screen and
+    the sidebar were right); during an autotune the channel's SP is its test temperature (web, touch, chart).
+  - Web live chart: the time marks are times before now counted from the right edge ("now", −0:30, …), so they
+    stay put while the curves move (they moved with the curves for up to 2 s and jumped back at each chart
+    refresh); solid vertical grid lines at the marks, spaced by `tickStep()` (≥ 64 px, 5 s … 24 h steps) for the
+    period and the width.
+  - Tests: host (defaults, JSON, clamps), median of 3 … 9 against a sort (100 000 cases), UI host `chan`
+    (+ shots 24c / 24d), mock: badge, fields, static marks at 1360 / 420 px and 5 / 60 min.
+  - Rost's checks (2026-10-19): MAX31855 at 100 ms steady; the time limit ends the autotune ("time limit
+    reached"); the web badge shows "Autotune". His history CSV: the bottom thermocouple (median off) jumps
+    by up to 4 °C within a second (per-second spread median 0.4, p90 1.9 °C), the top one by 0.1 / 0.3 °C on
+    the same board, also with the heater off: pick-up on the bottom sensor's wiring, not the converter.
+    Hints given: 10 nF across T+ / T− at the MAX31855, twisted (shielded) leads away from mains / SSR / heater
+    wiring, an insulated (ungrounded) junction, the shield grounded at the converter only. The autotune
+    already uses the filtered PV (median when on).
+  - Same round (1.0.51, not committed yet), web: **autotune controls** on the Dashboard channel card (a row
+    "Autotune" with Stop autotune / Review the result… / Clear) and in the sidebar (the channel's button
+    becomes stop ■ / review ✓ / clear ✕ while an autotune exists; the sidebar text: "Autotune" only while it
+    runs, "Autotune done", else Idle / Manual). A finished autotune opens a **dialog** once per result while
+    the Dashboard is shown: current and new Kp / Ki / Kd, Accept (`cmd accept`), Edit… (inputs; Save these
+    values = POST /api/config with the values + `cmd discard`), Dismiss (`discard`), Later.
+  - **Live view first** (web `view = 'live'`, touch `chartLive = true`); a run starting, opening a program
+    (Programs page) or choosing one (Dashboard select, touch picker) switch to the program view.
+  - **Hover** on the Dashboard chart: dotted line, a dot per curve, a box (live: clock time + time before now;
+    run: run time; preview: plan values); mouse / pen, a finger on the live chart; the hover layer takes no
+    pointer events (the program chart's handles stay draggable).
+  - **CSV replay** page (third in the menu, `#/replay`): opens the device's CSVs (history / last run, SD run
+    logs: time / time_s / run_s, `<ch>_pv/_sp/_min/_max/_plan/_prog/_out`, SD events as dotted marks) from a
+    file, a drop, "Device history", "Last run" or Log › Replay; zoom (wheel, pinch, buttons, Shift + drag
+    range, double click = all), pan, hover, legend toggles, Crop to view, Save CSV (the original lines of the
+    range). CYD flash 92.1 % after this (the page grew ~9 kB).
 - Next: step 7b is done, the old UI removed. Open: the older untested points (Modbus beta, runs on the CYD, ...); later GitHub Pages (7b
   option 1) and a release build of the launcher.
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,

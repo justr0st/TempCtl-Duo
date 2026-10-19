@@ -43,6 +43,16 @@ static bool raOn(const Settings& s, int c) { return isOn(s, c) && ra(s, c).enabl
 static bool offOn(const Settings& s, int c) { return isOn(s, c) && ra(s, c).offEnable; }
 static bool frozenOn(const Settings& s, int c) { return isOn(s, c) && ra(s, c).frozenEnable; }
 static bool cjOn(const Settings& s, int c) { return isLoc(s, c) && s.ch[c].loc.cjEnable; }
+static bool medOn(const Settings& s, int c) { return isLoc(s, c) && s.ch[c].loc.median; }
+// local: read interval, median filter, autotune time limit
+static float gReadMs(const Settings& s, int c) { return s.ch[c].loc.readMs; }
+static void sReadMs(Settings& s, int c, float v) { s.ch[c].loc.readMs = (uint16_t)v; }
+static float gMedian(const Settings& s, int c) { return s.ch[c].loc.median; }
+static void sMedian(Settings& s, int c, float v) { s.ch[c].loc.median = v != 0; }
+static float gMedianN(const Settings& s, int c) { return (s.ch[c].loc.medianN - 3) / 2; }  // 3, 5, 7, 9 -> 0 ... 3
+static void sMedianN(Settings& s, int c, float v) { s.ch[c].loc.medianN = (uint8_t)(3 + 2 * (int)v); }
+static float gTuneMax(const Settings& s, int c) { return s.ch[c].loc.tuneMaxMin; }
+static void sTuneMax(Settings& s, int c, float v) { s.ch[c].loc.tuneMaxMin = (uint16_t)v; }
 
 static const uint32_t BAUDS[] = {2400, 4800, 9600, 19200, 38400};
 
@@ -383,7 +393,15 @@ static const Field CH_FIELDS[] = {
     {F_NUM, "Calibration offset", "Calibrated = raw \xC3\x97 gain + offset", -50, 50, 2, "\xC2\xB0" "C", nullptr,
      fg26, fs27, isLoc},
     {F_NUM, "Calibration gain", nullptr, 0.5f, 2, 4, "", nullptr, fg28, fs29, isLoc},
+    {F_NUM, "Read every", "MAX6675: at least 250 ms (its conversion time)", 100, 1000, 0, "ms", nullptr, gReadMs, sReadMs,
+     isLoc},
+    {F_SW, "Median filter", "Removes single-reading spikes; a change shows about half the window later", 0, 0, 0,
+     nullptr, nullptr, gMedian, sMedian, isLoc},
+    {F_SEL, "\xE2\x80\xA6 over the last", nullptr, 0, 0, 0, nullptr, "3 readings\n5 readings\n7 readings\n9 readings", gMedianN,
+     sMedianN, medOn},
     {F_HEAD, "PID control", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, isLoc},
+    {F_NUM, "Autotune time limit", "The autotune gives up after this time", 10, 240, 0, "min", nullptr, gTuneMax, sTuneMax,
+     isLoc},
     {F_NUM, "Kp", "% output per \xC2\xB0" "C", 0, 1000, 2, "", nullptr, fg30, fs31, isLoc},
     {F_NUM, "Ki", "% per \xC2\xB0" "C\xC2\xB7s", 0, 100, 4, "", nullptr, fg32, fs33, isLoc},
     {F_NUM, "Kd", "%\xC2\xB7s per \xC2\xB0" "C", 0, 10000, 1, "", nullptr, fg34, fs35, isLoc},

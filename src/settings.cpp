@@ -87,6 +87,10 @@ static void channelDefaults(ChannelSettings& c, int ch, uint8_t type) {
   c.loc.cjEnable = 1;
   c.loc.cjMax = 70;
   runawayDefaults(c.loc.runaway, ch);
+  c.loc.readMs = 250;
+  c.loc.median = 1;  // (median of 3: what the firmware always did before the setting)
+  c.loc.medianN = 3;
+  c.loc.tuneMaxMin = 70;
 }
 
 void settingsDefaults(Settings& s, const BoardLimits& lim) {
@@ -282,6 +286,11 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
     c.loc.cjEnable = c.loc.cjEnable ? 1 : 0;
     clampv(c.loc.cjMax, 30.0f, 125.0f);
     validRunaway(c.loc.runaway);
+    clampv<uint16_t>(c.loc.readMs, c.loc.sensor == SENSOR_MAX6675 ? 250 : 100, 1000);
+    c.loc.median = c.loc.median ? 1 : 0;
+    clampv<uint8_t>(c.loc.medianN, 3, 9);
+    if (!(c.loc.medianN & 1)) ++c.loc.medianN;  // odd: 3, 5, 7, 9
+    clampv<uint16_t>(c.loc.tuneMaxMin, 10, 240);
     // the setpoint limit stays at least 10 degC below the local cut-off (spec 9.2)
     if (c.type == CH_LOCAL && c.spMax > c.loc.maxTemp - 10) c.spMax = c.loc.maxTemp - 10;
     if (c.spMax < c.spMin) c.spMax = c.spMin;
@@ -556,6 +565,10 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
     l["cjEnable"] = c.loc.cjEnable != 0;
     l["cjMax"] = c.loc.cjMax;
     runawayToJson(c.loc.runaway, l["runaway"].to<JsonObject>());
+    l["readMs"] = c.loc.readMs;
+    l["median"] = c.loc.median != 0;
+    l["medianN"] = c.loc.medianN;
+    l["tuneMaxMin"] = c.loc.tuneMaxMin;
   }
 }
 
@@ -810,6 +823,10 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
         R.flag(l, pl, "cjEnable", c.loc.cjEnable);
         R.num(l, pl, "cjMax", c.loc.cjMax);
         R.runaway(R.obj(l, pl, "runaway"), pl, c.loc.runaway);
+        R.num(l, pl, "readMs", c.loc.readMs);
+        R.flag(l, pl, "median", c.loc.median);
+        R.num(l, pl, "medianN", c.loc.medianN);
+        R.num(l, pl, "tuneMaxMin", c.loc.tuneMaxMin);
       }
     }
   }

@@ -452,6 +452,17 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
   scrolling; a channel card turns into its channel colour while the output is on. Browsers that ask for
   reduced transparency get it without the blur. Logo: `web/icons/`
   (from `logo/TempCtl.svg`).
+- Chart: starts in the **Live** view (touch screen too); a run, opening or choosing a program switch to the
+  program view. **Hover** (mouse; a finger on the live chart) shows a dotted line, a dot on each curve and a
+  box with the time and the values (live: clock time and time before now). The live chart's time marks
+  count back from now and stay put, with vertical grid lines.
+- **CSV replay** page (`#/replay`): a CSV of the device - Export CSV (live history or last run), "Device
+  history", "Last run", an SD run log (Log page › Replay) or any file opened / dropped - as a chart: wheel /
+  two fingers zoom, drag moves, Shift + drag zooms to a range, double click shows all, hover as above, the
+  legend switches curves; Crop to view + Save CSV write only the rows of that range (same columns).
+- Autotune on the Dashboard and in the sidebar: Stop (running), Clear (failed / stopped), Review (done); a
+  finished autotune opens a dialog with the current and the new PID values: Accept, Edit… (then Save these
+  values), Dismiss, Later.
 - Source: `web/index.html` (one file: HTML, CSS, JS) and the Barlow / Barlow Semi Condensed fonts in
   `web/fonts/` (woff2 subsets: Latin, Latin-1, Latin Extended-A and a few symbols; SIL Open Font License,
   `web/fonts/OFL.txt`). The page works without internet (AP mode): everything comes from the device.
@@ -598,7 +609,8 @@ TempCtl Duo: two channels. The flat fields of `/api/status` (TempCtl 1.2) show t
 **bottom channel**; everything else covers both (`ch` = 0 bottom, 1 top).
 
 **Local channels** (type `local`, step 3): thermocouple converter MAX31855 or MAX6675 (`local.sensor`) read
-every 250 ms, calibration `true = raw * calGain + calOffset`, PID (`kp`, `ki`, `kd`, or from the autotune: relay test around a
+every `readMs` (100 … 1000 ms, default 250; MAX6675 from 250 ms), optionally through a median filter over the last
+`medianN` readings (`median`, 3 / 5 / 7 / 9, default on, 3), calibration `true = raw * calGain + calOffset`, PID (`kp`, `ki`, `kd`, or from the autotune (time limit `tuneMaxMin`, default 70 min): relay test around a
 test temperature, Tyreus–Luyben rule) and a time-proportional SSR output (`windowSec`, default 1 s; `maxOut` %). Safety: SSR pins low from
 the first line of `setup()`, SSR off when the task stops refreshing it (1.5 s), and latched faults
 (outputs off, run stopped) for no reading (3 bad reads while on), above `maxTemp` and the runaway checks.

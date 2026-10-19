@@ -13,7 +13,7 @@ const ChartData& chartData();
 static lv_obj_t* scr;
 static lv_obj_t *btnRun, *btnStop, *btnNext, *titleBox, *lblProg, *lblSub, *badge, *lblTime, *lblRem;
 static lv_obj_t *chart, *lblChartMode;
-static bool chartLive = false;
+static bool chartLive = true;  // the live view first (Rost); a run switches to its program view
 static uint32_t chartAt = 0;
 
 struct Tile {
@@ -72,6 +72,7 @@ static int8_t pickSlot[PROG_MAX];
 
 static void onPick(int i, int) {
   if (i >= 0 && i < PROG_MAX && pickSlot[i] >= 0) selectProgram(pickSlot[i]);
+  chartLive = false;  // (a program chosen: its preview)
   chartAt = 0;
 }
 
