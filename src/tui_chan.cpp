@@ -11,6 +11,7 @@
 
 static Settings E;  // edited copy
 static bool eDirty = false;
+static uint32_t eGen = 0;  // settingsGen() of the copy in E (a save elsewhere - web, serial - reloads it)
 // control sizes (480x320 / 320x240)
 constexpr int CW = TUI_SMALL ? 128 : 150, CW2 = TUI_SMALL ? 90 : 110, BH = TUI_SMALL ? 32 : 36, TAB_W = TUI_SMALL ? 66 : 104;
 static int tab = 0;  // 0, 1 = channel, 2 = bus
@@ -435,6 +436,11 @@ static const Field* fieldsOf(int& n) {
   return CH_FIELDS;
 }
 
+static void loadE() {
+  settingsCopy(E);
+  eGen = settingsGen();
+}
+
 static void build();
 
 static void changed() {
@@ -496,7 +502,7 @@ static void onTune(lv_event_t* e) {
     }
     saveSettingsAndNotify();
     localCtrlTuneClear(tab);
-    settingsCopy(E);
+    loadE();
     eDirty = false;
     build();
     tToast("PID values taken over.");
@@ -583,6 +589,12 @@ static void selText(const char* opts, int i, char* b, size_t n) {
 }
 
 static void build() {
+  // the RS485 tab only when a channel is a Modbus channel (as edited)
+  const bool anyMb = isMb(E, 0) || isMb(E, 1);
+  if (cTabs[2]) tSetHidden(cTabs[2], !anyMb);
+  if (tab == 2 && !anyMb) tab = 0;
+  // rebuilt after every change: keep the scroll position (a value entered further down stays in view)
+  const int32_t sy = lv_obj_get_scroll_y(cBody);
   tuneLbl = tuneRow = nullptr;
   lv_obj_clean(cBody);
   for (int i = 0; i < 3; ++i)
@@ -641,6 +653,8 @@ static void build() {
       tButton(r, b, onField, (void*)(intptr_t)i, CW2, BH);
     }
   }
+  lv_obj_update_layout(cBody);
+  lv_obj_scroll_to_y(cBody, sy, LV_ANIM_OFF);
 }
 
 static void onTab(lv_event_t* e) {
@@ -672,7 +686,7 @@ static void onSave(lv_event_t*) {
     gSettings = s;
   }
   saveSettingsAndNotify();
-  settingsCopy(E);
+  loadE();
   eDirty = false;
   build();
   tToast("Settings saved.");
@@ -718,14 +732,20 @@ lv_obj_t* chanCreate() {
 }
 
 void chanShow() {
-  settingsCopy(E);
+  loadE();
   eDirty = false;
   build();
+  lv_obj_scroll_to_y(cBody, 0, LV_ANIM_OFF);  // (opened: from the top)
 }
 
 void chanUpdate() {
   static uint32_t at = 0;
   if (at && lv_tick_elaps(at) < 1000) return;
   at = tTickNow();
+  // saved elsewhere (web, serial) while nothing is being edited here: show it
+  if (!eDirty && !tModalOpen() && settingsGen() != eGen) {
+    loadE();
+    build();
+  }
   if (tab < 2 && isLoc(E, tab)) tuneUpdate();
 }

@@ -152,10 +152,15 @@ static bool withCard(char* err, size_t n, F fn, uint32_t waitMs = 5000) {
     return false;
   }
   crumb(CR_SD, S_MOUNT);
+  // Once more after a failure, also when no card answered: a card that was idle (its lines shared with the
+  // display) sometimes misses the first initialisation and answers the next one (Rost: "not found at the
+  // first attempt, works afterwards"). Without a card both attempts fail at once (MISO pull-up).
   bool ok = mountCard(err, n);
-  if (!ok && cardSeen != 0) {  // (a card that answered but failed: once more)
+  if (!ok) {
+    LogSerial.printf("[sd] %s - trying once more\n", err);
     vTaskDelay(pdMS_TO_TICKS(100));
     ok = mountCard(err, n);
+    if (ok) LogSerial.println("[sd] the card answered the second time");
   }
   if (ok) {
     crumb(CR_SD, S_WORK);

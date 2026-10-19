@@ -2118,14 +2118,19 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   - **Web "Last run" button** (Rost): on the Dashboard chart's program preview, when the device still has the
     selected program's last run (finished / stopped, until a restart or the next run): shows that run again
     (the counterpart of "Back to preview").
-- **Planned** (Rost, 2026-10-15):
-  - Web Channels page: the Save / Revert bar at the bottom of a card is not aligned with the card's sides.
-  - Touch Channels screen: changes saved on the web show only after leaving and opening the screen again
-    (the other way round they show at once).
-  - Touch Channels screen: the RS485 tab only when a channel is a Modbus channel.
-  - SD card: sometimes not found at the first read or write, works on the next attempt.
-  - Touch Channels screen: after a value is entered with the keyboard / number pad, the list jumps back to
-    the top (it should stay where it was).
+- **1.0.50** (2026-10-15; Rost's list after 1.0.49, 1f8464a):
+  - Web Channels page: the sticky Save / Revert bar reaches the card's edges in the glass style too (its
+    padding is 16 / 18 px there, the bar's negative margins were for the plain style's 14 px).
+  - Touch Channels screen: a save elsewhere (web, serial) shows within a second while nothing is being edited
+    here and no keyboard / list is open (`eGen` = `settingsGen()` of the edit copy); with unsaved touch edits
+    the copy is kept (Save then writes the touch values for the channels).
+  - Touch Channels screen: the RS485 tab only while a channel is (as edited) a Modbus channel; on it when
+    the last one is switched away: back to the first tab.
+  - Touch Channels screen: rebuilt after every change, it keeps its scroll position now (opening the screen
+    or switching tabs: from the top).
+  - SD card: the mount is tried once more after any failure (before: only when the card had answered),
+    serial "[sd] ... - trying once more" / "the card answered the second time" to see how often it helps.
+  - UI host `./uihost chan`: reload after a web save, RS485 tab, scroll kept (without the fix: 564 -> 0).
 - Next: step 7b is done, the old UI removed. Open: the older untested points (Modbus beta, runs on the CYD, ...); later GitHub Pages (7b
   option 1) and a release build of the launcher.
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,

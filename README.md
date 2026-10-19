@@ -348,7 +348,7 @@ lists, messages), `tui_main.cpp`, `tui_chart.cpp`, `tui_menu.cpp` (menu, log, di
 `src/fonts/tfont_*.c`, made by `tools/lv_font_gen.py` from `tools/fonts/*.ttf` (OFL); LVGL's Montserrat
 supplies the symbols. **Preview without a board**: `test/ui_host/build.sh` builds the screens for the PC
 and renders screenshots of the main states (and `./uihost monkey` taps around at random under
-AddressSanitizer, `./uihost stepper` checks the tile's + / - while the device takes a value over late); `BOARD=cyd ./build.sh` does the same for the 320×240 set (`uihost_cyd`, `shots_cyd/`),
+AddressSanitizer, `./uihost stepper` checks the tile's + / - while the device takes a value over late, `./uihost chan` the Channels screen); `BOARD=cyd ./build.sh` does the same for the 320×240 set (`uihost_cyd`, `shots_cyd/`),
 `python3 sheet.py [cyd] [names]` converts the shots and puts them on one sheet, `MEM=1 BOARD=cyd ./build.sh`
 + `./uihost_mem mem` prints the heap used per screen.
 

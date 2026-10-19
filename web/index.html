@@ -272,7 +272,7 @@ input[type=range].thick:focus-visible{outline:2px solid var(--acc);outline-offse
 .cards.mas{grid-auto-rows:4px;row-gap:0}.cards.mas>*{align-self:start}
 .fbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
 .fbar .msg{margin:0}
-.fbar.sticky{position:sticky;bottom:0;z-index:4;background:var(--panel);margin:14px -14px -14px;padding:10px 14px;border-radius:0 0 10px 10px}
+.fbar.sticky{position:sticky;bottom:0;z-index:4;background:var(--panel);margin:14px -14px -14px;padding:10px 14px;border-radius:0 0 10px 10px}  /* (to the panel's edges: its padding) */
 details.grp{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}
 details.grp summary{cursor:pointer;font-family:var(--cond);font-weight:600;font-size:16.5px}
 details.grp[open] summary{margin-bottom:8px}
@@ -484,6 +484,7 @@ html:root .ctabs button[aria-pressed=true] .arc{display:block;position:absolute;
   mask-image:linear-gradient(to right,#000 20%,transparent),linear-gradient(to bottom,#000 25%,transparent);mask-composite:intersect}
 html:root .ctab-panel{position:relative;z-index:1;background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none;
   border-color:transparent;border-radius:0 18px 18px 18px;box-shadow:none}
+html:root .fbar.sticky{margin:14px -18px -16px;padding:10px 18px 12px;border-radius:0 0 18px 18px}  /* glass panel: padding 16px 18px, radius 18px */
 html:root .ctab-panel::before{content:"";position:absolute;inset:-1px;border:1px solid var(--glass-border);border-radius:0 18px 18px 18px;pointer-events:none;
   -webkit-mask:linear-gradient(to right,#000 var(--g0,0px),transparent var(--g0,0px) var(--g1,0px),#000 var(--g1,0px)) 0 0/100% 1px no-repeat,linear-gradient(#000,#000) 0 1px/100% calc(100% - 1px) no-repeat;
   mask:linear-gradient(to right,#000 var(--g0,0px),transparent var(--g0,0px) var(--g1,0px),#000 var(--g1,0px)) 0 0/100% 1px no-repeat,linear-gradient(#000,#000) 0 1px/100% calc(100% - 1px) no-repeat}

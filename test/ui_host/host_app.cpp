@@ -57,6 +57,8 @@ void setManualSp(float v, int ch) {
 }
 void saveSettingsQuiet() {}
 void saveSettingsAndNotify() {}
+static uint32_t hostGen = 1;
+uint32_t settingsGen() { return hostGen; }
 BoardLimits boardLimits() { return BoardLimits{true, 2}; }
 uint32_t liveHistSec() { return 86400; }
 const uint16_t LIVE_PERIODS[LIVE_PERIODS_N] = {1, 5, 10, 15, 30, 60, 120, 240, 480, 720, 1440};
@@ -286,6 +288,18 @@ static bool findText(lv_obj_t* o, const char* t, int& x, int& y) {
     if (findText(lv_obj_get_child(o, i), t, x, y)) return true;
   return false;
 }
+// the label showing `t` (nullptr if none)
+static lv_obj_t* findLabel(lv_obj_t* o, const char* t) {
+  if (lv_obj_check_type(o, &lv_label_class) && !strcmp(lv_label_get_text(o), t)) return o;
+  for (uint32_t i = 0; i < lv_obj_get_child_count(o); ++i)
+    if (lv_obj_t* r = findLabel(lv_obj_get_child(o, i), t)) return r;
+  return nullptr;
+}
+static bool visible(lv_obj_t* o) {
+  for (; o; o = lv_obj_get_parent(o))
+    if (lv_obj_is_hidden(o)) return false;
+  return true;
+}
 static int nthSlider(lv_obj_t* o, int& n, lv_area_t& a) {  // the n-th slider under o (depth first)
   if (lv_obj_check_type(o, &lv_slider_class) && n-- == 0) {
     lv_obj_get_coords(o, &a);
@@ -451,6 +465,45 @@ int main(int argc, char** argv) {
     return 0;
   }
 #endif
+  // Channels screen: a save elsewhere (web) shows without leaving the screen; the RS485 tab only with a Modbus
+  // channel; a change further down keeps the list where it was
+  if (argc > 1 && !strcmp(argv[1], "chan")) {
+    baseState();
+    uiInit();
+    tShow(SCR_CHANNELS);
+    run(500);
+    int fails = 0;
+    auto label = [](const char* t) { return findLabel(lv_screen_active(), t); };
+    const bool rs1 = visible(label(SMALL ? "RS485" : "RS485 (beta)"));
+    gSettings.ch[0].loc.kp = 7.5f;
+    gSettings.ch[1].type = CH_LOCAL;  // (as saved on the web)
+    ++hostGen;
+    run(1300);
+    const bool rs2 = visible(label(SMALL ? "RS485" : "RS485 (beta)"));
+    const bool kp = label("7.50") != nullptr;
+    printf("[host] chan: RS485 tab %d -> %d (want 1 -> 0), Kp 7.50 shown %d\n", rs1, rs2, kp);
+    fails += !rs1 || rs2 || !kp;
+    // a switch far down: the list stays where it was
+    lv_obj_t* l = label("Converter too hot: fault");
+    if (!l) return printf("[host] chan: no switch row\n"), 1;
+    lv_obj_t* body = lv_obj_get_parent(lv_obj_get_parent(lv_obj_get_parent(l)));
+    lv_obj_t* row = lv_obj_get_parent(lv_obj_get_parent(l));
+    lv_obj_t* sw = lv_obj_get_child(row, -1);
+    lv_area_t a;
+    lv_obj_get_coords(sw, &a);
+    lv_obj_scroll_to_y(body, lv_obj_get_scroll_y(body) + (a.y1 + a.y2) / 2 - SCREEN_H / 2, LV_ANIM_OFF);  // to the middle
+    run(100);
+    const int32_t y0 = lv_obj_get_scroll_y(body);
+    lv_obj_get_coords(sw, &a);
+    const bool on0 = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    tap((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2);
+    const int32_t y1 = lv_obj_get_scroll_y(body);
+    lv_obj_t* sw2 = lv_obj_get_child(lv_obj_get_parent(lv_obj_get_parent(label("Converter too hot: fault"))), -1);  // (rebuilt)
+    const bool on1 = lv_obj_has_state(sw2, LV_STATE_CHECKED);
+    printf("[host] chan: switch %d -> %d; scroll %d before, %d after (want equal, > 0)\n", on0, on1, (int)y0, (int)y1);
+    fails += on0 == on1 || y0 <= 0 || y0 != y1;
+    return fails;
+  }
 #if !TUI_SMALL
   // + on a tile while the device takes the new manual setpoint over only 600 ms later: the old value must not
   // show again, and a + in that time must go on from the new one
