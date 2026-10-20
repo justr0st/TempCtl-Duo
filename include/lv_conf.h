@@ -14,6 +14,18 @@
 #define LV_USE_STDLIB_MALLOC LV_STDLIB_CLIB
 #endif
 #define LV_USE_STDLIB_STRING LV_STDLIB_CLIB
+
+/*---- ESP32-S3 SIMD for the software renderer's simple fills (RGB565, ARGB8888) and RGB565 copies:
+ * Espressif's assembly (src/simd/, Apache-2.0) through the hooks in lv_blend_esp32s3.h. S3 only. ----*/
+#if defined(BOARD_S3) && defined(ESP_PLATFORM)
+#define LV_USE_DRAW_SW_ASM LV_DRAW_SW_ASM_CUSTOM
+#define LV_DRAW_SW_ASM_CUSTOM_INCLUDE "lv_blend_esp32s3.h"
+#endif
+
+/*---- no OS threads for drawing: tried on the S3 (LV_USE_OS LV_OS_FREERTOS, 2 SW draw units, priority 1;
+ * spec 1.0.54) - busy screens got slower (14 -> 2..9 FPS, frames 60-70 -> 86-107 ms), touch and scrolling
+ * sluggish: our frames consist of many small draw tasks, and handing each one to a thread costs more than
+ * drawing it. LVGL draws in the loop task, as before. ----*/
 #define LV_USE_STDLIB_SPRINTF LV_STDLIB_CLIB  /* (floats in printf) */
 
 /*---- display refresh ----*/

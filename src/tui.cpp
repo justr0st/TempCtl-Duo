@@ -116,6 +116,21 @@ void uiSetBrightness(uint8_t b) {
   appliedBrightness = b;
 }
 
+void uiPerf(bool on) { lcdPerf(on); }
+bool uiPerfOn() { return lcdPerfOn(); }
+uint8_t uiSpiMhz() { return lcdSpiMhz(); }
+#if LV_USE_DRAW_SW_ASM == LV_DRAW_SW_ASM_CUSTOM
+extern "C" volatile int lvSimdOn;  // src/simd/lv_blend_esp32s3.c
+void uiSimd(bool on) {
+  lvSimdOn = on ? 1 : 0;
+  if (disp) lv_obj_invalidate(lv_display_get_screen_active(disp));  // (all drawn again: see the difference)
+}
+int uiSimdOn() { return lvSimdOn; }
+#else
+void uiSimd(bool) {}
+int uiSimdOn() { return -1; }
+#endif
+
 static void applyRotation(bool r) {
   rotated = r;
   lcdSetRotation(r);
@@ -201,6 +216,11 @@ static void uiTimer(lv_timer_t*) {
   }
   if (S.brightness != appliedBrightness) uiSetBrightness(S.brightness);
   if ((S.rotate180 != 0) != rotated) applyRotation(S.rotate180);
+  static uint8_t triedSpi = 0;  // (a clock that could not be set is not tried again every tick)
+  if (S.spiMhz != lcdSpiMhz() && S.spiMhz != triedSpi) {
+    triedSpi = S.spiMhz;
+    lcdSetSpiMhz(S.spiMhz);
+  }
   const bool dark = S.themeDark != 0;
   if ((S.accentColor & 0xFFFFFF) != appliedAccent || (int)dark != appliedDark) {
     appliedAccent = S.accentColor & 0xFFFFFF;

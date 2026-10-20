@@ -117,6 +117,7 @@ void settingsDefaults(Settings& s, const BoardLimits& lim) {
   s.accentColor = 0x2196F3;  // "Blue", the first accent preset
   s.liveMin = 5;
   s.screenCheck = 1;
+  s.spiMhz = 40;
   s.scanFrom = 3100 + DP1;
   s.scanTo = 3199 + DP1;
   s.selProgram = 0;
@@ -225,6 +226,7 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
   clampv<uint8_t>(s.brightness, 10, 255);
   s.rotate180 = s.rotate180 ? 1 : 0;
   s.screenCheck = s.screenCheck ? 1 : 0;
+  s.spiMhz = s.spiMhz < 30 ? 20 : s.spiMhz < 60 ? 40 : 80;  // (the SPI clock is 80 MHz divided by 1, 2 or 4)
   s.manualIdle = s.manualIdle ? 1 : 0;
   clampv<uint16_t>(s.manualIdleMin, 2, 1440);
   s.estop = s.estop ? 1 : 0;
@@ -516,6 +518,7 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
   d["accent"] = hex;
   d["liveMin"] = s.liveMin;
   d["screenCheck"] = s.screenCheck != 0;
+  d["spiMhz"] = s.spiMhz;
   JsonArray tc = d["touchCal"].to<JsonArray>();
   tc.add(s.tsMinX); tc.add(s.tsMaxX); tc.add(s.tsMinY); tc.add(s.tsMaxY);
   JsonObject tz = o["time"].to<JsonObject>();
@@ -701,6 +704,7 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
     R.num(d, "display.", "brightness", s.brightness);
     R.flag(d, "display.", "rotate180", s.rotate180);
     R.flag(d, "display.", "screenCheck", s.screenCheck);
+    R.num(d, "display.", "spiMhz", s.spiMhz);
     JsonVariantConst td = d["themeDark"];
     if (td.is<bool>()) s.themeDark = td.as<bool>() ? 1 : 0;
     else if (!td.isNull()) R.fail("display.", "themeDark", "true / false expected");

@@ -5,13 +5,18 @@
 // moves the bytes: commands as polling transfers, pixel data as a queued DMA
 // transfer whose completion (SPI post-transaction callback) reports
 // lv_display_flush_ready(). LVGL renders into the second draw buffer while
-// the first one is sent.
+// the first one is sent. It renders RGB565 little endian (the format the ESP32-S3
+// SIMD fill / blend routines work on); sendColor swaps the bytes for the panel (32-bit
+// swaps, ~0.1 ms per 20-line part).
+// SPI clock: setting display.spiMhz (20 / 40 / 80 MHz; lcdSetSpiMhz). Frame
+// rate meter: lcdPerf (serial "perf on", touch Display › Frame rate).
 #include "lcd.h"
 #include "console.h"
 #include <Arduino.h>
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
 #include <esp_heap_caps.h>
+#include <esp_timer.h>
 #include <freertos/semphr.h>
 #include "config.h"
 #include "crumbs.h"
@@ -33,6 +38,18 @@ static spi_bus_config_t busCfg;               // (bus and device set up again af
 static spi_device_interface_config_t devCfg;
 static lv_display_t* disp = nullptr;
 static int queued = 0;  // DMA colour transfers not yet collected
+
+// ---- frame rate meter (lcdPerf): per second the redraws, their time, the time LVGL waited for the SPI
+// transfer, how long the SPI was busy, the CPU load of the LVGL loop
+static bool perfOn = false;
+static lv_obj_t* perfLabel = nullptr;
+static lv_timer_t* perfTimer = nullptr;
+static volatile int64_t spiStartUs = 0, spiBusyUs = 0;  // (postCb runs in the SPI interrupt)
+static volatile uint32_t spiBytes = 0;
+static int64_t frameStartUs = 0, frameUs = 0, waitStartUs = 0, waitUs = 0;
+static uint32_t frames = 0;
+static int64_t perfLastUs = 0;  // the last report
+static uint32_t chartN = 0, chartUs = 0;  // chart picture drawings (outside the display refresh)
 
 // Collects finished queued transfers. Polling transfers must not be started
 // while queued ones are pending (spi_master rule). LVGL waits for
@@ -73,6 +90,10 @@ static void sendCmd(lv_display_t*, const uint8_t* cmd, size_t cmdSize, const uin
 // Runs in the SPI interrupt (not in IRAM: the SPI interrupt is not
 // registered as IRAM-safe, so it is deferred while the flash cache is off).
 static void postCb(spi_transaction_t* t) {
+  if (perfOn && spiStartUs) {
+    spiBusyUs += esp_timer_get_time() - spiStartUs;
+    spiStartUs = 0;
+  }
   if (t->user) lv_display_flush_ready((lv_display_t*)t->user);
 }
 
@@ -87,6 +108,10 @@ static void sendColor(lv_display_t* d, const uint8_t* cmd, size_t cmdSize, uint8
   t.length = paramSize * 8;
   t.tx_buffer = param;
   t.user = d;
+  if (perfOn) {
+    spiStartUs = esp_timer_get_time();
+    spiBytes += paramSize;
+  }
   if (spi_device_queue_trans(spi, &t, portMAX_DELAY) == ESP_OK) ++queued;
   else lv_display_flush_ready(d);  // don't hang LVGL
 }
@@ -221,7 +246,7 @@ lv_display_t* lcdInit(bool rotate180) {
   if (!disp) return nullptr;
   LCD_SEND_CMD_LIST(disp, PANEL_FIXUP);
   LCD_SET_INVERT(disp, LCD_INVERT != 0);
-  lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
+  lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);  // (swapped in sendColor)
   lv_display_set_buffers(disp, buf1, buf2, bufBytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
   lcdSetRotation(rotate180);
   LogSerial.printf("[lcd] %dx%d, SPI %d MHz, %d x %u bytes draw buffer\n", (int)lv_display_get_horizontal_resolution(disp),
@@ -437,4 +462,117 @@ bool lcdTestBreak() {
   sendCmd(disp, &SLEEP, 1, nullptr, 0);
   LogSerial.println("[lcd] test: display switched off and put to sleep");
   return true;
+}
+
+// ------------------------------------------------------------ SPI clock (setting display.spiMhz)
+// The SPI clock is 80 MHz divided: 80 / 40 / 20 MHz. 80 MHz works on the IO-MUX pins of the bus (S3: GPIO
+// 10-13, CYD: 12-15), with short wires; long ones give wrong pixels or a garbled picture (back to 40 MHz:
+// web page, serial). The device is set up again with the new clock; the screen is drawn again.
+uint8_t lcdSpiMhz() { return (uint8_t)(devCfg.clock_speed_hz / 1000000); }
+
+bool lcdSetSpiMhz(uint8_t mhz) {
+  if (!disp || !spi) return false;
+  const int hz = (int)mhz * 1000000;
+  if (devCfg.clock_speed_hz == hz) return true;
+  drainQueue();
+  if (spi_bus_remove_device(spi) != ESP_OK) return false;
+  spi = nullptr;
+  const int was = devCfg.clock_speed_hz;
+  devCfg.clock_speed_hz = hz;
+  esp_err_t err = spi_bus_add_device(SPI2_HOST, &devCfg, &spi);
+  if (err != ESP_OK) {
+    LogSerial.printf("[lcd] SPI %u MHz not possible (%s) - stays at %d MHz\n", (unsigned)mhz, esp_err_to_name(err), was / 1000000);
+    devCfg.clock_speed_hz = was;
+    if (spi_bus_add_device(SPI2_HOST, &devCfg, &spi) != ESP_OK) spi = nullptr;
+    return false;
+  }
+  LogSerial.printf("[lcd] SPI %u MHz\n", (unsigned)mhz);
+  lv_obj_invalidate(lv_display_get_screen_active(disp));
+  lv_obj_invalidate(lv_display_get_layer_top(disp));
+  return true;
+}
+
+// ------------------------------------------------------------ frame rate meter
+static void perfEvent(lv_event_t* e) {
+  if (!perfOn) return;
+  const int64_t now = esp_timer_get_time();
+  switch (lv_event_get_code(e)) {
+    case LV_EVENT_RENDER_START: frameStartUs = now; break;
+    case LV_EVENT_RENDER_READY:
+      if (frameStartUs) frameUs += now - frameStartUs, ++frames;
+      frameStartUs = 0;
+      break;
+    case LV_EVENT_FLUSH_WAIT_START: waitStartUs = now; break;
+    case LV_EVENT_FLUSH_WAIT_FINISH:
+      if (waitStartUs) waitUs += now - waitStartUs;
+      waitStartUs = 0;
+      break;
+    default: break;
+  }
+}
+
+static void perfTick(lv_timer_t*) {
+  const int64_t now = esp_timer_get_time();
+  const int64_t span = now - perfLastUs > 0 ? now - perfLastUs : 1;
+  perfLastUs = now;
+  const uint32_t n = frames;
+  const int64_t fUs = frameUs, wUs = waitUs, sUs = spiBusyUs;
+  const uint32_t bytes = spiBytes;
+  const uint32_t cn = chartN, cus = chartUs;
+  chartN = chartUs = 0;
+  frames = 0;
+  frameUs = waitUs = 0;
+  spiBusyUs = 0;
+  spiBytes = 0;
+  const unsigned fps = (unsigned)((n * 1000000LL + span / 2) / span);
+  const unsigned cpu = 100 - lv_timer_get_idle();
+  const unsigned frame = n ? (unsigned)(fUs / n / 1000) : 0, wait = n ? (unsigned)(wUs / n / 1000) : 0;
+  const unsigned spiPct = (unsigned)(sUs * 100 / span);
+  char t[150];
+  int k = snprintf(t, sizeof(t), "%u FPS  LVGL CPU %u %%\nframe %u ms (draw %u, wait %u)\nSPI %u MHz busy %u %%, %u kB/s", fps, cpu,
+                   frame, frame > wait ? frame - wait : 0, wait, (unsigned)lcdSpiMhz(), spiPct,
+                   (unsigned)(bytes * 1000000LL / span / 1024));
+  if (cn && k > 0 && k < (int)sizeof(t))
+    snprintf(t + k, sizeof(t) - k, "\nchart %u x %.1f ms", (unsigned)cn, cus / 1000.0 / cn);
+  if (perfLabel) lv_label_set_text(perfLabel, t);
+  for (char* p = t; *p; ++p)
+    if (*p == '\n') *p = ',';
+  LogSerial.printf("[perf] %s\n", t);
+}
+
+void lcdPerf(bool on) {
+  if (!disp || on == perfOn) return;
+  if (on) {
+    frames = 0;
+    frameUs = waitUs = spiBusyUs = 0;
+    spiBytes = 0;
+    frameStartUs = waitStartUs = spiStartUs = 0;
+    perfLastUs = esp_timer_get_time();
+    perfLabel = lv_label_create(lv_display_get_layer_sys(disp));
+    lv_obj_set_style_bg_color(perfLabel, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(perfLabel, LV_OPA_70, 0);
+    lv_obj_set_style_text_color(perfLabel, lv_color_white(), 0);
+    lv_obj_set_style_text_font(perfLabel, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_pad_all(perfLabel, 3, 0);
+    lv_obj_align(perfLabel, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_label_set_text(perfLabel, "measuring ...");
+    lv_display_add_event_cb(disp, perfEvent, LV_EVENT_ALL, nullptr);
+    perfTimer = lv_timer_create(perfTick, 1000, nullptr);
+    perfOn = true;
+  } else {
+    perfOn = false;
+    lv_timer_delete(perfTimer);
+    perfTimer = nullptr;
+    lv_display_remove_event_cb_with_user_data(disp, perfEvent, nullptr);
+    lv_obj_delete(perfLabel);
+    perfLabel = nullptr;
+  }
+}
+
+bool lcdPerfOn() { return perfOn; }
+
+void lcdPerfChart(uint32_t us) {
+  if (!perfOn) return;
+  ++chartN;
+  chartUs += us;
 }

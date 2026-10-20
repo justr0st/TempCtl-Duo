@@ -2201,10 +2201,120 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   - Rost's tests: `tools/release_local.sh --no-app` (deployed with his wrangler login; Go not installed yet), the
     CYD's web page found and installed 1.0.52; the S3 first failed ("SSL - Memory allocation failed", fixed with
     mbedTLS in PSRAM, 9.13), then found and installed 1.0.52 from the touch screen.
-- **1.0.53** (2026-10-20; after 1.0.52 = 703ccf4): `wrangler deploy --tag v<version> --message <commit subject, ≤ 100>`
+- **1.0.53** (2026-10-20, 4f75037; after 1.0.52 = 703ccf4): `wrangler deploy --tag v<version> --message <commit subject, ≤ 100>`
   (workflow) / `"<version> local build from <commit>[ + uncommitted changes]"` (release_local.sh), so Cloudflare's
   deployment list no longer says only "Manually deployed" (Rost). The version is read with `tr -d '\r'` (a CRLF
   version.h on Windows; also in tools/launcher/build.sh).
+- **1.0.54** (2026-10-20; Rost asked whether drawing can be faster, picked steps 1–3 now, the
+  second core for drawing and a shorter refresh period next): 
+  - **Frame rate meter** (lcd.cpp `lcdPerf`; ui.h `uiPerf`; serial `perf on|off`, touch Display › Frame rate meter,
+    not saved): own measurement instead of LVGL's perf monitor (that one is created with every display, and
+    `lcdReinit`'s short-lived second display would leave its timer behind): display events RENDER_START/READY
+    (frame time), FLUSH_WAIT_START/FINISH (waiting for SPI), SPI busy time from queueing to the post callback,
+    bytes sent, `lv_timer_get_idle()`; label on the system layer (bottom right, Montserrat 12) + `[perf]` line
+    every second.
+  - **SPI clock setting** `display.spiMhz` 20 / 40 / 80 (default 40; validate snaps < 30 → 20, < 60 → 40, else
+    80): `lcdSetSpiMhz` removes and adds the SPI device with the new clock (fallback to the old one on an error),
+    redraws; applied by the UI tick (tui.cpp) when the setting differs (a failed clock is not retried until the
+    setting changes). Web Settings › Display select, touch Display › Display SPI clock (choice), serial
+    `display.spiMhz=20|40|80`. Host test (default, JSON, snapping).
+  - **No swap pass**: display colour format `LV_COLOR_FORMAT_RGB565_SWAPPED`; `sendColor` no longer calls
+    `lv_draw_rgb565_swap` (LVGL's SW renderer blends straight into big-endian RGB565).
+  - Tests: host, console host (perf, spiMhz set / refused value), UI host shots 12e/12f (both boards), Playwright
+    `mock/spi.js` (select, POST), S3 + CYD builds.
+  - **Rost's measurement (S3, 2026-10-20)**, `[perf]` lines:
+    | state | SPI | FPS | LVGL CPU | frame (draw / wait) | SPI busy | data |
+    |---|---|---|---|---|---|---|
+    | Dashboard, nothing touched | 80 | 5 | 14–17 % | 17–22 ms (all draw) | 1–2 % | 160–210 kB/s |
+    | still screen | 80 / 40 | 1 | 0 % | 8–10 ms | 0 % | ~20 kB/s |
+    | busy (near full-screen redraws, ~250 kB per frame) | 80 | 14–15 | 94–95 % | 60–68 ms (draw 60–68, wait 0–1) | 36–41 % | 3.4–3.9 MB/s |
+    | the same | 40 | 12–14 | 95–96 % | 68–73 ms (draw 66–70, wait 1–2) | 66–72 % | 3.2–3.5 MB/s |
+    **Finding: the drawing (CPU) is the limit, not the SPI**: waiting for the transfer is ≤ 2 ms per frame even
+    at 40 MHz, and 80 MHz gives only 13 → 14–15 FPS on busy screens (it halves the SPI load, which also leaves
+    more of the bus to the SD card). LVGL draws ~3.7 MB/s; a 30 ms refresh period is far from reached (frames
+    take 60–70 ms), so a shorter period would not help yet. 80 MHz ran without wrong pixels on Rost's wiring.
+    Next candidates: drawing on both cores (LVGL OS = FreeRTOS, 2 SW draw units), the ESP32-S3 SIMD blend
+    routines (esp_lvgl_port's assembly fill / blend for RGB565), cheaper styles on large areas (gradients,
+    shadows, opacity). The idle Dashboard redraws 5 × per second (~35 kB each: the values, the live chart).
+  - Seen in the same log: one "Screen restarted automatically: touch controller does not answer" while the
+    LVGL loop was at 84–95 % CPU (the touch is I2C, not on the display SPI); to watch whether it comes back.
+    `[mem] stack free: loop 18108` of 24 kB (S3): the loop uses ~6 kB.
+  - **Faster drawing, round 2** (Rost picked: both cores, the S3 SIMD routines, the chart as a cached picture):
+    - **Both cores** (S3, include/lv_conf.h): `LV_USE_OS LV_OS_FREERTOS`, `LV_DRAW_SW_DRAW_UNIT_CNT 2`,
+      `LV_DRAW_THREAD_PRIO 1` (= tskIDLE + 1, the loop task's priority: below control 3 / local 4), stacks 2 × 8 kB.
+      All LVGL calls stay in the loop task (other tasks only set flags: screen restart, OTA overlay); the draw
+      threads only render during a refresh, which the loop waits for. CYD: unchanged (one unit, no OS).
+    - **Chart cache** (S3, tui_chart.cpp `CHART_CACHE`): the chart is an `lv_canvas` with an RGB565 draw buffer
+      (lv_malloc = PSRAM, 472 × 132 × 2 = 124 kB); `chartUpdate` (once a second) hashes (FNV-1a) the snapshot,
+      view, size and theme colours and draws only when that changed: buffer filled with the screen background,
+      `lv_canvas_init_layer` → the old drawing code (`render(layer, area)`) → `lv_canvas_finish_layer` (draws,
+      waits, invalidates). On the screen only the picture is copied. A rebuilt main screen gets the buffer again
+      (`cObj`); a new size makes a new buffer. CYD: drawn directly as before (no PSRAM).
+    - **Back to RGB565 little endian + the swap in sendColor** (reverts the 1.0.54 "no swap pass"): the ESP32-S3
+      SIMD fill / blend routines (next step) and the chart picture copy work on RGB565; the swap is ~0.1 ms per
+      20-line part, measured frames take 60–70 ms.
+    - **Rost's measurement** (S3, 80 MHz): idle Dashboard 12–15 ms per frame (before 17–22: the chart cache
+      works); busy screens **slower**: 2–9 FPS, frames 74–107 ms (before 14–15 FPS, 60–68 ms), several seconds
+      with frame times ~100 ms at 0 % LVGL CPU, touch and scrolling sluggish ("stops all the time").
+      → **Both cores reverted** (LV_USE_OS none again): a frame is thousands of small draw tasks (glyph runs,
+      fills, chart pieces); with draw threads every task is handed over and its completion signalled between
+      tasks, which costs more than the drawing (and both cores then compete for PSRAM, where LVGL's objects
+      and styles are). Kept: the chart cache, RGB565 + swap.
+    - The same log again had "Screen restarted automatically: touch controller does not answer" (also seen in
+      the first measurement, without the draw threads): to look into separately.
+    - **Rost's measurement after the revert** (S3, 80 MHz, chart cache, one draw thread; "better now, no rapid CPU
+      spikes, smoother"):
+      | state | FPS | LVGL CPU | frame | SPI busy | data |
+      |---|---|---|---|---|---|
+      | Dashboard idle | 5 | **4–5 %** (before the cache 14–17 %) | **12–13 ms** (17–22) | 1–2 % | ~160 kB/s |
+      | still screen | 1 | 0 % | 5–9 ms | 0 % | ~20 kB/s |
+      | busy (near full-screen redraws) | 12–13 | 88–95 % | 55–74 ms | 29–36 % | 2.8–3.5 MB/s |
+      | between (smaller redraws) | 2–8 | 0–60 % | 25–60 ms | 3–23 % | 0.3–2 MB/s |
+      Busy screens are as before the cache (CPU-bound, ~13 FPS): the next step there is the SIMD fill / blend
+      code. Some seconds show long frames (up to 132 ms) at "0 %" LVGL CPU: LVGL's idle figure is measured over
+      its own 500 ms windows and read once a second here, so it is coarse for short bursts (not a stall: the
+      UI felt smooth). RAM steady: DRAM 149.5 kB free (largest block 139 kB), PSRAM 4.36 MB free (the chart
+      picture took ~124 kB), loop stack 17.8 kB unused. No touch restart in this log (2 short gaps bridged).
+      The S3's own release check worked in the same run (`[ota] release page: 1.0.53 (2121 kB)`).
+    - **Rost: a longer chart costs a lot of CPU**: idle Dashboard 2 FPS, frames 22–30 ms, but "LVGL CPU 81 %"; 0 %
+      on a still screen, ~7 % with a static program chart. The CPU went into drawing the chart picture (inside
+      an LVGL timer, not part of a display frame): LVGL made thousands of small draw tasks (round-ended line
+      pieces, a 1 px rectangle per area column) and blended them into the picture in PSRAM column by column
+      (each pixel another cache line): ~0.8 s per second. **Fix: own raster for the chart's data** (S3,
+      tui_chart.cpp): pass 1 = grid + labels through LVGL into the picture (few tasks), pass 2 = areas, curves,
+      "now" and plan-end lines straight into the RGB565 pixels: per curve the centre line's vertical extent in
+      each column (all pieces), then one span per column widened by the line width (neighbour columns: steep
+      parts keep their width), anti-aliased top / bottom, alpha blend (5-bit, 32-bit lane trick); dashes as
+      before (standalone dashed lines: each dash stroked by itself); areas row by row (sequential memory).
+      Looks as before (UI host shots compared), slightly cleaner joints (no doubled 50 % pieces). UI host
+      `./uihost chartbench` (x86 -O2): 6.4 ms (all LVGL) → 0.31 ms (raster) per drawing of the live chart.
+      The frame rate meter now adds "chart n x t ms" (drawings of the picture per second, `lcdPerfChart`).
+    - **SIMD routines** (Rost cloned espressif/esp-bsp into `.old/esp-bsp`, commit f259a6a; esp_lvgl_port 2.9.0,
+      Apache-2.0): `src/simd/` = `lv_color_blend_to_rgb565_esp32s3.S`, `lv_color_blend_to_argb8888_esp32s3.S`,
+      `lv_rgb565_blend_normal_to_rgb565_esp32s3.S`, `lv_macro_memcpy.S` (unchanged but a `#if defined(BOARD_S3)`
+      guard: empty objects on the CYD), their `LICENSE`, a README (origin, changes). esp_lvgl_port builds them
+      only for LVGL 9.1 (its wrapper uses 9.1's `_lv_draw_sw_blend_*_dsc_t`): our own wrapper
+      `src/simd/lv_blend_esp32s3.c` maps LVGL 9.6's `lv_draw_sw_blend_fill_dsc_t` / `..._image_dsc_t` to the
+      assembly's `asm_dsc_t` (opa, dst_buf, dst_w, dst_h, dst_stride, src_buf, src_stride, mask_buf,
+      mask_stride; fills pass `&dsc->color`, read as one aligned 32-bit word: static asserts for the offset and
+      `lv_color_t` = blue, green, red). Hooks in `include/lv_blend_esp32s3.h` (`LV_DRAW_SW_ASM_CUSTOM_INCLUDE`,
+      lv_conf.h, S3 only): `LV_DRAW_SW_COLOR_BLEND_TO_RGB565`, `..._TO_ARGB8888`,
+      `LV_DRAW_SW_RGB565_BLEND_NORMAL_TO_RGB565`; LVGL calls them only without mask and at full opacity. The
+      assembly checks alignment itself (16-byte stores, else 4-byte / byte paths; widths < 16 / < 8: plain
+      code) and returns LV_RESULT_OK. Run-time switch `lvSimdOn` (serial `perf simd on|off`, ui.h `uiSimd`;
+      the screen is drawn again) for comparing with the frame rate meter. Not runnable on the PC (Xtensa PIE):
+      checked by the S3 build (symbols linked, `lv_draw_sw_blend_color_to_rgb565` calls `lvSimdFillRgb565`);
+      Rost to compare `[perf]` with SIMD on / off and look for wrong pixels.
+    - **Rost's measurement with SIMD** (S3, 80 MHz, chart raster; the log does not mark `perf simd on/off`):
+      | state | FPS | LVGL CPU | frame | chart picture |
+      |---|---|---|---|---|
+      | Dashboard, long live chart | 5 | 4–11 % (before the raster 81 %) | 11–16 ms | 1 × 9.3–15 ms per second (grows as the chart fills) |
+      | still screen | 1 | 0 % | 7–11 ms | – |
+      | busy (near full-screen redraws) | 11–15 | 89–95 % | 61–74 ms | – |
+      Busy screens are as before SIMD (12–15 FPS, 55–74 ms): solid fills and copies are not what costs on them —
+      text (A4 glyphs blended), rounded corners / borders (masks) and anti-aliasing stay in LVGL's C code. No wrong
+      pixels reported. RAM: DRAM 144.5 kB free (largest 131 kB; −5 kB: the raster's column arrays), PSRAM 4.36 MB.
+      The chart raster works: "chart 1 x ~10–15 ms" instead of ~800 ms of CPU per second.
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,

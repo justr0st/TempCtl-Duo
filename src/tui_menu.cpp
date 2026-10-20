@@ -5,6 +5,7 @@
 #include "safety.h"
 #include "ota.h"
 #include "ota_net.h"
+#include "ui.h"
 #include "release.h"
 #include "version.h"
 #include "sdlog.h"
@@ -154,13 +155,13 @@ static lv_obj_t* settingRow(lv_obj_t* parent, const char* label, const char* hin
 static void saveQuiet() { saveSettingsQuiet(); }
 
 // ------------------------------------------------------------ display
-static lv_obj_t *dBright, *dDark, *dRotate, *dCheck, *dPeriod, *dAcc[7], *dAccIcon;  // dAcc[6]: custom colour
+static lv_obj_t *dBright, *dDark, *dRotate, *dCheck, *dPeriod, *dSpi, *dPerf, *dAcc[7], *dAccIcon;  // dAcc[6]: custom colour
 static const uint32_t ACCENTS[6] = {0x2196F3, 0xD1449B, 0x6C71C4, 0xD65D0E, 0x8839EF, 0x50A14F};
 static const char* const ACC_NAMES[6] = {"Blue", "Pink", "Violet", "Orange", "Mauve", "Green"};
 static bool dLoading = false;
 // what the screen shows: a change from the web page is picked up (displayUpdate)
 struct DShown {
-  uint8_t bright, dark, rot, check;
+  uint8_t bright, dark, rot, check, spi;
   uint32_t acc;
   uint16_t liveMin;
 };
@@ -201,6 +202,28 @@ static void onCheck(lv_event_t*) {
     gSettings.screenCheck = lv_obj_has_state(dCheck, LV_STATE_CHECKED) ? 1 : 0;
   }
   saveQuiet();
+}
+
+// display SPI clock (setting; tui.cpp's UI tick sets it) and the frame rate meter (not saved)
+static const uint8_t SPI_MHZ[3] = {20, 40, 80};
+static void onSpiPick(int i, int) {
+  if (i < 0 || i > 2) return;
+  {
+    Guard g;
+    gSettings.spiMhz = SPI_MHZ[i];
+  }
+  saveQuiet();
+  displayShow();
+}
+static void onSpi(lv_event_t*) {
+  Settings S;
+  settingsCopy(S);
+  const int sel = S.spiMhz == 20 ? 0 : S.spiMhz == 80 ? 2 : 1;
+  tChoice("Display SPI clock", "20 MHz (long wires)\n40 MHz\n80 MHz (short wires)", sel, onSpiPick, 0);
+}
+static void onPerf(lv_event_t*) {
+  if (dLoading) return;
+  uiPerf(lv_obj_has_state(dPerf, LV_STATE_CHECKED));
 }
 
 static void onAccent(lv_event_t* e) {
@@ -423,6 +446,10 @@ lv_obj_t* displayCreate() {
   dPeriod = tButton(r, "", onPeriod, nullptr, CW2, BH);
   r = settingRow(p.body, "Screen check", "Restarts a hanging display or touch by itself");
   dCheck = tSwitch(r, onCheck);
+  r = settingRow(p.body, "Display SPI clock", "Faster drawing at 80 MHz; wrong pixels: back to 40");
+  dSpi = tButton(r, "", onSpi, nullptr, CW2, BH);
+  r = settingRow(p.body, "Frame rate meter", "FPS and drawing time at the bottom right (also on the serial log)");
+  dPerf = tSwitch(r, onPerf);
   return p.scr;
 }
 
@@ -434,6 +461,12 @@ void displayShow() {
   tSetChecked(dDark, S.themeDark != 0);
   tSetChecked(dRotate, S.rotate180 != 0);
   tSetChecked(dCheck, S.screenCheck != 0);
+  tSetChecked(dPerf, uiPerfOn());
+  {
+    char m[12];
+    snprintf(m, sizeof(m), "%u MHz", (unsigned)S.spiMhz);
+    tButtonText(dSpi, m);
+  }
   const uint32_t acc = S.accentColor & 0xFFFFFF;
   bool preset = false;
   for (int i = 0; i < 6; ++i) {
@@ -461,7 +494,7 @@ void displayShow() {
   }
   fmtMinutes(cur, b, sizeof(b));
   tButtonText(dPeriod, b);
-  dShown = {S.brightness, S.themeDark, S.rotate180, S.screenCheck, S.accentColor, S.liveMin};
+  dShown = {S.brightness, S.themeDark, S.rotate180, S.screenCheck, S.spiMhz, S.accentColor, S.liveMin};
   dLoading = false;
   (void)ACC_NAMES;
 }
@@ -470,7 +503,7 @@ void displayUpdate() {
   if (lv_obj_has_state(dBright, LV_STATE_PRESSED)) return;  // being moved here
   Settings S;
   settingsCopy(S);
-  if (S.brightness != dShown.bright || S.themeDark != dShown.dark || S.rotate180 != dShown.rot || S.screenCheck != dShown.check ||
+  if (S.brightness != dShown.bright || S.themeDark != dShown.dark || S.rotate180 != dShown.rot || S.screenCheck != dShown.check || S.spiMhz != dShown.spi ||
       S.accentColor != dShown.acc || S.liveMin != dShown.liveMin)
     displayShow();
 }

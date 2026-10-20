@@ -365,6 +365,25 @@ outside it, CYD 6 px) does nothing — no click, no switch toggle; a held steppe
 finger is outside. Sliders and the keyboard / number keys behave as before. (`slideOffCancels` in tui.cpp:
 an event handler on the touch input resets it on such a release, before the widget sees it.)
 
+### Display speed (setting "Display SPI clock", `display.spiMhz`, 20 / 40 / 80 MHz, default 40)
+
+- LVGL draws in 2 buffers of 20 lines (S3; CYD one of 10) in internal DMA RAM (RGB565, bytes swapped for the
+  panel just before sending) and sends each part by DMA while it draws the next. S3: the chart is drawn once
+  per change into a picture in PSRAM and only copied to the screen (the CYD draws it directly). Drawing on both
+  CPU cores (LVGL draw threads) was tried and made busy screens slower: LVGL draws in the loop task. S3: solid
+  fills and RGB565 copies use Espressif's ESP32-S3 SIMD assembly (src/simd/, Apache-2.0, see its README). A full screen is 300 kB on the
+  S3: about 61 ms at 40 MHz, 31 ms at 80 MHz (only changed areas are drawn and sent).
+- **80 MHz** needs short, clean wires (S3: GPIO 10–13, the SPI bus's IO-MUX pins; CYD: 12–15). Wrong pixels or a
+  garbled picture: back to 40 MHz on the web page (Settings › Display) or serially (`set display.spiMhz=40`).
+  The setting takes effect at once (touch: Setup › Display › Display SPI clock).
+- **Frame rate meter** (touch Setup › Display › Frame rate meter, serial `perf on`, not saved): per second the
+  redraws (FPS), the LVGL loop's CPU load, the average frame time split into drawing and waiting for the SPI
+  transfer, how busy the SPI was and the data rate, e.g. `[perf] 24 FPS  LVGL CPU 61 %, frame 31 ms (draw 19,
+  wait 12), SPI 40 MHz busy 52 %, 410 kB/s`. Much "wait": the SPI is the limit (a higher clock helps); much
+  "draw": the CPU is. Measured on the S3 (1.0.54): busy screens (nearly the whole screen redrawn) reach 13 FPS at
+  40 MHz and 14–15 FPS at 80 MHz with the CPU at 95 % and almost no waiting: the drawing is the limit; 80 MHz
+  halves the SPI load (40 → 80 MHz: 70 % → 38 % busy).
+
 ### Automatic screen check (setting "Screen check", `display.screenCheck`, on by default)
 
 Every second the firmware checks the screen hardware and restarts a part that hangs, without restarting
@@ -434,6 +453,8 @@ their ranges and an example per section.
 | `reboot` | restart the device (refused while a program runs, like on touch / web) |
 | `screen restart` | set only the display and the touch controller up again (S3: reset pins + I2C bus freed; CYD: software reset + SPI) and redraw; prints whether the touch controller answers |
 | `screen check` | what the automatic screen check sees now: display status read back, touch controller, number of automatic restarts |
+| `perf on` · `perf off` · `perf` | frame rate meter: a box at the bottom right of the touch screen and a `[perf]` line every second (see "Display speed") |
+| `perf simd on` · `perf simd off` | S3: the SIMD fills / copies (src/simd) on or off, to compare (on again after a restart) |
 | Up / Down keys | the last 20 commands (lines with `pw=` and password entries are not kept) |
 | `backup sd` · `backup sd list` · `backup sd restore n=<n> [settings\|programs] [yes]` · `backup sd delete n=<n> yes` | S3: settings + all programs to a new file on the SD card · the backups, newest first, numbered · without `yes`: what backup n holds; with `yes`: restore both parts or one · delete one |
 | `api on` · `api off` | machine mode for the Web Serial page (JSON lines, below) |

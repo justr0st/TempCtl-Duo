@@ -5,6 +5,14 @@ void uiLoop();
 // a firmware upload runs inside one web request: it calls this so the touch screen shows the progress
 void uiOtaRefresh();
 void uiSetBrightness(uint8_t b);
+// frame rate meter on the screen + serial log (lcd.cpp lcdPerf); the display's SPI clock now (MHz).
+// Call from the loop task (the UI task).
+void uiPerf(bool on);
+bool uiPerfOn();
+uint8_t uiSpiMhz();
+// S3: the SIMD fills / copies (src/simd) on or off, for comparing with the frame rate meter; -1: not built in
+void uiSimd(bool on);
+int uiSimdOn();
 // Restart of the screen hardware without restarting the device: touch controller and display
 // controller set up again, everything redrawn. Asked from any task, done in the next uiLoop().
 // uiScreenRestartPoll(): number of restarts done so far (+ the result of the last one).

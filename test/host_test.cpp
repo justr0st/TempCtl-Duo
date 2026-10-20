@@ -926,6 +926,19 @@ static void testGuard() {
   settingsValidate(mb, BoardLimits{true, 2}, msg, sizeof(msg));
   CHECK(mb.ch[0].loc.medianN == 5 && mb.ch[1].loc.medianN == 9 && mb.ch[0].loc.tuneMaxMin == 10);
   CHECK(mb.ch[1].loc.readMs == 250 && mb.ch[0].loc.readMs == 100);
+  // display SPI clock (1.0.54): default 40, JSON round trip, snapped to 20 / 40 / 80
+  CHECK(st.spiMhz == 40);
+  Settings sp = st;
+  sp.spiMhz = 80;
+  JsonDocument ds;
+  settingsToJson(sp, ds.to<JsonObject>(), false);
+  Settings sb = st;
+  CHECK(settingsFromJson(ds.as<JsonObjectConst>(), sb, msg, sizeof(msg)) && sb.spiMhz == 80);
+  for (int v : {0, 25, 29, 30, 59, 60, 200}) {
+    sb.spiMhz = (uint8_t)v;
+    settingsValidate(sb, BoardLimits{true, 2}, msg, sizeof(msg));
+    CHECK(sb.spiMhz == (v < 30 ? 20 : v < 60 ? 40 : 80));
+  }
 }
 
 // ------------------------------------------------------------------ firmware image check (ota_image)

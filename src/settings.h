@@ -127,6 +127,7 @@ struct Settings {
   uint32_t accentColor;  // RGB 0xRRGGBB
   uint16_t liveMin;      // live chart period, minutes (at most what the live history holds)
   uint8_t screenCheck;   // 1: watch the display / touch controller, restart one that hangs (default on)
+  uint8_t spiMhz;        // display SPI clock: 20, 40 (default) or 80 MHz (80: short wires; garbled pixels: back to 40)
 
   // Time zone (local time in the SD run logs): "Europe/Berlin", "UTC+02:00" (its rule: tzLookup); empty =
   // not set yet (UTC; the web page sets it from the browser once)

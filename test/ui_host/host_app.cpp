@@ -216,6 +216,13 @@ bool lcdReinit() { return true; }
 int lcdCheck(char* i, size_t n) { snprintf(i, n, "host"); return 1; }
 bool lcdTestBreak() { return true; }
 void lcdSetBrightness(uint8_t) {}
+static uint8_t hostSpi = 40;
+static bool hostPerf = false;
+bool lcdSetSpiMhz(uint8_t m) { hostSpi = m; return true; }
+uint8_t lcdSpiMhz() { return hostSpi; }
+void lcdPerf(bool on) { hostPerf = on; }
+bool lcdPerfOn() { return hostPerf; }
+void lcdPerfChart(uint32_t) {}
 static int tx = -1, ty = -1;
 static int backupsMade = 0;  // (backupCreate stub: the slide-off test)
 bool touchInit(const TouchCal&) { return true; }
@@ -247,6 +254,7 @@ static void run(uint32_t ms) {
 }
 #define SMALL (SCREEN_W < 400)
 static bool otaOk = false;  // otaCanStart (stub below)
+void chartBench(int n, double& lvglUs, double& rasterUs);
 static void tap(int x, int y) {
   tx = x, ty = y;
   run(80);
@@ -522,6 +530,15 @@ int main(int argc, char** argv) {
 #if !TUI_SMALL
   // + on a tile while the device takes the new manual setpoint over only 600 ms later: the old value must not
   // show again, and a + in that time must go on from the new one
+  if (argc > 1 && !strcmp(argv[1], "chartbench")) {  // the chart picture: LVGL draw tasks vs. the own raster
+    uiInit();
+    tShow(SCR_MAIN);
+    run(1500);
+    double l = 0, r = 0;
+    chartBench(20, l, r);
+    printf("[host] chart (live): LVGL %.0f us, raster %.0f us per drawing\n", l, r);
+    return 0;
+  }
   if (argc > 1 && !strcmp(argv[1], "stepper")) {
     baseState();
     uiInit();
@@ -653,6 +670,24 @@ int main(int argc, char** argv) {
       gSettings.accentColor = 0x2196F3;
       run(600);
     } else printf("[host] custom accent button not found\n");
+  }
+  {  // display SPI clock + frame rate meter rows (bottom of the Display screen), the clock choice
+    tShow(SCR_DISPLAY);
+    run(200);
+    lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 1000, LV_ANIM_OFF);
+    run(200);
+    shot("12e-display-spi");
+    int x, y;
+    if (findText(lv_screen_active(), "40 MHz", x, y)) {
+      tap(x, y);
+      run(300);
+      shot("12f-spi-choice");
+      if (findText(lv_layer_top(), "80 MHz (short wires)", x, y)) tap(x, y);
+      run(400);
+      printf("[host] spi: setting %u, display %u MHz\n", (unsigned)gSettings.spiMhz, (unsigned)lcdSpiMhz());
+      gSettings.spiMhz = 40;
+      run(400);
+    } else printf("[host] spi button not found\n");
   }
   tShow(SCR_NETWORK);
   shot("13-network");

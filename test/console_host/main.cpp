@@ -65,6 +65,13 @@ int uiTouchCalPoll(int& step, uint16_t& a, uint16_t& b, uint16_t& c, uint16_t& d
   return calState;
 }
 void uiTouchCalCancel() { calState = -1; }
+static bool perfOn = false;
+void uiPerf(bool on) { perfOn = on; }
+bool uiPerfOn() { return perfOn; }
+uint8_t uiSpiMhz() { return 40; }
+static int simdOn = HAS_NET_OTA ? 1 : -1;  // (S3 build: built in)
+void uiSimd(bool on) { if (simdOn >= 0) simdOn = on; }
+int uiSimdOn() { return simdOn; }
 String netApName() { return String("TempCtl-Duo-1A2B"); }
 void syslogTee(const uint8_t*, size_t) {}
 void safetyActivity() {}
@@ -179,6 +186,14 @@ int main() {
   type("get b.local\r");
   type("info\r");
   type("fw\r");
+  type("perf\r");
+  type("perf on\r");
+  type("perf x\r");
+  type("perf simd off\r");
+  type("perf\r");
+  type("set display.spiMhz=80\r");
+  type("set display.spiMhz=33\r");
+  type("get display\r");
   type("fw sd\r");
   type("fw sd\r");  // (still reading)
   run(500);

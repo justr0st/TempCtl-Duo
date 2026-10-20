@@ -2593,7 +2593,8 @@ function updSystem(){
       {k:'display.themeDark',l:'Touch screen theme',t:'theme',def:true},
       {k:'display.brightness',l:'Touch screen brightness',t:'range',min:10,max:255,w:true,fmt:v=>(v>=255?100:Math.max(1,Math.min(99,Math.round(1+(v-10)*99/245))))+' %'}  /* 10 = 1 %, 255 = 100 % (only fully on: no PWM) */,
       {k:'display.rotate180',l:'Rotate the screen by 180°',t:'sw'},
-      {k:'display.screenCheck',l:'Restart a hanging screen by itself',t:'sw',def:true,h:'Checks the display and the touch controller every second and restarts one that hangs (logged as an event).'}]}],{title:'Display',auto:true}); }
+      {k:'display.screenCheck',l:'Restart a hanging screen by itself',t:'sw',def:true,h:'Checks the display and the touch controller every second and restarts one that hangs (logged as an event).'},
+      {k:'display.spiMhz',l:'Display SPI clock',t:'sel',num:true,o:[[20,'20 MHz (long wires)'],[40,'40 MHz'],[80,'80 MHz (short wires)']],h:'How fast the picture goes to the touch screen. 80 MHz draws faster but needs short wires; if pixels go wrong, set 40 MHz again. The touch screen’s Setup › Display › Frame rate meter (serial: perf on) shows the effect.'}]}],{title:'Display',auto:true}); }
   const sf=live.safety||{}, L=CFG.limits||{}, sl=[];
   if(L.estop) sl.push(sf.estop?'<span class="msg bad" style="margin:0">E-stop active</span>':`E-stop contact ${sf.contact||'–'}${CFG.safety&&CFG.safety.estop?'':' (input not watched)'}`);
   if(sf.chipC!=null) sl.push(`chip ${f1(sf.chipC)} °C${sf.chipHot?' <span class="msg bad" style="margin:0">hot</span>':''}`);

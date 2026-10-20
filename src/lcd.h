@@ -20,6 +20,16 @@ bool lcdReinit();
 // hardware: decided by the first read right after the init). info: the values, for the log / console.
 // Call from the UI task (or the same task as lv_timer_handler()).
 int lcdCheck(char* info, size_t n);
+// SPI clock of the display, 20 / 40 / 80 MHz (setting display.spiMhz; the bus device is set up again).
+// False when it can't be set (the clock stays). Call from the UI task.
+bool lcdSetSpiMhz(uint8_t mhz);
+uint8_t lcdSpiMhz();
+// Frame rate meter: a box at the bottom right (FPS, CPU load, frame time = drawing + waiting for the
+// SPI transfer, SPI busy) and the same line on the serial log every second. Call from the UI task.
+void lcdPerf(bool on);
+bool lcdPerfOn();
+// the time one drawing of the chart picture took (tui_chart.cpp): counted in the meter's line ("chart")
+void lcdPerfChart(uint32_t us);
 // Test only: switches the display off and puts it to sleep (the screen check must notice it)
 bool lcdTestBreak();
 // The SPI bus shared with the SD card (S3): the screen check frees the bus for its status read, so the SD

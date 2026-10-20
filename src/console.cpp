@@ -370,6 +370,9 @@ static const char* const H_DEVICE[] = {
     "  screen restart                 restart only the display and the touch controller",
     "                                 (when the screen hangs or shows rubbish)",
     "  screen check                   what the automatic screen check sees now",
+    "  perf on | off                  frame rate meter: box on the screen + a line every second",
+    "                                 (FPS, frame time = drawing + waiting for SPI, SPI load)",
+    "  perf simd on | off             S3: SIMD fills / copies (to compare; on after a restart)",
     "  fw                             firmware: version, board, update slot",
     "  fw sd                          the firmware.bin on the SD card (S3)",
     "  fw sd install yes              install it (restarts; checked for 30 s, else the",
@@ -495,6 +498,7 @@ static const char* const H_SETTINGS[] = {
     "  accent=<name>|#RRGGBB        blue, pink, violet, orange, mauve, green or any colour",
     "  rotate180=on|off             turn the screen upside down",
     "  screenCheck=on|off           restart a hanging display / touch controller by itself",
+    "  spiMhz=20|40|80              display SPI clock (80: faster drawing, needs short wires)",
     "  liveMin=<min>                live chart period: 1 5 10 15 30 60 120 240 480 720 1440",
     "  e.g. set display.accent=orange display.brightness=180 display.liveMin=30",
     "",
@@ -1326,6 +1330,7 @@ static const SKey KEYS[] = {
     {KS_DISP, K_ACCENT, "accent", 0, 0, nullptr},
     {KS_DISP, K_BOOL, "rotate180", 0, 0, nullptr},
     {KS_DISP, K_BOOL, "screenCheck", 0, 0, nullptr},
+    {KS_DISP, K_SET, "spiMhz", 0, 0, "20|40|80"},
     {KS_DISP, K_SET, "liveMin", 0, 0, "1|5|10|15|30|60|120|240|480|720|1440"},
     {KS_TIME, K_TZ, "zone", 0, 0, nullptr},
     {KS_SAFETY, K_BOOL, "manualIdle", 0, 0, nullptr},
@@ -1914,6 +1919,20 @@ static void dispatch(const Args& a) {
   }
   if (!strcmp(c, "info")) return cmdInfo();
   if (!strcmp(c, "fw") || !strcmp(c, "firmware")) return cmdFw(a);
+  if (!strcmp(c, "perf")) {  // frame rate meter (lcd.cpp)
+    const char* w = a.word(1);
+    if (!strcmp(w, "simd")) {  // S3: SIMD fills / copies on or off (comparison)
+      const char* v = a.word(2);
+      if (uiSimdOn() < 0) return err("no SIMD drawing on this board");
+      if (!strcmp(v, "on") || !strcmp(v, "off")) uiSimd(!strcmp(v, "on"));
+      else if (*v) return err("perf simd on | perf simd off");
+      return say("SIMD fills / copies %s", uiSimdOn() ? "on" : "off");
+    }
+    if (!strcmp(w, "on") || !strcmp(w, "off")) uiPerf(!strcmp(w, "on"));
+    else if (*w) return err("perf on | perf off");
+    return say("frame rate meter %s, display SPI %u MHz%s", uiPerfOn() ? "on" : "off", (unsigned)uiSpiMhz(),
+               uiSimdOn() < 0 ? "" : uiSimdOn() ? ", SIMD on" : ", SIMD off");
+  }
 #if HAS_SD
   if (!strcmp(c, "backup")) return cmdBackup(a);
 #else
