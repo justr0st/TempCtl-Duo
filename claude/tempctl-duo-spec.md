@@ -2201,7 +2201,11 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   - Rost's tests: `tools/release_local.sh --no-app` (deployed with his wrangler login; Go not installed yet), the
     CYD's web page found and installed 1.0.52; the S3 first failed ("SSL - Memory allocation failed", fixed with
     mbedTLS in PSRAM, 9.13), then found and installed 1.0.52 from the touch screen.
-- Next: Rost sets up the two GitHub secrets and disconnects Workers Builds (9.13), then the first release run.
+- **1.0.53** (2026-10-20; after 1.0.52 = 703ccf4): `wrangler deploy --tag v<version> --message <commit subject, ≤ 100>`
+  (workflow) / `"<version> local build from <commit>[ + uncommitted changes]"` (release_local.sh), so Cloudflare's
+  deployment list no longer says only "Manually deployed" (Rost). The version is read with `tr -d '\r'` (a CRLF
+  version.h on Windows; also in tools/launcher/build.sh).
+- Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
   add phase, save (POST body checked), start without saving, new Timeline in an empty slot with a pause

@@ -5,7 +5,7 @@
 #   tools/launcher/build.sh all        -> + macOS (arm64 / amd64) and Linux (amd64)
 set -e
 cd "$(dirname "$0")"
-V=$(sed -n 's/^#define FW_VERSION "\(.*\)"/\1/p' ../../src/version.h)
+V=$(sed -n 's/^#define FW_VERSION "\(.*\)".*/\1/p' ../../src/version.h | tr -d '\r')
 "${PY:-python3}" ../build_site.py site   # (PY: tools/release_local.sh hands over PlatformIO's python)
 mkdir -p dist
 LD="-s -w -X main.version=$V"

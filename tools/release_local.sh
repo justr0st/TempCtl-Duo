@@ -46,11 +46,15 @@ done
 
 if [ -z "$NOAPP" ]; then
   PY="$PY" bash tools/launcher/build.sh all
-  V=$(sed -n 's/^#define FW_VERSION "\(.*\)"/\1/p' src/version.h)
+  V=$(sed -n 's/^#define FW_VERSION "\(.*\)".*/\1/p' src/version.h | tr -d '\r')
   mkdir -p art/app && cp tools/launcher/dist/tempctl-duo-$V* art/app/
 fi
 
 "$PY" tools/build_site.py dist --web
 "$PY" tools/release.py dist art $NOAPP
 [ -n "$DRY" ] && { echo "dry run: dist/ is ready, nothing deployed"; exit 0; }
-npx --yes wrangler@4 deploy
+# the deployment list in Cloudflare: the version (tag) and "local build" with the commit it started from
+V=$(sed -n 's/^#define FW_VERSION "\(.*\)".*/\1/p' src/version.h | tr -d '\r')
+C=$(git rev-parse --short HEAD 2>/dev/null || echo "?")
+[ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ] && C="$C + uncommitted changes"
+npx --yes wrangler@4 deploy --tag "v$V" --message "$V local build from $C"

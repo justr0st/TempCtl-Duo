@@ -622,7 +622,9 @@ starts one by hand) runs `.github/workflows/release.yml`:
 3. `tools/build_site.py dist --web` (the page, `_headers`), then `tools/release.py dist art`: the files go to
    `dist/dl/` with the version in their names, plus `dist/dl/manifest.json` (version, date, commit; per board
    url, size, MD5, SHA-256; the app files). It stops if an image does not carry its env and this version.
-4. `npx wrangler deploy` (`wrangler.jsonc`, assets from `dist/`). The files are also kept 14 days as a run
+4. `npx wrangler deploy --tag v<version> --message "<first line of the commit>"` (`wrangler.jsonc`, assets
+   from `dist/`): Cloudflare's deployment list shows the version and what changed (`release_local.sh`:
+   "<version> local build from <commit>"). The files are also kept 14 days as a run
    artifact.
 
 Setup, once: GitHub › repository › *Settings › Secrets and variables › Actions*: `CLOUDFLARE_API_TOKEN` (a
