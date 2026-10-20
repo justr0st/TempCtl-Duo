@@ -22,9 +22,10 @@
 #define LCD_SPI_HZ 40000000
 #define LCD_BGR 1         // panel colour order (MADCTL BGR bit)
 #define LCD_INVERT 0      // TN panel: no colour inversion. Set 1 if colours look inverted.
-// Draw buffers (2 x, internal DMA RAM). One SPI transfer on the S3 is at
-// most 32 kB: 480 px * 32 lines * 2 bytes = 30 kB.
-#define LCD_BUF_LINES 32
+// Draw buffers (2 x, internal DMA RAM: SPI DMA can't read PSRAM here without a bounce copy). One SPI
+// transfer on the S3 is at most 32 kB. 20 lines: 480 px * 20 * 2 bytes = 18.75 kB each (was 32 lines, 30 kB
+// each: 23 kB more internal RAM free; a full screen is now 16 parts instead of 10).
+#define LCD_BUF_LINES 20
 
 #define PIN_BACKLIGHT 8   // LED pin of the module, LEDC PWM
 #define PIN_SD_CS 18      // SD card not used: held high (deselected)

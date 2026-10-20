@@ -32,4 +32,4 @@ for f in $R/src/fonts/*.c $R/src/tui_icons.c; do o=$FO/$(basename $f .c).o; [ $o
 g++ -std=gnu++17 -O0 -g $SAN -Wall -Wno-unused-function $INC $BD host_app.cpp \
   $R/src/tui.cpp $R/src/tui_theme.cpp $R/src/tui_widgets.cpp $R/src/tui_main.cpp $R/src/tui_chart.cpp \
   $R/src/tui_menu.cpp $R/src/tui_prog.cpp $R/src/tui_chan.cpp $R/src/settings.cpp $R/src/duo_program.cpp \
-  $R/src/run_engine.cpp $FO/tfont_*.o $FO/tui_icons.o obj/liblvgl.a -lm $EXTRA -o $OUT
+  $R/src/run_engine.cpp $R/src/release.cpp $FO/tfont_*.o $FO/tui_icons.o obj/liblvgl.a -lm $EXTRA -o $OUT

@@ -82,6 +82,19 @@ int sdlogFirmwareCheckResult(SdFirmware& f, char* e, size_t n) {
   f.found = true; f.size = 1900000; strcpy(f.board, "cyd-1xlocal-1x485"); strcpy(f.version, "1.0.40"); return 1;
 }
 bool sdlogFirmwareInstall(char* e, size_t n) { snprintf(e, n, "a program is running - stop it first"); return false; }
+void otaStatus(OtaStatus& s) { memset(&s, 0, sizeof(s)); s.phase = OTA_RUNNING; s.done = 950000; s.total = 1900000; }
+#include "ota_net.h"
+static int netPolls = 0, netJob = 0;  // a check / download "runs" for a few polls
+bool netOtaAvailable() { return HAS_NET_OTA; }
+bool netOtaCheckStart(char* e, size_t n) {
+  if (!HAS_NET_OTA) return snprintf(e, n, "on this board: web page, Settings, Firmware update, Check for updates"), false;
+  netPolls = 4; netJob = 1; return true; }
+bool netOtaInstallStart(char*, size_t) { netPolls = 250; netJob = 2; return true; }
+void netOtaInfo(NetOtaInfo& i) {
+  memset(&i, 0, sizeof(i));
+  if (netPolls > 0) { --netPolls; i.phase = netJob == 2 ? NET_DOWNLOADING : NET_CHECKING; return; }
+  i.phase = netJob == 2 ? NET_FAILED : NET_CHECKED; i.newer = true; strcpy(i.latest, "1.0.53"); strcpy(i.date, "2026-10-20T09:15:00Z");
+  i.size = 1900000; if (netJob == 2) strcpy(i.msg, "the download stalled after 950 of 1855 kB"); }
 #include "backup.h"
 #include "config.h"
 #if HAS_SD  // (BOARD=s3 ./build.sh)
@@ -171,6 +184,11 @@ int main() {
   run(500);
   type("fw sd install\r");
   type("fw sd install yes\r");
+  type("fw net\r");
+  run(500);
+  type("fw net install\r");
+  type("fw net install yes\r");
+  run(13000);
   type("STATUS\r\n");
   type("manual b on sp=180\r");
   type("manual t sp=9999\r");

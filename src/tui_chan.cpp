@@ -3,13 +3,14 @@
 // stores it (the same rules as the web page). Register addresses and the two-point calibration
 // are on the web page.
 #include "tui.h"
+#include "psram.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include "local_ctrl.h"
 #include "settings_store.h"
 
-static Settings E;  // edited copy
+static PSRAM_VAR(Settings, E);  // edited copy
 static bool eDirty = false;
 static uint32_t eGen = 0;  // settingsGen() of the copy in E (a save elsewhere - web, serial - reloads it)
 // control sizes (480x320 / 320x240)

@@ -18,6 +18,14 @@
 #define HAS_SD 0
 #endif
 
+// firmware download from the release page over HTTPS (spec 9.13): S3 only (a TLS session needs ~70 kB RAM,
+// taken from PSRAM; the CYD has none - its web page installs releases through the browser)
+#if defined(BOARD_HAS_PSRAM)
+#define HAS_NET_OTA 1
+#else
+#define HAS_NET_OTA 0
+#endif
+
 // Backlight PWM (LEDC channel 0, 8 bit). 20 kHz (was 5 kHz until 1.0.46): inaudible, fewer touch gaps on the S3's
 // capacitive panel at part brightness. The CYD's RGB status LED (channels 1..3) shares channel 0's timer, so it
 // runs at the same frequency.

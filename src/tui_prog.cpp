@@ -6,6 +6,7 @@
 // Start asks to save first. During a run the running program is shown with its run edits;
 // targets and times can be changed there (run edits, spec 9.3.4), the structure is locked.
 #include "tui.h"
+#include "psram.h"
 #include <esp_heap_caps.h>
 #include <math.h>
 #include <stdio.h>
@@ -36,7 +37,7 @@ void progListShow() {
   if (plGen == programStoreGen() && plSel == S.selProgram) return;
   plGen = programStoreGen();
   plSel = S.selProgram;
-  static ProgSummary sums[PROG_MAX];
+  static PSRAM_VAR(ProgSummary[PROG_MAX], sums);
   programSummaries(sums);
   lv_obj_clean(plBody);
   for (int i = 0; i < PROG_MAX; ++i) {
@@ -533,7 +534,7 @@ static void rowMenu(int ch, int idx) {
   rowCh = ch;
   rowIdx = idx;
   rowN = 0;
-  static char items[900];
+  static PSRAM_VAR(char[900], items);
   items[0] = 0;
   auto add = [&](uint8_t a, const char* t) {
     if (rowN) strlcat(items, "\n", sizeof(items));

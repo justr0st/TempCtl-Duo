@@ -2,6 +2,7 @@
 // Screens: tui_main.cpp (main), tui_menu.cpp (menu, log, display, network, system), tui_chart.cpp,
 // building blocks and popups: tui_widgets.cpp, colours and styles: tui_theme.cpp.
 #include "tui.h"
+#include "psram.h"
 #include "crumbs.h"
 #include "console.h"
 #include "lcd.h"
@@ -180,11 +181,11 @@ void tShow(TScreen s) {
 // the snapshot of gLive / gSettings taken on every UI tick (one copy for all screens: the main screen
 // reads it directly)
 static LiveData& snapLive() {
-  static LiveData L;
+  static PSRAM_VAR(LiveData, L);
   return L;
 }
 static Settings& snapSettings() {
-  static Settings S;
+  static PSRAM_VAR(Settings, S);
   return S;
 }
 const LiveData& tuiLive() { return snapLive(); }
@@ -475,7 +476,7 @@ void tuiOtaPoll() {
     if (pct >= 0) snprintf(amount, sizeof(amount), "%d %%", pct);
     else snprintf(amount, sizeof(amount), "%u kB", (unsigned)(st.done / 1024));
     snprintf(b, sizeof(b), "Firmware update%s%s\n%s %s\nDon't switch off.", st.version[0] ? " to " : "", st.version,
-             st.source == OTA_SD ? "From the SD card:" : "Over Wi-Fi:", amount);
+             st.source == OTA_SD ? "From the SD card:" : st.source == OTA_NET ? "Download:" : "Over Wi-Fi:", amount);
   }
   lv_label_set_text(otaText, b);
   lv_bar_set_value(otaBar, pct >= 0 ? pct : 50, LV_ANIM_OFF);

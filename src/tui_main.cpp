@@ -3,6 +3,7 @@
 // switch / extend hold / acknowledge). Overlays: "Action required", "Run interrupted by a reset",
 // "Save the run's changes?", messages.
 #include "tui.h"
+#include "psram.h"
 #include "local_ctrl.h"
 #include <math.h>
 #include <stdio.h>
@@ -81,9 +82,9 @@ static void onTitle(lv_event_t*) {
     tToast("The program can be changed when no run is active.");
     return;
   }
-  static ProgSummary sums[PROG_MAX];
+  static PSRAM_VAR(ProgSummary[PROG_MAX], sums);
   programSummaries(sums);
-  static char items[PROG_MAX * 64];
+  static PSRAM_VAR(char[PROG_MAX * 64], items);
   items[0] = 0;
   int n = 0, sel = -1;
   for (int i = 0; i < PROG_MAX; ++i) {

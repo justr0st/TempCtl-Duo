@@ -1,6 +1,7 @@
 // HTTP server: single-page web UI + JSON API.
 // No authentication: keep the device on a trusted network.
 #include "web.h"
+#include "psram.h"
 #include "console.h"
 #include "ui.h"
 #include "syslog.h"
@@ -518,7 +519,7 @@ static void handleCsv() {
 
 // ------------------------------------------------------------ program / commands
 static void handleGetPrograms() {
-  static ProgSummary list[PROG_MAX];
+  static PSRAM_VAR(ProgSummary[PROG_MAX], list);
   programSummaries(list);
   JsonDocument d;
   {
@@ -872,7 +873,7 @@ static void handleWifiScan() {
   }
   JsonDocument d;
   if (netScanBusy()) {
-    static char buf[1200];
+    static PSRAM_VAR(char[1200], buf);
     const int n = netScanResult(buf, sizeof(buf));
     if (n == -1) {
       d["busy"] = true;
@@ -1199,7 +1200,7 @@ static void otaStatusJson(JsonObject o) {
   otaStatus(st);
   static const char* const PH[] = {"idle", "running", "done", "failed"};
   o["phase"] = PH[st.phase <= OTA_FAILED ? st.phase : 0];
-  o["source"] = st.source == OTA_SD ? "sd" : st.source == OTA_WEB ? "web" : "";
+  o["source"] = st.source == OTA_SD ? "sd" : st.source == OTA_WEB ? "web" : st.source == OTA_NET ? "net" : "";
   o["done"] = st.done;
   o["total"] = st.total;
   o["version"] = JsonString(st.version);
@@ -1225,7 +1226,7 @@ static void handleOtaInfo() {
   sendJson(d);
 }
 
-// POST /api/ota?size=<bytes> (multipart, field "fw"): the upload is written while it arrives; the answer
+// POST /api/ota?size=<bytes>[&md5=<32 hex>] (multipart, field "fw"): the upload is written while it arrives; the answer
 // comes when it is complete; the device restarts 2 s later
 static char otaErr[120];
 static void handleOtaUpload() {
@@ -1240,7 +1241,8 @@ static void handleOtaUpload() {
       }
       safetyActivity();
       const uint32_t size = (uint32_t)server.arg("size").toInt();
-      otaBegin(OTA_WEB, size, otaErr, sizeof(otaErr));
+      if (otaBegin(OTA_WEB, size, otaErr, sizeof(otaErr)) && server.hasArg("md5"))
+        otaSetMd5(server.arg("md5").c_str());  // (from the release list: checked when the image is complete)
       break;
     }
     case UPLOAD_FILE_WRITE: {

@@ -1,7 +1,7 @@
 // Host-side tests. Build & run on a PC (ArduinoJson 7 headers, e.g. from .pio/libdeps/<env>/ArduinoJson/src):
 //   g++ -std=c++17 -Wall -Wextra -I../src -I<ArduinoJson>/src host_test.cpp ../src/duo_program.cpp
 //       ../src/run_engine.cpp ../src/settings.cpp ../src/tc_sensor.cpp ../src/pid.cpp ../src/runaway.cpp
-//       ../src/autotune.cpp ../src/ota_image.cpp -o host_test
+//       ../src/autotune.cpp ../src/ota_image.cpp ../src/release.cpp -o host_test
 //   ./host_test
 #include <cassert>
 #include <cmath>
@@ -15,6 +15,7 @@
 #include "pid.h"
 #include "runaway.h"
 #include "ota_image.h"
+#include "release.h"
 #include "raw_hist.h"
 #include "backup.h"
 #include "host_check.h"
@@ -981,6 +982,34 @@ static void testImageScanner() {
   CHECK(!s.found());
 }
 
+// ------------------------------------------------------------------ releases (release.cpp, spec 9.13)
+
+static void testRelease() {
+  CHECK(versionCompare("1.0.52", "1.0.51") > 0 && versionCompare("1.0.9", "1.0.10") < 0);
+  CHECK(versionCompare("1.0.52", "1.0.52") == 0 && versionCompare("1.1", "1.0.99") > 0);
+  CHECK(versionCompare("1.0", "1.0.0") == 0 && versionCompare("2.0.0", "10.0.0") < 0 && versionCompare("", "0") == 0);
+  const char* M = R"({"version":"1.0.52","date":"2026-10-20T09:15:00Z","commit":"abc1234",
+    "firmware":{"s3":{"url":"/dl/tempctl-duo-1.0.52-s3.bin","size":1923456,"md5":"0123456789ABCDEF0123456789abcdef",
+                      "full":{"url":"/dl/x-full.bin","size":1999999}},
+                "cyd-2xlocal":{"url":"https://other.example/dl/c.bin","size":1800000}},
+    "app":[{"os":"windows","arch":"x64","url":"/dl/a.exe","size":6000000}]})";
+  ReleaseInfo r;
+  char e[120] = "";
+  CHECK(releaseParse(M, strlen(M), "s3", r, e, sizeof(e)));
+  CHECK(!strcmp(r.version, "1.0.52") && !strcmp(r.date, "2026-10-20T09:15:00Z") && r.size == 1923456);
+  CHECK(!strcmp(r.host, RELEASE_HOST) && !strcmp(r.path, "/dl/tempctl-duo-1.0.52-s3.bin"));
+  CHECK(!strcmp(r.md5, "0123456789abcdef0123456789abcdef"));
+  CHECK(releaseParse(M, strlen(M), "cyd-2xlocal", r, e, sizeof(e)));
+  CHECK(!strcmp(r.host, "other.example") && !strcmp(r.path, "/dl/c.bin") && !r.md5[0]);
+  CHECK(!releaseParse(M, strlen(M), "cyd-1xlocal-1x485", r, e, sizeof(e)) && strstr(e, "no firmware for this board"));
+  const char* B[] = {"{", R"({"firmware":{}})",
+                     R"({"version":"1.0.52","firmware":{"s3":{"url":"http://x/a.bin","size":1923456}}})",
+                     R"({"version":"1.0.52","firmware":{"s3":{"url":"/a.bin","size":100}}})",
+                     R"({"version":"1.0.52","firmware":{"s3":{"url":"/a.bin","size":1923456,"md5":"xyz"}}})",
+                     R"({"version":"1.0.52","firmware":{"s3":{"url":"https:///a.bin","size":1923456}}})"};
+  for (const char* b : B) CHECK(!releaseParse(b, strlen(b), "s3", r, e, sizeof(e)) && e[0]);
+}
+
 // ------------------------------------------------------------------ autotune
 
 static bool runTune(Heater& h, RelayAutotune& at, const TuneConfig& c) {
@@ -1249,6 +1278,7 @@ int main() {
   testRunaway();
   testGuard();
   testImageScanner();
+  testRelease();
   testRawHist();
   testBackupLabel();
   testHostCheck();

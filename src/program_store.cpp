@@ -1,4 +1,5 @@
 #include "program_store.h"
+#include "psram.h"
 #include "console.h"
 #include <sys/stat.h>
 #include <Arduino.h>
@@ -7,7 +8,7 @@
 #include "run_engine.h"
 
 static bool fsOk = false;
-static ProgSummary sums[PROG_MAX];
+static PSRAM_VAR(ProgSummary[PROG_MAX], sums);
 static SemaphoreHandle_t sumLock = nullptr;
 static volatile uint32_t storeGen = 1;
 

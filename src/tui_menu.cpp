@@ -1,8 +1,12 @@
 // Touch UI menu and setup pages: Menu, Event log, Display, Network, System.
 #include "syslog.h"
+#include "psram.h"
 #include "tui.h"
 #include "safety.h"
 #include "ota.h"
+#include "ota_net.h"
+#include "release.h"
+#include "version.h"
 #include "sdlog.h"
 #include "backup.h"
 #include "config.h"
@@ -473,10 +477,10 @@ void displayUpdate() {
 
 // ------------------------------------------------------------ network
 static lv_obj_t *nStatus, *nSsid, *nPass, *nAp, *nHost, *nStatic, *nIpBox, *nIp[5];
-static Settings nEdit;  // edited copy, saved with "Save and connect"
+static PSRAM_VAR(Settings, nEdit);  // edited copy, saved with "Save and connect"
 static bool nPassChanged, nApChanged;
 static bool scanning = false, scanShown = false;
-static char scanNames[1200];
+static PSRAM_VAR(char[1200], scanNames);
 static const char* const IP_LABELS[5] = {"IP address", "Subnet mask", "Gateway", "DNS server", "Second DNS"};
 
 static uint8_t* ipField(Settings& s, int i) {
@@ -910,6 +914,53 @@ static void onSdFw(lv_event_t*) {
   sdFwTimer = lv_timer_create(sdFwPoll, 300, nullptr);
 }
 
+// ---- firmware from the release page (spec 9.13; S3: the device downloads it, CYD: only the web page)
+static lv_timer_t* netFwTimer = nullptr;
+static uint32_t netFwAt = 0;
+static void netFwPoll(lv_timer_t*);
+static void netFwWatch() {
+  netFwAt = tTickNow();
+  if (!netFwTimer) netFwTimer = lv_timer_create(netFwPoll, 300, nullptr);
+}
+static void onNetFwAnswer(int b, int) {
+  if (b != 2) return;
+  char err[120];
+  if (!netOtaInstallStart(err, sizeof(err))) return tToast(err, true);
+  tToast("Downloading the firmware" "\xE2\x80\xA6");  // (the update overlay follows)
+  netFwWatch();
+}
+static void netFwPoll(lv_timer_t*) {  // the release page is asked in a task of its own: its result, then the dialog
+  NetOtaInfo i;
+  netOtaInfo(i);
+  if ((i.phase == NET_CHECKING || i.phase == NET_DOWNLOADING) && lv_tick_elaps(netFwAt) < 600000) return;
+  lv_timer_delete(netFwTimer);
+  netFwTimer = nullptr;
+  if (i.phase == NET_CHECKING) return tToast("The release page does not answer - try again.", true);
+  if (i.phase == NET_FAILED) return tToast(i.msg, true);
+  if (i.phase != NET_CHECKED) return;  // (downloaded: the overlay shows "written, restarting")
+  char t[64], m[200], err[120];
+  if (!i.newer) {
+    snprintf(m, sizeof(m), "Firmware %s is the newest release.", FW_VERSION);
+    if (versionCompare(i.latest, FW_VERSION) < 0) snprintf(m, sizeof(m), "The newest release is %s (this one: %s).", i.latest, FW_VERSION);
+    return tToast(m);
+  }
+  if (!otaCanStart(err, sizeof(err))) {
+    snprintf(m, sizeof(m), "Firmware %s is available, but: %s", i.latest, err);
+    return tToast(m, true);
+  }
+  snprintf(t, sizeof(t), "Install firmware %s?", i.latest);
+  snprintf(m, sizeof(m), "From the release page (%u kB, built %.10s), now %s. The device restarts afterwards; the new firmware is checked for 30 s.",
+           (unsigned)(i.size / 1024), i.date, FW_VERSION);
+  tDialog(t, m, "Cancel", "Install", "", onNetFwAnswer, 0);
+}
+static void onNetFw(lv_event_t*) {
+  char err[120];
+  if (netFwTimer) return;  // (still asking)
+  if (!netOtaCheckStart(err, sizeof(err))) return tToast(err, true);
+  tToast("Asking the release page" "\xE2\x80\xA6");
+  netFwWatch();
+}
+
 #if HAS_SD
 // ---- backup of the settings and all programs on the SD card (S3, spec 9.12)
 static constexpr int BK_MAX = 40;  // (the choice list's rows)
@@ -934,7 +985,7 @@ static void onBackup(lv_event_t*) {
 static void onBkDone(int, int) {}
 static void onBkAnswer(int b, int) {
   if (b != 2) return;
-  static char msg[400];
+  static PSRAM_VAR(char[400], msg);
   const bool ok = backupRestore(bkName, bkWhat, msg, sizeof(msg));
   tDialog(ok ? "Restored" : "Restore", msg, "OK", "", "", onBkDone, 0);
   systemShow();
@@ -981,7 +1032,7 @@ static void onRestoreList(lv_event_t*) {
   bkN = sdlogList(bkFiles, BK_MAX, totalKb, freeKb, err, sizeof(err), SD_BACKUPS);
   if (bkN < 0) return tToast(err, true);
   if (!bkN) return tToast("No backups on the SD card yet.", true);
-  static char items[BK_MAX * 32];
+  static PSRAM_VAR(char[BK_MAX * 32], items);
   items[0] = 0;
   for (int i = 0; i < bkN; ++i) {
     char label[48];
@@ -1001,6 +1052,12 @@ lv_obj_t* systemCreate() {
   sBand = tButton(r, "", onBand, nullptr, CW2, BH);
   r = settingRow(p.body, "Time zone", "Local time in the SD run logs");
   sTz = tButton(r, "", onTz, nullptr, CW2, BH);
+  if (netOtaAvailable()) {
+    r = settingRow(p.body, "Online update", "The newest release from the release page (Wi-Fi with internet access)");
+    tButton(r, "Check", onNetFw, nullptr, CW2, BH);
+  } else {
+    settingRow(p.body, "Online update", "Web page, Settings, Firmware update: Check for updates (this board installs releases through the browser)");
+  }
   sFw = nullptr;
   if (sdlogSlot()) {
     r = settingRow(p.body, "Firmware update", "firmware.bin in the SD card's root folder (or: web page, Settings)");

@@ -40,6 +40,12 @@ static void memLog(const char* where) {
 
 void setup() {
   localCtrlEarlyInit();  // SSR outputs low (off) before anything else
+#ifdef BOARD_HAS_PSRAM
+  // malloc() of 256 bytes or more: PSRAM first (the core's limit is 4 kB). Web answers, JSON documents, strings,
+  // lists, the update buffers go there; the internal RAM stays for the display's DMA buffers, task stacks,
+  // Wi-Fi and the system, which ask for it explicitly. Nothing of ours touches heap memory from an IRAM interrupt.
+  heap_caps_malloc_extmem_enable(256);
+#endif
   safetyBegin();         // E-stop input, buzzer (spec 9.2a)
   otaBoot();             // a new firmware on probation? (confirmed by otaLoop after 30 s)
 #if !(defined(BOARD_S3) && ARDUINO_USB_MODE == 0)

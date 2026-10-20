@@ -3,14 +3,16 @@
 them (tools/web_embed.py ASSETS), plus shell.html (the local app's tabs), for the local launcher
 (tools/launcher) and the hosted page (Cloudflare Workers static assets, wrangler.jsonc).
   python3 tools/build_site.py [out_dir]          (default: tools/launcher/site)
-  python3 tools/build_site.py dist --web         the hosted page: without the launcher's shell.html, with _headers"""
+  python3 tools/build_site.py dist --web         the hosted page: without the launcher's shell.html, with _headers
+                                                 (the release files: tools/release.py, .github/workflows/release.yml)"""
 import os, shutil, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ["WEB_EMBED_NO_BUILD"] = "1"
 from web_embed import ASSETS, WEB, ROOT  # noqa: E402
 
 # hosted page (Cloudflare static assets): headers per path. HTML and icons are checked on every visit (the
-# default); the fonts never change under their name.
+# default); the fonts never change under their name. /dl/ = the release files (tools/release.py): the device's
+# own page (http://<device>/) fetches the manifest and the image from here, so they allow any origin.
 HEADERS = """/*
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
@@ -18,6 +20,9 @@ HEADERS = """/*
   Permissions-Policy: serial=(self), camera=(), microphone=(), geolocation=()
 /f/*
   Cache-Control: public, max-age=31536000, immutable
+/dl/*
+  Access-Control-Allow-Origin: *
+  Cache-Control: no-cache
 """
 
 def build(out, web=False):

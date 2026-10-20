@@ -1,4 +1,5 @@
 #include "app_state.h"
+#include "psram.h"
 #include "syslog.h"
 #include "sdlog.h"
 #include "crumbs.h"
@@ -563,7 +564,7 @@ static void flushRunEvents() {
 
 // ---- event log (any task)
 
-static LogEntry logBuf[LOG_N];
+static PSRAM_VAR(LogEntry[LOG_N], logBuf);
 static uint32_t logNext = 1;
 static portMUX_TYPE logMux = portMUX_INITIALIZER_UNLOCKED;
 static volatile float logRunT = NAN;
@@ -1625,7 +1626,7 @@ static void handleCmd(const Cmd& c) {
     case CMD_RUN_RECOVER: resumeInterrupted(); break;
     case CMD_RUN_DISMISS: dismissInterrupted(); break;
     case CMD_SETTINGS_CHANGED: {
-      static Settings prev;  // static: large
+      static PSRAM_VAR(Settings, prev);  // static: large
       prev = s;
       {
         Guard g;

@@ -304,6 +304,14 @@ local); change them on the web page's *Channels* page. After switching from the 
   30 s on the S3: the card shares the SPI bus with the display, which is slow meanwhile). Log:
   `[sd] firmware.bin checked: 1855 kB in 0.2 s`. After the install the file is
   renamed `firmware.done`.
+- **Release page** (section 5c): every push to `main` publishes all firmware images on
+  `https://tempctl-duo.just-r0st.workers.dev`. *Settings › Device › Firmware update › Check for updates*
+  (also checked by itself when Settings opens, at most every 10 min) shows whether a newer release exists;
+  *Install* lets the browser download this board's image and upload it as above (the device also checks its
+  MD5). Works on every board, as long as the computer or phone has internet access. The **S3** can also fetch
+  it itself over HTTPS (Wi-Fi with internet): touch *System › Online update › Check*, serial `fw net` /
+  `fw net install yes` (root certificates: `src/ca_roots.h`, `tools/gen_ca_roots.py`). The CYD leaves this to
+  the web page: an HTTPS session needs about 70 kB of RAM; the S3 takes it from its PSRAM, the CYD has none.
 - Not while a program runs or an output is on. The touch screen shows the progress; don't switch off.
 - **Rollback**: the new firmware runs "on probation" and confirms itself after 30 s of normal running (loop
   and control task alive). A crash or reset before that makes the bootloader start the previous firmware
@@ -315,7 +323,7 @@ local); change them on the web page's *Channels* page. After switching from the 
   restore them afterwards. Wi-Fi settings are in that backup too, so the device starts as an access point
   until they are restored. The CYD firmware is about 1.77 MB (90 % of a slot); the page and icons are
   embedded without the web fonts on the CYD (the S3 only gets those), which keeps it in the slot.
-- Serial: `fw` (version, board, slot), `fw sd`, `fw sd install yes`.
+- Serial: `fw` (version, board, slot), `fw sd`, `fw sd install yes`, `fw net`, `fw net install yes` (S3).
 
 ### Backup on the SD card (S3)
 
@@ -595,13 +603,38 @@ so it is not opened from the device but from the **local app**:
   human console. CSV downloads work over USB too.
 - The device's own copy of the page is marked (`data-device`, by `tools/web_embed.py`), the launcher's
   copy `data-launcher`; without a mark (the hosted page) the page shows the connect screen.
-- **Hosted page** (Cloudflare Workers static assets, no install at all): `https://tempctl-duo.<account
-  subdomain>.workers.dev`, Chrome / Edge. The same connect screen: USB (Web Serial) or Wi-Fi = open the
-  device's own `http://` page (an https page may not call the device's http API itself). No device search
-  and no tabs (those need the local app). Deployed by Cloudflare Workers Builds on every push to `main`:
-  build command `python3 tools/build_site.py dist --web` (without `shell.html`, with a `_headers` file:
-  security headers, fonts cached for a year), deploy command `npx wrangler deploy` (`wrangler.jsonc`:
-  name `tempctl-duo`, assets from `dist/`).
+- **Hosted page** (Cloudflare Workers static assets, no install at all): `https://tempctl-duo.just-r0st.workers.dev`,
+  Chrome / Edge. The same connect screen: USB (Web Serial) or Wi-Fi = open the device's own `http://` page (an
+  https page may not call the device's http API itself). No device search and no tabs (those need the local
+  app). Below them: **Downloads** of the newest release (desktop app for Windows, macOS, Linux; firmware of
+  every board), see 5c; the local app shows the same list and says when a newer app exists.
+
+## 5c. Releases (GitHub Actions → Cloudflare)
+
+Every push to `main` (pushes that change only documentation are skipped; *Actions › Release › Run workflow*
+starts one by hand) runs `.github/workflows/release.yml`:
+
+1. PlatformIO builds the four envs; per env the update image (`firmware.bin`) and a full image for the
+   first USB flash (`esptool merge_bin`: bootloader, partition table, boot_app0, firmware; write it at
+   address 0x0).
+2. `tools/launcher/build.sh all`: the desktop app for Windows, macOS (Apple silicon, Intel; zipped) and
+   Linux (tar.gz).
+3. `tools/build_site.py dist --web` (the page, `_headers`), then `tools/release.py dist art`: the files go to
+   `dist/dl/` with the version in their names, plus `dist/dl/manifest.json` (version, date, commit; per board
+   url, size, MD5, SHA-256; the app files). It stops if an image does not carry its env and this version.
+4. `npx wrangler deploy` (`wrangler.jsonc`, assets from `dist/`). The files are also kept 14 days as a run
+   artifact.
+
+Setup, once: GitHub › repository › *Settings › Secrets and variables › Actions*: `CLOUDFLARE_API_TOKEN` (a
+Cloudflare API token from the template "Edit Cloudflare Workers") and `CLOUDFLARE_ACCOUNT_ID`; in Cloudflare
+*Workers & Pages › tempctl-duo › Settings › Build*: disconnect the Git repository (Workers Builds would
+otherwise deploy the page without the release files). `/dl/*` is served with `Access-Control-Allow-Origin: *`
+(the device's own page reads it) and `Cache-Control: no-cache`. A private repository has 2000 free Actions
+minutes a month; one release takes about 10–15.
+
+**Without commit / push** (a test release from the PC, same steps, your own Cloudflare login): in the
+PlatformIO terminal, Git Bash: `bash tools/release_local.sh` (needs Node.js for `npx wrangler`, the first time
+`npx wrangler login`; Go for the desktop app, else `--no-app`; `--dry` builds `dist/` only).
 
 ## 5. Web API
 
@@ -610,7 +643,8 @@ TempCtl Duo: two channels. The flat fields of `/api/status` (TempCtl 1.2) show t
 
 **Local channels** (type `local`, step 3): thermocouple converter MAX31855 or MAX6675 (`local.sensor`) read
 every `readMs` (100 … 1000 ms, default 250; MAX6675 from 250 ms), optionally through a median filter over the last
-`medianN` readings (`median`, 3 / 5 / 7 / 9, default on, 3), calibration `true = raw * calGain + calOffset`, PID (`kp`, `ki`, `kd`, or from the autotune (time limit `tuneMaxMin`, default 70 min): relay test around a
+`medianN` readings (`median`, 3 / 5 / 7 / 9, default on, 3; the PID, the protections and the autotune all see this
+filtered, calibrated value), calibration `true = raw * calGain + calOffset`, PID (`kp`, `ki`, `kd`, or from the autotune (time limit `tuneMaxMin`, default 70 min): relay test around a
 test temperature, Tyreus–Luyben rule) and a time-proportional SSR output (`windowSec`, default 1 s; `maxOut` %). Safety: SSR pins low from
 the first line of `setup()`, SSR off when the task stops refreshing it (1.5 s), and latched faults
 (outputs off, run stopped) for no reading (3 bad reads while on), above `maxTemp` and the runaway checks.
@@ -661,7 +695,7 @@ console's api path has no such checks.
 | POST | `/api/autotune` | local channels: `{"ch":1,"cmd":"start","sp":200}`, `"stop"`, `"accept"` (proposed kp/ki/kd → settings), `"discard"`; progress and result in `/api/status` → `channels[].autotune` |
 | POST | `/api/ack` | `{"ch":0}` acknowledge a channel fault (runaway, sensor, over temperature, heating while off, frozen reading, converter too hot); refused while the cause is still there. The outputs stay off until switched on again |
 | GET | `/api/ota` | firmware update: `board`, `version`, `slot`, `slotKb` (0 = no second slot, `why`), `canStart` / `why`, `probation`, `sd` (SD slot), `status` {`phase` idle / running / done / failed, `source`, `done`, `total`, `version`, `msg`}; `/api/live` → `ota` while one runs or the new firmware is on probation |
-| POST | `/api/ota?size=<bytes>` | multipart upload of a `firmware.bin` (field `fw`, Wi-Fi only): written while it arrives, `{"ok":true,"version"}` or `{"err"}`; the device restarts 2 s later |
+| POST | `/api/ota?size=<bytes>[&md5=<hex>]` | multipart upload of a `firmware.bin` (field `fw`, Wi-Fi only): written while it arrives (with `md5`: checked at the end), `{"ok":true,"version"}` or `{"err"}`; the device restarts 2 s later |
 | GET / POST | `/api/ota/sd` | S3: `?start=1` starts the check of the `firmware.bin` in the SD card's root; then `{"busy":true}` until its result (`found`, `sizeKb`, `board`, `version`, `problem`, or `err`) / POST: install it (progress in `/api/live` → `ota`) |
 | POST | `/api/beep` | `{}` one short test beep (Settings › Safety). `/api/live` → `safety`: `estop`, `contact` (open / closed, S3), `chipC`, `chipHot`, `muted`; `/api/config` → `limits.estop / sound / chipTemp` |
 | POST | `/api/cmd` | `{"cmd":"start"|"pause"|"resume"|"stop"|"next"|"continue", "prog":index}` (`skip` = `next`) |
@@ -709,6 +743,8 @@ src/fonts/                touch UI fonts (tools/lv_font_gen.py from tools/fonts/
 src/web.*                 HTTP server, JSON API
 src/safety.*              E-stop input, alarm sound, user activity, chip temperature (section 7a)
 src/ota.*, ota_image.*    firmware update (web upload, SD card), image check (pure C++, unit-tested), rollback
+src/psram.h               PSRAM_VAR: large static variables in PSRAM on the S3 (plain statics on the CYD)
+src/ota_net.*, release.*  release page: manifest (pure C++, unit-tested), S3 download over HTTPS (ca_roots.h)
 src/sdlog.*               SD card (S3): run logs, firmware.bin, backup files
 src/backup.*              backup of settings + programs on the SD card (S3), restore
 hardware/s3-schematic/    KiCad schematic of the S3 device (+ PDF / PNG)
@@ -717,11 +753,13 @@ hardware/gen/             generator of both (Python 3: python3 make.py ..)
 web/, tools/web_embed.py  web page + fonts → src/web_assets.h (generated before each build)
 tools/build_site.py       the same page as static files (device URL layout), for the launcher / the hosted page
 wrangler.jsonc            the hosted page: Cloudflare Workers static assets (dist/, built by build_site.py --web)
+tools/release.py          release files + dl/manifest.json for the hosted page (section 5c)
+.github/workflows/        release.yml: builds firmware + desktop app, deploys page and files to Cloudflare
 tools/launcher/           local app: Go launcher (build.sh → dist/tempctl-duo-<version>.exe), section 5b
 test/ui_host/             touch UI preview on a PC (screenshots, random-tap test)
 test/console_host/        serial console on a PC (scripted commands -> output)
 src/console.*             serial console (section 4b), LogSerial (log lines that don't break typed input)
-test/host_test.cpp        g++ -std=c++17 -Wall -Wextra -Isrc -I<ArduinoJson>/src test/host_test.cpp src/duo_program.cpp src/run_engine.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp src/ota_image.cpp && ./a.out
+test/host_test.cpp        g++ -std=c++17 -Wall -Wextra -Isrc -I<ArduinoJson>/src test/host_test.cpp src/duo_program.cpp src/run_engine.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp src/ota_image.cpp src/release.cpp && ./a.out
 ```
 
 ## 7. Safety

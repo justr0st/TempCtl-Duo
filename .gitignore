@@ -15,8 +15,9 @@ hardware/**/*.kicad_prl
 hardware/**/*.rpt
 hardware/**/fp-info-cache
 
-# hosted page: built by tools/build_site.py dist --web; wrangler cache
+# hosted page + release files: tools/build_site.py dist --web, tools/release.py dist art; wrangler cache
 /dist/
+/art/
 .wrangler/
 __pycache__/
 

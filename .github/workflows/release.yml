@@ -1,0 +1,98 @@
+# Release (spec 9.13): every push to main builds the four firmware images and the desktop app and publishes
+# them with the page on Cloudflare (https://tempctl-duo.just-r0st.workers.dev, files under /dl/, list in
+# /dl/manifest.json). The device's web page (all boards) and the S3 itself read the list to offer updates.
+# Needs two repository secrets (Settings > Secrets and variables > Actions):
+#   CLOUDFLARE_API_TOKEN   a token with the template "Edit Cloudflare Workers"
+#   CLOUDFLARE_ACCOUNT_ID  the account id (Workers & Pages overview, right side)
+# and Workers Builds on the Cloudflare side switched off (it would deploy the page without the release files).
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["claude/**", "docs/**", "hardware/**", "logo/**", "**.md", ".vscode/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ENVS: s3 cyd-1xlocal-1x485 cyd-2xlocal cyd-2xlocal-2x485
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: false
+
+      - name: PlatformIO cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio/libdeps
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - name: Tools
+        run: pip install "platformio>=6.1.16,<6.2" "esptool==4.8.1"
+
+      - name: Firmware
+        run: |
+          args=""; for e in $ENVS; do args="$args -e $e"; done
+          pio run $args
+
+      - name: Firmware files (update image + full image for the first USB flash)
+        run: |
+          set -e
+          BA=~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin
+          for e in $ENVS; do
+            B=.pio/build/$e; O=art/fw/$e; mkdir -p $O
+            cp $B/firmware.bin $O/firmware.bin
+            if [ "$e" = s3 ]; then
+              CHIP="--chip esp32s3"; FL="--flash_mode qio --flash_freq 80m --flash_size 16MB"; BOOT=0x0
+            else
+              CHIP="--chip esp32"; FL="--flash_mode dio --flash_freq 40m --flash_size 4MB"; BOOT=0x1000
+            fi
+            esptool.py $CHIP merge_bin -o $O/full.bin $FL \
+              $BOOT $B/bootloader.bin 0x8000 $B/partitions.bin 0xe000 $BA 0x10000 $B/firmware.bin
+          done
+          ls -l art/fw/*
+
+      - name: Desktop app
+        run: |
+          bash tools/launcher/build.sh all
+          mkdir -p art/app && cp tools/launcher/dist/* art/app/
+          ls -l art/app
+
+      - name: Page + release files
+        run: |
+          python3 tools/build_site.py dist --web
+          python3 tools/release.py dist art
+          cat dist/dl/manifest.json
+
+      - name: Keep the files (14 days)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tempctl-duo-release
+          path: dist/dl
+          retention-days: 14
+
+      - name: Deploy to Cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy

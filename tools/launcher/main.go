@@ -43,9 +43,10 @@ func main() {
 	if err != nil || err2 != nil {
 		fail("The page is missing in this build.")
 	}
-	// the launcher's copies: they know to call /launcher/alive (and the page: to list found devices)
+	// the launcher's copies: they know to call /launcher/alive (and the page: to list found devices; its version:
+	// the connect screen says when the release page has a newer app)
 	mark := func(b []byte) []byte {
-		return bytes.Replace(b, []byte(`<html lang="en">`), []byte(`<html lang="en" data-launcher>`), 1)
+		return bytes.Replace(b, []byte(`<html lang="en">`), []byte(`<html lang="en" data-launcher data-version="`+version+`">`), 1)
 	}
 	page, shell = mark(page), mark(shell)
 

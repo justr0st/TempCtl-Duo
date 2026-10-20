@@ -3,12 +3,15 @@
 // Everything goes through the same code paths as the touch UI and the web page (sendCmd,
 // setManualSp, net*, the program store).
 #include "console.h"
+#include "psram.h"
 #include <WiFi.h>
 #include <math.h>
 #include <stdarg.h>
 #include "app_state.h"
 #include "safety.h"
 #include "ota.h"
+#include "ota_net.h"
+#include "release.h"
 #include "sdlog.h"
 #include "backup.h"
 #include "config.h"
@@ -109,7 +112,7 @@ static void showPrompt() {
 // ------------------------------------------------------------ command history (Up / Down keys)
 // The last commands (up to 20, 1 kB), oldest first, each '\0'-terminated. Lines with a password
 // (pw=) and password entries are not kept.
-static char hist[1024];
+static PSRAM_VAR(char[1024], hist);
 static int histUsed = 0;
 static int histPos = -1;  // -1 = the line being typed, 0 = the newest entry, 1 = the one before ...
 
@@ -371,6 +374,9 @@ static const char* const H_DEVICE[] = {
     "  fw sd                          the firmware.bin on the SD card (S3)",
     "  fw sd install yes              install it (restarts; checked for 30 s, else the",
     "                                 previous firmware starts again). Upload: web page",
+    "  fw net                         the newest release on the release page (S3; needs",
+    "                                 Wi-Fi with internet. Web page: Check for updates)",
+    "  fw net install yes             download and install it (restarts, checked for 30 s)",
     "  help [section]                 this list, or one section: help wifi",
     "  Up / Down keys                 the last commands (without passwords)",
     "  api on | api off               machine mode (JSON lines) for programs and the",
@@ -1755,7 +1761,37 @@ static void fwPoll() {
       f.version[0] ? f.version : "?", f.problem[0] ? " - refused: " : " - fw sd install yes installs it", f.problem);
 }
 
-// fw / fw sd / fw sd install yes (spec 9.11)
+// fw net: the release page is asked in a task of its own (ota_net); the result is printed when it is there
+static bool netWaiting = false;
+static uint32_t netWaitAt = 0;
+static void netPoll() {
+  if (!netWaiting) return;
+  NetOtaInfo i;
+  netOtaInfo(i);
+  if (i.phase == NET_CHECKING || i.phase == NET_DOWNLOADING) {
+    if (i.phase == NET_DOWNLOADING && millis() - netWaitAt >= 10000) {
+      netWaitAt = millis();
+      OtaStatus st;
+      otaStatus(st);
+      if (st.phase == OTA_RUNNING) {
+        breakLine();
+        say("downloading: %u of %u kB", (unsigned)(st.done / 1024), (unsigned)(st.total / 1024));
+      }
+    }
+    return;
+  }
+  netWaiting = false;
+  breakLine();
+  if (i.phase == NET_FAILED) return err("release page: %s", i.msg);
+  if (i.phase != NET_CHECKED) return;  // (after a download: "written - restarting" is in the log)
+  if (i.newer)
+    say("release %s (built %.10s), %u kB - newer than %s: fw net install yes installs it", i.latest, i.date,
+        (unsigned)(i.size / 1024), FW_VERSION);
+  else
+    say("%s is the newest release (this firmware: %s)", i.latest, FW_VERSION);
+}
+
+// fw / fw sd / fw sd install yes (spec 9.11) / fw net / fw net install yes (9.13)
 static void cmdFw(const Args& a) {
   char e[120];
   if (!strcmp(a.word(1), "sd")) {
@@ -1770,10 +1806,25 @@ static void cmdFw(const Args& a) {
     fwWaitAt = millis();
     return say("reading firmware.bin on the SD card ...");
   }
+  if (!strcmp(a.word(1), "net") || !strcmp(a.word(1), "check")) {
+    if (!strcmp(a.word(2), "install")) {
+      if (strcmp(a.word(3), "yes")) return err("to install: fw net install yes");
+      if (!netOtaInstallStart(e, sizeof(e))) return err("%s", e);
+      netWaiting = true;
+      netWaitAt = millis();
+      return say("downloading from %s (the device restarts when it is written)", RELEASE_HOST);
+    }
+    if (netWaiting) return say("still busy with the release page ...");
+    if (!netOtaCheckStart(e, sizeof(e))) return err("%s", e);
+    netWaiting = true;
+    netWaitAt = millis();
+    return say("asking %s for the newest release ...", RELEASE_HOST);
+  }
   uint32_t size;
   const bool slot = otaSlot(size, e, sizeof(e));
   say("firmware  %s (board %s), slot %s%s", FW_VERSION, BOARD_ID, otaRunningSlot(), otaProbation() ? ", new: checked for 30 s" : "");
-  if (slot) say("update    slot of %u kB free; upload on the web page (Settings), or fw sd", (unsigned)(size / 1024));
+  if (slot) say("update    slot of %u kB free; upload on the web page (Settings), fw sd%s", (unsigned)(size / 1024),
+                netOtaAvailable() ? " or fw net" : "");
   else say("update    %s", e);
 }
 
@@ -2382,6 +2433,7 @@ void consoleLoop() {
   calPoll();
   screenPoll();
   fwPoll();
+  netPoll();
   if (watching && millis() - watchAt >= 1000) {
     watchAt += 1000;
     if (millis() - watchAt >= 1000) watchAt = millis();  // (fell behind: no burst)

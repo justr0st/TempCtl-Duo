@@ -6,7 +6,7 @@
 set -e
 cd "$(dirname "$0")"
 V=$(sed -n 's/^#define FW_VERSION "\(.*\)"/\1/p' ../../src/version.h)
-python3 ../build_site.py site
+"${PY:-python3}" ../build_site.py site   # (PY: tools/release_local.sh hands over PlatformIO's python)
 mkdir -p dist
 LD="-s -w -X main.version=$V"
 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$LD -H windowsgui" -o "dist/tempctl-duo-$V.exe" .

@@ -1,7 +1,7 @@
-// The hosted page (spec 7b): Cloudflare Workers static assets, no Worker code. Workers Builds runs
-//   python3 tools/build_site.py dist --web     (build command)
-//   npx wrangler deploy                        (deploy command; uses this file)
-// on every push to main -> https://tempctl-duo.<account subdomain>.workers.dev
+// The hosted page (spec 7b) with the release files (spec 9.13): Cloudflare Workers static assets, no Worker
+// code. Built and deployed by .github/workflows/release.yml on every push to main:
+//   python3 tools/build_site.py dist --web && python3 tools/release.py dist art && npx wrangler deploy
+// -> https://tempctl-duo.just-r0st.workers.dev (Workers Builds, which ran build_site.py alone, is switched off)
 {
   "name": "tempctl-duo",
   "compatibility_date": "2026-10-14",

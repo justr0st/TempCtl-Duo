@@ -1,5 +1,6 @@
 // Backup of the settings and all programs on the SD card (backup.h)
 #include "backup.h"
+#include "psram.h"
 #include "config.h"
 
 #if HAS_SD
@@ -58,7 +59,7 @@ bool backupCreate(char* name, size_t nn, char* err, size_t n) {
   }
   d["time"] = when;
   {
-    static Settings S;  // (large; one caller at a time: Busy)
+    static PSRAM_VAR(Settings, S);  // (large; one caller at a time: Busy)
     {
       Guard g;
       S = gSettings;
@@ -129,7 +130,8 @@ bool backupInfo(const char* name, BackupInfo& i, char* err, size_t n) {
 
 // like POST /api/config with the whole document; net: the network settings changed (used after a restart)
 static bool restoreSettings(JsonObjectConst o, bool& net, char* msg, size_t n) {
-  static Settings S, Old;
+  static PSRAM_VAR(Settings, S);
+  static PSRAM_VAR(Settings, Old);
   {
     Guard g;
     S = Old = gSettings;

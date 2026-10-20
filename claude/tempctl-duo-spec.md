@@ -5,8 +5,8 @@ end of the conversation that built TempCtl 1.2. Revisions 2–3 add everything a
 claude.ai chat: the Duo goals and program model (9), the hardware — ESP32-S3 + 4.0" ST7796 as main
 target and the CYD as second device (2, 2a, 2b), colours (6), the Web-GUI based on the 9.3 simulator
 (7, `claude/web-sim/`), serial console (7a) and the Web Serial page / local app (7b). Every open point
-was decided one by one; what is left is only for later (GitHub Pages, SD logging, "Convert to
-Timeline") and hardware checks during bring-up (9.10).
+was decided one by one; what is left is only for later (GitHub Pages — replaced by Cloudflare, 7b / 9.13 —,
+SD logging, "Convert to Timeline") and hardware checks during bring-up (9.10).
 2026-09-30: **steps 1–4 of 9.10 implemented** (S3 bring-up, per-board headers, three CYD variants,
 identity; channel interface, two Modbus channels on one bus, `/duo/settings.json`; local channels
 with thermocouple, SSR, PID and safety; autotune). All four envs compile and link in the cloud container.
@@ -646,6 +646,7 @@ needed.
      Live since 2026-10-14: https://tempctl-duo.just-r0st.workers.dev/ (checked: page = repo's index.html, connect screen,
      fonts load, headers as in `_headers`, HTML / icons revalidated, fonts cached a year, shell.html not deployed).
      Rost (2026-10-14): Web Serial from the hosted page works.
+     **Since 1.0.52** deployed by GitHub Actions together with the release files (9.13); Workers Builds is switched off.
   2. **Local app, no installation** — *the delivery for now*. **Decided: one Go executable**
      (`tempctl-duo.exe`, ≈ 6 MB, Windows first; macOS/Linux builds possible from the same source) with
      the page files embedded (`embed`), serving them on **`http://localhost:8765`** (fixed) and opening
@@ -1072,7 +1073,7 @@ sequences with 'wait for previous phases' barriers"). Chosen after comparing the
   Preheater"); serial commands keep `b` / `t` as short channel keys.
 
 ### 9.6 Hardware
-- ESP32-S3-DevKitC-1 v1.0 N16R8 (WS2812 assumed on GPIO48, test pending), 4.0" ST7796 + FT6336U
+- ESP32-S3-DevKitC-1 v1.0 N16R8 (WS2812 on GPIO48 and the touch confirmed by Rost), 4.0" ST7796 + FT6336U
   module, pinout in 2a; both USB ports usable: flashing + log monitor via the "UART" port, control
   (serial console, Web Serial page) via the native "USB" port.
 - **CYD stays supported as a second device** (2b): envs `cyd-1xlocal-1x485` / `cyd-2xlocal` / `cyd-2xlocal-2x485`, 320×240, resistive touch, same features.
@@ -1140,8 +1141,8 @@ sequences with 'wait for previous phases' barriers"). Chosen after comparing the
 8. Serial console (7a) — can come early (after step 2), it helps with bring-up and Wi-Fi setup;
    then the `api` mode and the Web Serial page (7b). Test the DTR/RTS auto-reset behaviour early.
 9. Identity (9.8) — can be done in step 1 already (name, host, AP, version 1.0.0).
-10. Later / planned: the page on GitHub Pages (7b, option 1). (SD run logs and Convert to Timeline:
-    done in 1.0.32.)
+10. Later / planned: the page on GitHub Pages (7b, option 1) — done on Cloudflare instead (1.0.45), with the
+    release files since 1.0.52 (9.13). (SD run logs and Convert to Timeline: done in 1.0.32.)
 
 #### 9.10.1 State of step 1 (2026-09-29)
 Implemented (both envs compile and link without warnings in our files; host tests pass):
@@ -2131,7 +2132,7 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   - SD card: the mount is tried once more after any failure (before: only when the card had answered),
     serial "[sd] ... - trying once more" / "the card answered the second time" to see how often it helps.
   - UI host `./uihost chan`: reload after a web save, RS485 tab, scroll kept (without the fix: 564 -> 0).
-- **1.0.51** (2026-10-19; Rost):
+- **1.0.51** (2026-10-19, 9a147d0; Rost):
   - Local channels, new settings (web Channels › Thermocouple / PID control, touch Channels, serial
     `b.local.*`): **`readMs`** thermocouple read interval 100 … 1000 ms (default 250; MAX6675 at least 250, its
     conversion time; clamped when saved); **`median`** on / off and **`medianN`** 3 / 5 / 7 / 9 readings (default on,
@@ -2157,7 +2158,7 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
     Hints given: 10 nF across T+ / T− at the MAX31855, twisted (shielded) leads away from mains / SSR / heater
     wiring, an insulated (ungrounded) junction, the shield grounded at the converter only. The autotune
     already uses the filtered PV (median when on).
-  - Same round (1.0.51, not committed yet), web: **autotune controls** on the Dashboard channel card (a row
+  - Same round (1.0.51), web: **autotune controls** on the Dashboard channel card (a row
     "Autotune" with Stop autotune / Review the result… / Clear) and in the sidebar (the channel's button
     becomes stop ■ / review ✓ / clear ✕ while an autotune exists; the sidebar text: "Autotune" only while it
     runs, "Autotune done", else Idle / Manual). A finished autotune opens a **dialog** once per result while
@@ -2173,8 +2174,35 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
     file, a drop, "Device history", "Last run" or Log › Replay; zoom (wheel, pinch, buttons, Shift + drag
     range, double click = all), pan, hover, legend toggles, Crop to view, Save CSV (the original lines of the
     range). CYD flash 92.1 % after this (the page grew ~9 kB).
-- Next: step 7b is done, the old UI removed. Open: the older untested points (Modbus beta, runs on the CYD, ...); later GitHub Pages (7b
-  option 1) and a release build of the launcher.
+- **1.0.52** (2026-10-20; Rost): **releases + online update** (9.13), more free internal RAM on the S3.
+  - Rost's answers (2026-10-20): the autotune uses the channel's own filter settings — already so (it gets
+    the same median-filtered, calibrated PV as the PID; nothing changed, README says it now). The S3's
+    WS2812 on GPIO48 and its touch were confirmed by Rost earlier (9.6 updated). The hosted page stays on
+    Cloudflare Workers (7b; GitHub Pages dropped). The desktop app gets release builds.
+  - Decisions (Rost picked the proposals): install from the release page through the **web page on both
+    boards** (the browser downloads, the normal upload installs) and **on the S3 also from the device
+    itself** (touch, serial; the CYD has no RAM for TLS); builds on **GitHub Actions**; **every push to main**
+    is a release; desktop app for **Windows, macOS and Linux**.
+  - **Internal RAM on the S3** (Rost, 2026-10-20, after the TLS "Memory allocation failed" at 76 kB free; he picked
+    the moves from Claude's list, not the loop-stack reduction):
+    - `src/psram.h` `PSRAM_VAR(T, name)`: on PSRAM boards a reference to a zero-filled PSRAM block (constructor
+      run for non-trivial types; arrays keep `sizeof`), elsewhere a plain static. Moved: event log ring (6.7 kB),
+      the static Settings copies (control task's `prev`, backup ×3, touch snapshot / Channels edit / Network edit),
+      touch LiveData snapshot, program summary lists (store, web, touch ×2), touch popup item lists, Wi-Fi scan
+      lists (web, touch), console history. Not moved (hot or tiny): the control task's settings copy `s`, channel
+      slots, `loc`, run anchors, gLive / gSettings. S3 static RAM 98.3 → 75.1 kB.
+    - `heap_caps_malloc_extmem_enable(256)` first in setup (S3): malloc ≥ 256 B → PSRAM first (core: 4 kB). Safe
+      because no IRAM ISR of ours touches heap memory; Wi-Fi, FreeRTOS, stacks, DMA ask for internal RAM
+      explicitly; flash writes from PSRAM buffers (Update's 4 kB buffer, upload buffer) are bounced by the IDF.
+    - Display draw buffers 2 × 32 → 2 × 20 lines (board_s3.h `LCD_BUF_LINES`): 2 × 18.75 kB (−22.5 kB). They stay
+      in internal DMA RAM (SPI DMA from PSRAM would need a bounce copy).
+    - Result (Rost): `[mem] running: DRAM free 149536, largest 139252, min 147980` (before: ~76 kB free, largest
+      67 kB). Touch drawing still smooth; web upload and SD backup work.
+  - Rost's tests: `tools/release_local.sh --no-app` (deployed with his wrangler login; Go not installed yet), the
+    CYD's web page found and installed 1.0.52; the S3 first failed ("SSL - Memory allocation failed", fixed with
+    mbedTLS in PSRAM, 9.13), then found and installed 1.0.52 from the touch screen.
+- Next: Rost sets up the two GitHub secrets and disconnects Workers Builds (9.13), then the first release run.
+  Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
   add phase, save (POST body checked), start without saving, new Timeline in an empty slot with a pause
   text, phone width (no sideways scrolling).
@@ -2246,6 +2274,67 @@ delete on the web; only by hand (no automatic backups); S3 only (the CYD's SD pi
   what it holds), `backup sd delete n=<n> yes`; `help backup`. CYD: "no SD slot".
 - Tests: host (backupLabel), console host S3 build (`BOARD=s3 test/console_host/build.sh`), UI host shots
   14e–14i, mock + Playwright (`mock/backup.js`).
+
+### 9.13 Releases and online update (decided 2026-10-20, Rost; version 1.0.52)
+Decisions: see the 1.0.52 entry in 9.10. Pieces:
+- **Workflow** `.github/workflows/release.yml` (push to main, docs-only pushes skipped, also by hand;
+  one job, ~10–15 min): `pip install platformio esptool==4.8.1`, cache `~/.platformio` + `.pio/libdeps`;
+  `pio run` for the four envs; per env `art/fw/<env>/firmware.bin` and `full.bin` = `esptool merge_bin`
+  (S3: esp32s3, qio / 80m / 16MB, bootloader at 0x0; CYD: esp32, dio / 40m / 4MB, 0x1000; then 0x8000
+  partitions, 0xe000 boot_app0, 0x10000 firmware); `tools/launcher/build.sh all` → `art/app/`;
+  `tools/build_site.py dist --web` + `tools/release.py dist art`; upload artifact (14 days); `npx wrangler@4
+  deploy` with the secrets `CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare Workers") and
+  `CLOUDFLARE_ACCOUNT_ID`. Workers Builds (1.0.45) must be disconnected, else it deploys without `/dl/`.
+  Not run in the cloud container (no PlatformIO / network there): release.py and the launcher build were
+  tested with fake images; the first real run is Rost's.
+  `tools/release_local.sh [--no-app] [--dry]` (asked by Rost 2026-10-20: test without commit / push): the same
+  steps on his PC (Git Bash in the PIO terminal; PIO's python + its tool-esptoolpy for merge_bin; Go only for the
+  app; `npx wrangler@4 deploy` with his `wrangler login`); `release.py --no-app` = firmware only.
+- **`tools/release.py`**: `dist/dl/tempctl-duo-<v>-<env>.bin`, `…-<env>-full.bin`, `…-windows-x64.exe`,
+  `…-macos-arm64.zip` / `-x64.zip` (one file "TempCtl Duo", mode 755), `…-linux-x64.tar.gz` (`tempctl-duo`,
+  755); `dist/dl/manifest.json` {version, date (UTC), commit, firmware: {env: {url, size, md5, sha256, full:
+  {…}}}, app: [{os, arch, url, size, md5, sha256}]}. Refuses an image without `TCDUO-IMAGE|<env>|<version>|end`
+  or with the wrong chip. `_headers`: `/dl/*` → `Access-Control-Allow-Origin: *`, `Cache-Control: no-cache`.
+  Only the newest release is online (each deploy replaces the files).
+- **`src/release.*`** (pure, host-tested): `RELEASE_HOST` = tempctl-duo.just-r0st.workers.dev,
+  `versionCompare` (numeric per dot part), `releaseParse(json, board)` → version, date, host + path (relative
+  url or https only), size (≥ 64 kB), md5 (32 hex, lower case).
+- **Web page** (both boards, Settings › Device › Firmware update): "Check for updates" (also by itself when
+  Settings is shown, at most every 10 min): fetches `REL_BASE/dl/manifest.json` (`REL_BASE` = '' on the hosted
+  page itself) → "Firmware X (date) is available (n kB)" + Install / "X is the newest release" / "The newest
+  release is X; this device runs Y" / unreachable. Install: confirm → download with progress (fetch stream) →
+  same checks as a chosen file (`fwInspect` / `fwProblem`) + size + version = manifest → `fwUpload(file, r,
+  md5)` → `POST /api/ota?size=&md5=` (device: `otaSetMd5` → `Update.setMD5`, checked by `Update.end`). Over
+  USB (Web Serial): only a download link (upload is Wi-Fi only). No hash in the browser (`crypto.subtle`
+  needs a secure context; the device page is http).
+- **Connect screen** (hosted page, local app): "Downloads" panel from the manifest: app buttons (Windows,
+  macOS Apple silicon / Intel, Linux; size), "Firmware for the boards" (Update / Full image per env) and notes
+  (unsigned app: SmartScreen / Gatekeeper). The launcher marks its page `data-version`; the panel says when
+  the release has a newer app.
+- **S3 device** (`HAS_NET_OTA` = `BOARD_HAS_PSRAM`, config.h): `src/ota_net.*`, a task per job (12 kB stack,
+  priority 1, core 1): check = HTTPClient + WiFiClientSecure (`setCACert(CA_ROOTS)`: 18 roots from certifi,
+  `tools/gen_ca_roots.py` → `src/ca_roots.h`: ISRG X1/X2, GTS R1/R3/R4, GlobalSign R46/E46, SSL.com ×4,
+  Certum Trusted Network CA, USERTrust ×2, Sectigo R46/E46, DigiCert G2/G3 — Cloudflare's Universal SSL CAs +
+  backups; no date check in this mbedTLS build, so no clock needed), GET manifest (≤ 16 kB) → `NetOtaInfo`
+  {phase idle / checking / checked / failed / downloading, newer, latest, date, size, msg}; install = the
+  checked release only if newer and `otaCanStart`: `otaBegin(OTA_NET, size)` + `otaSetMd5`, GET the image,
+  4 kB reads into `otaWrite` (size must match; 20 s without data or a closed connection → abort), `otaEnd`
+  → the usual restart + probation. Needs Wi-Fi as station (not AP). **Memory** (Rost's first test: "SSL - Memory
+  allocation failed (-0x7F00)", 76 kB internal free, largest block 67 kB): mbedTLS needs ~70 kB per session (16 kB
+  in + 16 kB out, handshake, the parsed roots) and this core allocates it internally (`CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC`);
+  so the netota task switches mbedTLS to PSRAM-first (`mbedtls_platform_set_calloc_free`, internal as fallback,
+  `heap_caps_free`) for the job and back to the core's pair afterwards (`esp_mbedtls_mem_calloc/free`, named by
+  asm label: esp_mem.h has no extern "C"). Errors name the stage (DNS with the server, TLS text + code from
+  `lastError`, HTTP code); the log line adds the internal RAM before the connect. OTA source "net": log "download from the
+  release page", touch overlay "Download:", ota.json src "net". S3 image +~240 kB (TLS), 33 % of its slot; CYD 93.0 % (cyd-2xlocal-2x485; the page grew ~2.5 kB).
+- **Touch** System: row "Online update" — S3: Check → toast "Asking the release page…" → dialog "Install
+  firmware X?" (size, build date, current version; Cancel / Install) or a toast (newest / older / can't start /
+  error); CYD: the row only names the web page's button. UI host shots 14j (S3 dialog), 14e0-system-online (CYD).
+- **Serial**: `fw net` (alias `fw check`) → result line when there; `fw net install yes` (progress every 10 s);
+  `fw` names `fw net` on the S3. Console host test both builds.
+- Tests: host (versionCompare, releaseParse incl. bad input), console host, UI host, Playwright `mock/rel.js`
+  (auto check, install through the browser with md5 in the POST, newest / older / unreachable, hosted
+  downloads incl. phone width), the older ota / fwsd / backup / raw / itest tests, all four envs build.
 
 ## 10. Open items carried over from TempCtl
 

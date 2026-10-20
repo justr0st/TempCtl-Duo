@@ -246,6 +246,7 @@ static void run(uint32_t ms) {
   }
 }
 #define SMALL (SCREEN_W < 400)
+static bool otaOk = false;  // otaCanStart (stub below)
 static void tap(int x, int y) {
   tx = x, ty = y;
   run(80);
@@ -704,6 +705,18 @@ int main(int argc, char** argv) {
       shot("14i-restored");
       tModalClose();
     } else printf("[host] restore button not found\n");
+    if (findText(lv_screen_active(), "Check", x, y)) {  // online update (release page)
+      otaOk = true;
+      tap(x, y);
+      run(1500);
+      shot("14j-online-update");
+      tModalClose();
+      otaOk = false;
+    } else printf("[host] online update button not found\n");
+  } else {
+    lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 160, LV_ANIM_OFF);
+    run(100);
+    shot("14e0-system-online");
   }
   tShow(SCR_LOG);
   run(400);
@@ -798,7 +811,18 @@ void safetyBeepTest() {}
 #include "sdlog.h"
 static OtaStatus otaStub{};
 void otaStatus(OtaStatus& s) { s = otaStub; }
-bool otaCanStart(char* e, size_t n) { snprintf(e, n, "a program is running - stop it first"); return false; }
+bool otaCanStart(char* e, size_t n) { if (otaOk) return true; snprintf(e, n, "a program is running - stop it first"); return false; }
+// the release page (ota_net.h): a check finds 1.0.99 (S3)
+#include "ota_net.h"
+static int netPolls = 0;
+bool netOtaAvailable() { return HAS_NET_OTA; }
+bool netOtaCheckStart(char*, size_t) { netPolls = 3; return true; }
+bool netOtaInstallStart(char* e, size_t n) { snprintf(e, n, "-"); return false; }
+void netOtaInfo(NetOtaInfo& i) {
+  memset(&i, 0, sizeof(i));
+  if (netPolls > 0) { --netPolls; i.phase = NET_CHECKING; return; }
+  i.phase = NET_CHECKED; i.newer = true; strcpy(i.latest, "1.0.99"); strcpy(i.date, "2026-10-20T09:15:00Z"); i.size = 1923456;
+}
 bool sdlogFirmwareCheckStart(char*, size_t) { return true; }
 int sdlogFirmwareCheckResult(SdFirmware& f, char* e, size_t n) { memset(&f, 0, sizeof(f)); if (n) e[0] = 0; return 1; }
 bool sdlogFirmwareInstall(char* e, size_t n) { snprintf(e, n, "-"); return false; }

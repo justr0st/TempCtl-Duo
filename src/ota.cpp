@@ -75,6 +75,8 @@ bool otaCanStart(char* err, size_t n) {
   return true;
 }
 
+static const char* srcName(uint8_t s) { return s == OTA_SD ? "SD card" : s == OTA_NET ? "download from the release page" : "web upload"; }
+
 bool otaBegin(OtaSource src, uint32_t total, char* err, size_t n) {
   if (!otaCanStart(err, n)) return false;
   uint32_t size;
@@ -90,8 +92,12 @@ bool otaBegin(OtaSource src, uint32_t total, char* err, size_t n) {
   st.source = src;
   st.total = total;
   portEXIT_CRITICAL(&mux);
-  logEvent("Firmware update started (%s%s)", src == OTA_SD ? "SD card" : "web upload", total ? "" : ", size unknown");
+  logEvent("Firmware update started (%s%s)", srcName(src), total ? "" : ", size unknown");
   return true;
+}
+
+bool otaSetMd5(const char* hex) {
+  return st.phase == OTA_RUNNING && hex && strlen(hex) == 32 && Update.setMD5(hex);
 }
 
 bool otaWrite(const uint8_t* p, size_t n) {
@@ -144,7 +150,7 @@ bool otaEnd(char* err, size_t n) {
   }
   // a note for the next start: the new firmware reports itself, the old one (after a rollback) the failure
   if (File f = LittleFS.open(NOTE, "w")) {
-    f.printf("{\"from\":\"%s\",\"to\":\"%s\",\"src\":\"%s\"}", FW_VERSION, scan.version(), st.source == OTA_SD ? "sd" : "web");
+    f.printf("{\"from\":\"%s\",\"to\":\"%s\",\"src\":\"%s\"}", FW_VERSION, scan.version(), st.source == OTA_SD ? "sd" : st.source == OTA_NET ? "net" : "web");
     f.close();
   }
   portENTER_CRITICAL(&mux);
