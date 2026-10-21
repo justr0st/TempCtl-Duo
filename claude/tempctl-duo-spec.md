@@ -2332,6 +2332,10 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   lv_mem_psram, raw_hist, syslog, crumbs, net, ca_roots, release_local.sh …), 12 Safety, Status. Dropped: the
   step notes and TempCtl 1.2 remarks, the bring-up panel, "(later)" pins, the setpoint-write counter; touch
   paths now "Menu › …"; CYD image 1.83 MB (93 %); the touch calibration note moved to the CYD hardware part.
+- **1.0.57 wiki** (2026-10-21; after 1.0.56 = 12edb9e; Rost: "a structured Wiki with description / instructions /
+  wiring illustrations and simulated screenshots for the Web-UI and touch interface, available from the Cloudflare
+  page and the README"; decided: Markdown in the repo, pictures scripted and committed, new wiring diagrams,
+  English only): see 9.14.
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
@@ -2466,6 +2470,40 @@ Decisions: see the 1.0.52 entry in 9.10. Pieces:
 - Tests: host (versionCompare, releaseParse incl. bad input), console host, UI host, Playwright `mock/rel.js`
   (auto check, install through the browser with md5 in the POST, newest / older / unreachable, hosted
   downloads incl. phone width), the older ota / fwsd / backup / raw / itest tests, all four envs build.
+
+### 9.14 Wiki (decided 2026-10-21, Rost; version 1.0.57)
+- **Pages** `docs/wiki/*.md` (GitHub renders them; README links `docs/wiki/Home.md`), page list + groups in
+  `docs/wiki/_Sidebar.md`: Home, Getting started, Hardware S3 / CYD, Touch screen, Web page, Programs and runs,
+  Channels (PID, autotune), Safety, Updates and backups, Desktop app and USB, Serial console, Troubleshooting,
+  Modbus (beta), For developers. Pictures in `docs/wiki/img/{wiring,touch,web}`; theme-aware with
+  `<picture><source media="(prefers-color-scheme: dark)" srcset="…-dark…"><img src="…-light…"></picture>`; the SVG
+  diagrams switch colours by themselves (`@media (prefers-color-scheme:dark)` inside the SVG).
+- **Hosted**: `tools/wiki_site.py` (no packages: own Markdown subset — headings with ids, lists, tables incl. `\|`,
+  code, quotes with Note / Warning / Tip / Safety styles, images, links `Page.md#x` → `Page.html#x`, raw HTML
+  blocks) writes `<site>/wiki/*.html` + `img/`, sidebar with groups and the current page's sections, prev / next;
+  page look = the web page's palette and Barlow fonts (`/f/`). Called by `tools/build_site.py --web` only (not the
+  launcher: +5 MB). `_headers`: `/wiki/img/*` cached a day. The release workflow no longer ignores `docs/**` and
+  `**.md` (only README.md, docs/SPEC.md, claude, hardware, logo, .vscode), so wiki changes deploy.
+- **Links**: web page sidebar "Help (wiki) ↗" (https://tempctl-duo.just-r0st.workers.dev/wiki/, new tab) and a line
+  on the connect screen; README top + hardware sections + project layout.
+- **Pictures** — `tools/wiki/make_shots.sh [wiring|touch|web]` (Linux / WSL: g++, Python + Pillow, Node +
+  Playwright, LVGL / ArduinoJson sources for the UI host):
+  - `tools/wiki/wiring.py` → 9 SVGs: overview (block diagram), s3-display / thermocouples / ssr / rs485 / safety,
+    cyd-a / b / c. Board pins left, module middle, field device right, straight wires coloured by function; pins
+    copied from board_*.h and hardware/gen (keep in step).
+  - Touch: the UI host (test/ui_host) renders all shots; new `UIHOST_THEME=light` renders them light into
+    `shots_light/`, `shots_cyd_light/`; host demo names now Bottom / Top, the log line uses FW_VERSION, a 6 s wait
+    before the log shot lets the update toasts go. `tools/wiki/touch_png.py` picks 37 screens, 2× nearest-neighbour
+    + a dark frame → `img/touch/<name>-<dark|light>.png`, `cyd-…` for the CYD (134 files, ~3.4 MB).
+  - Web: `tools/wiki/mock/server.py` = demo device (port 8770): settings / example programs / time zones from the
+    firmware code via `tools/wiki/demo_run.cpp` (`config`, `examples`, `zones`); runs from the real run engine
+    (`demo_run <example> <run time> [continue after s]`: heater model per channel, deterministic noise; /api/chart
+    v=run as chartJson incl. lanes, events, merged forecast, histCompress; /api/live run + channel fields; rows for an
+    SD-log-style CSV). Scenes by `POST /demo/scene`: idle, manual, run, run-early, pause, run-tl, done, intr, tune,
+    fault, modbus. `tools/wiki/shots_web.js` (Playwright, 1280 wide, phone 390 @2x, Europe/Berlin): 22 shots × dark /
+    light (dashboard run / phone / manual live / cards / action / interrupted / done / autotune / fault, sidebar,
+    editor seq / tl / chart, programs, channels local / modbus, log, settings + update available (manifest routed to a
+    fake newer release), tools, CSV replay of the demo run log, connect screen with downloads) → WebP q82 (~2 MB).
 
 ## 10. Open items carried over from TempCtl
 

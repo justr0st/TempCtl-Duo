@@ -9,6 +9,10 @@ station** (reflow / desolder profiles). Version **1.0.55**. Two boards, built fr
 
 Design notes and decisions: `claude/tempctl-duo-spec.md`.
 
+**Wiki** — instructions with wiring diagrams and pictures of every screen: [`docs/wiki/Home.md`](docs/wiki/Home.md)
+(on GitHub), also on the release page: <https://tempctl-duo.just-r0st.workers.dev/wiki/> (and linked from the
+device's web page, *Help (wiki)*).
+
 > **Status:** local thermocouple + SSR channels are the tested path (S3 and CYD). **Modbus RTU** (an RS485
 > controller per channel) is a **beta** feature: built in, but not tested with a real controller yet.
 
@@ -70,7 +74,8 @@ Two supported boards, selected by the PlatformIO environment; all pins are in `s
 | MAX31855 (or MAX6675) thermocouple converters, SSRs | local channels |
 | **3.3 V** RS485 transceiver | on UART1 (Modbus channels, beta) |
 
-Wiring pictures: `claude/wiring/s3-wiring.png` (display on J1, RS485 / thermocouples / SSR drivers on J3,
+Wiring diagrams per part (display, thermocouples, SSRs + relay, E-stop / buzzer, RS485): wiki page
+[ESP32-S3 board](docs/wiki/Hardware-S3.md). All in one picture: `claude/wiring/s3-wiring.png` (display on J1, RS485 / thermocouples / SSR drivers on J3,
 relay / E-stop / buzzer on J1-4/5/6). Schematic of the whole device: `hardware/s3-schematic/`
 (KiCad 7 project + PDF / PNG, A3).
 
@@ -107,7 +112,8 @@ Bring-up checks: if the colours look inverted set `LCD_INVERT 1`; if touches lan
 ### ESP32-2432S028R "CYD" (envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`)
 
 The CYD has too few free pins for RS485 plus two local channels, so it has three wirings, one env each
-(pictures in `claude/wiring/`, KiCad schematics in `hardware/cyd-schematic/`, sheets A / B / C):
+(diagrams on the wiki page [CYD board](docs/wiki/Hardware-CYD.md), older pictures in `claude/wiring/`, KiCad
+schematics in `hardware/cyd-schematic/`, sheets A / B / C):
 
 | Env | Channels | Wiring |
 |---|---|---|
@@ -535,7 +541,7 @@ starts one by hand) runs `.github/workflows/release.yml`:
    address 0x0).
 2. `tools/launcher/build.sh all`: the desktop app for Windows, macOS (Apple silicon, Intel; zipped) and
    Linux (tar.gz).
-3. `tools/build_site.py dist --web` (the page, `_headers`), then `tools/release.py dist art`: the files go to
+3. `tools/build_site.py dist --web` (the page, `_headers`, the wiki under `/wiki/`), then `tools/release.py dist art`: the files go to
    `dist/dl/` with the version in their names, plus `dist/dl/manifest.json` (version, date, commit; per board
    url, size, MD5, SHA-256; the app files). It stops if an image does not carry its env and this version.
 4. `npx wrangler deploy --tag v<version> --message "<first line of the commit>"` (`wrangler.jsonc`, assets
@@ -820,6 +826,10 @@ tools/build_site.py       the same page as static files (device URL layout), for
 wrangler.jsonc            the hosted page: Cloudflare Workers static assets (dist/, built by build_site.py --web)
 tools/release.py          release files + dl/manifest.json for the hosted page (section 7)
 tools/release_local.sh    the same release from a PC, without commit / push
+docs/wiki/                the wiki (Markdown, _Sidebar.md = page list; img/: wiring SVGs, touch PNGs, web WebPs)
+tools/wiki_site.py        the wiki as HTML pages for the hosted page (/wiki/, called by build_site.py --web)
+tools/wiki/               the wiki pictures: make_shots.sh (all), wiring.py, touch_png.py, shots_web.js +
+                          mock/server.py (demo device), demo_run.cpp (runs from the firmware's run engine)
 .github/workflows/        release.yml: builds firmware + desktop app, deploys page and files to Cloudflare
 tools/launcher/           local app: Go launcher (build.sh → dist/tempctl-duo-<version>.exe), section 6
 test/ui_host/             touch UI preview on a PC (screenshots, random-tap test)

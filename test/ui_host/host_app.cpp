@@ -7,6 +7,7 @@
 #include "ui.h"
 #include "local_ctrl.h"
 #include "tui.h"
+#include "version.h"
 #include <vector>
 #ifdef MEMTEST
 #include <malloc.h>
@@ -273,11 +274,14 @@ static void slide(int x, int y, int x2, int y2) {
   tx = ty = -1;
   run(300);
 }
+// UIHOST_THEME=light: all shots in the light theme, into shots_light/ (shots_cyd_light/), for the wiki
+static const bool hostLight = getenv("UIHOST_THEME") && !strcmp(getenv("UIHOST_THEME"), "light");
+
 static void shot(const char* name) {
   run(300);
   lv_refr_now(hostDisp);
   char path[128];
-  snprintf(path, sizeof(path), "%s/%s.raw", SCREEN_W < 400 ? "shots_cyd" : "shots", name);
+  snprintf(path, sizeof(path), "%s%s/%s.raw", SCREEN_W < 400 ? "shots_cyd" : "shots", hostLight ? "_light" : "", name);
   FILE* f = fopen(path, "wb");
   fwrite(fb, 2, SCREEN_W * SCREEN_H, f);
   fclose(f);
@@ -327,11 +331,11 @@ static void tapSlider(int idx, float frac) {
 
 static void baseState() {
   settingsDefaults(gSettings, boardLimits());
-  strcpy(gSettings.ch[0].name, "Preheater");
-  strcpy(gSettings.ch[1].name, "IR head");
+  strcpy(gSettings.ch[0].name, "Bottom");
+  strcpy(gSettings.ch[1].name, "Top");
   gSettings.ch[0].type = CH_LOCAL;
   gSettings.ch[1].type = CH_MODBUS;
-  gSettings.themeDark = 1;
+  gSettings.themeDark = hostLight ? 0 : 1;
   strcpy(gSettings.ssid, "Workshop");
   strcpy(gSettings.pass, "secret");
   memset(&gLive, 0, sizeof(gLive));
@@ -573,12 +577,12 @@ int main(int argc, char** argv) {
     monkey(atoi(argc > 2 ? argv[2] : "3000"));
     return 0;
   }
-  for (int i = 0; i < 9; ++i) addLog(5 + i, i > 2 ? i * 40.0f : NAN, i == 0 ? "TempCtl Duo 1.0.19 started (power on)" : i == 1 ? "Wi-Fi connected: 192.168.1.50" : i == 3 ? "Program \"Lead-free BGA\" started" : "Phase 2 (P)");
+  for (int i = 0; i < 9; ++i) addLog(5 + i, i > 2 ? i * 40.0f : NAN, i == 0 ? "TempCtl Duo " FW_VERSION " started (power on)" : i == 1 ? "Wi-Fi connected: 192.168.1.50" : i == 3 ? "Program \"Lead-free BGA\" started" : "Phase 2 (P)");
   uiInit();
   run(500);
   shot("01-idle");
   hostTune = true;  // autotune status in the tile, a message over the chart
-  tToast("IR head: manual setpoint on");
+  tToast("Top: manual setpoint on");
   shot("01b-tune-toast");
   hostTune = false;
   run(5000);
@@ -621,7 +625,7 @@ int main(int argc, char** argv) {
   run(800);
   shot("08-light");
   tap(SMALL ? 160 : 240, SMALL ? 70 : 110);  // chart -> program
-  gSettings.themeDark = 1;
+  gSettings.themeDark = hostLight ? 0 : 1;
   gSettings.accentColor = 0x2196F3;
   // idle with an interrupted run + a fault
   baseState();
@@ -753,6 +757,7 @@ int main(int argc, char** argv) {
     run(100);
     shot("14e0-system-online");
   }
+  run(6000);  // (the toasts of the online update check go away)
   tShow(SCR_LOG);
   run(400);
   shot("15-log");
@@ -760,7 +765,7 @@ int main(int argc, char** argv) {
   shot("16-keyboard");
   tModalClose();
   tShow(SCR_MAIN);
-  tChoice("Extend the IR head hold", "+10 s\n+30 s\n+1 min\n+5 min", -1, nullptr, 0);
+  tChoice("Extend the Top hold", "+10 s\n+30 s\n+1 min\n+5 min", -1, nullptr, 0);
   shot("17-choice");
   tModalClose();
   tDialog("Stop the program?", "Each channel applies its end action.", "Cancel", "Stop", "", nullptr, 0, true);

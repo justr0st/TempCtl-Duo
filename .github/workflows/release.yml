@@ -10,7 +10,8 @@ name: Release
 on:
   push:
     branches: [main]
-    paths-ignore: ["claude/**", "docs/**", "hardware/**", "logo/**", "**.md", ".vscode/**"]
+    # (the wiki, docs/wiki, is part of the hosted page: its changes deploy too)
+    paths-ignore: ["claude/**", "hardware/**", "logo/**", "README.md", "docs/SPEC.md", ".vscode/**"]
   workflow_dispatch:
 
 concurrency:

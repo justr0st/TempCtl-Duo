@@ -1,6 +1,8 @@
 obj/
 shots/
 shots_cyd/
+shots_light/
+shots_cyd_light/
 uihost
 uihost_cyd
 uihost_mem

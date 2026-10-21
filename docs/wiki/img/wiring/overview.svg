@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 410" width="980" height="410" font-family="Barlow, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
+<style>svg{--bg:#fff;--box:#f5f7fa;--line:#c5ccd6;--text:#1c2430;--muted:#5d6b7c;--acc:#1976d2;--mains:#c62828;--hot:#fff3e0;--hotl:#ef6c00}@media (prefers-color-scheme:dark){svg{--bg:#12161c;--box:#1c222b;--line:#3a4452;--text:#e6ebf2;--muted:#94a3b5;--acc:#64b5f6;--mains:#ef9a9a;--hot:#2b2016;--hotl:#ffb74d}}text{fill:var(--text);font-size:13px}.m{fill:var(--muted);font-size:11.5px}.t{font-size:15px;font-weight:700}.h{font-size:19px;font-weight:700}.box{fill:var(--box);stroke:var(--line);stroke-width:1.5}.hot{fill:var(--hot);stroke:var(--hotl);stroke-width:1.5}.a{stroke:var(--acc);stroke-width:2.4;fill:none;marker-end:url(#ar)}.mn{stroke:var(--mains);stroke-width:2.4;fill:none;stroke-dasharray:6 4}</style>
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--acc)"/></marker></defs>
+<rect width="980" height="410" rx="14" fill="var(--bg)"/>
+<text x="16" y="30" class="h">TempCtl Duo: the parts of the device</text>
+<rect x="270" y="60" width="190" height="330" rx="10" class="box"/>
+<text x="365.0" y="82" class="t" text-anchor="middle">ESP32-S3 or CYD</text>
+<text x="365.0" y="100" class="m" text-anchor="middle">touch screen</text>
+<text x="365.0" y="116" class="m" text-anchor="middle">web page</text>
+<text x="365.0" y="132" class="m" text-anchor="middle">serial console</text>
+<text x="365.0" y="148" class="m" text-anchor="middle">programs, PID</text>
+<text x="365.0" y="164" class="m" text-anchor="middle">protections</text>
+<rect x="20" y="60" width="180" height="70" rx="10" class="box"/>
+<text x="110.0" y="82" class="t" text-anchor="middle">Phone / PC</text>
+<text x="110.0" y="100" class="m" text-anchor="middle">browser, desktop app</text>
+<path d="M200,95 L270,95" class="a" marker-start="url(#ar)"/>
+<text x="235.0" y="89.0" class="m" text-anchor="middle">Wi-Fi · USB</text>
+<rect x="20" y="150" width="180" height="70" rx="10" class="box"/>
+<text x="110.0" y="172" class="t" text-anchor="middle">E-stop · alarm</text>
+<text x="110.0" y="190" class="m" text-anchor="middle">S3: NC contact, piezo</text>
+<text x="110.0" y="206" class="m" text-anchor="middle">CYD: speaker (P4)</text>
+<path d="M270,185 L200,185" class="a" marker-start="url(#ar)"/>
+<text x="235.0" y="179.0" class="m" text-anchor="middle">GPIO</text>
+<rect x="530" y="60" width="200" height="70" rx="10" class="box"/>
+<text x="630.0" y="82" class="t" text-anchor="middle">Thermocouple converters</text>
+<text x="630.0" y="100" class="m" text-anchor="middle">MAX31855 / MAX6675</text>
+<path d="M530,95 L460,95" class="a"/>
+<text x="495.0" y="89.0" class="m" text-anchor="middle">SPI</text>
+<rect x="530" y="150" width="200" height="70" rx="10" class="box"/>
+<text x="630.0" y="172" class="t" text-anchor="middle">SSR drivers</text>
+<text x="630.0" y="190" class="m" text-anchor="middle">NPN, 1 kΩ / 10 kΩ</text>
+<path d="M460,185 L530,185" class="a"/>
+<text x="495.0" y="179.0" class="m" text-anchor="middle">GPIO</text>
+<rect x="530" y="240" width="200" height="70" rx="10" class="box"/>
+<text x="630.0" y="262" class="t" text-anchor="middle">SSR supply relay</text>
+<text x="630.0" y="280" class="m" text-anchor="middle">S3: +5 V of the SSR inputs</text>
+<path d="M460,275 L530,275" class="a"/>
+<text x="495.0" y="269.0" class="m" text-anchor="middle">GPIO</text>
+<rect x="530" y="330" width="200" height="70" rx="10" class="box"/>
+<text x="630.0" y="352" class="t" text-anchor="middle">RS485 transceiver</text>
+<text x="630.0" y="370" class="m" text-anchor="middle">3.3 V, Modbus (beta)</text>
+<path d="M460,365 L530,365" class="a" marker-start="url(#ar)"/>
+<text x="495.0" y="359.0" class="m" text-anchor="middle">UART</text>
+<rect x="790" y="60" width="170" height="70" rx="10" class="hot"/>
+<text x="875.0" y="82" class="t" text-anchor="middle">Thermocouples</text>
+<text x="875.0" y="100" class="m" text-anchor="middle">type K, bottom · top</text>
+<rect x="790" y="150" width="170" height="70" rx="10" class="hot"/>
+<text x="875.0" y="172" class="t" text-anchor="middle">SSRs → heaters</text>
+<text x="875.0" y="190" class="m" text-anchor="middle">mains side</text>
+<rect x="790" y="330" width="170" height="70" rx="10" class="box"/>
+<text x="875.0" y="352" class="t" text-anchor="middle">Controllers</text>
+<text x="875.0" y="370" class="m" text-anchor="middle">e.g. PMA KS 4x-1</text>
+<path d="M790,95 L730,95" class="a"/>
+<path d="M730,185 L790,185" class="a"/>
+<path d="M730,365 L790,365" class="a" marker-start="url(#ar)"/>
+<text x="760.0" y="359.0" class="m" text-anchor="middle">A / B</text>
+<path d="M730,275 L760,275 L760,205 L790,205" class="a"/>
+<text x="766" y="250" class="m">+5 V</text>
+<text x="20" y="300" class="m">Heaters: fit an independent</text><text x="20" y="316" class="m">over-temperature limiter and a</text><text x="20" y="332" class="m">contactor in their supply.</text>
+</svg>

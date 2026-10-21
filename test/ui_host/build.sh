@@ -23,7 +23,7 @@ if [ "$MEM" = 1 ]; then
   SAN="-rdynamic"; OUT=uihost_mem; BD="$BD -DMEMTEST"
   EXTRA="memtrack.cpp -Wl,--wrap=malloc,--wrap=free,--wrap=realloc,--wrap=calloc"
 fi
-mkdir -p obj $FO shots shots_cyd
+mkdir -p obj $FO shots shots_cyd shots_light shots_cyd_light
 if [ ! -f obj/liblvgl.a ]; then  # LVGL itself is the same for both boards
   find $LVGL/src -name "*.c" | xargs -P 8 -I{} sh -c 'gcc -O1 -w '"$INC"' -c {} -o obj/lv_$(echo {} | md5sum | cut -c1-12).o'
   ar rcs obj/liblvgl.a obj/lv_*.o

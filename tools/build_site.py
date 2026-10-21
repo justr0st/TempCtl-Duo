@@ -4,6 +4,7 @@ them (tools/web_embed.py ASSETS), plus shell.html (the local app's tabs), for th
 (tools/launcher) and the hosted page (Cloudflare Workers static assets, wrangler.jsonc).
   python3 tools/build_site.py [out_dir]          (default: tools/launcher/site)
   python3 tools/build_site.py dist --web         the hosted page: without the launcher's shell.html, with _headers
+                                                 and the wiki (docs/wiki -> /wiki/, tools/wiki_site.py)
                                                  (the release files: tools/release.py, .github/workflows/release.yml)"""
 import os, shutil, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -23,6 +24,8 @@ HEADERS = """/*
 /dl/*
   Access-Control-Allow-Origin: *
   Cache-Control: no-cache
+/wiki/img/*
+  Cache-Control: public, max-age=86400
 """
 
 def build(out, web=False):
@@ -37,6 +40,8 @@ def build(out, web=False):
     if web:
         with open(os.path.join(out, "_headers"), "w", newline="\n") as f:
             f.write(HEADERS)
+        import wiki_site  # the wiki pages (the launcher leaves them out: they would make the app 5 MB larger)
+        wiki_site.build(out)
     else:  # the local app's tab window (not on the device, not hosted)
         shutil.copyfile(os.path.join(WEB, "shell.html"), os.path.join(out, "shell.html"))
     print("build_site: %s" % os.path.relpath(out, ROOT))
