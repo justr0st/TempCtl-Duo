@@ -1,158 +1,62 @@
-# TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32-CYD + Modbus RTU)
+# TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32 CYD)
 
-> **Work in progress (version 1.0.22).** Modbus RTU (RS485 controllers) is a **beta** feature: built
-> in, but not tested with a real controller yet; local thermocouple + SSR channels are the tested path.
-> TempCtl Duo is being built from TempCtl 1.2 (bottom + top heater
-> of a BGA rework station, see `claude/tempctl-duo-spec.md`). Done: **steps 1–5** — hardware bring-up
-> (the ESP32-S3 board, env `s3`, and the CYD, envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`,
-> build from the same sources), two channels (Modbus / local / off), local thermocouple + SSR channels,
-> PID + autotune, and the two program types (Sequence, Timeline) with one run engine for both channels.
-> Step 7 (new web page, section 5a): Status (both channels, run control, chart with forecast, program
-> editor with chart handles, event log), Programs, Channels, System and Tools pages; the TempCtl 1.2 page
-> is gone. Still to come in step 7: "Run interrupted by a reset". The touch screens (TempCtl 1.2, step 6
-> comes later) show the **bottom channel**; programs are **read-only** there. On the S3's 480×320 screen
-> the 320×240 TempCtl screens run in the top left corner, next to a bring-up panel.
+Firmware for a two-channel temperature programmer, made for the **bottom and top heater of a BGA rework
+station** (reflow / desolder profiles). Version **1.0.55**. Two boards, built from the same sources:
 
-Firmware for the ESP32-2432S028R ("Cheap Yellow Display") that drives a **PMA KS 40-1 / 41-1 / 42-1**
-(or another Modbus RTU temperature controller) over RS485. It stores **up to 20 named programs** for both
-heaters (Sequence or Timeline, see "Programs" below) and can also hold a **manual setpoint** per channel.
-Main use: the bottom and top heater of a **BGA rework station** (reflow / desolder profiles); on the first
-start three example programs are created (Lead-free BGA, Leaded BGA, Lead-free BGA as a Timeline).
+- **ESP32-S3** with a 4" 480×320 capacitive touch screen (env `s3`, the main target)
+- **ESP32-2432S028R "Cheap Yellow Display"** with a 2.8" 320×240 resistive touch screen (envs
+  `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`, section 1)
 
-- LVGL 9.6 touch GUI, **both boards: the new touch UI** (step 6, `src/tui_*.cpp`, section 4a; S3 480×320 in
-  1.0.19, CYD 320×240 in 1.0.21), same look
-  as the web page (Barlow font, palette, accent and channel colours):
+Design notes and decisions: `claude/tempctl-duo-spec.md`.
+
+> **Status:** local thermocouple + SSR channels are the tested path (S3 and CYD). **Modbus RTU** (an RS485
+> controller per channel) is a **beta** feature: built in, but not tested with a real controller yet.
+
+- **Two channels** (bottom, top), each one of:
+  - **local**: a MAX31855 / MAX6675 thermocouple converter and an SSR; the ESP32 does the PID (with
+    autotune) and the protections (sections 8, 12);
+  - **Modbus RTU** (beta): a controller such as the PMA KS 40-1 / 41-1 / 42-1 does the PID, the ESP32
+    feeds it setpoints (section 9);
+  - **off**.
+- **Up to 20 named programs** that drive both channels (Sequence or Timeline, section 8), plus a **manual
+  setpoint** per channel. On the first start three example programs are created (Lead-free BGA, Leaded
+  BGA, Lead-free BGA as a Timeline).
+- LVGL 9.6 **touch UI** on both boards (`src/tui_*.cpp`, section 3), same look as the web page (Barlow
+  font, palette, accent and channel colours):
   - **Main screen**: header with the program (tap: choose the program for the next run), phase / steps,
     state, run time and remaining time, Start / Pause / Continue, Stop, Next phase; the chart of both
     channels (tap: program / live view); one tile per channel with PV, SP, output, what the channel does,
     a target stepper (− value +, tap the value for the number pad; during a run it changes the current or
     kept target, otherwise the manual setpoint), the manual on / off button (filled in the channel colour
-    while on), "+ Hold" (extend the running hold),
-    Acknowledge for a fault. While a channel's outputs are on (run, manual, autotune) its tile gets a 4 px
-    border in the channel colour and a 20 % tint of it. Overlays: "Action required" (Continue / Stop), "Run interrupted by a reset"
-    (Resume / Later / Dismiss; the red "Interrupted" badge opens it again), "Save the run's changes?",
-    messages at the bottom.
+    while on), "+ Hold" (extend the running hold), Acknowledge for a fault. While a channel's outputs are
+    on (run, manual, autotune) its tile gets a 4 px border in the channel colour and a 20 % tint of it.
+    Overlays: "Action required" (Continue / Stop), "Run interrupted by a reset" (Resume / Later / Dismiss;
+    the red "Interrupted" badge opens it again), "Save the run's changes?", messages at the bottom.
   - **Menu**: Programs (list; editor: Sequence as one table, Timeline as two tables side by side; tap a
     value to change it, tap # / Type for type, wait, pause text, insert, move, delete; Undo, Save, Start,
     Rename, Discard, Delete; during a run the running program with run edits of targets and times),
     Channels (name, type, limits, end action, Modbus controller, thermocouple, PID + autotune, runaway
-    protection, heating while off, frozen reading, converter temperature, RS485 bus; register addresses and the two-point calibration on the web page), Network
-    (Wi-Fi with scan and password, AP password, host name, fixed IP), Display (brightness, dark mode,
-    accent colour: six presets or any colour (hue / saturation / brightness), upside down, live chart
-    period), System (polling interval, "bottom reached" band, time zone, manual mode
-    timeout, E-stop input, alarm sound, chip temperature warning, info, restart), Event log.
-  - **CYD (320×240)**: the same screens as a compact set (section 4a).
-- Web interface (section 5a): Dashboard, Programs, Channels (incl. controller parameters, full register
-  map, calibration, PID autotune, protection), Log, Settings (Wi-Fi, safety, display, clock, restart) and Tools (register read/write, a
-  setpoint-address finder, backup) pages; CSV log download
-- The controller keeps doing the PID control; the ESP32 only feeds it setpoints
+    protection, heating while off, frozen reading, converter temperature, RS485 bus; register addresses
+    and the two-point calibration on the web page), Network (Wi-Fi with scan and password, AP password,
+    host name, fixed IP), Display (brightness, dark mode, accent colour: six presets or any colour, upside
+    down, live chart period, screen check, SPI clock, frame rate meter), System (polling interval,
+    "bottom reached" band, time zone, S3: online update, firmware update and backup / restore from the SD
+    card; manual mode timeout, E-stop input, SSR supply relay, alarm sound, chip temperature warning,
+    info, restart), Event log.
+  - **CYD (320×240)**: the same screens as a compact set (section 3).
+- **Web page** (section 5): Dashboard, Programs, Channels (incl. controller parameters, register map,
+  calibration, PID autotune, protection), Log (system log, SD run logs), Settings (device, firmware
+  update, Wi-Fi, safety, display, clock) and Tools (Modbus register tools, backup) pages; CSV export and a
+  CSV replay page.
+- The same page **over USB** (Web Serial), in the desktop app or on the hosted page (section 6), and a
+  **serial console** (section 4).
+- **Releases** (section 7): every push to `main` builds all firmware images and the desktop app and
+  publishes them on `https://tempctl-duo.just-r0st.workers.dev`; the web page checks for updates and
+  installs them on every board, the S3 also fetches them itself over HTTPS.
+- Firmware **protections** (runaway, heating while off, frozen reading, E-stop, SSR supply relay, …,
+  section 12).
 
-## 1. What the PMA interface description tells us
-
-| Item | Value (KS 4x-1) |
-|---|---|
-| Physical | RS485 2-wire or RS422 4-wire, galvanically isolated **option** on the controller |
-| Terminals (RS485) | 17 = DATA A, 15 = DATA B, 13 = RGND |
-| Protocol | Modbus RTU, slave only, address 1…247 |
-| Serial | 2400/4800/9600/19200 baud (menu), 8 data bits, even/odd/none parity. **Factory: 9600, even parity, address 1** |
-| Function codes | 03/04 read (identical), 06 write single, 16 write multiple, 08 diagnostics |
-| Address format | top 3 bits select format: `base` = integer, `base + 8192` = integer with 1 decimal ("1dP"), plus 2dP/3dP/float areas |
-| Special raw values | −31000 sensor fault, −32000 switched off, −32500 undefined, −32768 out of range |
-
-Registers used by default (1dP = value × 10):
-
-| Purpose | Name | Address |
-|---|---|---|
-| Process value | Cntr/Signal `In.1` | 13294 |
-| Effective setpoint | Cntr/Signal `SP.EF` | 13293 |
-| Output % | Cntr/Signal `Ypid` | 13295 |
-| Controller status | `St.Cntr` (bit 0 heating, bits 12–15 mode) | 5100 |
-| Alarm status | `St.Ala` | 250 |
-| Outputs off | LOGI/Signal `C.Off` | 1086 |
-| Front panel lock | LOGI/Signal `L-R` | 1080 |
-| Setpoint (interface) | SEtP/Signal `SP` | 11372 |
-| Setpoint limits | SEtP/PArA `SP.LO` / `SP.Hi` | 11292 / 11293 |
-| Setpoint gradient | SEtP/PArA `r.SP` (per minute, 0.01…9999 or off) | 11295 |
-
-**Why the ESP32 runs the program:** the KS 4x-1's built-in programmer (ProG, addresses 14292…14299) has only
-**4 segments** (`SP.01…SP.04`, `Pt.01…Pt.04`), so longer profiles have to be driven from outside by writing `SP`.
-
-**EEPROM:** the interface description says the `SP` value in RAM is updated immediately, while storing it to
-EEPROM is timed (about one write per half hour). Frequent setpoint writes over Modbus are therefore safe on
-the KS 4x-1. This is controller-specific; cheaper controllers may write every change to EEPROM.
-
-**Setpoint limits:** the controller clamps setpoints to `SP.LO…SP.Hi` (factory 0…900). Before starting, the
-firmware reads both and refuses to start if an enabled step's target lies outside them.
-
-### Setpoint ramp modes
-
-- **Controller ramps (r.SP)**, default: per segment the ESP32 writes the start value, the gradient
-  (|ΔT| / remaining minutes) and the target. About 4 writes per phase; the controller ramps smoothly.
-  Ramps slower than 0.1 °/min (the 1dP resolution) or faster than the register can hold (3000 °/min at 1dP)
-  fall back to host stepping for that segment.
-- **ESP32 writes setpoint steps**: writes a new setpoint when it has moved by *minimum step* (default 0.5)
-  and at least *minimum seconds* (default 5) have passed. Works with any controller.
-
-The web *Main* page shows the number of setpoint writes in the current run.
-
-### Programs (TempCtl Duo, spec 9.3)
-
-- **One program drives both channels.** Up to 20 programs, name up to 31 characters, stored as JSON files
-  `/duo/prog0.json` … `/duo/prog19.json` on LittleFS (safe save: temp file + rename). Two types:
-  - **Sequence**: up to 100 phases, one after another. `B` (bottom: target, ramp, hold), `T` (top: target,
-    ramp, hold), `BT` (both: the bottom setpoint jumps to its target or goes Idle = outputs off, the top
-    ramps and holds), `P` (pause: waits for Continue, optional "Action required" and a text up to 40
-    characters). `B` and `BT` phases can **wait for the bottom** to reach its target (± the "bottom reached"
-    band, default 5 °C) before the hold (`B`) or the top ramp (`BT`) starts. A channel keeps its last
-    target while other phases run.
-  - **Timeline**: two independent step lists (up to 100 steps each) started together: target steps
-    (target, ramp, hold), `idle` steps (outputs off for a time) and `pause` steps (the whole run pauses).
-    A channel that finishes earlier keeps its last target until the other one is done.
-- The first ramp of a channel, and the first ramp after Idle, starts at its measured temperature; later
-  ramps start at the previous target. A ramp of 0 is a jump. A channel without phases/steps in the program
-  stays under manual control during the run; the program's channels start with their outputs off until
-  they get a target.
-- **Next phase** (Sequence): ramp → hold (setpoint at the target, a wait is skipped), wait → hold / top ramp,
-  hold → next phase; in a pause it continues. Timelines have no Next phase (only Continue in a pause).
-- **Run edits** (`POST /api/run`): extend or change a hold (not below the time already held; down to now
-  ends it), change later ramp times, change targets (current, later, or the target a channel keeps). Slopes
-  are kept and times adapt; in a Timeline a timing change of one channel shifts the other one through its
-  holds. The edits go to the running copy; `{"cmd":"save"}` stores them into the program.
-- End: each channel of the program applies its own end action (keep setpoint / end setpoint / outputs off).
-  With "keep" or "end setpoint" the channel goes on in manual mode with that setpoint (its manual button
-  is on and switches the outputs off).
-- Resume after a reset: a ramp starts at the measured temperature with its planned speed (from the
-  previous target to its own in its ramp time); Sequence: the phase's ramp takes as long as that needs;
-  Timeline: the hold after the ramp takes up the difference, so later steps keep their run time.
-  A fault on any channel stops the run.
-- **Seconds:** times are stored in seconds. With *Controller ramps (r.SP)* the KS 4x-1 gradient is per
-  minute, so a short ramp only uses the controller gradient if it fits the register (see above); otherwise
-  the ESP32 steps the setpoint itself.
-
-### Manual setpoint
-
-- *Main* has a manual setpoint and an on/off switch. **On:** the ESP32 switches the controller outputs on and
-  writes the setpoint (again whenever you change it). **Off:** the outputs are switched off (`C.Off` = 1). If
-  no outputs-off register is configured, *off* only stops the ESP32 from writing; the controller keeps its
-  last setpoint.
-- Manual mode is always off after a restart; the last value is remembered.
-- Pause freezes program time (and the controller ramps).
-- End/stop action: keep setpoint, set an end setpoint, or switch controller outputs off (`C.Off`).
-  The original `r.SP` is restored afterwards.
-- If a channel of the program doesn't answer for 30 s (configurable) the program pauses.
-- **Run interrupted by a reset** (watchdog, crash, brown-out, power loss …): the board starts with the
-  program's channels off (local: SSR off; Modbus: outputs-off register, if set — without it the controller
-  keeps its last setpoint) and the web page shows "Run interrupted by a reset" with the reason, program,
-  phase / steps and run time. Never an automatic resume: **Resume** (Sequence: the interrupted phase from
-  its beginning, ramps from the measured temperatures, channels the phase doesn't start get their kept
-  target at once; Timeline: on at the interrupted run time, ramps from the measured temperatures in the
-  time they had left, holds with their remaining time) or **Dismiss** (outputs stay off, the controller
-  gradient and front panel are restored). Starting another program also ends the offer. The running copy
-  (with run edits) is in `/duo/run.json`; the position in RTC memory (exact, survives resets) and in
-  `/duo/runpos.json` (every phase / step change and every minute, for a power loss). The touch screen
-  shows the message; its Resume button comes with the new touch UI (step 6).
-
-## 2. Hardware
+## 1. Hardware
 
 Two supported boards, selected by the PlatformIO environment; all pins are in `src/board_s3.h` /
 `src/board_cyd.h`.
@@ -163,7 +67,8 @@ Two supported boards, selected by the PlatformIO environment; all pins are in `s
 |---|---|
 | ESP32-S3-DevKitC-1 **v1.0 N16R8** | 16 MB flash, 8 MB octal PSRAM. On-board WS2812 on GPIO48 (a v1.1 board has it on GPIO38: swap 38 ↔ 48 in `board_s3.h`) |
 | 4.0" SPI module **MSP4031** | ST7796S 320×480 (used as 480×320 landscape), FT6336U capacitive touch (I²C 0x38). VCC 5 V recommended |
-| **3.3 V** RS485 transceiver | on UART1 |
+| MAX31855 (or MAX6675) thermocouple converters, SSRs | local channels |
+| **3.3 V** RS485 transceiver | on UART1 (Modbus channels, beta) |
 
 Wiring pictures: `claude/wiring/s3-wiring.png` (display on J1, RS485 / thermocouples / SSR drivers on J3,
 relay / E-stop / buzzer on J1-4/5/6). Schematic of the whole device: `hardware/s3-schematic/`
@@ -174,9 +79,9 @@ relay / E-stop / buzzer on J1-4/5/6). Schematic of the whole device: `hardware/s
 | LCD SCK / SDI (MOSI) / SDO (MISO) | 12 / 11 / 13 | | RS485 TX → DI | 1 |
 | LCD_CS / LCD_RS (D/C) / LCD_RST | 10 / 9 / 14 | | RS485 RX ← RO | 2 |
 | LED (backlight, PWM) | 8 | | RS485 DE + /RE | 42 |
-| SD_CS (SD card: run logs) | 18 | | Thermocouple SCK / SO (later) | 41 / 40 |
-| CTP_SDA / CTP_SCL | 16 / 15 | | TC CS bottom / top (later) | 39 / 38 |
-| CTP_RST / CTP_INT | 17 / 7 | | SSR bottom / top (later) | 21 / 47 |
+| SD_CS (SD card: run logs) | 18 | | Thermocouple SCK / SO | 41 / 40 |
+| CTP_SDA / CTP_SCL | 16 / 15 | | TC CS bottom / top | 39 / 38 |
+| CTP_RST / CTP_INT | 17 / 7 | | SSR bottom / top | 21 / 47 |
 | | | | SSR supply relay (+5 V common of both SSRs) | 4 |
 | | | | E-stop input (NC contact to GND) | 5 |
 | | | | Alarm buzzer (2.7 kHz square wave) | 6 |
@@ -185,20 +90,19 @@ SSR supply relay: an **active-high DC solid-state relay** (input 3–32 V DC, at
 output at least 0.5 A DC). Input + = GPIO4, input − = GND (driven directly by the pin, no module power);
 output: 5 V (J1-21) → OUT+, OUT− → the "+" inputs of both SSRs. GPIO4 is driven low (off) from the first
 line of `setup()`. The relay covers a stuck SSR input or driver transistor; an SSR whose output is shorted
-keeps heating — that needs a contactor in the heater supply (and the independent limiter of section 7).
-Setting `safety.relay` (web Settings › Safety, touch System, serial; default on): off only when no relay is
+keeps heating — that needs a contactor in the heater supply (and the independent limiter of section 12).
+Setting `safety.relay` (web Settings › Safety, touch Menu › System, serial; default on): off only when no relay is
 fitted and the SSR "+" inputs get 5 V directly — GPIO4 then stays low.
 
 Flash and watch the log through the USB port labelled **"UART"**. The native **"USB"** port is the serial
-console (section 4b; later also the Web Serial page): open it with any terminal at 115200 baud, opening it
-never resets the board.
+console (section 4) and the Web Serial page's USB link (section 6): open it with any terminal at
+115200 baud, opening it never resets the board.
 
 Status LED (WS2812): green = idle, blue = running, amber blinking = paused / waiting, red blinking = fault
 (no answer from a channel, latched fault), purple = access point mode.
 
 Bring-up checks: if the colours look inverted set `LCD_INVERT 1`; if touches land in the wrong place change
-`TOUCH_SWAP_XY` / `TOUCH_INVERT_X` / `TOUCH_INVERT_Y` in `board_s3.h` (the bring-up panel shows the raw
-touch values and the mapped point).
+`TOUCH_SWAP_XY` / `TOUCH_INVERT_X` / `TOUCH_INVERT_Y` in `board_s3.h`.
 
 ### ESP32-2432S028R "CYD" (envs `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`)
 
@@ -222,7 +126,7 @@ The CYD has too few free pins for RS485 plus two local channels, so it has three
 
 The KS 4x-1 must be the version with the **Modbus option** (terminals 12–17 fitted, `othr/bAud`, `Addr` visible).
 
-### Wiring
+### RS485 wiring (Modbus, beta)
 
 ```
 CYD CN1 (JST 1.25, 4 pin)         RS485 module (3.3 V)          PMA KS 40-1
@@ -252,41 +156,31 @@ set `PIN_RS485_DE` to `-1` in `src/board_cyd.h` / `src/board_s3.h`.
 - CYD alarm sound: a small 8 Ω speaker (0.5–2 W) or a passive piezo on the speaker connector P4 (IO26
   drives the on-board SC8002B amplifier; bridged output, SPK− is not ground); IO35 can't drive a buzzer (input
   only). No E-stop input and no chip temperature on the CYD (no free pin / sensor).
+- CYD touch calibration: the defaults (200…3700 / 240…3800) suit most CYDs. If touches land off: serial
+  `touch cal` (tap 4 crosses), or `POST /api/config {"display":{"touchCal":[minX,maxX,minY,maxY]}}` and
+  restart.
 
-## 3. Can the LCTC M226-TE (from the screenshot) work the same way?
-
-**Electrically and at protocol level: yes.** It is advertised with RS485 Modbus RTU, so the same transceiver and
-the same Modbus master in this firmware can talk to it (it almost certainly uses FC 03 and 06).
-
-**Register-wise: no, and I could not find its register map.** LCTC's TE-M226 product page and catalog don't publish
-a Modbus table. PMA addresses (13294 etc.) will not work on it. To use it:
-
-1. Get the communication manual from the seller/LCTC (address list for PV and SV, scaling, serial format).
-2. Select *Generic Modbus RTU* on *Controller* (web), enter baud/parity/address as set on the controller.
-3. Enter the PV and SV addresses (*Tools → Find the setpoint address* helps once PV/SV reads work) and the divisor (1 or 10). If you only know the front-panel values, use
-   *Tools → Read registers* over 0…60 and look for the PV and SV numbers (e.g. SV 148 appears as 148 or 1480).
-4. Use *ESP32 writes setpoint steps* (it probably has no gradient register) and keep *minimum step* ≥ 1 and
-   *minimum seconds* ≥ 30 to spare its EEPROM.
-
-PMA-specific extras (status word, self-tuning, outputs off, parameter page) won't apply unless you map equivalents.
-
-## 4. Build and flash
+## 2. Build and flash
 
 1. Install VS Code + PlatformIO.
 2. Open this folder, build and upload environment `s3` (default), `cyd-1xlocal-1x485`, `cyd-2xlocal` or `cyd-2xlocal-2x485`
    (`pio run -e s3 -t upload`).
-   Check `upload_port` / `monitor_port` in `platformio.ini`.
+   Check `upload_port` / `monitor_port` in `platformio.ini`. Without PlatformIO: the release page
+   (section 7, Downloads) has a full image per board (`tempctl-duo-<version>-<env>-full.bin`: bootloader,
+   partition table and firmware); write it at address 0x0, e.g.
+   `esptool.py write_flash 0x0 tempctl-duo-1.0.55-s3-full.bin`.
 3. First start: no Wi-Fi configured → the device opens access point `TempCtl-Duo-XXXX`, password `tempctl123`.
-   Either set Wi-Fi on the display (*Setup → System*: scan, pick the network, enter the password, *Save +
-   connect*) or browse to `http://192.168.4.1` and use the *System* page. Afterwards: `http://tempctl-duo.local`
-   or the IP shown on *Setup → System*.
-4. On the web page's *Channels* page set each channel's type; for a Modbus controller check slave
-   address, baud rate and parity match the controller (`ConF/othr`), then check that the channel shows
-   its process value (*Status* page or the reading at the top of the channel's settings).
+   Either set Wi-Fi on the touch screen (*Menu › Network*: network name (scan), password), over serial
+   (`wifi scan`, `wifi connect`), or browse to `http://192.168.4.1` and use *Settings › Wi-Fi*.
+   Afterwards: `http://tempctl-duo.local` or the address shown in *Menu › System* (info).
+4. Set each channel's type (web *Channels* page or touch *Menu › Channels*): local — converter type,
+   then check the reading; Modbus — check that slave address, baud rate and parity match the controller
+   (`ConF/othr`), then that the channel shows its process value (Dashboard, or the reading at the top of
+   the channel's settings). Local channels: run the PID autotune once (section 8).
 
-TempCtl Duo keeps its settings in `/duo/settings.json` and doesn't read TempCtl's: Wi-Fi, controller and
-touch settings start from defaults. Defaults: bottom = Modbus (address 1), top = Off (`cyd-2xlocal`: both
-local); change them on the web page's *Channels* page. After switching from the TempCtl build delete the `.pio` folder once.
+Settings are kept in `/duo/settings.json` (LittleFS). Channel defaults: boards with RS485 (`s3`,
+`cyd-1xlocal-1x485`, `cyd-2xlocal-2x485`): bottom = Modbus (address 1), top = Off; `cyd-2xlocal`: both
+local.
 
 ### Firmware update without USB (OTA)
 
@@ -296,7 +190,7 @@ local); change them on the web page's *Channels* page. After switching from the 
   an image for another board / env is refused, also by the device), uploads it (about a minute), the
   device writes it into its other firmware slot and restarts.
 - **SD card** (S3): copy `firmware.bin` into the card's root folder, then *Settings › Device › Check the SD
-  card › Install from the SD card* (or touch *System › Firmware update*, serial `fw sd` / `fw sd install
+  card › Install from the SD card* (or touch *Menu › System › Firmware update*, serial `fw sd` / `fw sd install
   yes`). The check runs in the SD task, in the background (the page shows "Reading firmware.bin… n s", touch
   a message and then the dialog, serial prints the result when it is there). Images since 1.0.43 carry their
   id string right after the ESP-IDF app description (section `.rodata_custom_desc`, file offset 288), so the
@@ -304,14 +198,15 @@ local); change them on the web page's *Channels* page. After switching from the 
   30 s on the S3: the card shares the SPI bus with the display, which is slow meanwhile). Log:
   `[sd] firmware.bin checked: 1855 kB in 0.2 s`. After the install the file is
   renamed `firmware.done`.
-- **Release page** (section 5c): every push to `main` publishes all firmware images on
+- **Release page** (section 7): every push to `main` publishes all firmware images on
   `https://tempctl-duo.just-r0st.workers.dev`. *Settings › Device › Firmware update › Check for updates*
   (also checked by itself when Settings opens, at most every 10 min) shows whether a newer release exists;
   *Install* lets the browser download this board's image and upload it as above (the device also checks its
   MD5). Works on every board, as long as the computer or phone has internet access. The **S3** can also fetch
-  it itself over HTTPS (Wi-Fi with internet): touch *System › Online update › Check*, serial `fw net` /
+  it itself over HTTPS (Wi-Fi with internet): touch *Menu › System › Online update*, serial `fw net` /
   `fw net install yes` (root certificates: `src/ca_roots.h`, `tools/gen_ca_roots.py`). The CYD leaves this to
-  the web page: an HTTPS session needs about 70 kB of RAM; the S3 takes it from its PSRAM, the CYD has none.
+  the web page: an HTTPS session needs about 70 kB of RAM; the S3 takes it from its PSRAM (mbedTLS allocates
+  there while the download runs), the CYD has none.
 - Not while a program runs or an output is on. The touch screen shows the progress; don't switch off.
 - **Rollback**: the new firmware runs "on probation" and confirms itself after 30 s of normal running (loop
   and control task alive). A crash or reset before that makes the bootloader start the previous firmware
@@ -321,7 +216,7 @@ local); change them on the web page's *Channels* page. After switching from the 
   (2 × 1.875 MB firmware + 192 kB file system, instead of `huge_app.csv`). The first USB upload with this
   table **erases the file system**: back up settings and programs before (web page, *Tools › Backup*),
   restore them afterwards. Wi-Fi settings are in that backup too, so the device starts as an access point
-  until they are restored. The CYD firmware is about 1.77 MB (90 % of a slot); the page and icons are
+  until they are restored. The CYD firmware is about 1.83 MB (93 % of a slot); the page and icons are
   embedded without the web fonts on the CYD (the S3 only gets those), which keeps it in the slot.
 - Serial: `fw` (version, board, slot), `fw sd`, `fw sd install yes`, `fw net`, `fw net install yes` (S3).
 
@@ -329,7 +224,7 @@ local); change them on the web page's *Channels* page. After switching from the 
 
 Settings and all programs in one file in the card's `backup` folder, named by the device's local date and time
 (`backup/2026-10-14_153012.json`; before the clock is set `start<boot>_<n>.json`). Made by hand: web *Tools ›
-Backup › SD card › Back up to SD card*, touch *System › Backup to SD card*, serial `backup sd`. Restore: the web
+Backup › SD card › Back up to SD card*, touch *Menu › System › Backup to SD card*, serial `backup sd`. Restore: the web
 and touch list the backups newest first; pick one, then settings and programs, settings only or programs only
 (with a confirmation). Settings: all are replaced, the stored Wi-Fi passwords stay (they are not in the backup);
 changed network settings are used after a restart. Programs: the slots the backup holds are replaced, the
@@ -337,12 +232,9 @@ other slots stay. Not while a program runs. The web page also downloads and dele
 restore (*Restore settings…* / *Restore programs…*) takes a backup file too. The file:
 `{"fmt":1,"kind":"tempctl-duo-backup","fw","board","host","time","settings":{…},"programs":[{"i":0,"program":{…}},…]}`.
 
-Touch calibration defaults (200…3700 / 240…3800) suit most CYDs. If touches land off, adjust them with
-`POST /api/config {"display":{"touchCal":[minX,maxX,minY,maxY]}}` and restart.
+## 3. Touch UI
 
-## 4a. Touch UI
-
-**`src/tui_*.cpp`** — screens written in LVGL C code (decided with Rost, step 6), one code for both screen
+**`src/tui_*.cpp`** — screens written in LVGL C code, one code for both screen
 sizes: 480×320 (S3) and a compact 320×240 set (CYD, `TUI_SMALL` in `tui.h`): there the main screen has one
 SP button per channel (tap: number pad) instead of the − value + stepper and the SP readout, the run buttons
 and the menu in a bottom bar; the Sequence editor shows one line per phase (tap: the phase menu with its
@@ -369,14 +261,16 @@ an event handler on the touch input resets it on such a release, before the widg
 
 - LVGL draws in 2 buffers of 20 lines (S3; CYD one of 10) in internal DMA RAM (RGB565, bytes swapped for the
   panel just before sending) and sends each part by DMA while it draws the next. S3: the chart is drawn once
-  per change into a picture in PSRAM and only copied to the screen (the CYD draws it directly). Drawing on both
+  per change into a picture in PSRAM (grid and labels by LVGL, the curves by its own anti-aliased line
+  drawing, `tui_chart.cpp`; about 10–15 ms, once a second) and only copied to the screen (the CYD draws it
+  directly). Drawing on both
   CPU cores (LVGL draw threads) was tried and made busy screens slower: LVGL draws in the loop task. S3: solid
   fills and RGB565 copies use Espressif's ESP32-S3 SIMD assembly (src/simd/, Apache-2.0, see its README). A full screen is 300 kB on the
   S3: about 61 ms at 40 MHz, 31 ms at 80 MHz (only changed areas are drawn and sent).
 - **80 MHz** needs short, clean wires (S3: GPIO 10–13, the SPI bus's IO-MUX pins; CYD: 12–15). Wrong pixels or a
   garbled picture: back to 40 MHz on the web page (Settings › Display) or serially (`set display.spiMhz=40`).
-  The setting takes effect at once (touch: Setup › Display › Display SPI clock).
-- **Frame rate meter** (touch Setup › Display › Frame rate meter, serial `perf on`, not saved): per second the
+  The setting takes effect at once (touch: Menu › Display › Display SPI clock).
+- **Frame rate meter** (touch Menu › Display › Frame rate meter, serial `perf on`, not saved): per second the
   redraws (FPS), the LVGL loop's CPU load, the average frame time split into drawing and waiting for the SPI
   transfer, how busy the SPI was and the data rate, e.g. `[perf] 24 FPS  LVGL CPU 61 %, frame 31 ms (draw 19,
   wait 12), SPI 40 MHz busy 52 %, 410 kB/s`. Much "wait": the SPI is the limit (a higher clock helps); much
@@ -421,7 +315,7 @@ is seen at once — no added delay). Every 25th read (~0.75 s) is done anyway: a
 high (3 times) switches back to reading every time (`[touch] INT line stays high while touched ...`);
 `[touch] INT line works` after the first touch it saw.
 
-## 4b. Serial console
+## 4. Serial console
 
 Commands over USB serial, **115200 baud** (S3: the port labelled **"USB"**, the log stays on "UART"; CYD:
 its one USB port, shared with the log). The help is printed at the start (S3: when a terminal opens the
@@ -461,7 +355,7 @@ their ranges and an example per section.
 
 **api mode** (`api on`, spec 7b): one JSON object per line, for the Web Serial page. Requests
 `{"id":7,"m":"GET","p":"/api/live"}` or `{"id":8,"m":"POST","p":"/api/manual","b":{...}}` (`m`: GET,
-POST, PING) go through the same handlers as the HTTP API (section 5), with the same paths, query
+POST, PING) go through the same handlers as the HTTP API (section 10), with the same paths, query
 parameters and JSON. Answers: `{"id":7,"code":200,"body":{...}}`; text (CSV) in pieces
 `{"id":9,"code":200,"type":"text/csv","chunk":"..."}` … `{"id":9,"end":true}`. Also `{"t":"hello",
 "api":1,"fw":…,"board":…,"variant":…,"host":…}` after `api on`, `{"t":"bye","why":…}` at the end, and
@@ -474,7 +368,7 @@ Passwords are never shown (also not a `pw=` typed on the command line: shown as 
 (phases, messages, faults, the end) are printed as they happen; "Action required" as a highlighted block,
 repeated every 30 s. The PC test `test/console_host` types a script of commands and shows the output.
 
-## 5a. Web page
+## 5. Web page
 
 - Look (1.0.40): frosted glass — an accent-tinted gradient backdrop, translucent blurred sidebar and cards,
   pill buttons, channel colour strips, folder tabs on the Channels page, a title bar that fades in while
@@ -560,11 +454,12 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
   - **Log**: the SD run logs (S3, below) and the system log (below).
   - **Settings** (tiles fill the free space; jump buttons Device / Wi-Fi / Safety / Display / Clock in the
     title bar when it is one column): device info, restart, restart of the screen only (display
-    and touch controller set up again, the device keeps running), Wi-Fi (with network scan, show / hide
-    password, optional fixed IP address), touch display (light / dark switch, brightness slider;
-    applied at once, no Save button — the screen follows the slider while it is dragged) (accent colour:
-    a preset or "Custom" with the browser's colour picker; theme, brightness, rotation, screen check),
-    safety (section 7a: manual-mode timeout, E-stop input, alarm sound with a test beep, chip
+    and touch controller set up again, the device keeps running), firmware update (file, SD card, Check
+    for updates, section 2), Wi-Fi (with network scan, show / hide password, optional fixed IP address),
+    touch display (applied at once, no Save button: light / dark, brightness slider — the screen follows
+    it while it is dragged —, accent colour: a preset or "Custom" with the browser's colour picker,
+    rotation, screen check, SPI clock),
+    safety (section 12.1: manual-mode timeout, E-stop input, alarm sound with a test beep, chip
     temperature warning, with the E-stop contact and chip temperature live), the clock (time zone, below).
     **System log** (Log page): everything the device logs, colour-coded — errors (red), warnings (amber), program runs
     (accent), events, technical lines of the serial log ([wifi], [lcd], [mem] …, grey); filters per kind,
@@ -584,16 +479,16 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
     is written or read, and the screen check skips that second.
     **Clock** (Settings page): the time zone for local times (SD run logs): set from the browser the first time the
     page is opened (its zone if the device's list has it, else its current offset as `UTC+hh:mm`),
-    changeable here, on the touch screen (System › Time zone: region, then place) and over serial
+    changeable here, on the touch screen (Menu › System › Time zone: region, then place) and over serial
     (`set time.zone=Europe/Berlin`, `help time` lists the zones). Summer time follows the zone's rules.
   - **Tools**: Modbus tools for a Modbus channel (find the setpoint address, read registers, write one
     register); backup / restore of the settings and of all programs as JSON files; S3: backups on the SD
-    card (back up, list, restore all / settings / programs, download, delete; section 4).
+    card (back up, list, restore all / settings / programs, download, delete; section 2).
 
-## 5b. The page over USB (Web Serial) and the local app
+## 6. The page over USB (Web Serial) and the local app
 
 The same page also works **without Wi-Fi, over the USB cable** (spec 7b): it then talks to the device
-through the serial `api` mode (section 4b) instead of HTTP — same screens, same functions. This needs
+through the serial `api` mode (section 4) instead of HTTP — same screens, same functions. This needs
 **Chrome or Edge** on a computer (the Web Serial API), and the page must come from `localhost` or https,
 so it is not opened from the device but from the **local app**:
 
@@ -628,9 +523,9 @@ so it is not opened from the device but from the **local app**:
   Chrome / Edge. The same connect screen: USB (Web Serial) or Wi-Fi = open the device's own `http://` page (an
   https page may not call the device's http API itself). No device search and no tabs (those need the local
   app). Below them: **Downloads** of the newest release (desktop app for Windows, macOS, Linux; firmware of
-  every board), see 5c; the local app shows the same list and says when a newer app exists.
+  every board), section 7; the local app shows the same list and says when a newer app exists.
 
-## 5c. Releases (GitHub Actions → Cloudflare)
+## 7. Releases (GitHub Actions → Cloudflare)
 
 Every push to `main` (pushes that change only documentation are skipped; *Actions › Release › Run workflow*
 starts one by hand) runs `.github/workflows/release.yml`:
@@ -659,20 +554,158 @@ minutes a month; one release takes about 10–15.
 PlatformIO terminal, Git Bash: `bash tools/release_local.sh` (needs Node.js for `npx wrangler`, the first time
 `npx wrangler login`; Go for the desktop app, else `--no-app`; `--dry` builds `dist/` only).
 
-## 5. Web API
+## 8. Channels, programs and runs
 
-TempCtl Duo: two channels. The flat fields of `/api/status` (TempCtl 1.2) show the
-**bottom channel**; everything else covers both (`ch` = 0 bottom, 1 top).
+### Local channels
 
-**Local channels** (type `local`, step 3): thermocouple converter MAX31855 or MAX6675 (`local.sensor`) read
-every `readMs` (100 … 1000 ms, default 250; MAX6675 from 250 ms), optionally through a median filter over the last
-`medianN` readings (`median`, 3 / 5 / 7 / 9, default on, 3; the PID, the protections and the autotune all see this
-filtered, calibrated value), calibration `true = raw * calGain + calOffset`, PID (`kp`, `ki`, `kd`, or from the autotune (time limit `tuneMaxMin`, default 70 min): relay test around a
-test temperature, Tyreus–Luyben rule) and a time-proportional SSR output (`windowSec`, default 1 s; `maxOut` %). Safety: SSR pins low from
-the first line of `setup()`, SSR off when the task stops refreshing it (1.5 s), and latched faults
-(outputs off, run stopped) for no reading (3 bad reads while on), above `maxTemp` and the runaway checks.
-Modbus channels get the same runaway checks with the controller's output (Ypid); a fault switches the
-controller's outputs off (C.Off). `/api/status` → `channels[].fault`, `POST /api/ack` clears it.
+Type `local`: thermocouple converter MAX31855 or MAX6675 (`local.sensor`) read every `readMs` (100 … 1000 ms,
+default 250; MAX6675 from 250 ms), optionally through a median filter over the last `medianN` readings
+(`median`, 3 / 5 / 7 / 9, default on, 3; the PID, the protections and the autotune all see this filtered,
+calibrated value), calibration `true = raw * calGain + calOffset`, PID (`kp`, `ki`, `kd`, or from the autotune
+(time limit `tuneMaxMin`, default 70 min): relay test around a test temperature, Tyreus–Luyben rule; started
+from the touch Channels screen, the web Channels page or serial `tune`) and a time-proportional SSR output
+(`windowSec`, default 1 s; `maxOut` %). Safety: SSR pins low from the first line of `setup()`, SSR off when
+the task stops refreshing it (1.5 s), and latched faults (outputs off, run stopped) for no reading (3 bad
+reads while on), above `maxTemp` and the runaway checks. Modbus channels get the same runaway checks with the
+controller's output (Ypid); a fault switches the controller's outputs off (C.Off). `/api/status` →
+`channels[].fault`, `POST /api/ack` clears it.
+
+### Programs (spec 9.3)
+
+- **One program drives both channels.** Up to 20 programs, name up to 31 characters, stored as JSON files
+  `/duo/prog0.json` … `/duo/prog19.json` on LittleFS (safe save: temp file + rename). Two types:
+  - **Sequence**: up to 100 phases, one after another. `B` (bottom: target, ramp, hold), `T` (top: target,
+    ramp, hold), `BT` (both: the bottom setpoint jumps to its target or goes Idle = outputs off, the top
+    ramps and holds), `P` (pause: waits for Continue, optional "Action required" and a text up to 40
+    characters). `B` and `BT` phases can **wait for the bottom** to reach its target (± the "bottom reached"
+    band, default 5 °C) before the hold (`B`) or the top ramp (`BT`) starts. A channel keeps its last
+    target while other phases run.
+  - **Timeline**: two independent step lists (up to 100 steps each) started together: target steps
+    (target, ramp, hold), `idle` steps (outputs off for a time) and `pause` steps (the whole run pauses).
+    A channel that finishes earlier keeps its last target until the other one is done.
+- The first ramp of a channel, and the first ramp after Idle, starts at its measured temperature; later
+  ramps start at the previous target. A ramp of 0 is a jump. A channel without phases/steps in the program
+  stays under manual control during the run; the program's channels start with their outputs off until
+  they get a target.
+- **Next phase** (Sequence): ramp → hold (setpoint at the target, a wait is skipped), wait → hold / top ramp,
+  hold → next phase; in a pause it continues. Timelines have no Next phase (only Continue in a pause).
+- **Run edits** (`POST /api/run`): extend or change a hold (not below the time already held; down to now
+  ends it), change later ramp times, change targets (current, later, or the target a channel keeps). Slopes
+  are kept and times adapt; in a Timeline a timing change of one channel shifts the other one through its
+  holds. The edits go to the running copy; `{"cmd":"save"}` stores them into the program.
+- End: each channel of the program applies its own end action (keep setpoint / end setpoint / outputs off).
+  With "keep" or "end setpoint" the channel goes on in manual mode with that setpoint (its manual button
+  is on and switches the outputs off).
+- Resume after a reset: a ramp starts at the measured temperature with its planned speed (from the
+  previous target to its own in its ramp time); Sequence: the phase's ramp takes as long as that needs;
+  Timeline: the hold after the ramp takes up the difference, so later steps keep their run time.
+- **Seconds:** times are stored in seconds. With *Controller ramps (r.SP)* the KS 4x-1 gradient is per
+  minute, so a short ramp only uses the controller gradient if it fits the register; otherwise
+  the ESP32 steps the setpoint itself (section 9).
+
+### Manual setpoint
+
+- Each channel has a manual setpoint and an on / off switch (touch tile, web Dashboard card and sidebar,
+  serial `manual`); not for a channel of the running program. **On:** local: the PID drives the SSR to
+  the setpoint; Modbus: the ESP32 switches the controller outputs on and writes the setpoint (again
+  whenever it changes). **Off:** local: SSR off; Modbus: outputs off (`C.Off` = 1); without an
+  outputs-off register *off* only stops the writes and the controller keeps its last setpoint.
+- Manual mode is always off after a restart; the last value is remembered. Optional timeout: section 12.1.
+
+### Pause, end, faults, reset
+
+- Pause freezes program time (Modbus: the controller ramps too).
+- End / stop action per channel: keep setpoint, set an end setpoint, or outputs off. Modbus: the original
+  `r.SP` is restored afterwards.
+- If a channel of the program doesn't answer for 30 s (link-loss pause, Channels page › All channels) the
+  program pauses. A fault on any channel stops the run.
+- **Run interrupted by a reset** (watchdog, crash, brown-out, power loss …): the board starts with the
+  program's channels off (local: SSR off; Modbus: outputs-off register, if set — without it the controller
+  keeps its last setpoint), and the touch screen and the web page show "Run interrupted by a reset" with
+  the reason, program, phase / steps and run time. Never an automatic resume: **Resume** (Sequence: the
+  interrupted phase from its beginning, ramps from the measured temperatures, channels the phase doesn't
+  start get their kept target at once; Timeline: on at the interrupted run time, ramps from the measured
+  temperatures in the time they had left, holds with their remaining time), **Later** (touch: closes the
+  overlay, the red "Interrupted" badge opens it again) or **Dismiss** (outputs stay off, the controller
+  gradient and front panel are restored). Starting another program also ends the offer. Serial:
+  `resume run` / `dismiss run`. The running copy (with run edits) is in `/duo/run.json`; the position in RTC
+  memory (exact, survives resets) and in `/duo/runpos.json` (every phase / step change and every minute,
+  for a power loss).
+
+## 9. Modbus controllers (beta)
+
+A Modbus channel leaves the PID to the controller; the ESP32 writes its setpoints, reads PV, setpoint
+and output, and can switch its outputs off. Wiring: section 1. Set it up on the web page's *Channels*
+page (controller type PMA KS 4x-1 or Generic Modbus RTU, address, RS485 bus, register map).
+
+### What the PMA interface description tells us
+
+| Item | Value (KS 4x-1) |
+|---|---|
+| Physical | RS485 2-wire or RS422 4-wire, galvanically isolated **option** on the controller |
+| Terminals (RS485) | 17 = DATA A, 15 = DATA B, 13 = RGND |
+| Protocol | Modbus RTU, slave only, address 1…247 |
+| Serial | 2400/4800/9600/19200 baud (menu), 8 data bits, even/odd/none parity. **Factory: 9600, even parity, address 1** |
+| Function codes | 03/04 read (identical), 06 write single, 16 write multiple, 08 diagnostics |
+| Address format | top 3 bits select format: `base` = integer, `base + 8192` = integer with 1 decimal ("1dP"), plus 2dP/3dP/float areas |
+| Special raw values | −31000 sensor fault, −32000 switched off, −32500 undefined, −32768 out of range |
+
+Registers used by default (1dP = value × 10):
+
+| Purpose | Name | Address |
+|---|---|---|
+| Process value | Cntr/Signal `In.1` | 13294 |
+| Effective setpoint | Cntr/Signal `SP.EF` | 13293 |
+| Output % | Cntr/Signal `Ypid` | 13295 |
+| Controller status | `St.Cntr` (bit 0 heating, bits 12–15 mode) | 5100 |
+| Alarm status | `St.Ala` | 250 |
+| Outputs off | LOGI/Signal `C.Off` | 1086 |
+| Front panel lock | LOGI/Signal `L-R` | 1080 |
+| Setpoint (interface) | SEtP/Signal `SP` | 11372 |
+| Setpoint limits | SEtP/PArA `SP.LO` / `SP.Hi` | 11292 / 11293 |
+| Setpoint gradient | SEtP/PArA `r.SP` (per minute, 0.01…9999 or off) | 11295 |
+
+**Why the ESP32 runs the program:** the KS 4x-1's built-in programmer (ProG, addresses 14292…14299) has only
+**4 segments** (`SP.01…SP.04`, `Pt.01…Pt.04`), so longer profiles have to be driven from outside by writing `SP`.
+
+**EEPROM:** the interface description says the `SP` value in RAM is updated immediately, while storing it to
+EEPROM is timed (about one write per half hour). Frequent setpoint writes over Modbus are therefore safe on
+the KS 4x-1. This is controller-specific; cheaper controllers may write every change to EEPROM.
+
+**Setpoint limits:** the controller clamps setpoints to `SP.LO…SP.Hi` (factory 0…900). Before starting, the
+firmware reads both and refuses to start if an enabled step's target lies outside them.
+
+### Setpoint ramp modes
+
+- **Controller ramps (r.SP)**, default: per segment the ESP32 writes the start value, the gradient
+  (|ΔT| / remaining minutes) and the target. About 4 writes per phase; the controller ramps smoothly.
+  Ramps slower than 0.1 °/min (the 1dP resolution) or faster than the register can hold (3000 °/min at 1dP)
+  fall back to host stepping for that segment.
+- **ESP32 writes setpoint steps**: writes a new setpoint when it has moved by *minimum step* (default 0.5)
+  and at least *minimum seconds* (default 5) have passed. Works with any controller.
+
+### Other controllers, e.g. the LCTC M226-TE
+
+**Electrically and at protocol level: yes.** It is advertised with RS485 Modbus RTU, so the same transceiver and
+the same Modbus master in this firmware can talk to it (it almost certainly uses FC 03 and 06).
+
+**Register-wise: no, and I could not find its register map.** LCTC's TE-M226 product page and catalog don't publish
+a Modbus table. PMA addresses (13294 etc.) will not work on it. To use it:
+
+1. Get the communication manual from the seller/LCTC (address list for PV and SV, scaling, serial format).
+2. On the web *Channels* page set the channel's controller type to *Generic Modbus RTU*, enter
+   baud / parity / address as set on the controller.
+3. Enter the PV and SV addresses (*Tools → Find the setpoint address* helps once PV/SV reads work) and the divisor (1 or 10). If you only know the front-panel values, use
+   *Tools → Read registers* over 0…60 and look for the PV and SV numbers (e.g. SV 148 appears as 148 or 1480).
+4. Use *ESP32 writes setpoint steps* (it probably has no gradient register) and keep *minimum step* ≥ 1 and
+   *minimum seconds* ≥ 30 to spare its EEPROM.
+
+PMA-specific extras (status word, self-tuning, outputs off, parameter page) won't apply unless you map equivalents.
+
+## 10. Web API
+
+The flat fields of `/api/status` (kept from TempCtl 1.2) show the **bottom channel**; everything else
+covers both (`ch` = 0 bottom, 1 top). The serial console's api mode (section 4) reaches the same paths.
 
 **Request checks** (no password, but other web pages must not reach the device): every **POST needs the
 header `X-TempCtl: 1`**, otherwise 403. A browser only sends such a header cross-site after a CORS check,
@@ -713,7 +746,7 @@ console's api path has no such checks.
 | POST | `/api/program` | `{"i":0,"program":{…}}` save (validated, setpoint limits checked) or `{"i":0,"delete":true}` |
 | GET | `/api/run` | `run` (as in `/api/status`) + `program`: the running copy with its run edits |
 | POST | `/api/run` | `{"cmd":"start","i":0,"program":{…}}` (start slot 0 with this unsaved content), `{"cmd":"extend","ch":0,"sec":30}`, `{"cmd":"hold","ch":1,"idx":4,"sec":45}`, `{"cmd":"ramp","ch":1,"idx":5,"sec":40}`, `{"cmd":"target","ch":0,"idx":-1,"t":170}` (`idx` = phase / step, -1 = current / kept), `{"cmd":"save"}`, `"next"`, `"continue"`, `"recover"` (resume the run interrupted by a reset), `"dismiss"` (dismiss it); the result shows in `run.msg` |
-| POST | `/api/select` | `{"i":index}` select the program for Main / Chart |
+| POST | `/api/select` | `{"i":index}` select the program for the next run (Dashboard, touch) |
 | POST | `/api/manual` | `{"sp":150}` and/or `{"on":true}`, optional `"ch":1` (top; default 0 = bottom) |
 | POST | `/api/autotune` | local channels: `{"ch":1,"cmd":"start","sp":200}`, `"stop"`, `"accept"` (proposed kp/ki/kd → settings), `"discard"`; progress and result in `/api/status` → `channels[].autotune` |
 | POST | `/api/ack` | `{"ch":0}` acknowledge a channel fault (runaway, sensor, over temperature, heating while off, frozen reading, converter too hot); refused while the cause is still there. The outputs stay off until switched on again |
@@ -736,16 +769,20 @@ console's api path has no such checks.
 
 The web UI has no login. Keep it on a trusted network.
 
-## 6. Project layout
+## 11. Project layout
 
 ```
 platformio.ini            environments s3, cyd-1xlocal-1x485, cyd-2xlocal, cyd-2xlocal-2x485; libraries
 partitions_cyd_ota.csv    CYD flash layout: two firmware slots (OTA) + 192 kB file system
 include/lv_conf.h         LVGL 9.6 configuration (only what differs from LVGL's defaults)
+include/lv_blend_esp32s3.h, src/simd/  S3: Espressif's SIMD fills / copies for LVGL (Apache-2.0, esp-bsp)
+include/lv_assert_custom.h  LVGL assert: backtrace + restart instead of a frozen screen
+src/main.cpp              start-up, loop (S3 loop stack 16 kB, a warning in the log below 2 kB free)
 src/version.h             product name, version, host / AP name
 src/config.h              selects the board header, chart size
 src/board_s3.h, board_cyd.h  pins, display, touch and LED per board
-src/lcd.*                 display: LVGL's ST7796 / ILI9341 driver on ESP-IDF spi_master with DMA
+src/lcd.*                 display: LVGL's ST7796 / ILI9341 driver on ESP-IDF spi_master with DMA, frame rate meter
+src/lv_mem_psram.c        S3: LVGL's memory in PSRAM
 src/touch.h, touch_ft6336.cpp, touch_xpt2046.cpp  touch drivers (own FT6336U driver / XPT2046_Touchscreen)
 src/status_led.*          status LED (WS2812 / single LED)
 src/duo_program.*         programs (Sequence / Timeline): model, JSON, limits, examples (pure C++, unit-tested)
@@ -761,13 +798,18 @@ src/local_ctrl.*          local channels: task reading the thermocouples, PID, S
 src/tc_sensor.*, pid.*, runaway.*, autotune.*  MAX31855/MAX6675 decoding, PID, runaway check, relay autotune
                           (pure C++, unit-tested)
 src/app_state.*           control task: polling both channels, run engine, manual setpoint per channel, chart history
-src/tui*.cpp, tui.h, ui.h touch UI of both boards (480×320 S3, 320×240 CYD), section 4a
+src/raw_hist.h            every PV reading for the web chart (pure C++, unit-tested)
+src/syslog.*              system log (RAM ring) + events saved to flash
+src/crumbs.*              breadcrumbs for watchdog resets and crashes
+src/net.*                 Wi-Fi, access point, mDNS
+src/tui*.cpp, tui.h, ui.h touch UI of both boards (480×320 S3, 320×240 CYD), section 3
 src/fonts/                touch UI fonts (tools/lv_font_gen.py from tools/fonts/*.ttf)
-src/web.*                 HTTP server, JSON API
-src/safety.*              E-stop input, alarm sound, user activity, chip temperature (section 7a)
+src/web.*, host_check.h    HTTP server, JSON API, request checks
+src/safety.*              E-stop input, alarm sound, user activity, chip temperature (section 12.1)
 src/ota.*, ota_image.*    firmware update (web upload, SD card), image check (pure C++, unit-tested), rollback
 src/psram.h               PSRAM_VAR: large static variables in PSRAM on the S3 (plain statics on the CYD)
-src/ota_net.*, release.*  release page: manifest (pure C++, unit-tested), S3 download over HTTPS (ca_roots.h)
+src/ota_net.*, release.*  release page: manifest (pure C++, unit-tested), S3 download over HTTPS
+src/ca_roots.h            root certificates for it (tools/gen_ca_roots.py)
 src/sdlog.*               SD card (S3): run logs, firmware.bin, backup files
 src/backup.*              backup of settings + programs on the SD card (S3), restore
 hardware/s3-schematic/    KiCad schematic of the S3 device (+ PDF / PNG)
@@ -776,24 +818,26 @@ hardware/gen/             generator of both (Python 3: python3 make.py ..)
 web/, tools/web_embed.py  web page + fonts → src/web_assets.h (generated before each build)
 tools/build_site.py       the same page as static files (device URL layout), for the launcher / the hosted page
 wrangler.jsonc            the hosted page: Cloudflare Workers static assets (dist/, built by build_site.py --web)
-tools/release.py          release files + dl/manifest.json for the hosted page (section 5c)
+tools/release.py          release files + dl/manifest.json for the hosted page (section 7)
+tools/release_local.sh    the same release from a PC, without commit / push
 .github/workflows/        release.yml: builds firmware + desktop app, deploys page and files to Cloudflare
-tools/launcher/           local app: Go launcher (build.sh → dist/tempctl-duo-<version>.exe), section 5b
+tools/launcher/           local app: Go launcher (build.sh → dist/tempctl-duo-<version>.exe), section 6
 test/ui_host/             touch UI preview on a PC (screenshots, random-tap test)
 test/console_host/        serial console on a PC (scripted commands -> output)
-src/console.*             serial console (section 4b), LogSerial (log lines that don't break typed input)
+src/console.*             serial console (section 4), LogSerial (log lines that don't break typed input)
 test/host_test.cpp        g++ -std=c++17 -Wall -Wextra -Isrc -I<ArduinoJson>/src test/host_test.cpp src/duo_program.cpp src/run_engine.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp src/ota_image.cpp src/release.cpp && ./a.out
 ```
 
-## 7. Safety
+## 12. Safety
 
 A software programmer must never be the only protection against overheating. Fit an independent
 over-temperature limiter (PMA recommends the TB 40-1 in the KS 4x-1 manual) and use the controller's own
-limit alarms and `SP.Hi` setpoint limit. Set *Highest allowed setpoint* on *Controller* to match `SP.Hi`.
+limit alarms and `SP.Hi` setpoint limit. Set each channel's *Highest setpoint* (Channels page) to match the
+controller's `SP.Hi` (Modbus); a local channel's is at most its max. temperature − 10 °C.
 
-### 7a. Protections in the firmware (spec 9.2a)
+### 12.1 Protections in the firmware (spec 9.2a)
 
-Per channel (Channels page › Protection, touch Channels, `b.local.runaway.*` / `b.modbus.runaway.*` /
+Per channel (Channels page › Protection, touch Menu › Channels, `b.local.runaway.*` / `b.modbus.runaway.*` /
 `b.local.cj*`); a tripped check switches the outputs off (local: also the SSR supply relay, when used), stops a run
 and waits for Acknowledge:
 
@@ -805,7 +849,7 @@ and waits for Acknowledge:
 | Converter too hot (local, MAX31855) | on, 70 °C | cold-junction temperature; outputs can't be switched on above it |
 | Over temperature, sensor fault | always | as before |
 
-General (Settings › Safety, touch System, `safety.*`):
+General (Settings › Safety, touch Menu › System, `safety.*`):
 
 | Setting | Default | |
 |---|---|---|
@@ -818,6 +862,11 @@ General (Settings › Safety, touch System, `safety.*`):
 Start warning: a channel that already is within 10 °C of (or above) its first target when a program
 starts gets a warning message (the run starts anyway).
 
-Status: the program engine, settings, PID / autotune, runaway check and Modbus framing pass host unit
-tests; the firmware (Arduino-ESP32 2.0.17, `espressif32@6.9.0`, LVGL 9.6) runs on the S3 and the CYD
-with local channels. The Modbus channel is beta: it has not been tested with a controller yet.
+## Status (1.0.55)
+
+The program engine, settings, PID / autotune, runaway check, Modbus framing, image check and release
+manifest pass host unit tests (`test/host_test.cpp`); the touch UI and the console have PC hosts
+(`test/ui_host`, `test/console_host`). The firmware (Arduino-ESP32 2.0.17, `espressif32@6.9.0`, LVGL 9.6)
+runs on the S3 and the CYD with local channels. S3 while running: about 145–158 kB of internal RAM free
+(large tables, LVGL's memory, the histories and logs are in PSRAM, `src/psram.h`). The Modbus channel is
+beta: it has not been tested with a controller yet; the macOS / Linux desktop apps are built but untested.

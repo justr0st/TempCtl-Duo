@@ -2323,6 +2323,15 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   Rost's check: `setup done: DRAM free 158332` (before 150416: +8 kB); after a minute `loop 10352` bytes
   free (~6 kB used), after scrolling, web use, SD reads and an online update check `loop 9664` (~6.7 kB used,
   9.4 kB margin); DRAM running 145–148.5 kB free (lowest 130 kB, largest block 123–127 kB), PSRAM 4.3 MB.
+- **1.0.56 README rewrite** (2026-10-21; after 1.0.55 = 440468b; Rost: "edit or rewrite it
+  according to the current development state"): README.md reordered and brought up to date — intro (two
+  boards, channel types local / Modbus beta / off, status), 1 Hardware, 2 Build and flash (+ full image from the
+  release page at 0x0), 3 Touch UI, 4 Serial console, 5 Web page, 6 USB / local app, 7 Releases, 8 Channels,
+  programs and runs (manual setpoint written for both channel types; pause / end / reset), 9 Modbus controllers
+  (beta: PMA interface, ramp modes, other controllers), 10 Web API, 11 Project layout (new files: simd,
+  lv_mem_psram, raw_hist, syslog, crumbs, net, ca_roots, release_local.sh …), 12 Safety, Status. Dropped: the
+  step notes and TempCtl 1.2 remarks, the bring-up panel, "(later)" pins, the setpoint-write counter; touch
+  paths now "Menu › …"; CYD image 1.83 MB (93 %); the touch calibration note moved to the CYD hardware part.
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
