@@ -1060,7 +1060,8 @@ sequences with 'wait for previous phases' barriers"). Chosen after comparing the
   stored per channel type).
 - **Fixed IP (Rost, 2026-10-01)**: optional static address for the station (IP, mask, gateway, DNS) in
   the Wi-Fi settings, web and touch.
-- **Polling interval (Rost, 2026-10-01)**: the polling interval (`bus.pollMs`, 250–10000 ms, default
+- **Polling interval (Rost, 2026-10-01; lower limit 2026-10-21, see 1.0.58)**: the polling interval (`bus.pollMs`,
+  100 or 250–10000 ms by the channels: `pollMinMs`, default
   1000 ms) is a normal device setting, **editable on the touch UI and on the web GUI** (not only through
   `/api/config`). It sets how often the control task polls the channels (Modbus round robin; local
   channels every cycle) and so how often PV / SP / output are refreshed for the displays. Touch: Setup
@@ -2336,6 +2337,48 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   wiring illustrations and simulated screenshots for the Web-UI and touch interface, available from the Cloudflare
   page and the README"; decided: Markdown in the repo, pictures scripted and committed, new wiring diagrams,
   English only): see 9.14.
+- **Channel tiles and program editor, layout "A"** (2026-10-21, for 1.0.58; after 1.0.57 = eea0e5f; Rost picked
+  option A of three mockups, with changes): web page only.
+  - Channel tab content (tabs and "All channels" unchanged): `mkForm(…, {cards:true})` renders one **card per group**
+    (`.ccards` 2 columns, 1 below 900 px; group `c` = edge / title colour, `sub` = subtitle, `full`, `c2` = rows in
+    two columns, `det` = collapsible full-width card) and **one row per setting** (`.crow`: name left, value right;
+    the hint behind an (i) button, `.ci-i`, toggles a `.ch` line; the title attribute shows it on hover). Field extras:
+    `j` joins the previous row, `pre` text before the input, `rl` row label, `rh` row hint, `btn` html after the input,
+    `sent` sentence row (switch, bold name, values as a sentence). updForm hides a row when all its fields are hidden
+    and marks it `chg`. The field model (keys, fill / read / dirty / partial save) is unchanged.
+  - Cards: General (setpoint range lo … hi in one row), Modbus controller, RS485 bus (full, 2 columns), Register
+    addresses (collapsible), Thermocouple (calibration × gain + offset in one row, *Two-point…* opens the helper
+    below), PID control (Kp · Ki · Kd in one row), PID autotune (new group: time limit, test temperature, state,
+    Start / Stop, result), Protection (full width, sentences: runaway as two lines under one switch — the firmware
+    has one enable —, heating while off, reading frozen, converter too hot). New colour `--violet` (autotune).
+  - Program editor: the values that can be changed are darker fields (radius 8, inset shadow; light theme: the
+    light field colour), the step / phase type a dropdown (`select.k`, Idle muted, Pause amber), headers "Step
+    type" (Timeline) / "Phase type" (Sequence); ramp and hold as **m:ss** text fields (`timeIn`, `parseT`: m:ss,
+    h:mm:ss or seconds; invalid input is reset); new read-only **Ends** column (cumulative, waits / pauses
+    not counted); delete × faint until the row is hovered (hover devices); tighter cells so the Sequence table
+    fits 1280 px. Page +2.6 kB gzip; CYD 93.4 %.
+  - Tests: Playwright on the wiki demo device (m:ss / seconds / h:mm:ss / invalid, type change, Timeline hold + Ends,
+    channel save posts only the changed key, runaway off hides its rows, type off leaves General; phone 390 px no
+    sideways scroll), the older mock tests itest / itest3 / itest4 pass. Wiki web pictures regenerated.
+  - Rost (phone): *Save* of "All channels" stayed off after changes — the polling interval was 100 ms (min 250), but
+    the out-of-range mark never showed (the glass input style and the amber "changed" rule were more specific than
+    `.fld.bad input`). Now red with higher specificity (also the label / the card row), and the form's message names
+    the values and their ranges ("Not saved — outside the allowed range: Polling interval: 250 … 10000 ms."); it goes
+    away when they are fixed. All forms (also the auto-saving ones).
+  - **Polling interval lower limit by the channels** (Rost: "limited by the lowest possible value for the current
+    configuration"): `pollMinMs(s)` (settings.cpp) = 100 ms when every channel in use is local with a MAX31855
+    (or off), else 250 ms (a MAX6675: up to 220 ms conversion; Modbus: bus time). `settingsValidate` raises
+    `pollMs` to it without an error (so a channel change never fails because of it). Web: the field's min follows the
+    saved channels (`pollMin()`, getter), a channel save that raised it says "The polling interval was raised to
+    250 ms …"; touch: the number pad's lower limit, Channels save toast "Polling interval raised to 250 ms."; serial:
+    `bus.pollMs` 100 … 10000, a `set` that raises it prints "bus.pollMs=250 (raised: …)". The control task's cycle
+    follows it (100 ms works: 10 ms task delay); the web page still refreshes at 250 ms at most, the chart
+    history stays per second, the raw PV history fills faster (3.6 h at 100 ms). Host test + console host test.
+  - **Connect screen** (hosted page, local app; Rost: the wiki line was too subtle): own card "Manual and wiring"
+    between Wi-Fi and Downloads (one line, quick links Getting started / Wiring S3 / Wiring CYD / Troubleshooting as
+    pills, button "Open the wiki ↗", all to https://tempctl-duo.just-r0st.workers.dev/wiki/…, new tab) instead of the
+    hint line; every card title has a line icon in the accent colour (USB, Wi-Fi waves, book, download arrow; the
+    sidebar's stroke style). Wiki web pictures regenerated (all 44), Desktop-app.md mentions the two cards.
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,

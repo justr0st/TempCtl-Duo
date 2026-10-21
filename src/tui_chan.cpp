@@ -696,6 +696,7 @@ static void onSave(lv_event_t*) {
   s.timeoutMs = E.timeoutMs;
   s.commLossSec = E.commLossSec;
   char msg[160];
+  const uint16_t poll0 = s.pollMs;
   if (!settingsValidate(s, boardLimits(), msg, sizeof(msg))) {
     tToast(msg, true);
     return;
@@ -708,7 +709,13 @@ static void onSave(lv_event_t*) {
   loadE();
   eDirty = false;
   build();
-  tToast("Settings saved.");
+  if (s.pollMs != poll0) {  // (settings.cpp pollMinMs: a MAX6675 or Modbus channel needs at least 250 ms)
+    char t[96];
+    snprintf(t, sizeof(t), "Settings saved. Polling interval raised to %u ms.", (unsigned)s.pollMs);
+    tToast(t);
+  } else {
+    tToast("Settings saved.");
+  }
 }
 
 static void onLeave(int b, int) {

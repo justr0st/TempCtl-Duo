@@ -272,7 +272,11 @@ class H(http.server.BaseHTTPRequestHandler):
             GEN['cfg'] += 1
             return self.send(200, {'ok': True})
         if p == '/demo/config': merge(CFG, body); GEN['cfg'] += 1; return self.send(200, {'ok': True})
-        if p == '/api/config': merge(CFG, body); GEN['cfg'] += 1; return self.send(200, CFG)
+        if p == '/api/config':
+            merge(CFG, body); GEN['cfg'] += 1
+            lo = 100 if all(c['type'] == 'off' or (c['type'] == 'local' and c['local']['sensor'] == 'max31855') for c in CFG['channels']) else 250
+            CFG['bus']['pollMs'] = max(lo, min(10000, CFG['bus']['pollMs']))  # (as settings.cpp pollMinMs)
+            return self.send(200, CFG)
         if p == '/api/select': CFG['selProgram'] = body.get('i', 0); return self.send(200, {'ok': True, 'sel': CFG['selProgram']})
         if p == '/api/time': return self.send(200, {'ok': True, 'time': EPOCH0 + uptime(), 'zone': CFG['time']['zone']})
         self.send(200, {'ok': True})

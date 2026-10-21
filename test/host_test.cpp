@@ -666,6 +666,26 @@ static void testSettingsVariants() {
   s.ch[1].spMax = 350;
   CHECK(settingsValidate(s, S3, msg, sizeof(msg)));
   CHECK(near(s.ch[1].spMax, 290));
+  // polling: 100 ms only when every channel in use is local with a MAX31855, else at least 250 ms
+  settingsDefaults(s, S3);
+  s.ch[0].type = CH_LOCAL;
+  s.ch[1].type = CH_LOCAL;
+  s.pollMs = 100;
+  CHECK(pollMinMs(s) == 100 && settingsValidate(s, S3, msg, sizeof(msg)) && s.pollMs == 100);
+  s.pollMs = 50;
+  CHECK(settingsValidate(s, S3, msg, sizeof(msg)) && s.pollMs == 100);
+  s.ch[1].type = CH_OFF;
+  CHECK(pollMinMs(s) == 100);
+  s.ch[1].type = CH_LOCAL;
+  s.ch[1].loc.sensor = SENSOR_MAX6675;
+  s.pollMs = 100;
+  CHECK(pollMinMs(s) == 250 && settingsValidate(s, S3, msg, sizeof(msg)) && s.pollMs == 250 && msg[0] == 0);
+  s.ch[1].loc.sensor = SENSOR_MAX31855;
+  s.ch[0].type = CH_MODBUS;
+  s.pollMs = 120;
+  CHECK(settingsValidate(s, S3, msg, sizeof(msg)) && s.pollMs == 250);
+  s.pollMs = 400;
+  CHECK(settingsValidate(s, S3, msg, sizeof(msg)) && s.pollMs == 400);
   // ranges
   s.pollMs = 5;
   s.baud = 1234;

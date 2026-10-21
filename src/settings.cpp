@@ -196,6 +196,14 @@ static bool validHostname(const char* h) {
   return true;
 }
 
+uint16_t pollMinMs(const Settings& s) {
+  for (int i = 0; i < NUM_CHANNELS; ++i) {
+    const ChannelSettings& c = s.ch[i];
+    if (c.type == CH_MODBUS || (c.type == CH_LOCAL && c.loc.sensor != SENSOR_MAX31855)) return 250;
+  }
+  return 100;
+}
+
 bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) {
   if (msg && n) msg[0] = 0;
   bool ok = true;
@@ -206,7 +214,7 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
   clampv<uint8_t>(s.parity, 0, 2);
   clampv<uint8_t>(s.stopBits, 1, 2);
   clampv<uint16_t>(s.timeoutMs, 50, 2000);
-  clampv<uint16_t>(s.pollMs, 250, 10000);
+  clampv<uint16_t>(s.pollMs, 100, 10000);  // (the lower limit depends on the channels: below)
   clampv<uint16_t>(s.commLossSec, 0, 3600);
   clampv(s.bottomBand, 0.5f, 50.0f);
   s.ssid[sizeof(s.ssid) - 1] = 0;
@@ -305,6 +313,9 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
     addMsg(msg, n, t);
     ok = false;
   }
+  // polling: not faster than the slowest channel allows (raised without a message; the page and the console
+  // report the adjusted value)
+  if (s.pollMs < pollMinMs(s)) s.pollMs = pollMinMs(s);
   if (s.selProgram >= PROG_MAX) s.selProgram = 0;
   s.tzName[sizeof(s.tzName) - 1] = 0;
   char rule[48];

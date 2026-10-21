@@ -442,7 +442,8 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
   downloads the whole history of the switched-on series, one row per second ("Download live history" in
   the sidebar: all series). A setpoint is recorded only while it is active: in a run, with the manual
   setpoint on, or kept / set by a run's end action (Modbus; local channels: while their output is on).
-- Refresh: the page asks for new values every polling interval (Channels page; 250 ms … 1 s) and draws
+- Refresh: the page asks for new values every polling interval (Channels page; at most every 250 ms, at least
+  every 1 s) and draws
   the newest temperature at the end of the chart; the chart history comes every 2 s.
 - Pages (sidebar; addresses `#/programs`, `#/channels`, `#/log`, `#/settings` (old `#/system` too), `#/tools`, so a page can be
   bookmarked; all on the one page file, the drafts stay while switching pages):

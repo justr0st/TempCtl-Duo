@@ -193,6 +193,10 @@ int main() {
   type("perf\r");
   type("set display.spiMhz=80\r");
   type("set display.spiMhz=33\r");
+  type("set bus.pollMs=100\r");
+  type("set t.local.sensor=max6675\r");  // the polling interval is raised to 250 ms (settings.cpp pollMinMs)
+  type("get bus.pollMs\r");
+  type("set t.local.sensor=max31855 bus.pollMs=1000\r");
   type("get display\r");
   type("fw sd\r");
   type("fw sd\r");  // (still reading)

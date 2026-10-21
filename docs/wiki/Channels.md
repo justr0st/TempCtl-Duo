@@ -14,9 +14,14 @@ them on the web page's *Channels* page or on the touch screen (*Menu › Channel
 | When the program ends or stops | keep the last setpoint, go to an end setpoint, outputs off |
 | Lowest / highest setpoint | programs, manual setpoints and run edits stay inside; a local channel's highest setpoint is at most its max. temperature − 10 °C |
 
-The *All channels* tile holds the **polling interval** (how often PV, setpoint and output are read and the
-page refreshes, 250 ms … 1 s), the **link-loss pause** (Modbus) and the **"bottom reached" band** (for "wait
-for the bottom", default ±5 °C).
+The *All channels* tile holds the **polling interval** (how often PV, setpoint and output are taken over for
+the control, the displays and the logs; default 1 s), the **link-loss pause** (Modbus) and the **"bottom
+reached" band** (for "wait for the bottom", default ±5 °C).
+
+The shortest polling interval depends on the channels: **100 ms** when every channel in use is local with a
+MAX31855, **250 ms** as soon as one is a MAX6675 (it converts in up to 220 ms) or a Modbus controller (bus
+time). Switching a channel to one of those raises a shorter interval to 250 ms by itself (the page, the touch
+screen and the serial console say so). The web page itself refreshes at most every 250 ms.
 
 ## Local channels
 

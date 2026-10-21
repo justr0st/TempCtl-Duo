@@ -820,7 +820,8 @@ static void onTz(lv_event_t*) {
 static void onPollNum(float v, int) {
   {
     Guard g;
-    gSettings.pollMs = (uint16_t)v;
+    const uint16_t lo = pollMinMs(gSettings);
+    gSettings.pollMs = v < lo ? lo : (uint16_t)v;
   }
   saveSettingsAndNotify();
   systemShow();
@@ -836,7 +837,7 @@ static void onBandNum(float v, int) {
 static void onPoll(lv_event_t*) {
   Settings s;
   settingsCopy(s);
-  tNumPad("Polling interval", s.pollMs, 250, 10000, 0, "ms", onPollNum, 0);
+  tNumPad("Polling interval", s.pollMs, pollMinMs(s), 10000, 0, "ms", onPollNum, 0);  // (100 or 250: the channels)
 }
 static void onBand(lv_event_t*) {
   Settings s;

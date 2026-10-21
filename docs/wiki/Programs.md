@@ -2,7 +2,7 @@
 
 One program drives **both channels**. The device stores up to **20 programs** (names up to 31 characters);
 on the first start it creates three examples: *Lead-free BGA*, *Leaded BGA* and *Lead-free BGA (Timeline)*.
-Times are in seconds (shown as m:ss); a ramp of 0 is a jump.
+Times are entered and shown as m:ss (plain seconds are accepted too); a ramp of 0 is a jump.
 
 ## Two program types
 

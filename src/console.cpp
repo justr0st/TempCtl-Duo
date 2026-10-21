@@ -480,7 +480,8 @@ static const char* const H_SETTINGS[] = {
     "  e.g. set bus.baud=19200 bus.parity=none bus.commLossSec=30",
     "",
     "POLLING AND RUNS",
-    "  bus.pollMs=<ms>              how often PV, SP and output are read, 250 ... 10000",
+    "  bus.pollMs=<ms>              how often PV, SP and output are read, 100 ... 10000 (100 only when",
+    "                               every channel in use is local with a MAX31855, else from 250)",
     "  run.bottomBand=<C>           \"wait for bottom\" goes on within +- this, 0.5 ... 50",
     "  e.g. set bus.pollMs=500 run.bottomBand=3",
     "",
@@ -1316,7 +1317,7 @@ static const SKey KEYS[] = {
     {KS_BUS, K_SET, "stopBits", 0, 0, "1|2"},
     {KS_BUS, K_INT, "timeoutMs", 50, 2000, nullptr},
     {KS_BUS, K_INT, "commLossSec", 0, 3600, nullptr},
-    {KS_BUS, K_INT, "pollMs", 250, 10000, nullptr},
+    {KS_BUS, K_INT, "pollMs", 100, 10000, nullptr},  // (raised to 250 by the channels: settingsValidate)
     {KS_RUN, K_NUM, "bottomBand", 0.5f, 50, nullptr},
     {KS_WIFI, K_HOST, "hostname", 1, 23, nullptr},
     {KS_WIFI, K_BOOL, "staticIp", 0, 0, nullptr},
@@ -1602,8 +1603,10 @@ static void cmdSet(const Args& a) {
   if (!nx) return err("out of memory");
   char msg[200] = "";
   bool ok;
+  uint16_t poll0;
   {
     Guard g;
+    poll0 = gSettings.pollMs;
     *nx = gSettings;
     ok = settingsFromJson(patch.as<JsonObjectConst>(), *nx, msg, sizeof(msg)) && settingsValidate(*nx, boardLimits(), msg, sizeof(msg));
     if (ok) gSettings = *nx;
@@ -1623,6 +1626,10 @@ static void cmdSet(const Args& a) {
     if (strcmp(want, got)) say("%s=%s (adjusted: it depends on other settings)", m.name, got);
     else say("%s=%s", m.name, got);
   }
+  // a channel change can raise the polling interval (settings.cpp pollMinMs: MAX6675 or Modbus)
+  bool pollSet = false;
+  for (int i = 0; i < a.nk; ++i) pollSet |= it[i].k->sec == KS_BUS && !strcmp(it[i].k->key, "pollMs");
+  if (!pollSet && nx->pollMs != poll0) say("bus.pollMs=%u (raised: the lowest for a MAX6675 or Modbus channel)", (unsigned)nx->pollMs);
   free(nx);
   say("saved%s%s", wifi ? ", Wi-Fi reconnects" : "", host ? " (the new host name is used after a reboot)" : "");
   if (wifi) netApplyWifi();  // after the report: its log lines come after it

@@ -71,6 +71,9 @@ Under the channel cards: the selected program as tables and as handles on the ch
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/web/editor-seq-dark.webp"><img src="img/web/editor-seq-light.webp" alt="Sequence editor" width="900"></picture>
 
 - **Sequence**: one row per phase (cards on narrow screens). **Timeline**: two tables side by side.
+- The **step / phase type** is a dropdown; every value you can change is a darker field (targets in °C, ramp
+  and hold as m:ss — plain seconds work too). *Ends* shows when each step or phase finishes (without waits and
+  pauses).
 - **On the chart**: drag the squares up / down (target), the diamonds (end of a ramp) and the circles (end of
   a hold) left / right; whole seconds and °C.
 - Changes go to a **draft** in the browser: *Save*, *Discard changes*, *Undo / Redo* (Ctrl+Z / Ctrl+Y). Drafts
@@ -96,10 +99,12 @@ The 20 slots with type, channels, phases / steps and duration: *Open* (in the Da
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/web/channels-local-dark.webp"><img src="img/web/channels-local-light.webp" alt="Channels page, local channel" width="900"></picture>
 
-The *All channels* tile (polling interval, link-loss pause, "bottom reached" band), then one tab per channel:
-general (name, type, end action, setpoint limits), the thermocouple (converter, read interval, median filter,
-calibration with a two-point helper), PID and the PID autotune, and the protections. Changed fields are
-marked; *Save* sends only the changed values and lists any value the device had to adjust.
+The *All channels* tile (polling interval, link-loss pause, "bottom reached" band), then one tab per channel.
+A channel's tab holds one card per section — *General*, *Thermocouple*, *PID control*, *PID autotune* and
+*Protection* (a Modbus channel: *Modbus controller*, *RS485 bus*, *Register addresses*) — with one line per
+setting; **ⓘ** shows the explanation. The protection checks read as sentences ("outputs off, but the PV rises by
+10 °C within 60 s"). Changed values are marked amber; *Save* sends only them and lists any value the device had
+to adjust. *Two-point…* opens the calibration helper.
 See [Channels, PID and autotune](Channels.md).
 
 A Modbus channel (beta) has the controller, the RS485 bus, the register map and the controller's parameters

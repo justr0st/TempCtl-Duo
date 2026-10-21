@@ -28,6 +28,8 @@ when a newer version is on the release page.
   bottom left with *Disconnect USB*.
 - **Wi-Fi**: the app lists the devices it finds on the network (click one), or enter the address
   (`tempctl-duo.local` or the IP). That opens the device's own page.
+- **Manual and wiring**: opens this wiki (Getting started, the wiring of both boards, Troubleshooting).
+- **Downloads** (hosted page and app): the newest desktop app and the firmware for every board.
 
 Close a serial monitor (PlatformIO, Arduino) first: only one program can use the port.
 

@@ -166,6 +166,9 @@ void settingsDefaults(Settings& s, const BoardLimits& lim);
 // message if something had to be changed that the caller asked for explicitly
 // (used to reject a POST); the settings are corrected either way.
 bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n);
+// Lowest polling interval for these channels: 100 ms when every channel in use is local with a MAX31855,
+// else 250 ms (a MAX6675 converts in up to 220 ms; Modbus needs the bus time). settingsValidate raises pollMs.
+uint16_t pollMinMs(const Settings& s);
 
 const char* channelTypeName(uint8_t t);  // "off" / "modbus" / "local"
 
