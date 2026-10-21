@@ -233,7 +233,7 @@ TempCtl 1.2 (current state of the Duo repo):
   `LV_USE_OBJ_NAME`, `LV_USE_TRANSLATION`, printf log, dark default theme without grow, Montserrat
   12 + 14, asserts on with `include/lv_assert_custom.h` (`LV_ASSERT_HANDLER abort();` instead of
   LVGL's silent `while(1)`).
-- `src/main.cpp`: loop task stack 24 kB (`SET_LOOP_TASK_STACK_SIZE`), after setup
+- `src/main.cpp`: loop task stack 16 kB on both boards since 1.0.55 (S3 was 24; `SET_LOOP_TASK_STACK_SIZE`), after setup
   `esp_task_wdt_init(15, true)` + `enableLoopWDT()` (a stuck loop restarts the board with a backtrace;
   the longest intended wait in the loop is a 5 s bus request from the touch UI).
 - Measured on the CYD (1.2 on LVGL 9.6): flash ≈ 1.36 MB (before the web redesign, which
@@ -2315,6 +2315,14 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
       text (A4 glyphs blended), rounded corners / borders (masks) and anti-aliasing stay in LVGL's C code. No wrong
       pixels reported. RAM: DRAM 144.5 kB free (largest 131 kB; −5 kB: the raster's column arrays), PSRAM 4.36 MB.
       The chart raster works: "chart 1 x ~10–15 ms" instead of ~800 ms of CPU per second.
+- **1.0.55** (2026-10-21; after 1.0.54 = 03a215f): **S3 loop task stack 24 → 16 kB** (Rost):
+  his logs showed at most ~6 kB used (`[mem] stack free: loop 18436`); frees 8 kB of internal RAM. It stays
+  in internal RAM (a PSRAM stack is not allowed by this core's sdkconfig, and the loop writes flash, when
+  PSRAM cannot be read). New: an event "Loop task stack nearly used up: n bytes were left at the lowest"
+  (once per start) when the minute's high-water mark is below 2 kB.
+  Rost's check: `setup done: DRAM free 158332` (before 150416: +8 kB); after a minute `loop 10352` bytes
+  free (~6 kB used), after scrolling, web use, SD reads and an online update check `loop 9664` (~6.7 kB used,
+  9.4 kB margin); DRAM running 145–148.5 kB free (lowest 130 kB, largest block 123–127 kB), PSRAM 4.3 MB.
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,

@@ -20,10 +20,12 @@
 #include "console.h"
 
 // setup() and loop() run in the Arduino loop task, whose default stack is 8 kB.
-// LVGL (creating the screen, drawing the keyboards and the chart) needs about
-// 14 kB; an overflow reboots the board. The stack is taken from the heap.
+// An overflow reboots the board. The stack is taken from the internal heap (it
+// cannot be in PSRAM: the loop writes flash). S3: 16 kB (was 24; Rost's log,
+// 1.0.54: at most ~6 kB used, `[mem] stack free: loop 18436`); the minute's
+// [mem] line shows the lowest free space, and below 2 kB an event warns.
 #ifdef BOARD_HAS_PSRAM
-SET_LOOP_TASK_STACK_SIZE(24 * 1024);
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 #else
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);  // CYD: ~7.5 kB used (measured, incl. Wi-Fi scan list); DRAM is short
 #endif
@@ -95,8 +97,13 @@ void loop() {
     if (millis() - memAt > 60000) {
       memAt = millis();
       memLog("running");
-      LogSerial.printf("[mem] stack free: loop %u, control %u bytes\n", (unsigned)uxTaskGetStackHighWaterMark(nullptr),
-                    controlTaskStackFree());
+      const unsigned loopFree = (unsigned)uxTaskGetStackHighWaterMark(nullptr);
+      LogSerial.printf("[mem] stack free: loop %u, control %u bytes\n", loopFree, controlTaskStackFree());
+      static bool stackWarned = false;
+      if (loopFree < 2048 && !stackWarned) {  // (once per start: the event log keeps it)
+        stackWarned = true;
+        logWarn("Loop task stack nearly used up: %u bytes were left at the lowest", loopFree);
+      }
 #ifdef BOARD_HAS_PSRAM
       LogSerial.printf("[mem] PSRAM free %u\n", (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 #endif
