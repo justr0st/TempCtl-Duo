@@ -7,6 +7,8 @@
 #include "board_s3.h"
 #elif defined(BOARD_CYD)
 #include "board_cyd.h"
+#elif defined(BOARD_DEMO)
+#include "board_demo.h"  // the browser demo (demo/, its own include path)
 #else
 #error "No board selected: build with -D BOARD_S3 or -D BOARD_CYD (platformio.ini envs s3, cyd-1xlocal-1x485, cyd-2xlocal, cyd-2xlocal-2x485)"
 #endif
@@ -20,7 +22,7 @@
 
 // firmware download from the release page over HTTPS (spec 9.13): S3 only (a TLS session needs ~70 kB RAM,
 // taken from PSRAM; the CYD has none - its web page installs releases through the browser)
-#if defined(BOARD_HAS_PSRAM)
+#if defined(BOARD_HAS_PSRAM) && !defined(BOARD_DEMO)
 #define HAS_NET_OTA 1
 #else
 #define HAS_NET_OTA 0

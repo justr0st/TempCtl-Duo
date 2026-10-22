@@ -28,6 +28,7 @@ when a newer version is on the release page.
   bottom left with *Disconnect USB*.
 - **Wi-Fi**: the app lists the devices it finds on the network (click one), or enter the address
   (`tempctl-duo.local` or the IP). That opens the device's own page.
+- **Try the demo**: the [browser demo](Demo.md) with a simulated device.
 - **Manual and wiring**: opens this wiki (Getting started, the wiring of both boards, Troubleshooting).
 - **Downloads** (hosted page and app): the newest desktop app and the firmware for every board.
 

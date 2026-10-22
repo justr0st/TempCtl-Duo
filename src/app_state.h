@@ -225,6 +225,8 @@ struct Guard {
 
 void appInit();                  // create locks/queues, load settings and programs
 void controlTaskStart();
+void controlTaskBegin();  // (the task's start and one 10 ms pass: the browser demo runs them itself)
+void controlTaskStep();
 // Restart on request (touch, web): noted in RTC memory (the next boot logs "restart from ..."),
 // local outputs off, then the main loop restarts once the display has finished drawing.
 void appRequestRestart(const char* from);

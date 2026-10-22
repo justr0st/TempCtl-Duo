@@ -4,7 +4,8 @@ them (tools/web_embed.py ASSETS), plus shell.html (the local app's tabs), for th
 (tools/launcher) and the hosted page (Cloudflare Workers static assets, wrangler.jsonc).
   python3 tools/build_site.py [out_dir]          (default: tools/launcher/site)
   python3 tools/build_site.py dist --web         the hosted page: without the launcher's shell.html, with _headers
-                                                 and the wiki (docs/wiki -> /wiki/, tools/wiki_site.py)
+                                                 and the wiki (docs/wiki -> /wiki/, tools/wiki_site.py) and the
+                                                 demo (/demo/: needs demo/out/tempctl-demo.wasm, demo/build.sh)
                                                  (the release files: tools/release.py, .github/workflows/release.yml)"""
 import os, shutil, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -28,6 +29,29 @@ HEADERS = """/*
   Cache-Control: public, max-age=86400
 """
 
+DEMO = os.path.join(ROOT, "demo")
+
+def build_demo(out):
+    """/demo/: the page in demo mode (data-demo) + demo.js + the firmware's code as WebAssembly (demo/README.md)"""
+    wasm = os.path.join(DEMO, "out", "tempctl-demo.wasm")
+    if not os.path.isfile(wasm):
+        print("build_site: no %s - the site has no demo (demo/build.sh builds it)" % os.path.relpath(wasm, ROOT))
+        return False
+    d = os.path.join(out, "demo")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(WEB, "index.html"), encoding="utf-8") as f:
+        page = f.read()
+    for a, b in (('<html lang="en">', '<html lang="en" data-demo>'), ("<title>TempCtl Duo</title>", "<title>TempCtl Duo - Demo</title>"),
+                 ("<script>", '<script src="demo.js"></script>\n<script>')):
+        if page.count(a) != 1:
+            raise SystemExit("build_site: demo: %r not found once in web/index.html" % a)
+        page = page.replace(a, b)
+    with open(os.path.join(d, "index.html"), "w", encoding="utf-8", newline="\n") as f:
+        f.write(page)
+    shutil.copyfile(os.path.join(DEMO, "demo.js"), os.path.join(d, "demo.js"))
+    shutil.copyfile(wasm, os.path.join(d, "tempctl-demo.wasm"))
+    return True
+
 def build(out, web=False):
     if os.path.isdir(out):
         shutil.rmtree(out)
@@ -42,6 +66,7 @@ def build(out, web=False):
             f.write(HEADERS)
         import wiki_site  # the wiki pages (the launcher leaves them out: they would make the app 5 MB larger)
         wiki_site.build(out)
+        build_demo(out)
     else:  # the local app's tab window (not on the device, not hosted)
         shutil.copyfile(os.path.join(WEB, "shell.html"), os.path.join(out, "shell.html"))
     print("build_site: %s" % os.path.relpath(out, ROOT))

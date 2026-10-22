@@ -363,25 +363,30 @@ void localCtrlRelayEnable(bool) {}
 static void relayUpdate() {}
 #endif
 
+// one tick of the local task (every TICK_MS; the browser demo, demo/sim.cpp, calls it itself)
+void localCtrlTick() {
+  const uint32_t now = millis();
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    Local& l = loc[ch];
+    uint32_t every;
+    {
+      LockL g;
+      every = l.cfg.readMs >= 100 && l.cfg.readMs <= 1000 ? l.cfg.readMs : 250;
+    }
+    // due: a reading every `every` ms (the 50 ms tick can be up to one tick late: 5 ms early is due)
+    if (l.lastStepMs && now - l.lastStepMs + 5 < every) continue;
+    const float dt = l.lastStepMs ? (now - l.lastStepMs) / 1000.0f : every / 1000.0f;
+    l.lastStepMs = now;
+    step(ch, dt);
+  }
+  relayUpdate();
+}
+
 static void localTask(void*) {
   TickType_t wake = xTaskGetTickCount();
   for (;;) {
     vTaskDelayUntil(&wake, pdMS_TO_TICKS(TICK_MS));
-    const uint32_t now = millis();
-    for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
-      Local& l = loc[ch];
-      uint32_t every;
-      {
-        LockL g;
-        every = l.cfg.readMs >= 100 && l.cfg.readMs <= 1000 ? l.cfg.readMs : 250;
-      }
-      // due: a reading every `every` ms (the 50 ms tick can be up to one tick late: 5 ms early is due)
-      if (l.lastStepMs && now - l.lastStepMs + 5 < every) continue;
-      const float dt = l.lastStepMs ? (now - l.lastStepMs) / 1000.0f : every / 1000.0f;
-      l.lastStepMs = now;
-      step(ch, dt);
-    }
-    relayUpdate();
+    localCtrlTick();
   }
 }
 

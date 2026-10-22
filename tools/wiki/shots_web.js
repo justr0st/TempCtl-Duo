@@ -53,7 +53,7 @@ const SHOTS = [
       const csv = await (await fetch(BASE + '/demo/run.csv')).text();
       await p.setInputFiles('#rpFile', { name: '2026-10-20_101530_Lead-free_BGA.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
     } },
-  { n: 'connect', s: 'idle', url: '/hosted', hgt: 900 },
+  { n: 'connect', s: 'idle', url: '/hosted', hgt: 1120 },
 ];
 
 (async () => {

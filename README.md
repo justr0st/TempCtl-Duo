@@ -1,7 +1,7 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32 CYD)
 
 Firmware for a two-channel temperature programmer, made for the **bottom and top heater of a BGA rework
-station** (reflow / desolder profiles). Version **1.0.55**. Two boards, built from the same sources:
+station** (reflow / desolder profiles). Version **1.0.59**. Two boards, built from the same sources:
 
 - **ESP32-S3** with a 4" 480×320 capacitive touch screen (env `s3`, the main target)
 - **ESP32-2432S028R "Cheap Yellow Display"** with a 2.8" 320×240 resistive touch screen (envs
@@ -12,6 +12,10 @@ Design notes and decisions: `claude/tempctl-duo-spec.md`.
 **Wiki** — instructions with wiring diagrams and pictures of every screen: [`docs/wiki/Home.md`](docs/wiki/Home.md)
 (on GitHub), also on the release page: <https://tempctl-duo.just-r0st.workers.dev/wiki/> (and linked from the
 device's web page, *Help (wiki)*).
+
+**Demo** — the web page with a simulated rework station (1100 W bottom, 450 W top heater, a GPU board), in any
+browser: <https://tempctl-duo.just-r0st.workers.dev/demo/>. It runs the firmware's own control code, built for
+WebAssembly (`demo/`, wiki page [Browser demo](docs/wiki/Demo.md)).
 
 > **Status:** local thermocouple + SSR channels are the tested path (S3 and CYD). **Modbus RTU** (an RS485
 > controller per channel) is a **beta** feature: built in, but not tested with a real controller yet.
@@ -540,9 +544,10 @@ starts one by hand) runs `.github/workflows/release.yml`:
 1. PlatformIO builds the four envs; per env the update image (`firmware.bin`) and a full image for the
    first USB flash (`esptool merge_bin`: bootloader, partition table, boot_app0, firmware; write it at
    address 0x0).
-2. `tools/launcher/build.sh all`: the desktop app for Windows, macOS (Apple silicon, Intel; zipped) and
+2. `demo/build.sh` with the wasi-sdk: the browser demo (the firmware's control code as WebAssembly, `demo/README.md`).
+   `tools/launcher/build.sh all`: the desktop app for Windows, macOS (Apple silicon, Intel; zipped) and
    Linux (tar.gz).
-3. `tools/build_site.py dist --web` (the page, `_headers`, the wiki under `/wiki/`), then `tools/release.py dist art`: the files go to
+3. `tools/build_site.py dist --web` (the page, `_headers`, the wiki under `/wiki/`, the demo under `/demo/`), then `tools/release.py dist art`: the files go to
    `dist/dl/` with the version in their names, plus `dist/dl/manifest.json` (version, date, commit; per board
    url, size, MD5, SHA-256; the app files). It stops if an image does not carry its env and this version.
 4. `npx wrangler deploy --tag v<version> --message "<first line of the commit>"` (`wrangler.jsonc`, assets
@@ -831,6 +836,8 @@ docs/wiki/                the wiki (Markdown, _Sidebar.md = page list; img/: wir
 tools/wiki_site.py        the wiki as HTML pages for the hosted page (/wiki/, called by build_site.py --web)
 tools/wiki/               the wiki pictures: make_shots.sh (all), wiring.py, touch_png.py, shots_web.js +
                           mock/server.py (demo device), demo_run.cpp (runs from the firmware's run engine)
+demo/                     browser demo: the firmware's control code + simulated hardware (sim.cpp) as WebAssembly
+                          (build.sh), demo.js connects the page to it; README.md
 .github/workflows/        release.yml: builds firmware + desktop app, deploys page and files to Cloudflare
 tools/launcher/           local app: Go launcher (build.sh → dist/tempctl-duo-<version>.exe), section 6
 test/ui_host/             touch UI preview on a PC (screenshots, random-tap test)

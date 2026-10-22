@@ -2379,6 +2379,49 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
     pills, button "Open the wiki ↗", all to https://tempctl-duo.just-r0st.workers.dev/wiki/…, new tab) instead of the
     hint line; every card title has a line icon in the accent colour (USB, Wi-Fi waves, book, download arrow; the
     sidebar's stroke style). Wiki web pictures regenerated (all 44), Desktop-app.md mentions the two cards.
+- **Touch "does not answer" restarts** (2026-10-22, for 1.0.59; after 1.0.58 = 391c840): Rost saw "Screen restarted
+  automatically: touch controller does not answer" twice while the screen drew hard (LVGL 84–95 % CPU, SPI busy). The
+  check read the chip id (0xA3) once a second and restarted after 2 failed seconds — one bad read per second was
+  enough. Likely cause: the FT6336's I2C (400 kHz, module pull-ups) next to the display's SPI wires (40–80 MHz) in the
+  same ribbon; only Wire uses I2C, all in the loop task, so no concurrency. Now (touch_ft6336.cpp): up to 3 reads 2 ms
+  apart per check; a touch read that worked in the last 1.5 s also counts as an answer; every failed read is logged
+  with its reason from Wire (`[touch] chip id check: …`: address / register not acknowledged, bus error, timeout,
+  short read, wrong chip id) and counted (`screen check`: "chip id checks n: x needed a retry, y answered by a touch
+  read, z no answer; failed reads: …"); the restart event names the reason ("touch controller does not answer
+  (timeout)"). If the log shows many retries, next step: I2C at 100 kHz and / or shorter / separated wires.
+- **Browser demo** (2026-10-22, for 1.0.59): Rost: a button on the hosted page for a demo in the browser, a simulated
+  1100 W bottom + 450 W top heater warming a medium GPU board; start heaters and programs, edit programs, channel
+  settings, accent colour, light / dark. Decisions (Rost): the firmware's own code as WebAssembly (not a JS mock);
+  real time with speed-up 2× / 5× / 10×; settings and programs kept in the browser + "Reset demo"; web page only
+  (no touch screen). Done: `demo/` (README.md there): `sim.cpp` = the board (clock, the tasks stepped every 10 ms,
+  pins incl. MAX31855 / MAX6675 frames bit by bit, E-stop, relay, buzzer, LittleFS in memory, 4-body heat model:
+  emitters, board, GPU zone; thermocouples bottom on the board, top on the GPU), `stubs.cpp` (Wi-Fi, display, SD,
+  OTA, LED, console), `shim/` (Arduino, FreeRTOS one-thread stand-ins, ESP-IDF, LittleFS, WebServer),
+  `board_demo.h` (`BOARD_DEMO`, no RS485). Firmware hooks without effect on the boards: `controlTaskBegin()` /
+  `controlTaskStep()` and `localCtrlTick()` (the task loop bodies), `BOARD_DEMO` in config.h and web.cpp
+  (`demo_assets.h` instead of web_assets.h). `demo.js` (WASI layer, stepping, speed, local storage, demo panel:
+  speed, emitter / board / GPU temperatures and power, relay, buzzer with WebAudio, faults E-stop / thermocouple
+  open, Reset) connects `web/index.html` with `data-demo` like a USB port (`serWrite` → `TCDemo.write`, answers to
+  `serLine`). A reload = a power cycle (interrupted run → Resume; the bodies cool for the closed time); a restart
+  from the page restarts the module. First start: PID values from an autotune of the model (B 8.7 / 0.040 / 134,
+  T 5.7 / 0.053 / 44). Build: `demo/build.sh` with wasi-sdk 24 (release.yml downloads it) or system clang +
+  wasi-sysroot + builtins; ~520 kB. `tools/build_site.py --web` puts it under `/demo/`. Connect screen: card
+  "Try the demo"; wiki page Demo.md (+ sidebar, Home, Desktop-app), `tools/wiki/shots_demo.js` (make_shots.sh
+  demo); README. Tested: a whole Lead-free BGA run at 10×, restart / reload / resume, E-stop, thermocouple open,
+  autotune of both channels, phone layout of the panel.
+- **Glass flicker + demo chart at 5× / 10×** (2026-10-23, for 1.0.59): Rost's screen records: a lighter / darker band
+  in the active channel card and the whole sidebar about every 2 s, in step with a strip at the chart's left edge
+  that came and went (the oldest live bin starts up to one bin after the left edge). Chrome then repainted around
+  the chart and redrew the backdrop blur of the glass surfaces slightly differently. Now: the oldest point of each
+  live line / SP area is held to the left edge (modelLive); `will-change:transform` on aside, .panel, .tabbg, the
+  sidebar's children and .chartbox (own layers); setTxt() writes sidebar / footer texts only when they change.
+  Demo: the live chart's head and the head-join distance scale with the speed (devRate(): device s per real s;
+  `near` = max(8 × rate, 2.5 bins)); joinHead() fills points between the SP history and the newest SP (the live
+  view breaks lines at gaps > M.gap); polling every pollMs / rate (min. 250 ms); the Demo button 2× larger,
+  below the open sidebar on phones; the demo panel writes its texts only when open / changed.
+  Then still darker rectangles in the sidebar on polls and when hovering the chart / editor fields (Chrome renders
+  the live blur in tiles): on desktop (> 860 px) the sidebar no longer blurs live but paints a copy of the page
+  background (mesh, fixed) under its glass tint - looks the same (the mesh is smooth); phones keep the blur.
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,

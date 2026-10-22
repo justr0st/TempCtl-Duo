@@ -1,6 +1,7 @@
 ### Start
 - [Home](Home.md)
 - [Getting started](Getting-started.md)
+- [Browser demo](Demo.md)
 
 ### Hardware
 - [ESP32-S3 board](Hardware-S3.md)

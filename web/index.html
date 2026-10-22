@@ -89,7 +89,7 @@ button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
 .seg button{border:0;border-radius:0;min-height:30px;padding:3px 12px}
 .seg button[aria-pressed=true]{background:var(--sunk);box-shadow:inset 0 -2px 0 var(--acc)}
 .chartbox{margin:0 -4px;touch-action:pan-y;user-select:none;-webkit-user-select:none}
-.chartbox{position:relative}
+.chartbox{position:relative;will-change:transform}  /* (a layer of its own: its updates don't repaint the glass around it) */
 #chHover,#rpHov{pointer-events:none}  /* (the hover line and dots never take a click: the handles stay draggable) */
 .ctip{position:absolute;z-index:3;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12.5px;
   box-shadow:0 4px 14px rgba(0,0,0,.25);white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -482,6 +482,17 @@ html:root .top::after{opacity:calc(var(--grain-op) * var(--tf,0));mix-blend-mode
 html:root .top h1{letter-spacing:-.01em}
 html:root .panel{background:var(--glass);border:1px solid var(--glass-border);border-radius:18px;box-shadow:var(--glass-shadow);
   -webkit-backdrop-filter:blur(22px) saturate(1.25);backdrop-filter:blur(22px) saturate(1.25);padding:16px 18px}
+/* each glass surface on a layer of its own: Chrome otherwise repaints only the changed part of a blurred surface on a
+   poll and the rest of it flickers as a lighter / darker band (Rost's screen record, 1.0.58: the active channel card) */
+html:root aside,html:root .panel,html:root .tabbg{will-change:transform}
+/* the sidebar's contents too (its run / channel lines change on every poll): the blurred surface itself stays unchanged */
+html:root aside>*{will-change:transform}
+/* desktop: the sidebar only covers the page background, so it paints a copy of it under its glass tint instead of
+   blurring it live (the mesh is smooth: blurred it looks the same). Chrome re-rendered the live blur in tiles on
+   other repaints (polls, hovering the chart or the editor fields): darker rectangles in the sidebar. On phones it
+   lies over the page: blurred as before. */
+@media (min-width:861px){html:root aside{-webkit-backdrop-filter:none;backdrop-filter:none;will-change:auto;
+  background-color:var(--bg-base);background-image:linear-gradient(var(--glass),var(--glass)),var(--mesh);background-attachment:fixed}}
 html:root .chan{border-top:1px solid var(--glass-border);overflow:visible}
 html:root #card0,html:root [data-cht="0"],html:root #sChs .sch:nth-child(1){--v:var(--vB)}
 html:root #card1,html:root [data-cht="1"],html:root #sChs .sch:nth-child(2){--v:var(--vT)}
@@ -592,6 +603,9 @@ html:root .conn .head img{width:56px;height:56px;filter:drop-shadow(0 0 6px rgba
       <div class="devs" id="cDevs" hidden></div>
       <div class="row"><input type="text" id="cAddr" placeholder="tempctl-duo.local or 192.168.1.50" autocomplete="off" aria-label="Device address"><button id="cOpen">Open</button></div></section>
     <div class="msg" id="cMsg" role="status"></div>
+    <section class="panel wk"><h3><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/><path d="M10.2 7.6l4 2.4-4 2.4z"/></svg>Try the demo</h3>
+      <p>This page with a simulated device: an 1100 W bottom and a 450 W top heater warming a GPU board. Start programs, edit them, change channels, colours and settings — no hardware needed. It runs in your browser and keeps your changes there.</p>
+      <div class="row"><a class="btn" href="https://tempctl-duo.just-r0st.workers.dev/demo/" target="_blank" rel="noopener">Open the demo ↗</a></div></section>
     <section class="panel wk"><h3><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/><path d="M8 7h8M8 11h6"/></svg>Manual and wiring</h3>
       <p>How to build, wire, flash and use the device: wiring diagrams for both boards and pictures of every screen.</p>
       <div class="links"><a href="https://tempctl-duo.just-r0st.workers.dev/wiki/Getting-started.html" target="_blank" rel="noopener">Getting started</a><a href="https://tempctl-duo.just-r0st.workers.dev/wiki/Hardware-S3.html" target="_blank" rel="noopener">Wiring S3</a><a href="https://tempctl-duo.just-r0st.workers.dev/wiki/Hardware-CYD.html" target="_blank" rel="noopener">Wiring CYD</a><a href="https://tempctl-duo.just-r0st.workers.dev/wiki/Troubleshooting.html" target="_blank" rel="noopener">Troubleshooting</a></div>
@@ -842,6 +856,7 @@ async function api(path,body,ms){
    device ends api mode after 15 s without a request); a PING every 5 s covers a hidden tab. */
 const API_OK=[1];  // serial / HTTP API versions this page works with
 let OFF=false;     // the page is not served by a device (set by start())
+const DEMO=document.documentElement.hasAttribute('data-demo');  // the browser demo (/demo/: demo/demo.js runs the firmware's code here)
 const SER={on:false,port:null,reader:null,writer:null,id:0,pend:new Map(),buf:'',wq:Promise.resolve(),lastTx:0,hello:null,user:false,was:false};
 // in a tab of the local app (tools/launcher shell.html): the shell keeps the tabs, the page tells it
 // what it shows; ?tab=<id> keeps each tab's remembered USB port apart
@@ -851,7 +866,7 @@ function toShell(m){ if(FRAMED) try{ parent.postMessage(Object.assign({tcd:1},m)
 window.addEventListener('message',e=>{ if(e.source!==window.parent||!e.data||!e.data.tcd) return;
   if(e.data.close&&SER.on){ LS(K('tcd.auto'),null); serClose(true); } });
 const LS=(k,v)=>{ try{ if(v===undefined) return localStorage.getItem(k); if(v===null) localStorage.removeItem(k); else localStorage.setItem(k,v); }catch(e){ return null; } };
-function serWrite(t){ SER.lastTx=Date.now(); const enc=new TextEncoder().encode(t);
+function serWrite(t){ SER.lastTx=Date.now(); if(DEMO) return TCDemo.write(t); const enc=new TextEncoder().encode(t);
   return SER.wq=SER.wq.then(()=>SER.writer.write(enc)); }
 function serReq(path,body,ms,text){
   return new Promise((res,rej)=>{
@@ -1139,7 +1154,11 @@ function modelPreview(p){
 function modelLive(d){
   const M={kind:'live',now:0,hist:[],lanes:[[],[]],segs:[[],[]],ev:[],end:0,t0:-d.span,at:Date.now(),bin:d.bin,gap:Math.max(3,d.bin*2.5),have:d.have||0,cap:d.cap||d.span,ms:d.ms,raw:d.raw};
   for(const i of CH){ const pv=[],sp=[]; const n=d.pv[i].length, tOf=k=>k===n-1?0:(k-n+1)*d.bin+(d.sh||0);
-    pvPts(d,i,tOf,pv); for(let k=0;k<n;k++){ if(d.sp[i][k]!=null) sp.push([tOf(k),d.sp[i][k]]); } M.hist.push({pv,sp,pvBin:pv}); }
+    pvPts(d,i,tOf,pv); for(let k=0;k<n;k++){ if(d.sp[i][k]!=null) sp.push([tOf(k),d.sp[i][k]]); }
+    // the oldest bin starts up to one bin after the left edge: held to the edge, else a strip at the left comes
+    // and goes with every chart update (and Chrome repaints the glass surfaces around it: flicker)
+    for(const L of [pv,sp]) if(L.length&&L[0][0]>M.t0&&L[0][0]-M.t0<=1.5*d.bin) L.unshift([M.t0,L[0][1]]);
+    M.hist.push({pv,sp,pvBin:pv}); }
   liveMinSel(d);
   applyRaw(M);
   return M;
@@ -1169,11 +1188,13 @@ async function refreshChart(){
 // outputs are on)
 function headSp(c,run){ if(c.sp!=null) return c.sp; if(!c.outOn) return null;
   if(run&&c.inProgram&&!c.idle&&c.runSp!=null) return c.runSp; return c.manual&&c.manual.on&&c.manual.sp!=null?c.manual.sp:null; }
+// device seconds per real second (the demo's speed-up; a real device: 1)
+const devRate=()=>DEMO?TCDemo.speed():1;
 function chartHead(){
   if(!M||!live||drag) return;
   const run=live.run.state==='running'||live.run.state==='paused';
   const v=CH.map(i=>live.ch[i].pv!=null?live.ch[i].pv:null), sp=CH.map(i=>headSp(live.ch[i],run));
-  if(M.kind==='live'){ M.head={t:Math.min(Math.max(5,M.bin),(Date.now()-M.at)/1000),v,sp}; lastChart=0; }
+  if(M.kind==='live'){ const r=devRate(); M.head={t:Math.min(Math.max(5*r,M.bin),(Date.now()-M.at)/1000*r),v,sp}; lastChart=0; }
   else if(M.kind==='run'&&live.run.state==='running'&&live.run.el!=null&&live.run.el>=M.now){ M.now=live.run.el; M.head={t:live.run.el,v,sp}; lastChart=0; }
 }
 function previewDraft(){ const p=live?DRAFT[live.sel]:null; M=p&&progItems(p)?modelPreview(p):null; lastChart=0; }
@@ -1275,6 +1296,10 @@ function thin(pts){ const W=plotW(); if(pts.length<=W*3) return pts;
     if(p[1]==null){ flush(); out.push(p); col=null; continue; }
     if(c!==col){ flush(); col=c; } g.push(p); }
   flush(); return out; }
+// the newest value appended to a line (points in between: the live view breaks a line at gaps longer than M.gap,
+// and in the demo at 5x / 10x the newest value is up to 20 device seconds ahead of the history)
+const joinHead=(pts,t,v)=>{ const L=pts[pts.length-1], out=pts.slice(), st=(M.kind==='live'?M.gap:Infinity)*0.9;
+  for(let x=L[0]+st;x<t;x+=st) out.push([x,L[1]+(v-L[1])*(x-L[0])/(t-L[0])]); out.push([t,v]); return out; };
 const pathOf=pts0=>{ let d='',pen=false,lt=null; const gap=M.kind==='live'?M.gap:Infinity, pts=thin(pts0);
   for(const [t,v] of pts){ if(v==null){pen=false;continue;} if(lt!=null&&t-lt>gap) pen=false; d+=(pen?'L':'M')+X(t).toFixed(1)+','+Y(v).toFixed(1); pen=true; lt=t; } return d; };
 // closed area between a line (same gaps as pathOf) and the bottom of the chart
@@ -1343,13 +1368,14 @@ function renderChart(){
         s+=`<text x="${X(e.t)+6}" y="${Y(v)-11}" style="fill:var(--text);font-size:11.5px;paint-order:stroke;stroke:var(--panel);stroke-width:3px">${fmt(e.t)}</text>`; } }
   }
   const sBack=s; s='';
-  const near=Math.max(8,(M.bin||0)*2.5);  // the newest reading joins the history's last point when that is this close
+  const near=Math.max(8*devRate(),(M.bin||0)*2.5);  // the newest reading joins the history's last point when that is this close
+  // (the history comes every 2 s: in the demo at 5x / 10x that is 10 / 20 device seconds)
   for(const i of CH){
     const shSp=!lv||LVIS.sp[i], shPv=!lv||LVIS.pv[i];
     // SP: half strength with the area under it lightly filled (the temperature line stays on top); the
     // newest setpoint from the last poll extends it, so a ramp moves on every poll, not only with the history
     let sp=M.hist[i].sp; const hs=M.head&&M.head.sp?M.head.sp[i]:null;
-    if(hs!=null&&sp.length){ const L=sp[sp.length-1]; if(M.head.t>L[0]&&M.head.t-L[0]<near) sp=sp.concat([[M.head.t,hs]]); }
+    if(hs!=null&&sp.length){ const L=sp[sp.length-1]; if(M.head.t>L[0]&&M.head.t-L[0]<near) sp=joinHead(sp,M.head.t,hs); }
     if(shSp) s+=`<path d="${areaOf(sp)}" style="fill:${SP[i]};opacity:.2;stroke:none"/>`;
     if(shSp) s+=`<path d="${pathOf(sp)}" style="fill:none;stroke:${SP[i]};stroke-width:1.8;stroke-linejoin:round;opacity:.5"/>`;
     if(shPv) s+=`<path d="${pathOf(M.hist[i].pv)}" style="fill:none;stroke:${PV[i]};stroke-width:2.5;stroke-linejoin:round"/>`;
@@ -1583,11 +1609,13 @@ function updateChans(){
 
 /* ---------- sidebar: run and channels on every page ---------- */
 const SIDE_ST={ramp:'Ramp',hold:'Hold',wait:'Waiting',jump:'Jump',keep:'Keeps',halt:'Paused',pause:'Program pause',done:'Done',off:'Off'};
+// text only when it changed: an unchanged rewrite still repaints (the glass sidebar flickered on every poll)
+const setTxt=(e,t)=>{ if(e.textContent!==t) e.textContent=t; };
 function updSide(){
   if(!live) return; $('sCtl').hidden=false;
   const r=live.run, active=r.state==='running'||r.state==='paused';
-  $('sRunName').textContent=active?(r.name||''):(progs&&progs.programs[live.sel]&&progs.programs[live.sel].used?progs.programs[live.sel].name:'No program');
-  $('sRunSt').textContent=$('badge').textContent+(active||r.state==='finished'||r.state==='stopped'?' · '+$('clock').textContent:'');
+  setTxt($('sRunName'),active?(r.name||''):(progs&&progs.programs[live.sel]&&progs.programs[live.sel].used?progs.programs[live.sel].name:'No program'));
+  setTxt($('sRunSt'),$('badge').textContent+(active||r.state==='finished'||r.state==='stopped'?' · '+$('clock').textContent:''));
   const pl=$('sPlay'), running=r.state==='running'&&!r.progPause;
   pl.classList.toggle('run',running);
   const lab=running?'Pause':r.state==='paused'?'Resume':active&&r.progPause?'Continue':'Start';
@@ -1602,7 +1630,7 @@ function updSide(){
   for(const i of CH){ const c=live.ch[i], inRun=active&&c.inProgram;
     const at=c.autotune?c.autotune.state:'';
     const st=c.fault?'Fault':estopOn()&&c.type!=='off'?'E-stop':!c.ok&&c.type!=='off'?'No link':c.type==='off'?'Off':inRun?(SIDE_ST[c.state]||c.state):at==='running'?'Autotune':at==='done'?'Autotune done':c.manual.on?'Manual':'Idle';
-    const v=$('sv'+i); v.textContent=(c.pv!=null?f1(c.pv)+' °C':'–')+' · '+st; v.classList.toggle('bad',!!c.fault);
+    const v=$('sv'+i); setTxt(v,(c.pv!=null?f1(c.pv)+' °C':'–')+' · '+st); v.classList.toggle('bad',!!c.fault);
     const b=document.querySelector(`[data-sman="${i}"]`); if(!b) continue;
     // the button: manual on / off, or while an autotune exists: stop it / review its result / clear it
     const mode=at==='running'?'stop':at==='done'?'review':at==='failed'?'clear':'man';
@@ -1611,7 +1639,7 @@ function updSide(){
     b.disabled=mode==='man'?inRun||c.type==='off'||!!c.fault:false;
     const t=mode==='stop'?'Stop the autotune':mode==='review'?'Autotune done: review the result':mode==='clear'?'Clear the autotune message ('+(c.autotune.msg||'failed')+')':inRun?'In the program':c.manual.on?'Manual: switch off':'Manual: switch on';
     b.title=t; b.setAttribute('aria-label',`${chName(i)}: ${t}`); }
-  const rl=$('sRelay'); rl.hidden=live.relay==null; if(live.relay!=null) rl.textContent='SSR supply relay: '+(live.relay?'on':'off');
+  const rl=$('sRelay'); rl.hidden=live.relay==null; if(live.relay!=null) setTxt(rl,'SSR supply relay: '+(live.relay?'on':'off'));
 }
 $('sPlay').onclick=()=>{ if(!live) return; const r=live.run;
   if(r.state==='running'&&!r.progPause) $('bPause').click();
@@ -2578,6 +2606,7 @@ function fwProblem(r){ const I=FW.info; if(!I) return 'no answer from the device
 async function fwLoad(force){ if(!force&&FW.info&&Date.now()-FW.at<5000) return; FW.at=Date.now();
   try{ FW.info=await api('/api/ota'); }catch(e){ return; } fwShow(); }
 function fwShow(){ const I=FW.info; if(!I) return; const wifi=!OFF&&!SER.on;
+  if(DEMO){ $('fwHint').textContent=`Running ${I.version} in the browser demo: there is no firmware to update here.`; $('fwUp').hidden=$('fwSd').hidden=$('fwNet').hidden=true; return; }
   $('fwHint').textContent=`Running ${I.version} (board ${I.board}, slot ${I.slot}).`+(I.slotKb?` Drop or choose the firmware.bin of this board (PlatformIO: .pio/build/${I.board}/firmware.bin); the device restarts and checks the new firmware for 30 s — if it does not run, the previous one starts again.`:` ${I.why||'No second firmware slot.'}`)+(wifi?'':' The upload works over Wi-Fi only (open the page from the device’s address).');
   $('fwUp').hidden=!I.slotKb||!wifi; $('fwSd').hidden=!I.sd||!I.slotKb;
   $('fwGo').disabled=!FW.img||!!fwProblem(FW.img)||!I.canStart||FW.phase==='upload';
@@ -2706,7 +2735,7 @@ function updSystem(){
   if(sf.muted) sl.push('alarm silenced');
   const slh=sl.join(' · ')||'No E-stop input on this board.';
   if($('safeLive')&&$('safeLive').innerHTML!==slh) $('safeLive').innerHTML=slh;
-  fwLoad(); fwLive(); fwWatch(); fwNetCheck(true);
+  fwLoad(); fwLive(); fwWatch(); if(!DEMO) fwNetCheck(true);
   const host=CFG.wifi.hostname;
   const kv=[['Firmware','TempCtl Duo '+live.fw],['Board',live.board+(live.variant?' · '+live.variant:'')],['Network',live.net],['Host name',`<a href="http://${esc(host)}.local/">${esc(host)}.local</a>`],['Uptime',upTxt(live.up)]]
     .map(([k,v])=>`<dt>${k}</dt><dd>${k==='Host name'?v:esc(v)}</dd>`).join('');
@@ -2972,11 +3001,11 @@ async function poll(){
   if(polling) return; polling=true; clearTimeout(pollTimer);
   try{
     live=await api('/api/live'+rawLiveQuery()); rawFromLive(live);
-    $('linkDot').className='dot ok'; $('linkTxt').textContent=SER.on?'Connected over USB':'Device connected';
+    $('linkDot').className='dot ok'; setTxt($('linkTxt'),DEMO?'Demo · simulated device':SER.on?'Connected over USB':'Device connected');
     toShell({state:'ok'});
     if(live.time===0&&!clockSent){ clockSent=true; api('/api/time',{t:Math.floor(Date.now()/1000)}).catch(()=>{}); }  // (for the log times)
     if(live.tz===''&&!tzSent){ tzSent=true; api('/api/time',browserTz()).catch(()=>{}); }  // time zone: once, while none is set
-    $('net').textContent=live.net; $('fw').textContent=`v${live.fw} · ${live.board}${live.variant?' '+live.variant:''}`;
+    setTxt($('net'),live.net); setTxt($('fw'),`v${live.fw} · ${live.board}${live.variant?' '+live.variant:''}`);
     applyPalette();
     if(!progs||progsGen!==live.progGen) await loadPrograms(); else fillProgSelect();
     await loadSaved(live.sel); if(running()) await ensureRunProg(true);
@@ -2989,17 +3018,23 @@ async function poll(){
   }catch(e){ $('linkDot').className='dot'; $('linkTxt').textContent='Device not reachable'; toShell({state:'lost'}); }
   finally{ polling=false; if(OFF&&!SER.on) return;
     if(document.hidden){ pollTimer=0; return; }  // a hidden tab does not poll (visibilitychange starts it again; over USB the PING keeps the session)
-    pollTimer=setTimeout(poll,live&&live.pollMs?Math.max(250,Math.min(1000,live.pollMs)):1000); }
+    pollTimer=setTimeout(poll,live&&live.pollMs?Math.max(250,Math.min(1000,live.pollMs/devRate())):1000); }  // (demo at 10x: more often)
 }
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden&&!polling&&!pollTimer&&(!OFF||SER.on)) poll(); });
 let clkMin=-1;  // the sidebar clock: written when the minute changes, not on every frame
 function frame(){ if(lastChart===0&&!drag&&page==='status'){ renderChart(); lastChart=1; }
   const d=new Date(), m=d.getHours()*60+d.getMinutes(); if(m!==clkMin){ clkMin=m; $('clk').textContent=d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }
   requestAnimationFrame(frame); }
+// The demo: the simulated device answers like one on a USB cable (demo/demo.js)
+async function demoStart(){
+  try{ await TCDemo.start(serLine); }
+  catch(e){ connScreen('The demo could not start in this browser: '+(e&&e.message||e),true); $('cVer').textContent='Demo'; return; }
+  SER.on=true; SER.host='tempctl-duo-demo'; $('conn').hidden=true; poll(); }
 // Served by a device: its API answers here. Otherwise (launcher on localhost, GitHub Pages): the
 // connect screen (USB / Wi-Fi).
 async function start(){
   OFF=!document.documentElement.hasAttribute('data-device');  // set in the device's copy (tools/web_embed.py)
+  if(DEMO) return demoStart();
   if(OFF) return offDevice();
   if(FRAMED){ $('bNetOff').hidden=false; $('bNetOff').onclick=()=>toShell({disconnect:true}); }  // a device's page in a tab of the local app
   poll();

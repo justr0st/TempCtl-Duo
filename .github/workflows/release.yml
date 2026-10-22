@@ -1,6 +1,7 @@
 # Release (spec 9.13): every push to main builds the four firmware images and the desktop app and publishes
 # them with the page on Cloudflare (https://tempctl-duo.just-r0st.workers.dev, files under /dl/, list in
-# /dl/manifest.json). The device's web page (all boards) and the S3 itself read the list to offer updates.
+# /dl/manifest.json; the wiki under /wiki/, the browser demo under /demo/). The device's web page (all boards)
+# and the S3 itself read the list to offer updates.
 # Needs two repository secrets (Settings > Secrets and variables > Actions):
 #   CLOUDFLARE_API_TOKEN   a token with the template "Edit Cloudflare Workers"
 #   CLOUDFLARE_ACCOUNT_ID  the account id (Workers & Pages overview, right side)
@@ -72,6 +73,12 @@ jobs:
               $BOOT $B/bootloader.bin 0x8000 $B/partitions.bin 0xe000 $BA 0x10000 $B/firmware.bin
           done
           ls -l art/fw/*
+
+      - name: Browser demo (the firmware's control code as WebAssembly, demo/)
+        run: |
+          curl -sSL -o /tmp/wasi-sdk.tgz https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-24/wasi-sdk-24.0-x86_64-linux.tar.gz
+          tar -xzf /tmp/wasi-sdk.tgz -C /tmp
+          WASI_SDK=/tmp/wasi-sdk-24.0-x86_64-linux bash demo/build.sh
 
       - name: Desktop app
         run: |

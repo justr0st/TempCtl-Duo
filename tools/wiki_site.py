@@ -180,7 +180,7 @@ TPL = """<!doctype html>
 <title>{title} · TempCtl Duo wiki</title><link rel="icon" href="/favicon.svg"><style>{css}</style></head>
 <body><div class="wrap"><aside id="side"><div class="bar"><a class="brand" href="index.html"><img src="/favicon.svg" alt=""><span><b>TempCtl Duo</b><small>Wiki · firmware {ver}</small></span></a>
 <button class="top" onclick="document.getElementById('side').classList.toggle('open')">Pages</button></div>
-<nav>{nav}<div class="ext"><a href="/">Open the app (connect · downloads)</a></div></nav></aside>
+<nav>{nav}<div class="ext"><a href="/">Open the app (connect · downloads)</a><a href="/demo/">Try the demo (simulated device)</a></div></nav></aside>
 <main>{body}<div class="pn">{prev}{next}</div></main></div></body></html>
 """
 

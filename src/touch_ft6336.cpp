@@ -36,12 +36,27 @@ static bool writeReg(uint8_t reg, uint8_t v) {
   return Wire.endTransmission() == 0;
 }
 
+// why the last readRegs failed: Wire.endTransmission's code (1 too long, 2 address not acknowledged, 3 data not
+// acknowledged, 4 other bus error, 5 timeout) or RE_SHORT (fewer bytes than asked for)
+enum { RE_OK = 0, RE_SHORT = 6, RE_ID = 7, RE_N = 8 };
+static uint8_t lastErr = RE_OK;
+static const char* const RE_TEXT[RE_N] = {"ok", "data too long", "address not acknowledged", "register not acknowledged",
+                                          "bus error", "timeout", "short read", "wrong chip id"};
+
 static bool readRegs(uint8_t reg, uint8_t* buf, uint8_t n) {
   Wire.beginTransmission(ADDR);
   Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) return false;
-  if (Wire.requestFrom(ADDR, n) != n) return false;
+  const uint8_t e = Wire.endTransmission(false);
+  if (e != 0) {
+    lastErr = e < RE_SHORT ? e : 4;
+    return false;
+  }
+  if (Wire.requestFrom(ADDR, n) != n) {
+    lastErr = RE_SHORT;
+    return false;
+  }
   for (uint8_t i = 0; i < n; ++i) buf[i] = Wire.read();
+  lastErr = RE_OK;
   return true;
 }
 
@@ -59,6 +74,10 @@ static uint8_t relWhy = 0;
 static int32_t relX = 0, relY = 0, lastX = 0, lastY = 0, noteX = 0, noteY = 0;
 static uint32_t bridgedMin[GAP_READS], bridgedAll[GAP_READS], dropMin[3], dropAll[3];
 static uint32_t reads = 0, readErrs = 0, minuteAt = 0;
+static uint32_t lastGoodRead = 0;  // millis of the last touch read that worked (the controller answered then)
+// chip id checks (screen check, every second): retried at once up to CHECK_TRIES times; counts by outcome
+static constexpr uint8_t CHECK_TRIES = 3;
+static uint32_t checks = 0, checkRetried = 0, checkFailed = 0, checkSaved = 0, checkWhy[RE_N];
 
 static void released(uint8_t why) {
   if (wasPressed) {
@@ -88,11 +107,19 @@ static void gapReport() {
 }
 
 void touchStats(char* info, size_t n) {
-  snprintf(info, n, "%lu reads, %lu I2C read problems; gaps bridged: %lu of 1 read, %lu of 2 reads; longer (release + "
-                    "press within 150 ms): %lu no point, %lu lift-up, %lu I2C; INT line %s",
+  int k = snprintf(info, n, "%lu reads, %lu I2C read problems; gaps bridged: %lu of 1 read, %lu of 2 reads; longer (release + "
+                    "press within 150 ms): %lu no point, %lu lift-up, %lu I2C; INT line %s; chip id checks %lu: %lu needed a "
+                    "retry, %lu answered by a touch read, %lu no answer",
            (unsigned long)reads, (unsigned long)readErrs, (unsigned long)bridgedAll[0], (unsigned long)bridgedAll[1],
            (unsigned long)dropAll[DR_NONE], (unsigned long)dropAll[DR_LIFT], (unsigned long)dropAll[DR_I2C],
-           !TOUCH_USE_INT || TOUCH_PIN_INT < 0 ? "not used" : intOk > 0 ? "used" : intOk == 0 ? "NOT working, polled" : "not seen yet");
+           !TOUCH_USE_INT || TOUCH_PIN_INT < 0 ? "not used" : intOk > 0 ? "used" : intOk == 0 ? "NOT working, polled" : "not seen yet",
+           (unsigned long)checks, (unsigned long)checkRetried, (unsigned long)checkSaved, (unsigned long)checkFailed);
+  bool first = true;  // the failed reads by reason
+  for (int r = 1; r < RE_N && k > 0 && (size_t)k < n; ++r)
+    if (checkWhy[r]) {
+      k += snprintf(info + k, n - k, "%s%s %lu", first ? "; failed reads: " : ", ", RE_TEXT[r], (unsigned long)checkWhy[r]);
+      first = false;
+    }
 }
 
 // no touch point / I2C problem / lift-up: bridged (press kept at its last point) or released
@@ -158,16 +185,53 @@ bool touchReset(const TouchCal& cal) {
   return touchInit(cal);
 }
 
+// The screen check's question (every second): does the controller answer? A single read can fail while the
+// display draws hard (the touch I2C wires run next to the display's SPI wires, up to 80 MHz): up to 3 reads, 2 ms
+// apart; a touch read that worked in the last 1.5 s also counts as an answer. Every failed read is logged with
+// its reason, so a restart can be traced to the bus (not acknowledged, timeout) or the data (wrong id).
 int touchCheck(char* info, size_t n) {
   if (!foundOnce) {
     snprintf(info, n, "FT6336 not found at the start - no check");
     return -1;
   }
-  uint8_t id = 0;
-  const bool answers = readRegs(0xA3, &id, 1) && id == chipId;
-  if (answers) snprintf(info, n, "FT6336 answers, chip id 0x%02X", id);
-  else snprintf(info, n, "FT6336 does NOT answer (read 0x%02X, chip id 0x%02X)", id, chipId);
-  return answers ? 1 : 0;
+  ++checks;
+  uint8_t id = 0, why[CHECK_TRIES] = {}, tries = 0;
+  bool answers = false;
+  while (tries < CHECK_TRIES) {
+    id = 0;
+    const bool rd = readRegs(0xA3, &id, 1);
+    if (rd && id == chipId) {
+      answers = true;
+      break;
+    }
+    why[tries++] = rd ? RE_ID : lastErr;
+    ++checkWhy[why[tries - 1]];
+    delay(2);
+  }
+  if (tries) {
+    char w[96] = "";
+    for (uint8_t i = 0; i < tries; ++i)
+      snprintf(w + strlen(w), sizeof(w) - strlen(w), "%s%s", i ? ", " : "", RE_TEXT[why[i]]);
+    const uint32_t ago = lastGoodRead ? millis() - lastGoodRead : UINT32_MAX;
+    if (answers) {
+      ++checkRetried;
+      LogSerial.printf("[touch] chip id check: read %u of %u worked (before: %s)\n", (unsigned)tries + 1,
+                       (unsigned)CHECK_TRIES, w);
+    } else if (ago < 1500) {
+      ++checkSaved;
+      answers = true;
+      LogSerial.printf("[touch] chip id check: %s - but a touch read worked %lu ms ago, so it answers\n", w,
+                       (unsigned long)ago);
+    } else {
+      ++checkFailed;
+      LogSerial.printf("[touch] chip id check: no answer in %u reads (%s; read 0x%02X, chip id 0x%02X)\n",
+                       (unsigned)CHECK_TRIES, w, id, chipId);
+      snprintf(info, n, "FT6336 does NOT answer: %s", RE_TEXT[why[tries - 1]]);
+      return 0;
+    }
+  }
+  snprintf(info, n, "FT6336 answers, chip id 0x%02X", chipId);
+  return 1;
 }
 
 void touchSetRotation(bool rotate180) { rotated = rotate180; }
@@ -194,6 +258,7 @@ bool touchRead(int32_t* x, int32_t* y) {
     ++readErrs;
     return noTouch(DR_I2C, x, y);
   }
+  lastGoodRead = millis();
   const uint8_t points = b[0] & 0x0F;
   const uint8_t event = b[1] >> 6;
   if (points < 1 || points > 2 || event == 1) return noTouch(event == 1 && points >= 1 && points <= 2 ? DR_LIFT : DR_NONE, x, y);

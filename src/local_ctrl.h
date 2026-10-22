@@ -20,6 +20,7 @@
 void localCtrlEarlyInit();
 // Starts the task and the SSR timer (once)
 void localCtrlBegin();
+void localCtrlTick();  // one pass of the local task (every 50 ms; the browser demo runs it itself)
 // enabled = the channel is of type local (else its SSR stays off and it is not read)
 void localCtrlConfigure(int ch, bool enabled, const LocalChannelSettings& l);
 void localCtrlSetSp(int ch, float sp);

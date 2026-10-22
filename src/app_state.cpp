@@ -2238,7 +2238,10 @@ static void cycle(float dt) {
   statusLedSet(statusLedPick(fault, st == RunState::Paused || eng.progPaused(), netApActive(), active));
 }
 
-static void controlTask(void*) {
+// The control task: controlTaskBegin(), then controlTaskStep() every 10 ms (the browser demo, demo/sim.cpp,
+// calls the two itself)
+static uint32_t lastPoll = 0, lastTick = 0;
+void controlTaskBegin() {
   {
     Guard g;
     s = gSettings;
@@ -2246,27 +2249,36 @@ static void controlTask(void*) {
   applySettings(s, true);
   eng.setEventSink(recordEv, nullptr);
   for (int i = 0; i < NUM_CHANNELS; ++i) man[i].sp = s.ch[i].manualSp;
-  uint32_t lastPoll = 0, lastTick = millis();
+  lastPoll = 0;
+  lastTick = millis();
+}
+
+void controlTaskStep() {
+  Cmd c;
+  while (xQueueReceive(cmdQ, &c, 0) == pdTRUE) {
+    crumb(CR_CONTROL, C_CMD, c.type);
+    handleCmd(c);
+  }
+  if (reqPending) {
+    crumb(CR_CONTROL, C_REQUEST);
+    processRequest(reqSlot);
+    reqPending = false;
+    xSemaphoreGive(reqDone);
+  }
+  const uint32_t now = millis();
+  if (now - lastPoll >= s.pollMs) {
+    lastPoll = now;
+    const float dt = (now - lastTick) / 1000.0f;
+    lastTick = now;
+    crumb(CR_CONTROL, C_POLL);
+    cycle(dt);
+  }
+}
+
+static void controlTask(void*) {
+  controlTaskBegin();
   for (;;) {
-    Cmd c;
-    while (xQueueReceive(cmdQ, &c, 0) == pdTRUE) {
-      crumb(CR_CONTROL, C_CMD, c.type);
-      handleCmd(c);
-    }
-    if (reqPending) {
-      crumb(CR_CONTROL, C_REQUEST);
-      processRequest(reqSlot);
-      reqPending = false;
-      xSemaphoreGive(reqDone);
-    }
-    const uint32_t now = millis();
-    if (now - lastPoll >= s.pollMs) {
-      lastPoll = now;
-      const float dt = (now - lastTick) / 1000.0f;
-      lastTick = now;
-      crumb(CR_CONTROL, C_POLL);
-      cycle(dt);
-    }
+    controlTaskStep();
     crumb(CR_CONTROL, C_WAIT);
     vTaskDelay(pdMS_TO_TICKS(10));
   }

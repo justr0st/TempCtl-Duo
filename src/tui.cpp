@@ -379,8 +379,8 @@ static void screenWatch() {
     touchStuck = false;
     return;
   }
-  char info[112];
-  const int t = touchCheck(info, sizeof(info));
+  char info[112], tInfo[96];
+  const int t = touchCheck(tInfo, sizeof(tInfo));
   touchFails = t == 0 ? touchFails + 1 : 0;
   const int d = lcdCheck(info, sizeof(info));
   lcdFails = d == 0 ? lcdFails + 1 : 0;
@@ -393,7 +393,9 @@ static void screenWatch() {
     snprintf(why, sizeof(why), "display lost its setup (%s)", info);
     autoRestart(touchFails >= 2 || touchStuck ? 3 : 2, why);
   } else if (touchFails >= 2) {
-    autoRestart(1, "touch controller does not answer");
+    char why[140];  // (the reason of the last failed read: the touch log lines before it have each try)
+    snprintf(why, sizeof(why), "touch controller does not answer (%s)", strncmp(tInfo, "FT6336 does NOT answer: ", 24) ? tInfo : tInfo + 24);
+    autoRestart(1, why);
   } else if (touchStuck) {
     touchStuck = false;
     if (stuckRestarts < 3) {  // (a press the hardware keeps reporting: 3 tries, then left as it is)
