@@ -19,7 +19,10 @@
 :root[data-theme="dark"]{--violet:#B89CF4;--bg:#11161A;--panel:#192024;--sunk:#141A1E;--line:#2B353B;--text:#E3E9EB;--muted:#8D9BA2;--acc:#9FD9D5;--acc-ink:#0F2A28;--amber:#F3C335;--amber-bg:#3A3217;--danger:#F2867E;--ok:#7BC47F;--manual:#F0A050;color-scheme:dark}
 *,*::before,*::after{box-sizing:border-box}
 [hidden]{display:none!important}
-html{scroll-padding-top:60px}
+/* the page's scrollbar space is always kept (a page or tab that gets shorter does not widen the layout: no text
+   reflow); its track has the backdrop's base colour, so the kept space and a scrollbar look the same */
+html{scroll-padding-top:60px;scrollbar-gutter:stable;scrollbar-color:color-mix(in srgb,var(--muted) 55%,transparent) var(--bg-base,var(--bg))}
+body{scrollbar-color:auto}
 body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.45;font-variant-numeric:tabular-nums}
 a{color:var(--acc)}
 h1{font-family:var(--cond);font-weight:600;font-size:24px;line-height:1.1;margin:0}
@@ -49,6 +52,7 @@ nav small{color:var(--muted);font-weight:400;margin-left:auto;font-size:12px}
 .sch .n{font-weight:600;color:var(--c);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sch .v{grid-column:2;color:var(--muted);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sch .v.bad{color:var(--danger)}
+.sch.mon{min-height:32px}  /* (no button: as high as the channel rows) */
 .sch .ib{grid-row:1/3;grid-column:3;width:32px;height:32px;min-height:32px}
 .sch .ib svg{fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round}
 .sch .ib.on{background:var(--c);border-color:var(--c);color:var(--panel)}
@@ -112,6 +116,7 @@ button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
 .legend .lt{font:inherit;font-size:13px;color:var(--text);min-height:30px;padding:3px 10px;gap:6px;border-radius:999px}
 .legend .lt[aria-pressed=false]{color:var(--muted);background:transparent;border-style:dashed}.legend .lt[aria-pressed=false] .sw{opacity:.25}
 .legend .lh{color:var(--muted)}
+.legend .lv{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
 .msg{margin-top:8px;font-size:14px;color:var(--muted);min-height:1.4em}.msg.bad{color:var(--danger)}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
 .chan{border-top:4px solid var(--c);position:relative}
@@ -278,6 +283,7 @@ html:root .fld.bad>span:first-child,html:root .crow.bad .cl{color:var(--danger)}
 .tsw .mo{display:none}.tsw input:checked+.tr .mo{display:block}.tsw input:checked+.tr .su{display:none}
 .tsw input:focus-visible+.tr{outline:2px solid var(--acc);outline-offset:2px}
 .tswl{justify-content:space-between}
+.atr{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.atr span{font-size:13px;color:var(--muted)}
 /* theme change: colours fade */
 .theming,.theming *,.theming *::before,.theming *::after{transition:background-color .4s ease,color .4s ease,border-color .4s ease,fill .4s ease,stroke .4s ease,box-shadow .4s ease!important}
 .theming .tsw .kn{transition:transform .3s ease,background-color .4s ease,color .4s ease!important}
@@ -503,6 +509,16 @@ html:root .chan{transition:background-color .25s,border-color .25s,box-shadow .2
 html:root .chan.on{border:4px solid var(--v,var(--c));padding:13px 15px;background:linear-gradient(color-mix(in srgb,var(--v,var(--c)) 20%,transparent),color-mix(in srgb,var(--v,var(--c)) 20%,transparent)),var(--glass);
   box-shadow:var(--glass-shadow),0 0 22px -6px color-mix(in srgb,var(--v,var(--c)) 70%,transparent)}
 html:root .chan.on::before{display:none}
+/* desktop: the panels and channel cards lie on the page background only, so (as the sidebar) they paint a copy of it
+   under their glass tint instead of blurring it live; Chrome redrew the live blur in parts (Rost: a less transparent
+   band at the bottom of an active channel card). Phones keep the blur. */
+@media (min-width:861px){
+  html:root .panel{-webkit-backdrop-filter:none;backdrop-filter:none;will-change:auto;background-color:var(--bg-base);
+    background-image:linear-gradient(var(--glass),var(--glass)),var(--mesh);background-attachment:fixed}
+  html:root .chan.on{background-image:linear-gradient(color-mix(in srgb,var(--v,var(--c)) 20%,transparent),color-mix(in srgb,var(--v,var(--c)) 20%,transparent)),
+    linear-gradient(var(--glass),var(--glass)),var(--mesh);background-color:var(--bg-base);background-attachment:fixed}  /* (its own
+    background shorthand above would make the copy scroll: the whole page background squeezed into the card) */
+}
 
 /* controls: pills */
 html:root button,html:root .btn{border-radius:999px;background:var(--pill);border-color:var(--pill-border);padding:6px 15px;transition:background .15s,box-shadow .15s,transform .1s}
@@ -555,6 +571,12 @@ html:root{--tab-off:color-mix(in srgb,#15303F 9%,transparent)}
 html:root[data-theme="dark"]{--tab-off:color-mix(in srgb,#FFFFFF 9%,transparent)}
 html:root .ctabs .bg{position:absolute;inset:0;z-index:-2;pointer-events:none;background:var(--tab-off);
   -webkit-backdrop-filter:blur(22px) saturate(1.25);backdrop-filter:blur(22px) saturate(1.25)}
+@media (min-width:861px){  /* (as the panels above) */
+  html:root .tabbg{-webkit-backdrop-filter:none;backdrop-filter:none;will-change:auto;background-color:var(--bg-base);
+    background-image:linear-gradient(var(--glass),var(--glass)),var(--mesh);background-attachment:fixed}
+  html:root .ctabs .bg{-webkit-backdrop-filter:none;backdrop-filter:none;background-color:var(--bg-base);
+    background-image:linear-gradient(var(--tab-off),var(--tab-off)),var(--mesh);background-attachment:fixed}
+}
 html:root .ctabs button[aria-pressed=true] .bg{display:none}
 html:root .ctabs svg.tabsh{position:absolute;inset:0;width:100%;height:100%;z-index:-1;overflow:visible;pointer-events:none}
 html:root .ctabs svg.tabsh .ol{fill:none;stroke:var(--glass-border);stroke-width:1}
@@ -724,7 +746,8 @@ html:root .conn .head img{width:56px;height:56px;filter:drop-shadow(0 0 6px rgba
 <section class="panel seps" id="cCommon" data-form="common"></section>
 <div class="ctabs" role="tablist" aria-label="Channel" id="chTabs"></div>
 <div id="cChan"><div data-chp="0"><section class="panel ctab-panel seps" id="cf0" role="tabpanel"></section><div class="cards mt" id="cx0"></div></div>
-<div data-chp="1" hidden><section class="panel ctab-panel seps" id="cf1" role="tabpanel"></section><div class="cards mt" id="cx1"></div></div></div>
+<div data-chp="1" hidden><section class="panel ctab-panel seps" id="cf1" role="tabpanel"></section><div class="cards mt" id="cx1"></div></div>
+<div data-chp="2" hidden><section class="panel ctab-panel seps" id="cf2" role="tabpanel"></section></div></div>
 </div>
 
 <div class="pg" id="pg-settings" hidden>
@@ -836,7 +859,10 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmt=t=>{t=Math.max(0,Math.round(t));const h=Math.floor(t/3600),m=Math.floor(t/60)%60,s=String(t%60).padStart(2,'0');return h?`${h}:${String(m).padStart(2,'0')}:${s}`:`${m}:${s}`;};
 const f1=v=>v==null?'–':(+v).toFixed(1);
-const CH=[0,1], KEY=['B','T'], PV=['var(--pvB)','var(--pvT)'], SP=['var(--spB)','var(--spT)'];
+const CH=[0,1], KEY=['B','T'], PV=['var(--pvB)','var(--pvT)','var(--acc)'], SP=['var(--spB)','var(--spT)'];
+// the monitor channel (a third thermocouple, S3: shown and logged only): index MON of the chart's PV rows and the
+// raw readings; its colour is the accent (PV[MON])
+const MON=2, monLive=()=>!!(live&&live.mon);
 let tabsHtml=''; const TAB_R=12, TAB_TR=12;  // channel tabs (shapeTabs)
 const EV={PHASE:1,STEP:2,RAMP_END:3,HOLD_END:4,PAUSE:5,CONT:6,END:7,STOP:8};
 let live=null, progs=null, progsGen=-1, runProg=null, runProgAt=0, chartAt=0, view='live', showLast=true, edKey='';  // view: the live chart first (Rost); a run switches to its program view
@@ -1046,14 +1072,17 @@ $('menu').onclick=()=>{const o=$('side').classList.toggle('open');$('menu').setA
 document.addEventListener('click',e=>{ if($('side').classList.contains('open')&&!e.target.closest('#side,#menu')){$('side').classList.remove('open');$('menu').setAttribute('aria-expanded','false');} });
 
 /* ---------- programs: stored (SAVED), drafts (DRAFT), undo / redo (spec 9.3.3) ---------- */
-function chName(i){ return live&&live.ch[i]?live.ch[i].name:(i?'Top':'Bottom'); }
+function chName(i){ if(i===MON) return live&&live.mon?live.mon.name:CFG&&CFG.monitor?CFG.monitor.name:'Monitor';
+  return live&&live.ch[i]?live.ch[i].name:(i?'Top':'Bottom'); }
 const MAXN=100, MAXSEC=599940, J=o=>JSON.stringify(o), clone=o=>o==null?null:JSON.parse(J(o));
-// editable form: every phase has b {t,r,h,idle} and t {t,r,h}; Timeline steps {kind,t,r,h,msg,text}
+// editable form: every phase has b {t,r,h,idle} and t {t,r,h,idle}; Timeline steps {kind,t,r,h,msg,text}
 function normProg(d){ if(!d) return null;
   if(d.type==='tl'){ const st=x=>x.pause?{kind:'pause',t:0,r:0,h:0,msg:!!x.msg,text:x.text||''}:x.idle?{kind:'idle',t:0,r:0,h:x.h||0,msg:false,text:''}:{kind:'step',t:x.t,r:x.r||0,h:x.h||0,msg:false,text:''};
     return {name:d.name||'',type:'tl',B:(d.B||[]).map(st),T:(d.T||[]).map(st)}; }
   return {name:d.name||'',type:'seq',phases:(d.phases||[]).map(x=>({kind:x.kind,wait:!!x.wait,msg:!!x.msg,text:x.text||'',
-    b:{t:x.b&&x.b.t!=null?x.b.t:150,r:x.b&&x.b.r||0,h:x.b&&x.b.h||0,idle:!!(x.b&&x.b.idle)},t:{t:x.t&&x.t.t!=null?x.t.t:180,r:x.t&&x.t.r||0,h:x.t&&x.t.h||0}}))}; }
+    b:{t:x.b&&x.b.t!=null?x.b.t:150,r:x.b&&x.b.r||0,h:x.b&&x.b.h||0,idle:!!(x.b&&x.b.idle)},t:{t:x.t&&x.t.t!=null?x.t.t:180,r:x.t&&x.t.r||0,h:x.t&&x.t.h||0,idle:!!(x.t&&x.t.idle)}}))}; }
+// the bottom drives the phase (ramp, wait, hold): a Bottom phase, or Both with the top Idle (1.0.60)
+const bDrv=x=>x.kind==='B'||(x.kind==='BT'&&!!x.t.idle);
 // device JSON (spec 9.3.5)
 function denormProg(p){ if(!p) return null;
   if(p.type==='tl'){ const st=x=>x.kind==='pause'?Object.assign({pause:true},x.msg?{msg:true}:{},x.text?{text:x.text}:{}):x.kind==='idle'?{idle:true,h:x.h}:{t:x.t,r:x.r,h:x.h};
@@ -1061,9 +1090,9 @@ function denormProg(p){ if(!p) return null;
   return {fmt:1,name:p.name,type:'seq',phases:p.phases.map(x=>{ const o={kind:x.kind};
     if(x.kind==='P'){ if(x.msg) o.msg=true; if(x.text) o.text=x.text; return o; }
     if((x.kind==='B'||(x.kind==='BT'&&!x.b.idle))&&x.wait) o.wait=true;
-    if(x.kind==='B') o.b={t:x.b.t,r:x.b.r,h:x.b.h};
-    if(x.kind==='BT') o.b=x.b.idle?{idle:true}:{t:x.b.t};
-    if(x.kind!=='B') o.t={t:x.t.t,r:x.t.r,h:x.t.h};
+    if(bDrv(x)) o.b={t:x.b.t,r:x.b.r,h:x.b.h};
+    else if(x.kind==='BT') o.b=x.b.idle?{idle:true}:{t:x.b.t};
+    if(x.kind==='BT'&&x.t.idle) o.t={idle:true}; else if(x.kind!=='B') o.t={t:x.t.t,r:x.t.r,h:x.t.h};
     return o; })}; }
 function progUses(p,i){ if(!p) return false; if(p.type==='tl') return (p[KEY[i]]||[]).length>0; return (p.phases||[]).some(x=>x.kind==='BT'||x.kind===KEY[i]); }
 function progItems(p){ return !p?0:p.type==='tl'?p.B.length+p.T.length:p.phases.length; }
@@ -1092,8 +1121,8 @@ function planProgram(p,pv){
   if(p.type==='seq'){
     p.phases.forEach((x,k)=>{ ev.push({t,type:EV.PHASE,ch:-1,idx:k});
       if(x.kind==='P'){ ev.push({t,type:EV.PAUSE,ch:-1,idx:k}); ev.push({t,type:EV.CONT,ch:-1,idx:k}); return; }
-      const c=x.kind==='B'?0:1, sg=x.kind==='B'?x.b:x.t;
-      if(x.kind==='BT'){ if(x.b.idle){ g[0].idle=true; g[0].src=-1; } else { g[0].idle=false; g[0].v=x.b.t; g[0].src=k; } }
+      const c=bDrv(x)?0:1, sg=c===0?x.b:x.t;
+      if(x.kind==='BT'){ if(x.t.idle){ g[1].idle=true; g[1].src=-1; } else if(x.b.idle){ g[0].idle=true; g[0].src=-1; } else { g[0].idle=false; g[0].v=x.b.t; g[0].src=k; } }
       const o=1-c, t0=t, t1=ramp(c,t,sg.t,sg.r,k), t2=t1+(sg.h||0);
       ev.push({t:t1,type:EV.RAMP_END,ch:c,idx:k}); flat(c,t1,t2); flat(o,t0,t2); t=t2; ev.push({t,type:EV.HOLD_END,ch:c,idx:k});
     });
@@ -1116,7 +1145,7 @@ function laneCode(M,i,s){
   if(s.fl&1) return 'o'; if(s.fl&2) return 'r';
   const p=M.prog, tm=(s.t0+s.t1)/2;
   if(p&&p.type==='seq'){ let k=-1; for(const e of M.ev) if(e.type===EV.PHASE&&e.t<=tm+1e-6) k=e.idx; const x=p.phases&&p.phases[k]; if(!x) return 'k';
-    const tc=x.kind==='B'?0:1; if(x.kind==='BT'&&i===0&&s.src===k) return 'j'; return tc===i&&s.src===k?'h':'k'; }
+    const tc=bDrv(x)?0:1; if(x.kind==='BT'&&!x.t.idle&&i===0&&s.src===k) return 'j'; return tc===i&&s.src===k?'h':'k'; }
   let lastEnd=-1; for(const e of M.ev) if(e.type===EV.HOLD_END&&e.ch===i) lastEnd=Math.max(lastEnd,e.t); return tm>lastEnd&&lastEnd>=0?'d':'h';
 }
 // PV points of one channel: each chart slot has its last reading (pv) and how far its lowest / highest
@@ -1136,6 +1165,7 @@ function modelFromRun(d){
     for(let k=0;k<d.pv[i].length;k++){ const t=k*d.bin; if(d.sp[i][k]!=null) sp.push([t,d.sp[i][k]]);
       const c=st[k]||' '; if(c!==' '){ lastT=Math.max(lastT,(k+1)*d.bin); const t1=Math.min((k+1)*d.bin,d.el); if(ln.length&&ln[ln.length-1].c===c) ln[ln.length-1].t1=t1; else ln.push({t0:t,t1,c}); } }
     M.hist.push({pv,sp,pvBin:pv}); M.lanes.push(ln); }
+  if(d.pv.length>MON){ const pv=pvPts(d,MON,k=>k*d.bin,[]); M.hist.push({pv,sp:[],pvBin:pv}); M.mon=d.mon||chName(MON); }
   for(const e of d.ev) M.ev.push({t:e[0],type:e[1],ch:e[2],idx:e[3],past:true});
   if(d.mode==='run'){ for(const i of CH) for(const s of d.fc.seg[i]) M.segs[i].push({t0:s[0]+d.el,t1:s[1]+d.el,v0:s[2],v1:s[3],src:s[4],fl:s[5]});
     for(const e of d.fc.ev) if(e[1]!==EV.PHASE||e[0]>0.01) M.ev.push({t:e[0]+d.el,type:e[1],ch:e[2],idx:e[3],past:false});
@@ -1159,6 +1189,9 @@ function modelLive(d){
     // and goes with every chart update (and Chrome repaints the glass surfaces around it: flicker)
     for(const L of [pv,sp]) if(L.length&&L[0][0]>M.t0&&L[0][0]-M.t0<=1.5*d.bin) L.unshift([M.t0,L[0][1]]);
     M.hist.push({pv,sp,pvBin:pv}); }
+  if(d.pv.length>MON){ const n=d.pv[MON].length, tOf=k=>k===n-1?0:(k-n+1)*d.bin+(d.sh||0), pv=pvPts(d,MON,tOf,[]);
+    if(pv.length&&pv[0][0]>M.t0&&pv[0][0]-M.t0<=1.5*d.bin) pv.unshift([M.t0,pv[0][1]]);
+    M.hist.push({pv,sp:[],pvBin:pv}); M.mon=d.mon||chName(MON); }
   liveMinSel(d);
   applyRaw(M);
   return M;
@@ -1194,6 +1227,7 @@ function chartHead(){
   if(!M||!live||drag) return;
   const run=live.run.state==='running'||live.run.state==='paused';
   const v=CH.map(i=>live.ch[i].pv!=null?live.ch[i].pv:null), sp=CH.map(i=>headSp(live.ch[i],run));
+  v[MON]=live.mon&&live.mon.pv!=null?live.mon.pv:null;
   if(M.kind==='live'){ const r=devRate(); M.head={t:Math.min(Math.max(5*r,M.bin),(Date.now()-M.at)/1000*r),v,sp}; lastChart=0; }
   else if(M.kind==='run'&&live.run.state==='running'&&live.run.el!=null&&live.run.el>=M.now){ M.now=live.run.el; M.head={t:live.run.el,v,sp}; lastChart=0; }
 }
@@ -1201,8 +1235,10 @@ function previewDraft(){ const p=live?DRAFT[live.sel]:null; M=p&&progItems(p)?mo
 /* ---------- every reading (spec 7, "Chart: every reading"): the device keeps each PV reading (millis, PV)
    per channel (GET /api/raw, binary); the page fetches only the new ones each poll and draws every one.
    Older than what the device keeps: the chart's slots (last / lowest / highest). Wi-Fi only. ---------- */
-const RAW={t:[[],[]],v:[[],[]],after:[0,0],from:null,boot:null,busy:false,on:false,viaLive:null};
-function rawReset(){ RAW.t=[[],[]]; RAW.v=[[],[]]; RAW.after=[0,0]; RAW.from=null; }
+const RAW={t:[[],[],[]],v:[[],[],[]],after:[0,0,0],from:null,boot:null,busy:false,on:false,viaLive:null};
+function rawReset(){ RAW.t=[[],[],[]]; RAW.v=[[],[],[]]; RAW.after=[0,0,0]; RAW.from=null; }
+const RC=[0,1,2];  // raw readings: the channels and the monitor (a2: only asked for while it is on)
+const rawA2=()=>monLive()?`&a2=${RAW.after[MON]}`:'';
 async function rawPull(win){
   if(SER.on||OFF||RAW.busy||!M||!M.raw) return false;
   if(live&&RAW.boot!==live.boot){ rawReset(); RAW.boot=live.boot; }
@@ -1213,13 +1249,14 @@ async function rawPull(win){
   RAW.busy=true; let got=false;
   try{
     for(let round=0;round<40;round++){
-      const r=await fetch(`/api/raw?a0=${RAW.after[0]}&a1=${RAW.after[1]}&win=${Math.ceil(win)}&max=8192`,{cache:'no-store'});
+      const r=await fetch(`/api/raw?a0=${RAW.after[0]}&a1=${RAW.after[1]}${rawA2()}&win=${Math.ceil(win)}&max=8192`,{cache:'no-store'});
       if(!r.ok) break;
       const dv=new DataView(await r.arrayBuffer()); if(dv.byteLength<16) break;
-      const n=[dv.getUint32(4,true),dv.getUint32(8,true)]; let o=16;
-      for(const c of CH){
+      // format 1: now, n0, n1, 1; format 2 (with the monitor): ..., 2, n2
+      const f2=dv.getUint32(12,true)===2&&dv.byteLength>=20, n=[dv.getUint32(4,true),dv.getUint32(8,true),f2?dv.getUint32(16,true):0]; let o=f2?20:16;
+      for(const c of RC){
         for(let k=0;k<n[c];k++,o+=8){ const pv=dv.getInt16(o+4,true); if(rawAdd(c,dv.getUint32(o,true),pv===-32768?null:pv/10)) got=true; } }
-      if(n[0]<8192&&n[1]<8192) break;
+      if(n[0]<8192&&n[1]<8192&&n[2]<8192) break;
     }
     rawTrim(); RAW.on=true;
   }catch(e){} finally{ RAW.busy=false; }
@@ -1229,13 +1266,13 @@ async function rawPull(win){
 function rawAdd(c,ms,pv){ const T=RAW.t[c]; if(!ms||(T.length&&ms<=T[T.length-1])) return false;
   T.push(ms); RAW.v[c].push(pv); RAW.after[c]=ms; return true; }
 // the browser keeps at most what the device keeps (plus a little)
-function rawTrim(){ const lim=Math.max(2000,(M&&M.raw||0)*1.2); for(const c of CH) if(RAW.t[c].length>lim){ const cut=RAW.t[c].length-lim; RAW.t[c].splice(0,cut); RAW.v[c].splice(0,cut); } }
+function rawTrim(){ const lim=Math.max(2000,(M&&M.raw||0)*1.2); for(const c of RC) if(RAW.t[c].length>lim){ const cut=RAW.t[c].length-lim; RAW.t[c].splice(0,cut); RAW.v[c].splice(0,cut); } }
 // The new readings come with /api/live (?a0=&a1=: "raw" [[ms, pv tenths, ...], [...]]), so a poll needs no
 // second request; /api/raw only fills the start and catches up ("rawMore": too many since the last poll).
-function rawLiveQuery(){ return !SER.on&&RAW.on&&RAW.boot!=null&&page==='status'&&M&&M.raw&&!RAW.busy?`?a0=${RAW.after[0]}&a1=${RAW.after[1]}`:''; }
+function rawLiveQuery(){ return !SER.on&&RAW.on&&RAW.boot!=null&&page==='status'&&M&&M.raw&&!RAW.busy?`?a0=${RAW.after[0]}&a1=${RAW.after[1]}${rawA2()}`:''; }
 function rawFromLive(L){ RAW.viaLive=null;
   if(!L.raw||L.boot!==RAW.boot||!RAW.on) return;
-  let got=false; for(const c of CH){ const a=L.raw[c]||[]; for(let k=0;k+1<a.length;k+=2) if(rawAdd(c,a[k],a[k+1]==null?null:a[k+1]/10)) got=true; }
+  let got=false; for(const c of RC){ const a=L.raw[c]||[]; for(let k=0;k+1<a.length;k+=2) if(rawAdd(c,a[k],a[k+1]==null?null:a[k+1]/10)) got=true; }
   rawTrim(); RAW.viaLive={got}; }
 // run time of a reading (device millis) from the run's anchors (piecewise linear), after the newest point:
 // + wall time while running
@@ -1247,8 +1284,8 @@ function rawRunTime(M,ms){ const A=M.ra||[]; if(!A.length||ms<A[0][0]) return nu
 // PV points of the model: the slots older than the first kept reading, then every reading
 function applyRaw(M){
   if(!M||!M.raw||!RAW.on||(M.kind!=='live'&&M.kind!=='run'&&M.kind!=='last')) return;
-  M.rawOn=[false,false];
-  for(const i of CH){ const T=RAW.t[i],V=RAW.v[i]; if(!T.length) continue;
+  M.rawOn=[false,false,false];
+  for(let i=0;i<M.hist.length;i++){ const T=RAW.t[i],V=RAW.v[i]; if(!T||!T.length) continue;
     const tOf=M.kind==='live'?(ms=>(ms-M.ms)/1000):(ms=>rawRunTime(M,ms));
     const pts=[]; let first=null;
     for(let k=0;k<T.length;k++){ const t=tOf(T[k]); if(t==null) continue; if(M.kind==='live'&&t<M.t0-1) continue; if(first==null) first=t; pts.push([t,V[k]]); }
@@ -1318,9 +1355,10 @@ let YSTEP=50;
 function yRange(){ let mx=0; const see=v=>{ if(v!=null) mx=Math.max(mx,v); }, lv=M.kind==='live';
   const inView=p=>!lv||p[0]>=M.t0;  // live: a short period shows only the newest points
   for(const i of CH){ if(!lv||LVIS.pv[i]) M.hist[i].pv.forEach(p=>{ if(inView(p)) see(p[1]); }); if(!lv||LVIS.sp[i]) M.hist[i].sp.forEach(p=>{ if(inView(p)) see(p[1]); }); M.segs[i].forEach(s=>{see(s.v0);see(s.v1);}); }
+  if(M.hist[MON]&&(!lv||LVIS.pv[MON])) M.hist[MON].pv.forEach(p=>{ if(inView(p)) see(p[1]); });
   YMIN=0;
   if(M.kind==='live'){ // always 0 .. the highest value in view (incl. the newest reading), on a round step
-    if(M.head) M.head.v.forEach((v,i)=>{ if(LVIS.pv[i]) see(v); });
+    if(M.head) M.head.v.forEach((v,i)=>{ if(LVIS.pv[i]&&(i<MON||M.hist[MON])) see(v); });
     const top=Math.max(mx*1.06,mx+2,10); YSTEP=[1,2,5,10,20,25,50,100,200,250,500].find(st=>top/st<=7)||1000; YMAX=Math.ceil(top/YSTEP)*YSTEP; return; }
   YMAX=Math.max(100,Math.ceil((mx+15)/50)*50); YSTEP=YMAX>300?100:50; }
 let CHG={};  // the chart parts' current text (renderChart)
@@ -1343,7 +1381,7 @@ function renderChart(){
       s+=`<text x="${x.toFixed(1)}" y="${PB+18}" text-anchor="${k?'middle':'end'}" style="fill:var(--muted);font-size:12px">${k?'−'+tl(k*step):'now'}</text>`; }
   } else for(let t=Math.ceil(V0/step)*step;t<=V1+1e-6;t+=step) s+=`<text x="${X(t)}" y="${PB+18}" text-anchor="middle" style="fill:var(--muted);font-size:12px">${(t<0?'−':'')+tl(Math.abs(t))}</text>`;
   const prog=M.kind!=='live', lv=!prog;
-  if(legendKind!==(lv?'live':'prog')) legend();
+  if(legendKind!==(lv?'live':'prog')+(monLive()?'m'+live.mon.name:'')) legend(); else monLegend();
   if(prog){ for(const i of CH){ s+=`<text x="${CL-6}" y="${LANE[i]+13}" text-anchor="end" style="fill:${PV[i]};font-size:12px;font-weight:600">${esc(chName(i).slice(0,CW<600?4:9))}</text><rect x="${CL}" y="${LANE[i]}" width="${plotW()}" height="${LH}" style="fill:none;stroke:var(--line)"/>`; }
     // separator between the state lanes and the chart
     s+=`<line x1="4" x2="${CW-4}" y1="${LANE[1]+LH+10}" y2="${LANE[1]+LH+10}" style="stroke:var(--line);stroke-width:2"/>`; }
@@ -1386,6 +1424,13 @@ function renderChart(){
       s+=`<circle cx="${X(M.head.t).toFixed(1)}" cy="${Y(hv).toFixed(1)}" r="3.5" style="fill:${PV[i]}"/>`; }
     s+=`<path d="${segPath(M.segs[i])}" style="fill:none;stroke:${SP[i]};stroke-width:2;stroke-dasharray:6 4;opacity:.95"/>`;
   }
+  // the monitor channel: its PV only (accent colour), with the newest reading as for the channels
+  if(M.hist[MON]&&(!lv||LVIS.pv[MON])){ const hp=M.hist[MON].pv, c=PV[MON];
+    s+=`<path d="${pathOf(hp)}" style="fill:none;stroke:${c};stroke-width:2.2;stroke-linejoin:round"/>`;
+    const hv=M.head&&!(M.rawOn&&M.rawOn[MON])?M.head.v[MON]:null;
+    if(hv!=null){ const L=hp.length?hp[hp.length-1]:null;
+      if(L&&M.head.t-L[0]<near) s+=`<path d="M${X(L[0]).toFixed(1)} ${Y(L[1]).toFixed(1)}L${X(M.head.t).toFixed(1)} ${Y(hv).toFixed(1)}" style="fill:none;stroke:${c};stroke-width:2.2"/>`;
+      s+=`<circle cx="${X(M.head.t).toFixed(1)}" cy="${Y(hv).toFixed(1)}" r="3.5" style="fill:${c}"/>`; } }
   if(M.now!=null&&M.kind==='run') s+=`<line x1="${X(M.now)}" x2="${X(M.now)}" y1="${LANE[0]-4}" y2="${PB}" style="stroke:var(--text);stroke-width:1.5"/>`;
   handles=buildHandles(); if(handles.length) s+=drawHandles(handles);
   // The svg and its fixed parts stay; a part's elements are replaced only when its text changed (a poll
@@ -1406,16 +1451,23 @@ function renderChart(){
   $('chartCap').textContent=lv?(M.have<M.cap?`${fmt(M.have)} recorded`:`memory holds ${fmt(M.cap)}`):M.kind==='preview'?`Preview of “${M.prog?M.prog.name:''}”${hasWaits(M.prog)?' (waits not counted)':''}`:M.kind==='last'?'Last run':'';
 }
 // Live view: PV / SP of each channel can be switched off (chart, scale and CSV export; kept by the browser)
-let LVIS={pv:[1,1],sp:[1,1]}; try{ const v=JSON.parse(localStorage.getItem('lvis')); if(v&&v.pv&&v.sp) LVIS=v; }catch(e){}
-const lvMask=k=>CH.reduce((m,i)=>m|(LVIS[k][i]?1<<i:0),0);
+let LVIS={pv:[1,1,1],sp:[1,1]}; try{ const v=JSON.parse(localStorage.getItem('lvis')); if(v&&v.pv&&v.sp) LVIS=v; }catch(e){}
+if(LVIS.pv[MON]==null) LVIS.pv[MON]=1;  // (kept before the monitor channel existed)
+const lvMask=k=>CH.reduce((m,i)=>m|(LVIS[k][i]?1<<i:0),0)|(k==='pv'&&monLive()&&LVIS.pv[MON]?1<<MON:0);
 function histHref(){ const a=$('histCsv'), p=lvMask('pv'), s=lvMask('sp'); a.href=`/api/history.csv?pv=${p}&sp=${s}`;
   a.classList.toggle('dis',!(p|s)); a.setAttribute('aria-disabled',!(p|s)); }
 let legendKind='';
-function legend(){ const n=[chName(0),chName(1)]; legendKind=M&&M.kind==='live'?'live':'prog';
-  if(legendKind==='live'){ histHref();
-    $('legend').innerHTML=`<span class="lh">Show / export:</span>`+CH.map(i=>['pv','sp'].map(k=>`<button class="lt" data-lv="${k}${i}" aria-pressed="${!!LVIS[k][i]}"><i class="sw" style="background:${k==='pv'?PV[i]:SP[i]}${k==='sp'?';height:4px':''}"></i>${esc(n[i])} ${k.toUpperCase()}</button>`).join('')).join('');
+// the monitor channel in the legend: its name and current reading (monLegend() updates the value each poll)
+const monVal=()=>live&&live.mon?(live.mon.pv!=null?f1(live.mon.pv)+' °C':(live.mon.err||'–')):'–';
+function monLegend(){ const e=$('monLegV'); if(e) e.textContent=monVal(); }
+function legend(){ const n=[chName(0),chName(1)]; legendKind=(M&&M.kind==='live'?'live':'prog')+(monLive()?'m'+live.mon.name:'');
+  const mon=monLive()?esc(chName(MON)):null;
+  if(legendKind.startsWith('live')){ histHref();
+    $('legend').innerHTML=`<span class="lh">Show / export:</span>`+CH.map(i=>['pv','sp'].map(k=>`<button class="lt" data-lv="${k}${i}" aria-pressed="${!!LVIS[k][i]}"><i class="sw" style="background:${k==='pv'?PV[i]:SP[i]}${k==='sp'?';height:4px':''}"></i>${esc(n[i])} ${k.toUpperCase()}</button>`).join('')).join('')
+      +(mon?`<button class="lt" data-lv="pv${MON}" aria-pressed="${!!LVIS.pv[MON]}"><i class="sw" style="background:${PV[MON]}"></i>${mon} <b class="lv" id="monLegV">${esc(monVal())}</b></button>`:'');
     return; }
   $('legend').innerHTML=CH.map(i=>`<span><i class="sw" style="background:${PV[i]}"></i>${esc(n[i])} PV</span><span><i class="sw" style="background:${SP[i]};height:4px"></i>${esc(n[i])} SP</span>`).join('')+
+  (mon?`<span><i class="sw" style="background:${PV[MON]}"></i>${mon} <b class="lv" id="monLegV">${esc(monVal())}</b></span>`:'')+
   `<span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="var(--muted)" stroke-width="2" stroke-dasharray="6 4"/></svg>Forecast / plan</span>
   <span><i class="sw" style="background:var(--amber)"></i>Waiting for ${esc(n[0])}</span>
   <span><svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="7" style="fill:var(--amber)"/><rect x="4.5" y="4.5" width="2.5" height="7" style="fill:var(--panel)"/><rect x="9" y="4.5" width="2.5" height="7" style="fill:var(--panel)"/></svg>Program pause</span>
@@ -1460,6 +1512,8 @@ function drawHover(){ const g=$('chHover'), tip=$('ctip'); if(!g||!tip) return;
       if(p){ d+=hoverDot(X(p.t),Y(p.v),PV[i]); rows.push({c:PV[i],n:chName(i)+' PV',v:f1(p.v)+' °C'}); } }
     if(!lv||LVIS.sp[i]){ const q=nearPt(h.sp,t,tol)||(lv?null:segAt(M.segs[i],t));
       if(q){ d+=hoverDot(X(q.t),Y(q.v),SP[i]); rows.push({c:SP[i],n:chName(i)+(M.kind==='preview'||!nearPt(h.sp,t,tol)?' plan':' SP'),v:f1(q.v)+' °C',thin:true}); } } }
+  if(M.hist[MON]&&(!lv||LVIS.pv[MON])){ let p=nearPt(M.hist[MON].pv,t,tol); if(M.head&&M.head.v[MON]!=null&&Math.abs(M.head.t-t)<=tol&&(!p||Math.abs(M.head.t-t)<p.d)) p={t:M.head.t,v:M.head.v[MON]};
+    if(p){ d+=hoverDot(X(p.t),Y(p.v),PV[MON]); rows.push({c:PV[MON],n:M.mon||chName(MON),v:f1(p.v)+' °C'}); } }
   g.innerHTML=d;
   const title=lv?`${new Date(M.at+t*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})} (−${fmt(V1-t)})`:(M.kind==='preview'?'':'Run time ')+fmt(t);
   tip.innerHTML=tipHtml(title,rows.length?rows:[{c:'transparent',n:'No values here',v:''}]); tipPlace(tip,$('chartbox'),hovX,PT+2); }
@@ -1510,6 +1564,10 @@ function buildChans(){
   }
 }
 $('chans').addEventListener('click',e=>{ const b=e.target.closest('[data-atx]'); if(b) tuneAction(+b.dataset.ch,b.dataset.atx); });
+// the autotune rule (setting local.tuneFast): saved at once
+document.addEventListener('change',async e=>{ const s=e.target.closest('[data-atfast]'); if(!s) return; const i=+s.dataset.atfast, v=s.checked;
+  s.dataset.busy='1'; const r=await postCfg({channels:CH.map(k=>k===i?{local:{tuneFast:v}}:null)}); delete s.dataset.busy;
+  if(r&&r.err){ s.checked=!v; setMsg('atMsg'+i,r.err,true); return; } CFG.channels[i].local.tuneFast=v; setMsg('atMsg'+i,''); });
 // ---- autotune from the Dashboard and the sidebar: stop it, clear a failed / stopped one, review a result
 async function tuneAction(i,a){
   if(a==='stop'){ if(!await ask(`Stop the autotune of ${chName(i)}? Its outputs go off.`,'Stop autotune')) return; await api('/api/autotune',{ch:i,cmd:'stop'}); }
@@ -1622,11 +1680,14 @@ function updSide(){
   pl.title=lab; pl.setAttribute('aria-label',lab);
   pl.disabled=running?$('bPause').disabled:r.state==='paused'?$('bStart').disabled:active&&r.progPause?$('bPause').disabled:$('bStart').disabled;
   $('sStop').disabled=!active;
-  const key=live.ch.map(c=>c.name).join('|');
+  // (the monitor channel, while it is on: a third row with its reading only, no button)
+  const key=live.ch.map(c=>c.name).join('|')+(live.mon?'|'+live.mon.name:'');
   if($('sChs').dataset.k!==key){ $('sChs').dataset.k=key;
     $('sChs').innerHTML=CH.map(i=>`<div class="sch" style="--c:${PV[i]}"><i></i><span class="n">${esc(chName(i))}</span>
       <button class="ib" data-sman="${i}" data-mode="man">${SIDE_ICON.man}</button>
-      <span class="v" id="sv${i}"></span></div>`).join(''); }
+      <span class="v" id="sv${i}"></span></div>`).join('')
+      +(live.mon?`<div class="sch mon" style="--c:${PV[MON]}"><i></i><span class="n">${esc(live.mon.name)}</span><span class="v" id="sv${MON}"></span></div>`:''); }
+  if(live.mon){ const m=live.mon, v=$('sv'+MON); setTxt(v,m.pv!=null?f1(m.pv)+' °C · Monitor':'– · '+(m.err||'no reading')); v.classList.toggle('bad',m.pv==null); }
   for(const i of CH){ const c=live.ch[i], inRun=active&&c.inProgram;
     const at=c.autotune?c.autotune.state:'';
     const st=c.fault?'Fault':estopOn()&&c.type!=='off'?'E-stop':!c.ok&&c.type!=='off'?'No link':c.type==='off'?'Off':inRun?(SIDE_ST[c.state]||c.state):at==='running'?'Autotune':at==='done'?'Autotune done':c.manual.on?'Manual':'Idle';
@@ -1662,7 +1723,7 @@ const running=()=>!!live&&(live.run.state==='running'||live.run.state==='paused'
 function editProg(){ return running()?runProg:(live?DRAFT[live.sel]:null); }
 function curIdx(ch){ if(!running()) return -1; const r=live.run; if(r.type==='seq') return r.seq?r.seq.idx:-1; const L=live.ch[ch].lane; return L?(L.stage==='done'?1e9:L.idx):-1; }
 function refTarget(p,ch,idx){ if(!p) return null; if(p.type==='seq'){ const x=p.phases[idx]; if(!x) return null;
-  if(ch===0) return x.kind==='B'||(x.kind==='BT'&&!x.b.idle)?x.b.t:null; return x.kind==='T'||x.kind==='BT'?x.t.t:null; }
+  if(ch===0) return x.kind==='B'||(x.kind==='BT'&&!x.b.idle)?x.b.t:null; return x.kind==='T'||(x.kind==='BT'&&!x.t.idle)?x.t.t:null; }
   const x=p[KEY[ch]][idx]; return x&&x.kind==='step'?x.t:null; }
 function rampLocked(ch,idx){ if(!running()) return false; const r=live.run;
   if(r.type==='seq'){ const c=r.seq?r.seq.idx:-1; if(idx>c) return false; return !(idx===c&&ch===1&&r.seq.stage==='wait'); }
@@ -1692,6 +1753,8 @@ function seqToTl(p,name){
   for(const x of p.phases){
     if(x.kind==='B'){ step(0,x.b,T); T+=x.b.r+x.b.h; }
     else if(x.kind==='T'){ step(1,x.t,T); T+=x.t.r+x.t.h; }
+    else if(x.kind==='BT'&&x.t.idle){ pad(1,T); L[1].push({kind:'idle',t:0,r:0,h:0,msg:false,text:''}); E[1]=T;
+      step(0,x.b,T); T+=x.b.r+x.b.h; }
     else if(x.kind==='BT'){ pad(0,T); L[0].push(x.b.idle?{kind:'idle',t:0,r:0,h:0,msg:false,text:''}:{kind:'step',t:x.b.t,r:0,h:0,msg:false,text:''}); E[0]=T;
       step(1,x.t,T); T+=x.t.r+x.t.h; }
     else { const c=used[0]||!used[1]?0:1; pad(c,T); L[c].push({kind:'pause',t:0,r:0,h:0,msg:!!x.msg,text:x.text||''}); }
@@ -1753,41 +1816,42 @@ function buildEditor(){
   const kept=[live&&live.ch[0].kept,live&&live.ch[1].kept];
   if(p.type==='seq'){
     const cur=run?curIdx(0):-1, narrow=box.clientWidth<720;
-    let tEnd=0; const ends=p.phases.map(x=>(tEnd+=x.kind==='P'?0:x.kind==='B'?x.b.r+x.b.h:x.t.r+x.t.h));
+    let tEnd=0; const ends=p.phases.map(x=>(tEnd+=x.kind==='P'?0:bDrv(x)?x.b.r+x.b.h:x.t.r+x.t.h));
     const na=t=>`<span class="na">${t}</span>`, del=k=>`<button class="x" data-del="${k}" ${run?'disabled':''} aria-label="Delete phase ${k+1}" title="Delete phase">✕</button>`;
     const rows=p.phases.map((x,k)=>{
-      const done=run&&k<cur, isCur=run&&k===cur, hasB=x.kind==='B'||x.kind==='BT', hasT=x.kind==='T'||x.kind==='BT', bIdle=x.kind==='BT'&&x.b.idle, isP=x.kind==='P';
+      const done=run&&k<cur, isCur=run&&k===cur, hasB=x.kind==='B'||x.kind==='BT', hasT=x.kind==='T'||x.kind==='BT', bIdle=x.kind==='BT'&&x.b.idle, tIdle=x.kind==='BT'&&x.t.idle, bD=bDrv(x), isP=x.kind==='P';
       const en=f=>{ if(!run) return true; if(done||(isCur&&isP)) return (f==='b.t'&&k===kept[0])||(f==='t.t'&&k===kept[1]);
-        if(isCur){ if(f==='b.t') return hasB&&!bIdle; if(f==='t.t') return hasT; if(f==='b.h') return x.kind==='B'; if(f==='t.h') return hasT; if(f==='t.r') return !rampLocked(1,k); return false; }
+        if(isCur){ if(f==='b.t') return hasB&&!bIdle; if(f==='t.t') return hasT&&!tIdle; if(f==='b.h') return bD; if(f==='t.h') return hasT&&!tIdle; if(f==='t.r') return !tIdle&&!rampLocked(1,k); return false; }
         return ['b.t','t.t','b.r','t.r','b.h','t.h'].includes(f); };
       const opt=(v,t)=>`<option value="${v}"${x.kind===v?' selected':''}>${t}</option>`;
       const sel=`<select class="k${isP?' pause':''}" data-f="kind" ${run?'disabled':''} aria-label="Phase ${k+1} type">${opt('B',esc(n[0]))}${opt('T',esc(n[1]))}${opt('BT','Both')}${opt('P','Pause')}</select>`;
       const cb=(f,on,lab,dis)=>`<label class="cbl"><input type="checkbox" data-f="${f}" ${on?'checked':''} ${dis?'disabled':''}> ${lab}</label>`;
       const c={
         bt: hasB&&!bIdle?numIn('b.t',x.b.t,en('b.t'),`${n[0]} °C, phase ${k+1}`):na(bIdle?'off':'keeps'),
-        br: x.kind==='B'?timeIn('b.r',x.b.r,en('b.r'),`${n[0]} ramp, phase ${k+1}`):na(x.kind==='BT'&&!bIdle?'jump':'—'),
-        bh: x.kind==='B'?timeIn('b.h',x.b.h,en('b.h'),`${n[0]} hold, phase ${k+1}`):na('—'),
+        br: bD?timeIn('b.r',x.b.r,en('b.r'),`${n[0]} ramp, phase ${k+1}`):na(x.kind==='BT'&&!bIdle?'jump':'—'),
+        bh: bD?timeIn('b.h',x.b.h,en('b.h'),`${n[0]} hold, phase ${k+1}`):na('—'),
         bi: x.kind==='BT'?cb('b.idle',x.b.idle,'Idle',run):'',
-        tt: hasT?numIn('t.t',x.t.t,en('t.t'),`${n[1]} °C, phase ${k+1}`):na('keeps'),
-        tr: hasT?timeIn('t.r',x.t.r,en('t.r'),`${n[1]} ramp, phase ${k+1}`):na('—'),
-        th: hasT?timeIn('t.h',x.t.h,en('t.h'),`${n[1]} hold, phase ${k+1}`):na('—'),
+        tt: hasT&&!tIdle?numIn('t.t',x.t.t,en('t.t'),`${n[1]} °C, phase ${k+1}`):na(tIdle?'off':'keeps'),
+        tr: hasT&&!tIdle?timeIn('t.r',x.t.r,en('t.r'),`${n[1]} ramp, phase ${k+1}`):na('—'),
+        th: hasT&&!tIdle?timeIn('t.h',x.t.h,en('t.h'),`${n[1]} hold, phase ${k+1}`):na('—'),
+        ti: x.kind==='BT'?cb('t.idle',x.t.idle,'Idle',run):'',
         opt: isP?cb('msg',x.msg,'"Action required"',run)+` <input type="text" data-f="text" maxlength="40" value="${esc(x.text)}" placeholder="text (optional)" ${run?'disabled':''} aria-label="Pause text, phase ${k+1}">`
           :(x.kind!=='T'?cb('wait',x.wait,`Wait for ${esc(n[0])}`,run||bIdle):na('—'))
       };
       const cls=`${done?'done':''}${isCur?' cur':''}`;
       if(narrow) return `<div class="pc ${cls}" data-i="${k}"><div class="pch"><b>${k+1}</b>${sel}<span class="grow"></span>${del(k)}</div>`+
         (isP?`<div class="pcr"><span class="na">Both channels keep their setpoints.</span></div><div class="pcr">${c.opt}</div>`:
-        `<div class="pcr"><span class="pl gB">${esc(n[0])}</span>${!hasB?na('keeps its setpoint'):bIdle?na('off')+c.bi:x.kind==='BT'?`<label class="fl"><span>°C</span>${c.bt}</label>${na('jump')}${c.bi}`:`<label class="fl"><span>°C</span>${c.bt}</label><label class="fl"><span>Ramp</span>${c.br}</label><label class="fl"><span>Hold</span>${c.bh}</label>`}</div>
-         <div class="pcr"><span class="pl gT">${esc(n[1])}</span>${!hasT?na('keeps its setpoint'):`<label class="fl"><span>°C</span>${c.tt}</label><label class="fl"><span>Ramp</span>${c.tr}</label><label class="fl"><span>Hold</span>${c.th}</label>`}</div>
+        `<div class="pcr"><span class="pl gB">${esc(n[0])}</span>${!hasB?na('keeps its setpoint'):bIdle?na('off')+c.bi:x.kind==='BT'&&!bD?`<label class="fl"><span>°C</span>${c.bt}</label>${na('jump')}${c.bi}`:`<label class="fl"><span>°C</span>${c.bt}</label><label class="fl"><span>Ramp</span>${c.br}</label><label class="fl"><span>Hold</span>${c.bh}</label>${c.bi}`}</div>
+         <div class="pcr"><span class="pl gT">${esc(n[1])}</span>${!hasT?na('keeps its setpoint'):tIdle?na('off')+c.ti:`<label class="fl"><span>°C</span>${c.tt}</label><label class="fl"><span>Ramp</span>${c.tr}</label><label class="fl"><span>Hold</span>${c.th}</label>${c.ti}`}</div>
          ${x.kind!=='T'?`<div class="pcr">${c.opt}</div>`:''}`)+`</div>`;
       return `<tr class="${cls}" data-i="${k}"><td>${k+1}</td><td>${sel}</td>`+
-        (isP?`<td class="bl" colspan="4">${na('keeps its setpoint')}</td><td class="bl" colspan="3">${na('keeps its setpoint')}</td>`:
-        `<td class="bl">${c.bt}</td><td>${c.br}</td><td>${c.bh}</td><td>${c.bi}</td><td class="bl">${c.tt}</td><td>${c.tr}</td><td>${c.th}</td>`)+
+        (isP?`<td class="bl" colspan="4">${na('keeps its setpoint')}</td><td class="bl" colspan="4">${na('keeps its setpoint')}</td>`:
+        `<td class="bl">${c.bt}</td><td>${c.br}</td><td>${c.bh}</td><td>${c.bi}</td><td class="bl">${c.tt}</td><td>${c.tr}</td><td>${c.th}</td><td>${c.ti}</td>`)+
         `<td class="bl">${c.opt}</td><td class="end">${fmt(ends[k])}</td><td>${del(k)}</td></tr>`;
     });
     let h=narrow?`<div class="pcs">${rows.join('')}</div>`:
-      `<div class="ed-wrap"><table class="ed"><thead><tr><th rowspan="2">#</th><th rowspan="2">Phase type</th><th colspan="4" class="gB bl">${esc(n[0])}</th><th colspan="3" class="gT bl">${esc(n[1])}</th><th rowspan="2" class="bl">Option</th><th rowspan="2" class="r">Ends</th><th rowspan="2"></th></tr>
-      <tr><th class="bl">°C</th><th>Ramp</th><th>Hold</th><th></th><th class="bl">°C</th><th>Ramp</th><th>Hold</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+      `<div class="ed-wrap"><table class="ed"><thead><tr><th rowspan="2">#</th><th rowspan="2">Phase type</th><th colspan="4" class="gB bl">${esc(n[0])}</th><th colspan="4" class="gT bl">${esc(n[1])}</th><th rowspan="2" class="bl">Option</th><th rowspan="2" class="r">Ends</th><th rowspan="2"></th></tr>
+      <tr><th class="bl">°C</th><th>Ramp</th><th>Hold</th><th></th><th class="bl">°C</th><th>Ramp</th><th>Hold</th><th></th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
     h+=`<div class="edbar"><button id="addPh" ${run||p.phases.length>=MAXN?'disabled':''}>Add phase</button><span class="zr">${p.phases.length} / ${MAXN} phases</span></div>`;
     box.innerHTML=h;
   } else {
@@ -1840,7 +1904,9 @@ $('editor').addEventListener('change',async e=>{
   }
   const q=beginEdit(); if(!q) return;
   if(seq){ const x=q.phases[i];
-    if(f==='kind'){ x.kind=v; if(v==='P') x.msg=true; } else if(f==='wait'||f==='msg') x[f]=v; else if(f==='b.idle') x.b.idle=v; else if(f==='text') x.text=v.slice(0,40);
+    if(f==='kind'){ x.kind=v; if(v==='P') x.msg=true; } else if(f==='wait'||f==='msg') x[f]=v; else if(f==='b.idle'){ x.b.idle=v; if(v) x.t.idle=false; }
+    else if(f==='t.idle'){ x.t.idle=v; if(v){ x.b.idle=false; if(!x.b.r&&!x.b.h){ x.b.r=x.t.r; x.b.h=x.t.h; } } }  // (top off: the bottom drives, with the top's times if it had none)
+    else if(f==='text') x.text=v.slice(0,40);
     else { const [a,b]=f.split('.'); x[a][b]=b==='t'?clampT(a==='b'?0:1,v):clampS(v); } }
   else { const x=q[k][i]; if(f==='kind'){ x.kind=v; if(v==='pause') x.msg=true; } else if(f==='msg') x.msg=v; else if(f==='text') x.text=v.slice(0,40); else x[f]=f==='t'?clampT(k==='B'?0:1,v):clampS(v); }
   afterEdit();
@@ -1864,7 +1930,7 @@ function buildHandles(){
     if(e.type===EV.HOLD_END){ let v; if(seq) v=refTarget(p,e.ch,e.idx); else { const x=p[KEY[e.ch]][e.idx]; if(!x||x.kind==='pause') continue; v=x.kind==='idle'?null:x.t; }
       H.push({type:'hold',dir:'h',ch:e.ch,idx:e.idx,t:e.t,v:v==null?YMIN+8:v}); }
     else if(e.type===EV.RAMP_END){ if(rampLocked(e.ch,e.idx)) continue; const v=refTarget(p,e.ch,e.idx); if(v==null) continue;
-      if(seq&&e.ch===0&&p.phases[e.idx].kind==='BT') continue; H.push({type:'ramp',dir:'h',ch:e.ch,idx:e.idx,t:e.t,v}); } }
+      if(seq&&e.ch===0&&p.phases[e.idx].kind==='BT'&&!p.phases[e.idx].t.idle) continue; H.push({type:'ramp',dir:'h',ch:e.ch,idx:e.idx,t:e.t,v}); } }
   for(const i of CH){ const groups=[]; let g=null;
     for(const s of M.segs[i]){ if(s.t1<=now) continue; const ok=s.fl===0&&s.src>=0;
       if(ok&&g&&g.src===s.src&&Math.abs(g.t1-s.t0)<.01){ g.t1=s.t1; } else { if(g) groups.push(g); g=ok?{src:s.src,t0:Math.max(s.t0,now),t1:s.t1}:null; } }
@@ -1894,11 +1960,11 @@ async function dragEnd(){ const h=drag.h, D=Math.round(drag.t-h.t), V=drag.v; dr
   const p=M.prog, seq=p.type==='seq';
   if(M.kind==='run'){
     if(h.type==='target') await runCmd({cmd:'target',ch:h.ch,idx:h.idx,t:V});
-    else if(h.type==='hold'){ const x=seq?p.phases[h.idx]:p[KEY[h.ch]][h.idx], old=seq?(x.kind==='B'?x.b.h:x.t.h):x.h; await runCmd({cmd:'hold',ch:h.ch,idx:h.idx,sec:Math.max(0,old+D)}); }
+    else if(h.type==='hold'){ const x=seq?p.phases[h.idx]:p[KEY[h.ch]][h.idx], old=seq?(bDrv(x)?x.b.h:x.t.h):x.h; await runCmd({cmd:'hold',ch:h.ch,idx:h.idx,sec:Math.max(0,old+D)}); }
     else { const x=seq?p.phases[h.idx]:p[KEY[h.ch]][h.idx], old=seq?(h.ch===0?x.b.r:x.t.r):x.r; await runCmd({cmd:'ramp',ch:h.ch,idx:h.idx,sec:Math.max(0,old+D)}); }
     poll(); return; }
   const q=beginEdit(); if(!q) return;
-  if(seq){ const x=q.phases[h.idx], part=h.type==='target'?(h.ch===0?x.b:x.t):h.type==='hold'?(x.kind==='B'?x.b:x.t):(h.ch===0?x.b:x.t);
+  if(seq){ const x=q.phases[h.idx], part=h.type==='target'?(h.ch===0?x.b:x.t):h.type==='hold'?(bDrv(x)?x.b:x.t):(h.ch===0?x.b:x.t);
     if(h.type==='target') part.t=V; else if(h.type==='hold') part.h=clampS(part.h+D); else part.r=clampS(part.r+D); }
   else { const x=q[KEY[h.ch]][h.idx]; if(h.type==='target') x.t=V; else if(h.type==='hold') x.h=clampS(x.h+D); else x.r=clampS(x.r+D); }
   blurEditor(); afterEdit(); }
@@ -1990,7 +2056,7 @@ async function updateLog(){
    crop and save again; hover shows the values. Columns: time_s / run_s / time (wall clock), <ch>_pv, _sp,
    _min, _max, _plan / _prog, _out; SD logs also kind, event (shown as marks). ---------- */
 const RP={lines:null,head:null,name:'',T:[],cols:{},ev:[],clock:false,t0:0,crop:null,v0:0,v1:1,hide:{},sel:null,hov:null,W:1000,H:420};
-const RP_CH=[['bottom',0],['top',1]];
+const RP_CH=[['bottom',0],['top',1],['monitor',MON]];
 function csvSplit(l){ const out=[]; let cur='',q=false;
   for(let k=0;k<l.length;k++){ const c=l[k];
     if(q){ if(c==='"'){ if(l[k+1]==='"'){ cur+='"'; k++; } else q=false; } else cur+=c; }
@@ -2021,7 +2087,7 @@ function rpFit(){ if(!RP.T.length) return; [RP.v0,RP.v1]=rpRange(); }
 function rpClamp(){ const [a,b]=rpRange(), span=Math.min(b-a,Math.max(5,RP.v1-RP.v0)); if(RP.v0<a) RP.v0=a; RP.v1=RP.v0+span; if(RP.v1>b){ RP.v1=b; RP.v0=b-span; } }
 // series: [key, label, colour, kind]; channels by the current names when connected
 function rpSeries(){ const s=[], C={}; for(const k in RP.cols) if(RP.cols[k].some(v=>v!=null)) C[k]=RP.cols[k];  // (columns with values only)
-  for(const [p,i] of RP_CH){ const nm=live?chName(i):(p==='bottom'?'Bottom':'Top');
+  for(const [p,i] of RP_CH){ const nm=live||i===MON?chName(i):(p==='bottom'?'Bottom':'Top');
     if(C[p+'_min']&&C[p+'_max']) s.push({k:p+'_band',n:nm+' lowest / highest',c:PV[i],kind:'band',lo:C[p+'_min'],hi:C[p+'_max']});
     if(C[p+'_pv']) s.push({k:p+'_pv',n:nm+' PV',c:PV[i],kind:'pv',v:C[p+'_pv']});
     if(C[p+'_sp']) s.push({k:p+'_sp',n:nm+' SP',c:SP[i],kind:'sp',v:C[p+'_sp']});
@@ -2137,7 +2203,7 @@ function route(){
   page=pg;
   for(const k in PAGES) $('pg-'+k).hidden=k!==pg;
   document.querySelectorAll('nav a[data-pg]').forEach(a=>{ const on=a.dataset.pg===pg; a.classList.toggle('on',on); if(on) a.setAttribute('aria-current','page'); else a.removeAttribute('aria-current'); });
-  $('title').textContent=PAGES[pg]; $('jump').hidden=pg!=='status'; $('jumpS').hidden=pg!=='settings'; document.title=pg==='status'?'TempCtl Duo':PAGES[pg]+' – TempCtl Duo';
+  $('title').textContent=PAGES[pg]; $('jump').hidden=pg!=='status'; $('jumpS').hidden=pg!=='settings'; const app=DEMO?'TempCtl Duo DEMO':'TempCtl Duo'; document.title=pg==='status'?app:PAGES[pg]+' – '+app;
   $('side').classList.remove('open'); $('menu').setAttribute('aria-expanded','false');
   if(changed){ window.scrollTo(0,0); if(pg==='status'){ lastChart=0; chartAt=0; } if(pg==='replay') rpDraw(); pageUpdate(true); requestAnimationFrame(()=>{ shapeTabs(); topFade(); }); }
 }
@@ -2359,11 +2425,15 @@ $('plist').addEventListener('click',async e=>{
 /* ---------- Channels page ---------- */
 let chSel=0, chBuilt=false, chNamesKey='', xKey=['',''];
 const TYPE_TXT={off:'off',modbus:'Modbus',local:'local'};
-function chTabs(){ if(!CFG) return; const h=CH.map(i=>`<button role="tab" data-cht="${i}" aria-pressed="${i===chSel}" aria-selected="${i===chSel}" style="--c:${PV[i]}"><span class="bg" aria-hidden="true"></span><svg class="tabsh" aria-hidden="true"><path class="ol"/></svg><span class="arc" aria-hidden="true"></span><i></i>${esc(CFG.channels[i].name)} <small>${TYPE_TXT[CFG.channels[i].type]||''}</small></button>`).join('');
+// (a third tab for the monitor channel on boards that have it: same look, the accent colour)
+const chTabList=()=>CFG&&CFG.limits&&CFG.limits.monitor&&CFG.monitor?[0,1,MON]:CH;
+function chTabs(){ if(!CFG) return; const L=chTabList(); if(!L.includes(chSel)) chSel=0;
+  const tab=(i,name,sub)=>`<button role="tab" data-cht="${i}" aria-pressed="${i===chSel}" aria-selected="${i===chSel}" style="--c:${PV[i]}"><span class="bg" aria-hidden="true"></span><svg class="tabsh" aria-hidden="true"><path class="ol"/></svg><span class="arc" aria-hidden="true"></span><i></i>${esc(name)} <small>${sub}</small></button>`;
+  const h=L.map(i=>i===MON?tab(i,CFG.monitor.name,CFG.monitor.on?'monitor':'off'):tab(i,CFG.channels[i].name,TYPE_TXT[CFG.channels[i].type]||'')).join('');
   if(tabsHtml!==h){ tabsHtml=h; $('chTabs').innerHTML=h; requestAnimationFrame(shapeTabs); } document.querySelectorAll('[data-chp]').forEach(d=>d.hidden=+d.dataset.chp!==chSel); }
 $('chTabs').onclick=e=>{ const b=e.target.closest('button[data-cht]'); if(!b) return; chSel=+b.dataset.cht; chTabs(); updChanPage(); };
 /* Channel tabs (spec 7, "Look"): css-tip "rounded tab" shapes. lb / rb = left / right foot: 'flat' (first tab, flush with the card's
-   left edge), 'flare' (curves out into the card's top edge), 'under' (inactive tab tucked under the selected neighbour: its
+   left edge), 'flare' (curves out into the card's top edge), 'under' (inactive tab tucked under its right neighbour or the selected one: its
    edge stops where the neighbour's foot starts, its fill follows that curve). Outline coordinates are 1px-stroke centres on
    the card border's pixel grid; the tabs overlap by TAB_R+1 px. The selected tab and the card share one frosted background
    (.tabbg = union of both shapes), so there is no seam; the card's top edge is open under the selected tab (--g0 / --g1). */
@@ -2383,7 +2453,9 @@ function shapeTabs(){
   const tabs=[...document.querySelectorAll('#chTabs button[data-cht]')], sel=tabs.findIndex(t=>t.getAttribute('aria-pressed')==='true');
   if(!tabs.length||!tabs[0].offsetWidth) return;  // page not shown
   tabs.forEach((b,i)=>{
-    const W=b.offsetWidth, H=b.offsetHeight, on=i===sel, lb=i===0?'flat':(!on&&sel===i-1?'under':'flare'), rb=!on&&sel===i+1?'under':'flare';
+    // an inactive tab's right foot always tucks under its right neighbour (selected, or inactive and drawn later
+    // on top of it): no gap between two inactive tabs (three tabs with the monitor channel)
+    const W=b.offsetWidth, H=b.offsetHeight, on=i===sel, lb=i===0?'flat':(!on&&sel===i-1?'under':'flare'), rb=!on&&i<tabs.length-1?'under':'flare';
     const sh=tabShape(W,H,lb,rb,0,0,on?H:H-1);
     b.querySelector('.bg').style.clipPath=`path('${sh.fill}')`; b.querySelector('.ol').setAttribute('d',sh.ol);
     b.style.setProperty('--ax',(lb==='flare'?TAB_R:0)+'px'); b._shape=[W,H,lb,rb];
@@ -2477,16 +2549,32 @@ function chanGroups(i){ const P=`channels.${i}.`, ty=t=>g=>g(P+'type')===t;
      {k:P+'local.cjEnable',l:'Converter too hot',t:'sw',def:true,show:ty('local'),sent:true,h:'A hot enclosure makes the readings drift.'},
      {k:P+'local.cjMax',l:'… above',pre:'the MAX31855’s own (cold-junction) temperature above',t:'num',min:30,max:125,u:'°C',def:70,show:g=>g(P+'type')==='local'&&g(P+'local.cjEnable'),j:true}])}];
 }
+// the monitor channel's tab: a third thermocouple, shown on the chart and logged only
+function monGroups(){ const on=g=>g('monitor.on');
+  return [
+   {h:'General',c:'var(--acc)',note:'A third thermocouple that is only measured: the chart shows it (accent colour, its reading in the legend), the CSV exports and SD run logs include it. No output, no alarm. Wiring: its converter’s CS on GPIO 3; SCK and SO shared with the channels.',fields:[
+     {k:'monitor.on',l:'Converter fitted',t:'sw',h:'Read, charted and logged while on'},
+     {k:'monitor.name',l:'Name',t:'text',max:16,h:'Chart legend, CSV, touch screen'}]},
+   {h:'Thermocouple',c:'var(--ok)',show:on,extra:`<div class="calbox" id="calBox${MON}" hidden>${calHtml(MON)}</div>`,fields:[
+     {k:'monitor.sensor',l:'Converter',t:'sel',o:[['max31855','MAX31855'],['max6675','MAX6675']]},
+     {k:'monitor.readMs',l:'Read every',t:'num',min:100,max:1000,step:10,u:'ms',def:1000,h:'MAX6675: at least 250 ms (its conversion time)'},
+     {k:'monitor.median',l:'Median filter',t:'sw',def:true,h:'Removes single-reading spikes; a change shows about half the window later'},
+     {k:'monitor.medianN',l:'… over the last',t:'sel',num:true,def:3,o:[[3,'3 readings'],[5,'5 readings'],[7,'7 readings'],[9,'9 readings']],show:g=>on(g)&&g('monitor.median'),j:true},
+     {k:'monitor.calGain',l:'Calibration gain',rl:'Calibration',pre:'×',t:'num',min:0.5,max:2,step:0.0001,rh:'Calibrated = raw × gain + offset. “Two-point…” works them out from one or two reference temperatures.'},
+     {k:'monitor.calOffset',l:'Calibration offset',pre:'+',t:'num',min:-50,max:50,step:0.01,u:'°C',j:true,btn:`<button type="button" data-calt="${MON}">Two-point…</button>`}]}];
+}
 function calHtml(i){ return `<h4>Two-point calibration</h4><p class="hint">Measure one or two temperatures with a reference thermometer. “Now” takes the current raw reading (without calibration). With one point only the offset changes.</p>
   <div class="cal"><span></span><span>Raw reading</span><span>True temperature</span>
   <span>Point 1</span><span><input type="number" step="0.1" id="cr1_${i}" aria-label="Point 1 raw"> <button data-now="${i}" data-p="1">Now</button></span><span><input type="number" step="0.1" id="ct1_${i}" aria-label="Point 1 true"> °C</span>
   <span>Point 2</span><span><input type="number" step="0.1" id="cr2_${i}" aria-label="Point 2 raw"> <button data-now="${i}" data-p="2">Now</button></span><span><input type="number" step="0.1" id="ct2_${i}" aria-label="Point 2 true"> °C</span></div>
   <div class="row"><button data-calc="${i}">Calculate offset and gain</button><span class="msg" id="calMsg${i}"></span></div>`; }
-function rawNow(i){ const c=live&&live.ch[i], l=CFG.channels[i].local; if(!c||c.pv==null) return null; return (c.pv-l.calOffset)/(l.calGain||1); }
+function rawNow(i){ if(i===MON) return live&&live.mon&&live.mon.raw!=null?live.mon.raw:null;
+  const c=live&&live.ch[i], l=CFG.channels[i].local; if(!c||c.pv==null) return null; return (c.pv-l.calOffset)/(l.calGain||1); }
 function buildChanPage(){
   mkForm('common',$('cCommon'),commonGroups(),{title:'All channels'});
   for(const i of CH) mkForm('ch'+i,$('cf'+i),chanGroups(i),{cards:true,sticky:true,save:'Save channel settings',top:`<p class="live1" id="chLive${i}"></p>`,
     confirm:async(F,body)=>{ const c=body.channels&&body.channels[i]; if(c&&c.type&&runActive()) return ask(`Changing the type of ${CFG.channels[i].name} stops the running program. Continue?`,'Change type'); return true; }});
+  if(CFG.monitor) mkForm('ch'+MON,$('cf'+MON),monGroups(),{cards:true,sticky:true,save:'Save monitor settings',top:`<p class="live1" id="chLive${MON}"></p>`});
   chBuilt=true; chNamesKey=CFG.channels[0].name;
 }
 $('pg-channels').addEventListener('click',async e=>{
@@ -2498,7 +2586,7 @@ $('pg-channels').addEventListener('click',async e=>{
   if(d.calt!=null){ const x=$('calBox'+d.calt); x.hidden=!x.hidden; b.classList.toggle('on',!x.hidden); return; }
   if(d.now!=null){ const i=+d.now, v=rawNow(i); if(v==null){ setMsg('calMsg'+i,'No reading right now.',true); return; } $(`cr${d.p}_${i}`).value=Math.round(v*100)/100; setMsg('calMsg'+i,''); return; }
   if(d.calc!=null){ const i=+d.calc, F=FORMS['ch'+i], n=id=>parseFloat($(id+'_'+i).value), r1=n('cr1'), t1=n('ct1'), r2=n('cr2'), t2=n('ct2');
-    const fo=F.fields.find(f=>f.k.endsWith('local.calOffset')), fg=F.fields.find(f=>f.k.endsWith('local.calGain'));
+    const fo=F.fields.find(f=>/(local|monitor)\.calOffset$/.test(f.k)), fg=F.fields.find(f=>/(local|monitor)\.calGain$/.test(f.k));
     if(isNaN(r1)||isNaN(t1)){ setMsg('calMsg'+i,'Enter at least point 1 (raw and true).',true); return; }
     let g=readIn(F,fg); if(isNaN(g)) g=1;
     if(!isNaN(r2)&&!isNaN(t2)){ if(Math.abs(r2-r1)<5){ setMsg('calMsg'+i,'The two raw readings must be at least 5 °C apart.',true); return; } g=(t2-t1)/(r2-r1); }
@@ -2517,6 +2605,9 @@ function autotuneHtml(i){ const c=CFG.channels[i];
   return `<div class="crow"><span class="cl">Test temperature <button type="button" class="ci-i" title="Relay test around this temperature: the heater is switched between more and less power until the oscillation is steady. At least 10 °C above the current temperature and 15 °C below the max. temperature." aria-label="Explain">i</button></span>
     <span class="cc"><label class="ci"><input type="number" id="atSp${i}" step="1" value="${Math.min(200,c.local.maxTemp-15)}" aria-label="Test temperature"><span class="u">°C</span></label></span>
     <small class="ch" hidden>Relay test around this temperature: the heater is switched between more and less power until the oscillation is steady. At least 10 °C above the current temperature and 15 °C below the max. temperature. The proposed values can be accepted or discarded.</small></div>
+    <div class="crow"><span class="cl">Result <button type="button" class="ci-i" title="Slow: no overshoot, but the last few degrees to the setpoint take minutes. Faster: the same gain, a stronger integral part; reaches the setpoint about 2–3 times sooner with a little overshoot. Chosen before the start; it cannot be changed while the autotune runs." aria-label="Explain">i</button></span>
+    <span class="cc atr"><span>Slow, no overshoot</span><input type="checkbox" class="switch acc" id="atFast${i}" data-atfast="${i}" ${c.local.tuneFast?'checked':''} aria-label="Faster autotune result"><span>Faster</span></span>
+    <small class="ch" hidden>Slow: no overshoot, but the last few degrees to the setpoint take minutes. Faster: the same gain, a stronger integral part; reaches the setpoint about 2–3 times sooner with a little overshoot. Chosen before the start; it cannot be changed while the autotune runs.</small></div>
     <div class="crow"><span class="cl">State: <span class="u" id="atSt${i}">idle</span></span><span class="cc"><button class="pri" data-at="start" data-ch="${i}" id="atGo${i}">Start autotune</button><button data-at="stop" data-ch="${i}" id="atStop${i}">Stop</button></span></div>
     <div class="msg" id="atMsg${i}"></div><div id="atRes${i}"></div>`; }
 function extraHtml(i){ const c=CFG.channels[i];
@@ -2549,9 +2640,10 @@ function updChanPage(){
     if(L) L.innerHTML=cc.type==='off'?'Channel off: not polled.':`${c.ok?'':'<span class="msg bad" style="margin:0">'+esc('No answer'+(c.err?': '+c.err:''))+'</span> · '}PV <b>${c.pv!=null?f1(c.pv)+' °C':'–'}</b>${cc.type==='local'&&c.pv!=null?` (raw ${f1(rawNow(i))} °C)`:''} · SP ${c.sp!=null?f1(c.sp)+' °C':'–'} · output ${c.out!=null?Math.round(c.out)+' %':'–'}${c.cold!=null?` · cold junction ${f1(c.cold)} °C`:''}${c.mode?' · '+esc(c.mode):''}${c.fault?` · <span class="msg bad" style="margin:0">Fault: ${esc(c.fault)}</span>`:''}`;
     if(cc.type==='local'&&$('atRes'+i)){ const a=c.autotune, busy=a&&a.state==='running', blocked=runActive()&&c.inProgram;
       $('atGo'+i).disabled=busy||blocked||!!c.fault; $('atStop'+i).disabled=!busy;
+      const fs=$('atFast'+i); if(fs){ fs.disabled=busy; if(!fs.dataset.busy) fs.checked=busy?!!a.fast:!!cc.local.tuneFast; }  // (while it runs: the rule of the run)
       let h='';
       if(blocked&&!busy) h='<p class="hint">Not available while the program uses this channel.</p>';
-      if(a){ if(a.state==='running') h=`<p>Running at ${f1(a.sp)} °C: cycle ${a.cycle}, ${fmt(a.elapsed)} — ${esc(a.msg)}</p>`;
+      if(a){ if(a.state==='running') h=`<p>Running at ${f1(a.sp)} °C (${a.fast?'faster':'slow, no overshoot'}): cycle ${a.cycle}, ${fmt(a.elapsed)} — ${esc(a.msg)}</p>`;
         else if(a.state==='done'){ const l=cc.local; h=`<p>${esc(a.msg)} (Ku ${(+a.ku).toFixed(2)}, Pu ${Math.round(a.pu)} s)</p><table class="t"><thead><tr><th></th><th>Kp</th><th>Ki</th><th>Kd</th></tr></thead><tbody>
           <tr><td>Proposed</td><td class="n">${(+a.kp).toFixed(3)}</td><td class="n">${(+a.ki).toFixed(5)}</td><td class="n">${(+a.kd).toFixed(2)}</td></tr><tr><td>Current</td><td class="n">${(+l.kp).toFixed(3)}</td><td class="n">${(+l.ki).toFixed(5)}</td><td class="n">${(+l.kd).toFixed(2)}</td></tr></tbody></table>
           <div class="row"><button class="pri" data-at="accept" data-ch="${i}">Accept</button><button data-at="discard" data-ch="${i}">Discard</button></div>`; }
@@ -2559,6 +2651,10 @@ function updChanPage(){
       if($('atRes'+i).dataset.h!==h){ $('atRes'+i).innerHTML=h; $('atRes'+i).dataset.h=h; }
       $('atSt'+i).textContent=a?({running:'running',done:'done — review the values below',failed:'failed'}[a.state]||'idle'):blocked?'not available during the run':'idle'; }
   }
+  const ML=$('chLive'+MON);
+  if(ML&&CFG.monitor){ const m=live.mon;
+    ML.innerHTML=!CFG.monitor.on?'Monitor channel off: not read.':!m?'Starting…':m.pv!=null?`PV <b>${f1(m.pv)} °C</b>${m.raw!=null?` (raw ${f1(m.raw)} °C)`:''}${m.cold!=null?` · cold junction ${f1(m.cold)} °C`:''} · shown and logged only`
+      :`<span class="msg bad" style="margin:0">No reading${m.err?': '+esc(m.err):''}</span>`; }
 }
 
 /* ---------- System page ---------- */
@@ -3000,7 +3096,7 @@ function browserTz(){ let zone=''; try{ zone=Intl.DateTimeFormat().resolvedOptio
 async function poll(){
   if(polling) return; polling=true; clearTimeout(pollTimer);
   try{
-    live=await api('/api/live'+rawLiveQuery()); rawFromLive(live);
+    live=await api('/api/live'+rawLiveQuery()); rawFromLive(live); monLegend();
     $('linkDot').className='dot ok'; setTxt($('linkTxt'),DEMO?'Demo · simulated device':SER.on?'Connected over USB':'Device connected');
     toShell({state:'ok'});
     if(live.time===0&&!clockSent){ clockSent=true; api('/api/time',{t:Math.floor(Date.now()/1000)}).catch(()=>{}); }  // (for the log times)

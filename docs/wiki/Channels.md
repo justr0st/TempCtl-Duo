@@ -61,8 +61,15 @@ The autotune measures the heater and proposes PID values:
 3. When it is done the web page opens a dialog with the **current and the new values**: *Accept* (saved),
    *Edit…* (change them first), *Dismiss* or *Later*. Touch: *Take over* or *Discard* in the channel's PID part.
 
-The rule (Tyreus–Luyben) favours no overshoot. If a channel still overshoots, lower Kp a little; if it is slow
-to reach the setpoint, raise Ki a little.
+**Result: slow or faster** (switch in the autotune section; touch: *Autotune: faster*; serial
+`set b.local.tuneFast=on`). Chosen before the start, greyed out while the autotune runs:
+
+| | Rule | Behaviour |
+|---|---|---|
+| **Slow, no overshoot** (default) | Tyreus–Luyben: Kp = Ku / 2.2, Ti = 2.2 Pu, Td = Pu / 6.3 | no overshoot, but the last few degrees to the setpoint can take minutes |
+| **Faster** | the same Kp and Td, Ti = 0.7 Pu | the integral part is three times stronger: the setpoint is reached about 2–3 times sooner, with a little overshoot (a few °C from cold) |
+
+If a channel still overshoots, lower Kp a little; if it is slow to reach the setpoint, raise Ki a little.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/web/dashboard-autotune-dark.webp"><img src="img/web/dashboard-autotune-light.webp" alt="Autotune result" width="900"></picture>
 
@@ -74,6 +81,21 @@ to reach the setpoint, raise Ki a little.
 
 Each local channel has the runaway checks, *heating while off*, *reading frozen* and *converter too hot*
 ([Safety](Safety.md)). Leave them on.
+
+## Monitor channel (S3)
+
+A third thermocouple that is only **measured**: no output, no setpoint, no fault and no alarm. Fit a third
+MAX31855 (or MAX6675) on the shared SCK / SO with its CS on **GPIO 3**
+([Hardware: ESP32-S3](Hardware-S3.md#thermocouples)) and switch it on in its own tab, the third one on
+*Channels* (accent colour; touch screen: *Monitor*). Settings: on / off, name, converter, read interval
+(default 1 s), median filter and calibration (with *Two-point…* on the web page).
+
+Where it shows: the Dashboard chart draws it as a line in the accent colour with its name and current reading in
+the legend (no channel card); the touch screen shows the reading at the bottom right of the chart. The CSV
+exports (`monitor_pv`, `monitor_min`, `monitor_max`), the last run's CSV and the SD run logs (`monitor_pv`)
+include it; the serial `status` shows it as `mon`. The CYD has no free pin for it.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="img/web/channels-monitor-dark.webp"><img src="img/web/channels-monitor-light.webp" alt="Channels page, monitor channel tab" width="900"></picture>
 
 ## Modbus channels (beta)
 

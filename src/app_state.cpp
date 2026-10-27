@@ -189,7 +189,9 @@ static void histResetLive() {
 //   w0 = PV bottom | PV top << 16, w1 = SP bottom | SP top << 16  (int16 0.1 degC, INT16_MIN = none)
 //   w2 = one byte each: how far the lowest / highest reading lay below / above PV, bottom then top
 //        (0.1 degC up to 19.9 degC, then 2 degC steps up to 130 degC, rounded outwards)
-static constexpr int SLOT_W = 3;
+// With the monitor channel (HAS_MONITOR) a 4th word: its PV | lowest byte << 16 | highest byte << 24
+// (it has no setpoint).
+static constexpr int SLOT_W = 3 + HAS_MONITOR;
 static_assert(NUM_CHANNELS == 2, "the live history packs two channels per word");
 
 static int16_t t16(float v) {
@@ -206,28 +208,32 @@ static uint8_t dEnc(int32_t d) {
 static int32_t dDec(uint8_t c) { return c < 200 ? c : 200 + (c - 200) * 20; }
 
 struct LiveSlot {
-  int16_t pv[NUM_CHANNELS], sp[NUM_CHANNELS];
-  int32_t lo[NUM_CHANNELS], hi[NUM_CHANNELS];  // tenths; INT32_MIN with pv
+  int16_t pv[HIST_CH], sp[HIST_CH];
+  int32_t lo[HIST_CH], hi[HIST_CH];  // tenths; INT32_MIN with pv
 };
 
+// arrays of HIST_CH (the channels, then the monitor; its sp is ignored)
 static void livePut(const float* pv, const bool* ok, const float* sp, const float* lo, const float* hi) {
   if (!gHist->liveRing) return;
-  int16_t p[NUM_CHANNELS], q[NUM_CHANNELS];
-  uint32_t d = 0;
-  for (int c = 0; c < NUM_CHANNELS; ++c) {
+  int16_t p[HIST_CH], q[NUM_CHANNELS];
+  uint8_t dl[HIST_CH] = {}, dh[HIST_CH] = {};
+  for (int c = 0; c < HIST_CH; ++c) {
     p[c] = ok[c] ? t16(pv[c]) : (int16_t)INT16_MIN;
-    q[c] = t16(sp[c]);
+    if (c < NUM_CHANNELS) q[c] = t16(sp[c]);
     if (p[c] != INT16_MIN) {
       const int32_t l = isnan(lo[c]) ? p[c] : (int32_t)floorf(lo[c] * 10.0f);
       const int32_t h = isnan(hi[c]) ? p[c] : (int32_t)ceilf(hi[c] * 10.0f);
-      d |= (uint32_t)dEnc(p[c] - l) << (16 * c);
-      d |= (uint32_t)dEnc(h - p[c]) << (16 * c + 8);
+      dl[c] = dEnc(p[c] - l);
+      dh[c] = dEnc(h - p[c]);
     }
   }
   uint32_t* w = gHist->liveRing + (gHist->liveTotal % gHist->liveCap) * SLOT_W;
   w[0] = (uint16_t)p[0] | (uint32_t)(uint16_t)p[1] << 16;
   w[1] = (uint16_t)q[0] | (uint32_t)(uint16_t)q[1] << 16;
-  w[2] = d;
+  w[2] = dl[0] | (uint32_t)dh[0] << 8 | (uint32_t)dl[1] << 16 | (uint32_t)dh[1] << 24;
+#if HAS_MONITOR
+  w[3] = (uint16_t)p[CH_MON] | (uint32_t)dl[CH_MON] << 16 | (uint32_t)dh[CH_MON] << 24;
+#endif
   ++gHist->liveTotal;
 }
 
@@ -245,6 +251,18 @@ static void liveGet(uint32_t s, LiveSlot& o) {
     o.lo[c] = p - dDec((uint8_t)(d >> (16 * c)));
     o.hi[c] = p + dDec((uint8_t)(d >> (16 * c + 8)));
   }
+#if HAS_MONITOR
+  const uint32_t m = w[3];
+  const int16_t p = (int16_t)(uint16_t)m;
+  o.pv[CH_MON] = p;
+  o.sp[CH_MON] = INT16_MIN;
+  if (p == INT16_MIN) {
+    o.lo[CH_MON] = o.hi[CH_MON] = INT32_MIN;
+  } else {
+    o.lo[CH_MON] = p - dDec((uint8_t)(m >> 16));
+    o.hi[CH_MON] = p + dDec((uint8_t)(m >> 24));
+  }
+#endif
 }
 
 static uint32_t liveOldest() { return gHist->liveTotal > gHist->liveCap ? gHist->liveTotal - gHist->liveCap : 0; }
@@ -275,7 +293,7 @@ static uint32_t liveSpan() { return liveMinEff() * 60; }
 // (INT32_MIN = none). Under gLock.
 static void liveBin(uint32_t k, int64_t b, int32_t* pv, int32_t* sp, int32_t* lo, int32_t* hi) {
   const uint32_t tot = gHist->liveTotal, oldest = liveOldest();
-  for (int c = 0; c < NUM_CHANNELS; ++c) pv[c] = sp[c] = lo[c] = hi[c] = INT32_MIN;
+  for (int c = 0; c < HIST_CH; ++c) pv[c] = sp[c] = lo[c] = hi[c] = INT32_MIN;
   if (!tot || b < 0) return;
   int64_t s0 = b * k, s1 = s0 + k;
   if (s1 > tot) s1 = tot;
@@ -283,7 +301,7 @@ static void liveBin(uint32_t k, int64_t b, int32_t* pv, int32_t* sp, int32_t* lo
   LiveSlot x;
   for (int64_t sl = s0; sl < s1; ++sl) {
     liveGet((uint32_t)sl, x);
-    for (int c = 0; c < NUM_CHANNELS; ++c) {
+    for (int c = 0; c < HIST_CH; ++c) {
       if (x.sp[c] != INT16_MIN) sp[c] = x.sp[c];
       if (x.pv[c] == INT16_MIN) continue;
       pv[c] = x.pv[c];
@@ -301,7 +319,7 @@ template <typename F>
 static void liveBins(uint32_t k, F fn) {
   const int64_t last = liveLastBin(k);
   for (int j = 0; j < CHART_N; ++j) {
-    int32_t pv[NUM_CHANNELS], sp[NUM_CHANNELS], lo[NUM_CHANNELS], hi[NUM_CHANNELS];
+    int32_t pv[HIST_CH], sp[HIST_CH], lo[HIST_CH], hi[HIST_CH];
     liveBin(k, last - (CHART_N - 1 - j), pv, sp, lo, hi);
     fn(j, pv, sp, lo, hi);
   }
@@ -321,7 +339,7 @@ static uint32_t liveShift(uint32_t k) {
 // start the rows move left; slots dropped from the ring's old end change the oldest bins. So only those
 // bins are computed again (a 24 h view would otherwise read 86 400 slots every second).
 static void liveViewSet(int j, const int32_t* pv, const int32_t* sp, const int32_t* lo, const int32_t* hi) {
-  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+  for (int ch = 0; ch < HIST_CH; ++ch) {
     gHist->livePv[ch][j].v = pv[ch];
     gHist->liveSp[ch][j].v = sp[ch];
     gHist->liveLo[ch][j].v = lo[ch];
@@ -330,7 +348,7 @@ static void liveViewSet(int j, const int32_t* pv, const int32_t* sp, const int32
 }
 
 static void liveViewBin(uint32_t k, int64_t last, int j) {
-  int32_t pv[NUM_CHANNELS], sp[NUM_CHANNELS], lo[NUM_CHANNELS], hi[NUM_CHANNELS];
+  int32_t pv[HIST_CH], sp[HIST_CH], lo[HIST_CH], hi[HIST_CH];
   liveBin(k, last - (CHART_N - 1 - j), pv, sp, lo, hi);
   liveViewSet(j, pv, sp, lo, hi);
 }
@@ -349,7 +367,7 @@ static void liveViewUpdate(uint32_t k) {
     if (m > 0) {
       TenthRow* rows[4] = {gHist->livePv, gHist->liveSp, gHist->liveLo, gHist->liveHi};
       for (TenthRow* r : rows)
-        for (int ch = 0; ch < NUM_CHANNELS; ++ch) memmove(&r[ch][0], &r[ch][m], (CHART_N - m) * sizeof(Tenth));
+        for (int ch = 0; ch < HIST_CH; ++ch) memmove(&r[ch][0], &r[ch][m], (CHART_N - m) * sizeof(Tenth));
     }
     // the bin that was the newest (it may have got more slots) and the new ones
     for (int j = CHART_N - 1 - m; j < CHART_N; ++j) liveViewBin(k, last, j);
@@ -371,8 +389,8 @@ static void liveRows(uint32_t k, F fn) {
 #ifdef BOARD_HAS_PSRAM
   liveViewUpdate(k);
   for (int j = 0; j < CHART_N; ++j) {
-    int32_t pv[NUM_CHANNELS], sp[NUM_CHANNELS], lo[NUM_CHANNELS], hi[NUM_CHANNELS];
-    for (int c = 0; c < NUM_CHANNELS; ++c) {
+    int32_t pv[HIST_CH], sp[HIST_CH], lo[HIST_CH], hi[HIST_CH];
+    for (int c = 0; c < HIST_CH; ++c) {
       pv[c] = gHist->livePv[c][j].v;
       sp[c] = gHist->liveSp[c][j].v;
       lo[c] = gHist->liveLo[c][j].v;
@@ -401,8 +419,8 @@ size_t liveCsv(uint32_t& from, char* buf, size_t n, uint8_t pvMask, uint8_t spMa
   while (from < tot) {
     LiveSlot x;
     liveGet(from, x);
-    char f[8][14];
-    for (int c = 0; c < NUM_CHANNELS; ++c) {
+    char f[4 * HIST_CH][14];
+    for (int c = 0; c < HIST_CH; ++c) {
       num(f[c * 4], sizeof(f[0]), x.pv[c]);
       num(f[c * 4 + 1], sizeof(f[0]), x.lo[c]);
       num(f[c * 4 + 2], sizeof(f[0]), x.hi[c]);
@@ -411,15 +429,15 @@ size_t liveCsv(uint32_t& from, char* buf, size_t n, uint8_t pvMask, uint8_t spMa
     // time: seconds before the newest slot, and uptime (as in the event log); then the chosen columns
     // (pv, min, max / sp per channel). Rows without any of them are left out.
     const long age = (long)(tot - 1 - from) * LIVE_SAMPLE_SEC;
-    char line[112];
+    char line[160];
     int w = snprintf(line, sizeof(line), "%ld,%ld", -age, (long)nowSec - age);
     bool any = false;
-    for (int c = 0; c < NUM_CHANNELS; ++c) {
+    for (int c = 0; c < HIST_CH; ++c) {
       if (pvMask & (1 << c)) {
         w += snprintf(line + w, sizeof(line) - w, ",%s,%s,%s", f[c * 4], f[c * 4 + 1], f[c * 4 + 2]);
         any |= f[c * 4][0] != 0;
       }
-      if (spMask & (1 << c)) {
+      if (c < NUM_CHANNELS && (spMask & (1 << c))) {
         w += snprintf(line + w, sizeof(line) - w, ",%s", f[c * 4 + 3]);
         any |= f[c * 4 + 3][0] != 0;
       }
@@ -444,16 +462,16 @@ uint32_t iramPureFree() {
 }
 
 // every PV reading for the web chart (raw_hist.h); the run's time anchors
-static RawRing rawRing[NUM_CHANNELS];
-static uint32_t rawLastMs[NUM_CHANNELS];
-static bool rawGap[NUM_CHANNELS];
+static RawRing rawRing[HIST_CH];
+static uint32_t rawLastMs[HIST_CH];
+static bool rawGap[HIST_CH];
 static RunAnchors runAnch;
 
 uint32_t rawCap() { return rawRing[0].cap; }
 void rawPlan(const uint32_t* after, uint32_t winMs, uint32_t maxN, RawPlan& p) {
   Guard g;
   p.nowMs = millis();
-  for (int c = 0; c < NUM_CHANNELS; ++c) {
+  for (int c = 0; c < HIST_CH; ++c) {
     const RawRing& r = rawRing[c];
     uint32_t a = after[c];
     if (winMs && (int32_t)(p.nowMs - winMs - a) > 0) a = p.nowMs - winMs;  // not older than the window
@@ -469,13 +487,13 @@ uint32_t rawCopy(int ch, uint32_t k, uint32_t n, uint8_t* out) {
 // each cycle (under gLock): a channel's new reading (its poll succeeded since the last one: two Modbus
 // controllers are read in turns), or one gap entry when it has no valid reading
 static void rawRecord(const float* pv, const bool* pvOk, const uint32_t* lastOk) {
-  for (int c = 0; c < NUM_CHANNELS; ++c) {
+  for (int c = 0; c < HIST_CH; ++c) {
     if (pvOk[c]) {
       if (lastOk[c] == rawLastMs[c] && !rawGap[c]) continue;
       rawLastMs[c] = lastOk[c];
       rawGap[c] = false;
       rawRing[c].put(lastOk[c], t16(pv[c]));
-    } else if (!rawGap[c] && slots[c].active->type() != CH_OFF) {
+    } else if (!rawGap[c] && (c < NUM_CHANNELS ? slots[c].active->type() != CH_OFF : gLive.mon.on)) {
       rawGap[c] = true;
       rawRing[c].put(millis(), RAW_NONE);
     }
@@ -494,6 +512,11 @@ static void histStartRun(float total) {
     fillNan(gHist->runHi[ch], CHART_N);
     fillNan(gHist->runPlan[ch], CHART_N);
     memset(gHist->runSt[ch], ' ', CHART_N);
+  }
+  for (int ch = NUM_CHANNELS; ch < HIST_CH; ++ch) {  // the monitor: PV only
+    fillNan(gHist->runPv[ch], CHART_N);
+    fillNan(gHist->runLo[ch], CHART_N);
+    fillNan(gHist->runHi[ch], CHART_N);
   }
   gHist->runTotal = total;
   gHist->runEvN = 0;
@@ -522,7 +545,7 @@ static void histCompress() {
     memset(st + CHART_N / 2, ' ', CHART_N / 2);
   }
   gHist->runStLast = (int16_t)(gHist->runStLast >= 0 ? gHist->runStLast / 2 : -1);
-  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+  for (int ch = 0; ch < HIST_CH; ++ch) {
     half(gHist->runPv[ch], 1);
     half(gHist->runSp[ch], 1);
     half(gHist->runLo[ch], 2);
@@ -843,11 +866,11 @@ static void jNum(String& o, float v, const char* fmt = "%.1f") {
 
 // "dlo":[[..],[..]] / "dhi": how far the lowest / highest reading of each slot lies below / above
 // "pv" (the last reading), in 0.1 degC; 0 when equal or unknown (keeps the answer small)
-static void jDeltas(String& o, const char* key, TenthRow* pv, TenthRow* ext, bool below) {
+static void jDeltas(String& o, const char* key, TenthRow* pv, TenthRow* ext, bool below, int rows) {
   o += ",\"";
   o += key;
   o += "\":[";
-  for (int c = 0; c < NUM_CHANNELS; ++c) {
+  for (int c = 0; c < rows; ++c) {
     if (c) o += ',';
     o += '[';
     for (int i = 0; i < CHART_N; ++i) {
@@ -943,15 +966,27 @@ static void fcEv(const PlanEv& e, void* u) {
   jEv(k.ev, e);
 }
 
+// rows of PV in the chart answers: the channels, plus the monitor while it is on
+static int monRows() { return HAS_MONITOR && gSettings.mon.on ? HIST_CH : NUM_CHANNELS; }
+static void jMon(String& o) {  // "mon": the monitor channel's name while it is on
+  if (monRows() == NUM_CHANNELS) return;
+  o += ",\"mon\":\"";
+  for (const char* p = gSettings.mon.name; *p; ++p) {
+    if (*p == '"' || *p == '\\') o += '\\';
+    o += *p;
+  }
+  o += '"';
+}
+
 bool chartJson(String& o, bool run) {
   o.reserve(run ? 11000 : 8500);
   if (!run) {
     // the rows are taken under gLock (one pass), the text is made after it
     struct Rows {
-      int16_t pv[NUM_CHANNELS][CHART_N], sp[NUM_CHANNELS][CHART_N];
-      int16_t dlo[NUM_CHANNELS][CHART_N], dhi[NUM_CHANNELS][CHART_N];  // see jDeltas
+      int16_t pv[HIST_CH][CHART_N], sp[HIST_CH][CHART_N];
+      int16_t dlo[HIST_CH][CHART_N], dhi[HIST_CH][CHART_N];  // see jDeltas
     };
-    Rows* r = (Rows*)malloc(sizeof(Rows));  // 4.8 kB
+    Rows* r = (Rows*)malloc(sizeof(Rows));  // 4.8 kB (with the monitor 6.6 kB)
     if (!r) {
       o = "";
       return false;
@@ -967,7 +1002,7 @@ bool chartJson(String& o, bool run) {
       cap = liveHistSec();
       ms = millis();
       liveRows(k, [&](int j, const int32_t* pv, const int32_t* sp, const int32_t* lo, const int32_t* hi) {
-        for (int c = 0; c < NUM_CHANNELS; ++c) {
+        for (int c = 0; c < HIST_CH; ++c) {
           r->pv[c][j] = i16(pv[c]);
           r->sp[c][j] = i16(sp[c]);
           const bool no = pv[c] == INT32_MIN;
@@ -996,9 +1031,10 @@ bool chartJson(String& o, bool run) {
     jUns(o, ms);
     o += ",\"raw\":";
     jUns(o, (unsigned long)rawCap());
-    auto rows = [&](const char* key, int16_t (*a)[CHART_N], bool tenths) {
+    jMon(o);
+    auto rows = [&](const char* key, int16_t (*a)[CHART_N], bool tenths, int nr) {
       o += key;
-      for (int c = 0; c < NUM_CHANNELS; ++c) {
+      for (int c = 0; c < nr; ++c) {
         o += c ? ",[" : "[";
         for (int i = 0; i < CHART_N; ++i) {
           if (i) o += ',';
@@ -1009,11 +1045,12 @@ bool chartJson(String& o, bool run) {
       }
       o += ']';
     };
-    rows(",\"pv\":[", r->pv, true);
-    rows(",\"sp\":[", r->sp, true);
+    const int pvRows = monRows();
+    rows(",\"pv\":[", r->pv, true, pvRows);
+    rows(",\"sp\":[", r->sp, true, NUM_CHANNELS);
     // "dlo" / "dhi" as for the run (see jDeltas)
-    rows(",\"dlo\":[", r->dlo, false);
-    rows(",\"dhi\":[", r->dhi, false);
+    rows(",\"dlo\":[", r->dlo, false, pvRows);
+    rows(",\"dhi\":[", r->dhi, false, pvRows);
     o += '}';
     free(r);
     return true;
@@ -1073,8 +1110,11 @@ bool chartJson(String& o, bool run) {
   o += ']';
   o += ",\"rem\":";
   jNum(o, rem);
+  // "pv", "dlo", "dhi": a third row for the monitor channel while it is on ("mon" its name)
+  const int pvRows = monRows();
+  jMon(o);
   o += ",\"pv\":[";
-  for (int c = 0; c < NUM_CHANNELS; ++c) {
+  for (int c = 0; c < pvRows; ++c) {
     if (c) o += ',';
     jArr(o, gHist->runPv[c], CHART_N);
   }
@@ -1084,8 +1124,8 @@ bool chartJson(String& o, bool run) {
     jArr(o, gHist->runSp[c], CHART_N);
   }
   o += ']';
-  jDeltas(o, "dlo", gHist->runPv, gHist->runLo, true);
-  jDeltas(o, "dhi", gHist->runPv, gHist->runHi, false);
+  jDeltas(o, "dlo", gHist->runPv, gHist->runLo, true, pvRows);
+  jDeltas(o, "dhi", gHist->runPv, gHist->runHi, false, pvRows);
   o += ",\"st\":[";
   for (int c = 0; c < NUM_CHANNELS; ++c) {
     if (c) o += ',';
@@ -1210,6 +1250,7 @@ static void sdRow(const float* pv, const bool* pvOk, const float* spNow, const C
     const ChState cs = eng.chState(i);
     r.state[i] = cs != ChState::None ? chStateName(cs) : man[i].on ? "manual" : C.type == CH_OFF ? "" : "-";
   }
+  r.mon = HAS_MONITOR && pvOk[HIST_CH - 1] && HIST_CH > NUM_CHANNELS ? pv[HIST_CH - 1] : NAN;
   sdlogRow(r);
 }
 
@@ -1509,6 +1550,13 @@ static void applySettings(const Settings& prev, bool first) {
   localCtrlRelayEnable(s.relay != 0);
   modbusBusBegin(bus, s);
   eng.setBand(s.bottomBand);
+  localCtrlMonConfigure(HAS_MONITOR && s.mon.on, s.mon);
+  {
+    Guard g;
+    gLive.mon.on = HAS_MONITOR && s.mon.on;
+    strlcpy(gLive.mon.name, s.mon.name, sizeof(gLive.mon.name));
+    if (!gLive.mon.on) gLive.mon.valid = false;
+  }
   for (int i = 0; i < NUM_CHANNELS; ++i) {
     const bool typeChanged = first || prev.ch[i].type != s.ch[i].type;
     if (typeChanged && !first && inRun(i)) {
@@ -1666,7 +1714,8 @@ static void handleCmd(const Cmd& c) {
       m.on = m.pending = m.offPending = false;
       char err[96];
       if (localCtrlTuneStart(c.arg, c.value, err, sizeof(err))) {
-        say(LK_EVENT, "%s: autotune started at %.0f C", name, c.value);
+        say(LK_EVENT, "%s: autotune started at %.0f C (%s)", name, c.value,
+            s.ch[c.arg].loc.tuneFast ? "faster" : "slow, no overshoot");
       } else {
         say(LK_WARN, "%s: autotune not started: %s", name, err);
       }
@@ -2033,11 +2082,27 @@ static void cycle(float dt) {
   pollChannels();
   crumb(CR_CONTROL, C_CYCLE);
 
-  float pv[NUM_CHANNELS], spEff[NUM_CHANNELS];
-  bool pvOk[NUM_CHANNELS], spEffOk[NUM_CHANNELS], commOk[NUM_CHANNELS];
-  uint32_t lastOk[NUM_CHANNELS];
+  // (the first NUM_CHANNELS: the channels; the history arrays also have the monitor channel, CH_MON)
+  float pv[HIST_CH], spEff[NUM_CHANNELS];
+  bool pvOk[HIST_CH], spEffOk[NUM_CHANNELS], commOk[NUM_CHANNELS];
+  uint32_t lastOk[HIST_CH];
+#if HAS_MONITOR
+  MonStatus mst;
+  localCtrlMonGet(mst);
+  pv[CH_MON] = mst.pv;
+  pvOk[CH_MON] = mst.enabled && mst.fresh && !isnan(mst.pv);
+  lastOk[CH_MON] = mst.lastGoodMs;
+#endif
   {
     Guard g;
+#if HAS_MONITOR
+    MonLive& ml = gLive.mon;
+    ml.valid = pvOk[CH_MON];
+    ml.pv = mst.pv;
+    ml.rawC = mst.rawC;
+    ml.coldC = mst.coldC;
+    ml.tcFault = mst.tcFault;
+#endif
     for (int i = 0; i < NUM_CHANNELS; ++i) {
       const ChannelLive& L = gLive.ch[i];
       pv[i] = L.pv; pvOk[i] = L.pvValid;
@@ -2125,7 +2190,8 @@ static void cycle(float dt) {
 
   // history + publish
   static uint32_t lastLive = 0;
-  float spNow[NUM_CHANNELS];
+  float spNow[HIST_CH];
+  for (int i = NUM_CHANNELS; i < HIST_CH; ++i) spNow[i] = NAN;
   ChOut out[NUM_CHANNELS];
   for (int i = 0; i < NUM_CHANNELS; ++i) {
     out[i] = eng.out(i);
@@ -2143,9 +2209,15 @@ static void cycle(float dt) {
   gEngSnap = eng;
   // every reading counts for the lowest / highest value of its chart slot (the chart shows the
   // spread, so short peaks and dips between two slots are not lost)
-  static float accLo[NUM_CHANNELS] = {NAN, NAN}, accHi[NUM_CHANNELS] = {NAN, NAN};
+  static float accLo[HIST_CH], accHi[HIST_CH];
+  static bool accInit = false;
+  if (!accInit) {
+    accInit = true;
+    fillNan(accLo, HIST_CH);
+    fillNan(accHi, HIST_CH);
+  }
   rawRecord(pv, pvOk, lastOk);
-  for (int i = 0; i < NUM_CHANNELS; ++i)
+  for (int i = 0; i < HIST_CH; ++i)
     if (pvOk[i]) {
       accLo[i] = isnan(accLo[i]) ? pv[i] : fminf(accLo[i], pv[i]);
       accHi[i] = isnan(accHi[i]) ? pv[i] : fmaxf(accHi[i], pv[i]);
@@ -2155,7 +2227,7 @@ static void cycle(float dt) {
     int idx = (int)(eng.elapsed() / gHist->runBin);
     if (idx >= CHART_N) idx = CHART_N - 1;
     if (idx < 0) idx = 0;
-    for (int i = 0; i < NUM_CHANNELS; ++i) {
+    for (int i = 0; i < HIST_CH; ++i) {
       gHist->runPv[i][idx] = pvOk[i] ? pv[i] : NAN;
       if (pvOk[i]) {
         const float lo = gHist->runLo[i][idx], hi = gHist->runHi[i][idx];
@@ -2163,6 +2235,7 @@ static void cycle(float dt) {
         gHist->runLo[i][idx] = fresh || isnan(lo) ? pv[i] : fminf(lo, pv[i]);
         gHist->runHi[i][idx] = fresh || isnan(hi) ? pv[i] : fmaxf(hi, pv[i]);
       }
+      if (i >= NUM_CHANNELS) continue;  // (the monitor: PV only)
       gHist->runSp[i][idx] = spNow[i];
       const ChState cs = eng.chState(i);
       const char code = cs == ChState::None ? (man[i].on ? 'm' : '-') : CH_STATE_CODE[(int)cs];
@@ -2179,13 +2252,14 @@ static void cycle(float dt) {
   if (n) {
     lastLive = (n > 60) ? millis() : lastLive + n * slotMs;
     if (n > 60) {
-      const bool none[NUM_CHANNELS] = {};
-      const float nan2[NUM_CHANNELS] = {NAN, NAN};
+      const bool none[HIST_CH] = {};
+      float nan2[HIST_CH];
+      fillNan(nan2, HIST_CH);
       for (uint32_t i = 0; i + 1 < n && i < gHist->liveCap; ++i) livePut(nan2, none, nan2, nan2, nan2);
       n = 1;
     }
     for (uint32_t i = 0; i < n; ++i) livePut(pv, pvOk, spNow, accLo, accHi);
-    for (int c = 0; c < NUM_CHANNELS; ++c) accLo[c] = accHi[c] = NAN;
+    for (int c = 0; c < HIST_CH; ++c) accLo[c] = accHi[c] = NAN;
   }
   // run
   gLive.state = st;
@@ -2372,7 +2446,7 @@ void appInit() {
   // large buffers on the heap (the static DRAM segment is almost full)
   gHist = (History*)calloc(1, sizeof(History));
   runProg = (DuoProgram*)calloc(1, sizeof(DuoProgram));
-  // chart values: 6 x 2 x CHART_N words. No PSRAM (CYD): in the IRAM heap, which the rest of the
+  // chart values: 6 x HIST_CH x CHART_N words (rows per channel, the monitor's too: HIST_CH). No PSRAM (CYD): in the IRAM heap, which the rest of the
   // firmware can't use (32-bit access only); DRAM is what runs short there (Wi-Fi, LVGL, web)
   // (with PSRAM 4 more for the live view, see liveViewUpdate())
 #ifdef BOARD_HAS_PSRAM
@@ -2380,7 +2454,7 @@ void appInit() {
 #else
   constexpr int HV_ROWS = 6;
 #endif
-  const size_t hvBytes = sizeof(TenthRow) * NUM_CHANNELS * HV_ROWS;
+  const size_t hvBytes = sizeof(TenthRow) * HIST_CH * HV_ROWS;
 #ifdef BOARD_HAS_PSRAM
   TenthRow* hv = (TenthRow*)malloc(hvBytes);
 #else
@@ -2389,18 +2463,18 @@ void appInit() {
 #endif
   if (gHist && hv) {
     gHist->runPv = hv;
-    gHist->runSp = hv + NUM_CHANNELS;
-    gHist->runPlan = hv + 2 * NUM_CHANNELS;
-    gHist->plan = hv + 3 * NUM_CHANNELS;
-    gHist->runLo = hv + 4 * NUM_CHANNELS;
-    gHist->runHi = hv + 5 * NUM_CHANNELS;
+    gHist->runSp = hv + HIST_CH;
+    gHist->runPlan = hv + 2 * HIST_CH;
+    gHist->plan = hv + 3 * HIST_CH;
+    gHist->runLo = hv + 4 * HIST_CH;
+    gHist->runHi = hv + 5 * HIST_CH;
 #ifdef BOARD_HAS_PSRAM
-    gHist->livePv = hv + 6 * NUM_CHANNELS;
-    gHist->liveSp = hv + 7 * NUM_CHANNELS;
-    gHist->liveLo = hv + 8 * NUM_CHANNELS;
-    gHist->liveHi = hv + 9 * NUM_CHANNELS;
+    gHist->livePv = hv + 6 * HIST_CH;
+    gHist->liveSp = hv + 7 * HIST_CH;
+    gHist->liveLo = hv + 8 * HIST_CH;
+    gHist->liveHi = hv + 9 * HIST_CH;
 #endif
-    for (int r = 0; r < HV_ROWS * NUM_CHANNELS; ++r)
+    for (int r = 0; r < HV_ROWS * HIST_CH; ++r)
       for (int i = 0; i < CHART_N; ++i) hv[r][i] = NAN;
   }
   // every PV reading (raw_hist.h): S3 RAW_HIST_BYTES of PSRAM; CYD RAW_HIST_CYD readings per channel in
@@ -2413,13 +2487,15 @@ void appInit() {
     const uint32_t rc = RAW_HIST_CYD;
     const uint32_t caps = MALLOC_CAP_EXEC | MALLOC_CAP_32BIT | MALLOC_CAP_INTERNAL;
 #endif
-    for (int c = 0; c < NUM_CHANNELS; ++c) {
+    for (int c = 0; c < HIST_CH; ++c) {
       rawRing[c].w = (uint32_t*)heap_caps_malloc(rc * 8, caps);
       rawRing[c].cap = rawRing[c].w ? rc : 0;
     }
     if (!rawRing[0].cap || !rawRing[1].cap) rawRing[0].cap = rawRing[1].cap = 0;  // both or none
+    for (int c = NUM_CHANNELS; c < HIST_CH; ++c)  // the monitor's: the same size (or none: its chart line uses the slots)
+      if (!rawRing[0].cap) rawRing[c].cap = 0;
     LogSerial.printf("[hist] every reading: %lu per channel (%lu bytes)\n", (unsigned long)rawRing[0].cap,
-                     (unsigned long)(rawRing[0].cap * 8 * NUM_CHANNELS));
+                     (unsigned long)(rawRing[0].cap * 8 * HIST_CH));
   }
   // live history ring (see config.h)
   if (gHist) {

@@ -14,9 +14,23 @@
 // The channel the run engine's Sequence and the old /api/status flat fields refer to (the bottom).
 // Both channels are in LiveData::ch, the run in the run fields.
 constexpr int ENGINE_CH = CH_BOTTOM;
+// Chart history rows: the channels, plus the monitor channel (a third thermocouple, shown and logged only)
+// on boards that have it (HAS_MONITOR); CH_MON is its index there.
+constexpr int HIST_CH = NUM_CHANNELS + HAS_MONITOR;
+constexpr int CH_MON = NUM_CHANNELS;
+
+// Published values of the monitor channel (LiveData::mon)
+struct MonLive {
+  bool on;                  // switched on in the settings (and the board has it)
+  char name[CH_NAME_LEN];
+  bool valid;               // a current reading
+  float pv, rawC, coldC;    // calibrated, before calibration, cold junction (MAX31855)
+  uint8_t tcFault;          // TcFault of the last reading
+};
 
 struct LiveData {
   ChannelLive ch[NUM_CHANNELS];
+  MonLive mon;        // monitor channel (HAS_MONITOR; else always off)
   // ---- run (both channels) ----
   RunState state;
   uint8_t progType;   // PROG_SEQ / PROG_TL of the running / last program
@@ -277,13 +291,14 @@ float runSpanFor(float total);   // x axis length for a program: total + spare
 void chartSnapshot(ChartData& d, bool live = false);  // live: the live view even during a run
 // Live history as CSV: rows from slot `from` (counted since boot; the oldest kept slot if older) on,
 // as many as fit into buf. Returns the length (0 = done) and the next slot in `from`.
-// pvMask / spMask: channels (bit 0 bottom, bit 1 top) whose PV (+ lowest, highest) / setpoint are written
+// pvMask / spMask: channels (bit 0 bottom, bit 1 top; pvMask bit 2 the monitor channel, HAS_MONITOR) whose PV
+// (+ lowest, highest) / setpoint are written
 size_t liveCsv(uint32_t& from, char* buf, size_t n, uint8_t pvMask = 3, uint8_t spMask = 3);
-// Every PV reading (raw_hist.h) for GET /api/raw: rawPlan() picks the readings after `after[ch]` (millis),
-// at most winMs old and maxN per channel (under gLock); rawCopy() then copies them in chunks.
+// Every PV reading (raw_hist.h) for GET /api/raw: rawPlan() picks the readings after `after[ch]` (millis,
+// HIST_CH: the monitor last), at most winMs old and maxN per channel (under gLock); rawCopy() then copies them.
 struct RawPlan {
   uint32_t nowMs;
-  uint32_t from[NUM_CHANNELS], n[NUM_CHANNELS];
+  uint32_t from[HIST_CH], n[HIST_CH];  // the channels, then the monitor (HIST_CH)
 };
 void rawPlan(const uint32_t* after, uint32_t winMs, uint32_t maxN, RawPlan& p);
 uint32_t rawCopy(int ch, uint32_t k, uint32_t n, uint8_t* out);

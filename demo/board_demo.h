@@ -1,5 +1,5 @@
 // Board: the browser demo (demo/README.md) - an S3-like device whose hardware is simulated in demo/sim.cpp:
-// two local channels (MAX31855 + SSR), the SSR supply relay, E-stop and buzzer; no display, SD card or RS485.
+// two local channels (MAX31855 + SSR), the monitor thermocouple, the SSR supply relay, E-stop and buzzer; no display, SD card or RS485.
 // Selected by -D BOARD_DEMO (demo/build.sh).
 #pragma once
 
@@ -14,6 +14,7 @@
 #define PIN_TC_SO 40
 #define PIN_TC_CS_BOTTOM 39
 #define PIN_TC_CS_TOP 38
+#define PIN_TC_CS_MON 3  // monitor channel (a third thermocouple, demo/sim.cpp)
 #define PIN_SSR_BOTTOM 21
 #define PIN_SSR_TOP 47
 #define PIN_SSR_RELAY 4

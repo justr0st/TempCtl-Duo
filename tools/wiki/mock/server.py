@@ -21,7 +21,13 @@ def demo(*args):
 
 
 CFG = demo('config')
-CFG['limits'] = {'rs485': True, 'localMax': 2, 'relay': True, 'estop': True, 'sound': True, 'chipTemp': True}
+CFG['limits'] = {'rs485': True, 'localMax': 2, 'monitor': True, 'relay': True, 'estop': True, 'sound': True, 'chipTemp': True}
+CFG['monitor'].update({'on': True, 'name': 'Board edge'})  # the monitor channel (1.0.60): a third thermocouple
+
+
+def mon_of(b):
+    """the monitor channel's reading for a bottom PV: the board's edge, about half of its rise"""
+    return None if b is None else round(26 + 0.55 * (b - 26), 1)
 CFG['wifi'].update({'ssid': 'Workshop', 'passSet': True})
 CFG['time']['zone'] = 'Europe/Berlin'
 for i, c in enumerate(CFG['channels']):
@@ -100,6 +106,7 @@ def live():
                          'msg': 'Run interrupted by a reset (power loss)',
                          'intr': {'reason': 'power loss', 'exact': False, 'el': 262, 'i': [3, 0], 'st': ['hold', 'none'], 'left': [0, 0]}})
     L['ch'] = [chan(i, d) for i in range(2)]
+    L['mon'] = {'name': CFG['monitor']['name'], 'pv': mon_of(L['ch'][0]['pv']), 'raw': mon_of(L['ch'][0]['pv']), 'cold': 30.9, 'err': ''}
     return L
 
 
@@ -124,8 +131,9 @@ def live_chart():
         v, s = bottom_at(t)
         pv[0].append(round(v, 1)); sp[0].append(s)
         pv[1].append(round(25.8 + 0.3 * math.sin(t / 45), 1)); sp[1].append(None)
+    pv.append([mon_of(v) for v in pv[0]])
     return {'mode': 'live', 'bin': k, 'span': span, 'sh': 0, 'have': 86400, 'cap': 86400, 'ms': uptime() * 1000, 'raw': 0,
-            'pv': pv, 'sp': sp, 'dlo': [[2] * n, [3] * n], 'dhi': [[2] * n, [3] * n]}
+            'mon': CFG['monitor']['name'], 'pv': pv, 'sp': sp, 'dlo': [[2] * n, [3] * n, [1] * n], 'dhi': [[2] * n, [3] * n, [1] * n]}
 
 
 EVLOG = [  # [seq, uptime s, run time, text, kind, epoch]
@@ -176,15 +184,15 @@ def run_csv():
     """an SD run log (sdlog.cpp columns) of the 'done' run, for the CSV replay picture"""
     d = demo(0, 600, 10); r = d['rows']; ev = sorted(d['chart']['ev'], key=lambda e: e[0])
     kinds = {1: 'Phase %d', 4: 'Hold of phase %d ended', 5: 'Program pause (phase %d)', 6: 'Continue', 7: 'Program finished'}
-    out = ['time,run_s,where,bottom_pv,bottom_sp,bottom_prog,bottom_out,bottom_state,top_pv,top_sp,top_prog,top_out,top_state,kind,event']
+    out = ['time,run_s,where,bottom_pv,bottom_sp,bottom_prog,bottom_out,bottom_state,top_pv,top_sp,top_prog,top_out,top_state,monitor_pv,kind,event']
     f = lambda v: '' if v is None else '%.1f' % v
     k = 0
     for j in range(0, len(r), 7):
         t = r[j]; ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(EPOCH0 + 8130 + t))
-        out.append(','.join([ts, '%d' % t, '', f(r[j + 1]), f(r[j + 2]), f(r[j + 2]), f(r[j + 3]), '', f(r[j + 4]), f(r[j + 5]), f(r[j + 5]), f(r[j + 6]), '', '', '']))
+        out.append(','.join([ts, '%d' % t, '', f(r[j + 1]), f(r[j + 2]), f(r[j + 2]), f(r[j + 3]), '', f(r[j + 4]), f(r[j + 5]), f(r[j + 5]), f(r[j + 6]), '', f(mon_of(r[j + 1])), '', '']))
         while k < len(ev) and ev[k][0] <= t:
             e = ev[k]; k += 1
-            if e[1] in kinds: out.append(','.join([ts, '%d' % t] + [''] * 11 + ['run', '"%s"' % (kinds[e[1]] % (e[3] + 1) if '%' in kinds[e[1]] else kinds[e[1]])]))
+            if e[1] in kinds: out.append(','.join([ts, '%d' % t] + [''] * 12 + ['run', '"%s"' % (kinds[e[1]] % (e[3] + 1) if '%' in kinds[e[1]] else kinds[e[1]])]))
     return '\n'.join(out) + '\n'
 
 
@@ -223,6 +231,9 @@ class H(http.server.BaseHTTPRequestHandler):
             d = run_demo()
             if not d: return self.send(200, {'mode': 'none'})
             c = copy.deepcopy(d['chart']); c.update({'ms': uptime() * 1000, 'raw': 0, 'ra': [], 'rn': [0, 0]})
+            c['pv'].append([mon_of(v) for v in c['pv'][0]]); c['mon'] = CFG['monitor']['name']
+            for k in ('dlo', 'dhi'):
+                if k in c: c[k].append([0] * len(c['pv'][0]))
             return self.send(200, c)
         if p == '/api/programs': return self.send(200, {'sel': CFG['selProgram'], 'max': 20, 'maxPhases': 100, 'maxSteps': 100, 'programs': [summary(i) for i in range(20)]})
         if p == '/api/program':

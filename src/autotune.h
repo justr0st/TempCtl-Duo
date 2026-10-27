@@ -8,6 +8,8 @@
 //   Ku = 4 d / (pi * sqrt(a^2 - h^2))
 // and the Tyreus-Luyben rule (decided: no overshoot, see spec):
 //   Kp = Ku / 2.2, Ti = 2.2 Pu, Td = Pu / 6.3  ->  ki = Kp / Ti, kd = Kp * Td
+// or, with "faster" (setting local.tuneFast, 1.0.60), the same Kp and Td with Ti = 0.7 Pu: the integral closes
+// the last degrees about 3x sooner (TL leaves the PV a few degrees short for minutes), with a little overshoot
 #pragma once
 #include <stdint.h>
 
@@ -20,13 +22,15 @@ struct TuneConfig {
   float maxSec = 4200;  // give up after this time
   float maxOver = 40;   // fail if the PV goes this far above sp
   int cycles = 5;       // cycles to measure (after 2 settling cycles)
+  bool fast = false;    // faster rule (Ti = 0.7 Pu instead of 2.2 Pu)
 };
 
 struct TuneResult {
   float ku, pu;         // ultimate gain (%/degC) and period (s)
   float amplitude;      // PV oscillation amplitude (half peak-to-peak) degC
   float bias, d;        // relay centre and half swing %
-  float kp, ki, kd;     // proposed PID (Tyreus-Luyben)
+  float kp, ki, kd;     // proposed PID (Tyreus-Luyben, or the faster rule)
+  bool fast;            // the faster rule (set at the start)
 };
 
 class RelayAutotune {

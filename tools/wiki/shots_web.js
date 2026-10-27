@@ -45,6 +45,7 @@ const SHOTS = [
   { n: 'programs', s: 'idle', h: '#/programs', hgt: 820 },
   { n: 'channels-local', s: 'idle', h: '#/channels', full: true },
   { n: 'channels-modbus', s: 'modbus', h: '#/channels', full: true, act: async p => { await p.locator('#chTabs button').nth(1).click(); } },
+  { n: 'channels-monitor', s: 'idle', h: '#/channels', act: async p => { await p.locator('#chTabs button[data-cht="2"]').click(); } },
   { n: 'log', s: 'run', h: '#/log', hgt: 900 },
   { n: 'settings', s: 'idle', h: '#/settings', full: true },
   { n: 'settings-update', s: 'idle', h: '#/settings', clip: '#setDev', act: async p => { await p.click('#fwNetCheck').catch(() => {}); } },

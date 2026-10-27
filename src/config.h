@@ -13,6 +13,14 @@
 #error "No board selected: build with -D BOARD_S3 or -D BOARD_CYD (platformio.ini envs s3, cyd-1xlocal-1x485, cyd-2xlocal, cyd-2xlocal-2x485)"
 #endif
 
+// Monitor channel: a third thermocouple, shown and logged only (no output, no alarm). S3 (and the demo) only:
+// its converter's CS pin (PIN_TC_CS_MON) shares the thermocouple bus.
+#if defined(PIN_TC_CS_MON)
+#define HAS_MONITOR 1
+#else
+#define HAS_MONITOR 0
+#endif
+
 // SD card (run logs, firmware update, backups): S3 only (the CYD's SD pins carry the thermocouples)
 #if defined(PIN_SD_CS) && defined(BOARD_HAS_PSRAM)
 #define HAS_SD 1

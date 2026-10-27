@@ -12,6 +12,7 @@ void RelayAutotune::start(const TuneConfig& c) {
   if (c_.cycles < 3) c_.cycles = 3;
   state_ = TuneState::Running;
   res_ = TuneResult{};
+  res_.fast = c_.fast;
   snprintf(msg_, sizeof(msg_), "heating up to %.0f C", c_.sp);
   t_ = 0;
   high_ = true;
@@ -81,11 +82,11 @@ void RelayAutotune::finishCycle() {
   res_.bias = bias_;
   res_.d = d_;
   res_.kp = ku / 2.2f;
-  const float ti = 2.2f * pu, td = pu / 6.3f;
+  const float ti = (c_.fast ? 0.7f : 2.2f) * pu, td = pu / 6.3f;
   res_.ki = res_.kp / ti;
   res_.kd = res_.kp * td;
   state_ = TuneState::Done;
-  snprintf(msg_, sizeof(msg_), "done: Ku %.2f, Pu %.0f s", ku, pu);
+  snprintf(msg_, sizeof(msg_), "done: Ku %.2f, Pu %.0f s%s", ku, pu, c_.fast ? ", faster" : "");
 }
 
 float RelayAutotune::update(float pv, float dt) {

@@ -51,7 +51,7 @@ void netStartAp() {}
 void appRequestRestart(const char* from) { printf("<restart %s>", from); }
 // stubs for the settings / autotune / touch commands
 void saveSettingsAndNotify() { printf("<saved + notify>"); }
-BoardLimits boardLimits() { return BoardLimits{true, 2}; }
+BoardLimits boardLimits() { return BoardLimits{true, 2, HAS_MONITOR != 0}; }
 uint32_t liveHistSec() { return 30 * 60; }
 static LocalTune tune[2];
 void localCtrlTuneGet(int ch, LocalTune& t) { t = tune[ch]; }
@@ -166,7 +166,7 @@ static void run(int ms) { for (int t = 0; t < ms; t += 50) { consoleLoop(); dela
 static void type(const char* s) { Serial.feed(s); run(300); }
 
 int main() {
-  settingsDefaults(gSettings, BoardLimits{true, 2});
+  settingsDefaults(gSettings, boardLimits());
   strcpy(gSettings.ch[0].name, "Preheater"); strcpy(gSettings.ch[1].name, "IR head");
   gSettings.ch[0].type = CH_LOCAL; gSettings.ch[1].type = CH_LOCAL; gSettings.selProgram = 0;
   strcpy(gSettings.ssid, "Workshop"); strcpy(gSettings.pass, "oldsecret");
@@ -198,6 +198,16 @@ int main() {
   type("get bus.pollMs\r");
   type("set t.local.sensor=max31855 bus.pollMs=1000\r");
   type("get display\r");
+#if HAS_MONITOR
+  // the monitor channel (S3): settings, then its line in status
+  type("get monitor\r");
+  type("set monitor.on=on monitor.name=\"Board edge\" monitor.readMs=500\r");
+  type("set monitor.sensor=max9999\r");
+  gLive.mon.on = true; gLive.mon.valid = true; gLive.mon.pv = 96.4f; strcpy(gLive.mon.name, "Board edge");
+  type("status\r");
+  gLive.mon.valid = false; gLive.mon.tcFault = 1;
+  type("status\r");
+#endif
   type("fw sd\r");
   type("fw sd\r");  // (still reading)
   run(500);

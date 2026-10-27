@@ -24,6 +24,7 @@
 #include <esp_task_wdt.h>
 #include "controller.h"
 #include "local_ctrl.h"
+#include "tc_sensor.h"
 #include "net.h"
 #include "settings_store.h"
 #include "host_check.h"
@@ -316,6 +317,7 @@ static void tuneJson(JsonObject o, int ch) {
   a["cycle"] = t.cycle;
   a["elapsed"] = (int)t.elapsed;
   a["msg"] = JsonString(t.msg);
+  a["fast"] = t.res.fast;  // the rule of this run
   if (t.state == TuneState::Done) {
     a["kp"] = t.res.kp;
     a["ki"] = t.res.ki;
@@ -462,9 +464,16 @@ static void handleStatus() {
 }
 
 // The whole live history (one row per slot), streamed. ?pv=3&sp=3: channels (bit 0 bottom, bit 1
-// top) whose PV (+ lowest, highest) / setpoint columns are included (default all)
+// top; pv bit 2 the monitor channel while it is on) whose PV (+ lowest, highest) / setpoint columns are
+// included (default all)
 static void handleHistCsv() {
-  const uint8_t pvMask = reqHas("pv") ? (uint8_t)(reqArg("pv").toInt() & 3) : 3;
+  bool monOn;
+  {
+    Guard g;
+    monOn = gLive.mon.on;
+  }
+  const uint8_t pvAll = monOn ? 7 : 3;
+  const uint8_t pvMask = reqHas("pv") ? (uint8_t)(reqArg("pv").toInt() & pvAll) : pvAll;
   const uint8_t spMask = reqHas("sp") ? (uint8_t)(reqArg("sp").toInt() & 3) : 3;
   extraHeaders = "Content-Disposition: attachment; filename=tempctl-duo-history.csv\r\nCache-Control: no-store\r\n";
   uint32_t from = 0;
@@ -472,11 +481,11 @@ static void handleHistCsv() {
   sendStream("text/csv", "history.csv", [&](char* b, size_t n) -> size_t {
     if (head) {
       head = false;
-      static const char* const K[NUM_CHANNELS] = {"bottom", "top"};
+      static const char* const K[3] = {"bottom", "top", "monitor"};
       int w = snprintf(b, n, "time_s,uptime_s");
-      for (int c = 0; c < NUM_CHANNELS; ++c) {
+      for (int c = 0; c < HIST_CH; ++c) {
         if (pvMask & (1 << c)) w += snprintf(b + w, n - w, ",%s_pv,%s_min,%s_max", K[c], K[c], K[c]);
-        if (spMask & (1 << c)) w += snprintf(b + w, n - w, ",%s_sp", K[c]);
+        if (c < NUM_CHANNELS && (spMask & (1 << c))) w += snprintf(b + w, n - w, ",%s_sp", K[c]);
       }
       w += snprintf(b + w, n - w, "\n");
       return w;
@@ -493,9 +502,15 @@ static void handleCsv() {
     run = gHist->runValid;
   }
   if (!run) return handleHistCsv();
-  String out = "time_s,bottom_pv,bottom_sp,bottom_plan,top_pv,top_sp,top_plan\n";
-  out.reserve(CHART_N * 48 + 80);
-  char line[112];
+  bool mon;
+  {
+    Guard g;
+    mon = HAS_MONITOR && gLive.mon.on;
+  }
+  String out = mon ? "time_s,bottom_pv,bottom_sp,bottom_plan,top_pv,top_sp,top_plan,monitor_pv\n"
+                   : "time_s,bottom_pv,bottom_sp,bottom_plan,top_pv,top_sp,top_plan\n";
+  out.reserve(CHART_N * 56 + 90);
+  char line[128];
   auto num = [](char* b, size_t n, float v) {
     if (isnan(v)) b[0] = 0;
     else snprintf(b, n, "%.1f", v);
@@ -509,11 +524,14 @@ static void handleCsv() {
         v[c * 3 + 1] = gHist->runSp[c][i];
         v[c * 3 + 2] = gHist->runPlan[c][i];
       }
-      if (isnan(v[0]) && isnan(v[1]) && isnan(v[3]) && isnan(v[4])) continue;
+      const float vm = mon ? (float)gHist->runPv[HIST_CH - 1][i] : NAN;
+      if (isnan(v[0]) && isnan(v[1]) && isnan(v[3]) && isnan(v[4]) && isnan(vm)) continue;
       const float t = i * gHist->runBin;
-      char f[6][12];
+      char f[6][12], fm[12];
       for (int k = 0; k < 6; ++k) num(f[k], sizeof(f[k]), v[k]);
-      snprintf(line, sizeof(line), "%.0f,%s,%s,%s,%s,%s,%s\n", t, f[0], f[1], f[2], f[3], f[4], f[5]);
+      num(fm, sizeof(fm), vm);
+      const int w = snprintf(line, sizeof(line), "%.0f,%s,%s,%s,%s,%s,%s", t, f[0], f[1], f[2], f[3], f[4], f[5]);
+      snprintf(line + w, sizeof(line) - w, mon ? ",%s\n" : "\n", fm);
       out += line;
     }
   }
@@ -811,6 +829,7 @@ static void handleGetConfig() {
   JsonObject l = d["limits"].to<JsonObject>();
   l["rs485"] = lim.rs485;
   l["localMax"] = lim.localMax;
+  l["monitor"] = lim.monitor;  // the monitor channel (a third thermocouple) can be wired
   l["relay"] = localCtrlRelayWired();
   l["estop"] = safetyEstopWired();
   l["sound"] = safetySoundWired();
@@ -1355,28 +1374,30 @@ static void sendAsset(const WebAsset& a) {
 
 static const char* const CH_KEYS[NUM_CHANNELS] = {"b", "t"};
 
-// ?a0=&a1= (device millis, as GET /api/raw): the new PV readings after them, so that the page needs no
-// second request per poll: "raw":[[ms, pv, ms, pv, ...], [...]] (pv in 0.1 degC, null = no reading). More
+// ?a0=&a1=[&a2=] (device millis, as GET /api/raw): the new PV readings after them, so that the page needs no
+// second request per poll: "raw":[[ms, pv, ms, pv, ...], [...]] (pv in 0.1 degC, null = no reading; a third
+// array for the monitor channel when a2 is given). More
 // than LIVE_RAW_MAX for a channel (a tab that was hidden): "rawMore":true instead, the page uses /api/raw.
 // Not over the serial link (as /api/raw).
 static constexpr uint32_t LIVE_RAW_MAX = 32;
 static void liveRaw(JsonDocument& d) {
   if (sreq || !rawCap() || !reqHas("a0") || !reqHas("a1")) return;
-  uint32_t after[NUM_CHANNELS];
-  for (int c = 0; c < NUM_CHANNELS; ++c) {
+  const int nc = HIST_CH > NUM_CHANNELS && reqHas("a2") ? HIST_CH : NUM_CHANNELS;
+  uint32_t after[HIST_CH];
+  for (int c = 0; c < HIST_CH; ++c) {
     const char k[3] = {'a', (char)('0' + c), 0};
-    after[c] = (uint32_t)strtoul(reqArg(k).c_str(), nullptr, 10);
+    after[c] = c < nc ? (uint32_t)strtoul(reqArg(k).c_str(), nullptr, 10) : 0;
   }
   RawPlan p;
   rawPlan(after, 0, LIVE_RAW_MAX + 1, p);
-  for (int c = 0; c < NUM_CHANNELS; ++c)
+  for (int c = 0; c < nc; ++c)
     if (p.n[c] > LIVE_RAW_MAX) {
       d["rawMore"] = true;
       return;
     }
   JsonArray a = d["raw"].to<JsonArray>();
   uint8_t buf[LIVE_RAW_MAX * 8];
-  for (int c = 0; c < NUM_CHANNELS; ++c) {
+  for (int c = 0; c < nc; ++c) {
     JsonArray x = a.add<JsonArray>();
     const uint32_t n = rawCopy(c, p.from[c], p.n[c], buf);
     for (uint32_t k = 0; k < n; ++k) {
@@ -1537,6 +1558,14 @@ static void handleLive() {
     m["synced"] = C.manualSynced;
     if (C.type == CH_LOCAL) tuneJson(c, i);
   }
+  if (L.mon.on) {  // monitor channel (switched on): its reading; "err" the converter's fault while it has none
+    JsonObject m = d["mon"].to<JsonObject>();
+    m["name"] = JsonString(L.mon.name);
+    setNum(m["pv"], L.mon.valid ? L.mon.pv : NAN);
+    setNum(m["raw"], L.mon.valid ? L.mon.rawC : NAN);
+    setNum(m["cold"], L.mon.coldC);
+    m["err"] = L.mon.valid ? "" : L.mon.tcFault == TC_OK ? "no reading" : tcFaultName(L.mon.tcFault);
+  }
   liveRaw(d);
   sendJson(d);
 }
@@ -1549,14 +1578,16 @@ static void handleChart() {
   sendText(200, "application/json", out);
 }
 
-// GET /api/raw?a0=&a1=&win=&max= : every PV reading of both channels after a0 / a1 (device millis), at most
-// win s old, at most max per channel (default 8192). Binary, little-endian: uint32 now (millis), n0, n1,
-// 1 (format); then n0 + n1 records of 8 bytes: uint32 millis, int16 PV (0.1 degC, -32768 = no reading),
-// 2 bytes 0. Over Wi-Fi only (the serial link carries text).
+// GET /api/raw?a0=&a1=[&a2=]&win=&max= : every PV reading of both channels after a0 / a1 (device millis), at
+// most win s old, at most max per channel (default 8192). Binary, little-endian: uint32 now (millis), n0, n1,
+// format; format 1: then n0 + n1 records; format 2 (a2 given, a board with the monitor channel): uint32 n2,
+// then n0 + n1 + n2 records (the monitor's last). A record is 8 bytes: uint32 millis, int16 PV (0.1 degC,
+// -32768 = no reading), 2 bytes 0. Over Wi-Fi only (the serial link carries text).
 static void handleRaw() {
   if (sreq) return sendError("Not over the serial link");
-  uint32_t after[NUM_CHANNELS];
-  for (int c = 0; c < NUM_CHANNELS; ++c) {
+  const int nc = HIST_CH > NUM_CHANNELS && reqHas("a2") ? HIST_CH : NUM_CHANNELS;
+  uint32_t after[HIST_CH];
+  for (int c = 0; c < HIST_CH; ++c) {
     const String k = String("a") + c;
     after[c] = reqHas(k.c_str()) ? (uint32_t)strtoul(reqArg(k.c_str()).c_str(), nullptr, 10) : 0;
   }
@@ -1572,13 +1603,14 @@ static void handleRaw() {
   sendStream("application/octet-stream", "raw", [&](char* b, size_t n) -> size_t {
     if (stage == 0) {
       stage = 1;
-      const uint32_t h[4] = {p.nowMs, p.n[0], p.n[1], 1};
-      for (int i = 0; i < 4; ++i)
+      const uint32_t h[5] = {p.nowMs, p.n[0], p.n[1], nc > NUM_CHANNELS ? 2u : 1u, nc > NUM_CHANNELS ? p.n[nc - 1] : 0};
+      const int nh = nc > NUM_CHANNELS ? 5 : 4;
+      for (int i = 0; i < nh; ++i)
         for (int k = 0; k < 4; ++k) b[i * 4 + k] = (char)(h[i] >> (8 * k));
-      return 16;
+      return (size_t)nh * 4;
     }
-    while (ch < NUM_CHANNELS && done >= p.n[ch]) ch++, done = 0;
-    if (ch >= NUM_CHANNELS) return 0;
+    while (ch < nc && done >= p.n[ch]) ch++, done = 0;
+    if (ch >= nc) return 0;
     uint32_t k = (uint32_t)(n / 8);
     if (k > p.n[ch] - done) k = p.n[ch] - done;
     rawCopy(ch, p.from[ch] + done, k, (uint8_t*)b);

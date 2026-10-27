@@ -229,6 +229,11 @@ static void fillSeq() {
       case PH_T: seg3(f.t, b, sizeof(b)); break;
       case PH_BT: {
         char tt[40];
+        if (f.tIdle) {
+          seg3(f.b, tt, sizeof(tt));
+          snprintf(b, sizeof(b), "B %s \xC2\xB7 T off", tt);
+          break;
+        }
         seg3(f.t, tt, sizeof(tt));
         if (f.bIdle) snprintf(b, sizeof(b), "B off \xC2\xB7 T %s", tt);
         else snprintf(b, sizeof(b), "B %.0f\xC2\xB0 \xC2\xB7 T %s", f.b.t, tt);
@@ -272,8 +277,9 @@ static void fillSeq() {
         break;
       case PH_BT:
         if (f.bIdle) none3(t, i, 2, c, "off");
-        else seg(t, i, 2, f.b, false, c);
-        seg(t, i, 5, f.t, true, c);
+        else seg(t, i, 2, f.b, f.tIdle, c);
+        if (f.tIdle) none3(t, i, 5, c, "off");
+        else seg(t, i, 5, f.t, true, c);
         break;
       default: {
         const char* tx = progText(*ed, f.text);
@@ -419,7 +425,7 @@ static void editField(int ch, int idx, int field, float cur) {
 
 // --- row menu
 enum RowAct : uint8_t {
-  A_KIND_B, A_KIND_T, A_KIND_BT, A_KIND_P, A_KIND_TARGET, A_KIND_IDLE, A_KIND_PAUSE, A_WAIT, A_BIDLE, A_MSG, A_TEXT,
+  A_KIND_B, A_KIND_T, A_KIND_BT, A_KIND_P, A_KIND_TARGET, A_KIND_IDLE, A_KIND_PAUSE, A_WAIT, A_BIDLE, A_TIDLE, A_MSG, A_TEXT,
   A_INS_ABOVE, A_INS_BELOW, A_UP, A_DOWN, A_DEL,
   A_FB_T, A_FB_R, A_FB_H, A_FT_T, A_FT_R, A_FT_H  // 320x240: edit a value (bottom / top: target, ramp, hold)
 };
@@ -489,7 +495,14 @@ static void onRowAct(int i, int) {
     case A_KIND_IDLE: s->kind = ST_IDLE; break;
     case A_KIND_PAUSE: s->kind = ST_PAUSE; break;
     case A_WAIT: f->wait = !f->wait; break;
-    case A_BIDLE: f->bIdle = !f->bIdle; break;
+    case A_BIDLE:
+      f->bIdle = !f->bIdle;
+      if (f->bIdle) f->tIdle = 0;  // (not both)
+      break;
+    case A_TIDLE:
+      f->tIdle = !f->tIdle;
+      if (f->tIdle) f->bIdle = 0;
+      break;
     case A_MSG:
       if (f) f->msg = !f->msg;
       else s->msg = !s->msg;
@@ -569,8 +582,8 @@ static void rowMenu(int ch, int idx) {
   if (ed->type == PROG_SEQ) {
     const SeqPhase& f = ed->ph[idx];
     if (f.kind == PH_B) values(CH_BOTTOM, A_FB_T, true);
-    if (f.kind == PH_BT && !f.bIdle) values(CH_BOTTOM, A_FB_T, false);
-    if (f.kind == PH_T || f.kind == PH_BT) values(CH_TOP, A_FT_T, true);
+    if (f.kind == PH_BT && !f.bIdle) values(CH_BOTTOM, A_FB_T, f.tIdle);  // (top off: the bottom ramps and holds)
+    if (f.kind == PH_T || (f.kind == PH_BT && !f.tIdle)) values(CH_TOP, A_FT_T, true);
   } else {
     const TlStep& st = ed->st[ch][idx];
     if (st.kind == ST_TARGET) values(ch, A_FB_T, true);
@@ -596,8 +609,10 @@ static void rowMenu(int ch, int idx) {
       add(A_WAIT, b);
     }
     if (f.kind == PH_BT) {
-      snprintf(b, sizeof(b), "%s: %s", ES.ch[0].name, f.bIdle ? "off \xE2\x80\x94 give it a target" : "jump target \xE2\x80\x94 switch off");
+      snprintf(b, sizeof(b), "%s: %s", ES.ch[0].name, f.bIdle ? "off \xE2\x80\x94 give it a target" : "on \xE2\x80\x94 switch off");
       add(A_BIDLE, b);
+      snprintf(b, sizeof(b), "%s: %s", ES.ch[1].name, f.tIdle ? "off \xE2\x80\x94 give it a target" : "on \xE2\x80\x94 switch off");
+      add(A_TIDLE, b);
     }
     if (f.kind == PH_P) {
       add(A_MSG, f.msg ? "\"Action required\": on \xE2\x80\x94 turn off" : "\"Action required\": off \xE2\x80\x94 turn on");
@@ -653,7 +668,7 @@ static void onTable(lv_event_t* e) {
     const int cch = c >= 5 ? CH_TOP : CH_BOTTOM, field = (c - 2) % 3;
     const Seg* s = progSeg(*ed, cch, r);
     if (f.kind == PH_P) return rowMenu(0, r);
-    if (!s || (cch == CH_BOTTOM && f.kind == PH_BT && field > 0)) return;
+    if (!s || (cch == CH_BOTTOM && f.kind == PH_BT && !f.tIdle && field > 0)) return;
     editField(cch, r, field, field == 0 ? s->t : field == 1 ? s->r : s->h);
   } else {
     rowCh = ch;

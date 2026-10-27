@@ -25,9 +25,11 @@ Its two USB ports:
 
 ## Thermocouples
 
-<img src="img/wiring/s3-thermocouples.svg" alt="Wiring: two MAX31855 converters to the ESP32-S3" width="900">
+<img src="img/wiring/s3-thermocouples.svg" alt="Wiring: three MAX31855 converters to the ESP32-S3" width="900">
 
 - MAX6675 modules fit the same way (choose the converter on the *Channels* page).
+- The third converter is optional: the [monitor channel](Channels.md#monitor-channel-s3), measured and logged
+  only (CS on GPIO 3, J1-13).
 - Use thermocouple wire all the way to the converter; screened cable with the screen to GND at one end
   helps against noise from the heaters.
 
@@ -75,8 +77,11 @@ waiting, **red blinking** fault, **purple** access point mode.
 | Touch RST / INT | 17 / 7 | J1-10 / 7 | | SSR bottom / top | 21 / 47 | J3-18 / 17 |
 | SSR supply relay | 4 | J1-4 | | E-stop (NC to GND) | 5 | J1-5 |
 | Alarm buzzer (2.7 kHz) | 6 | J1-6 | | Status LED (WS2812) | 48 | on board |
+| Thermocouple CS monitor (optional) | 3 | J1-13 | | | | |
 
-Keep free: GPIO35–37 (octal PSRAM), 19 / 20 and 43 / 44 (the USB ports), the strapping pins 0, 3, 45, 46.
+Keep free: GPIO35–37 (octal PSRAM), 19 / 20 and 43 / 44 (the USB ports), the strapping pins 0, 45, 46. GPIO 3
+is a strapping pin only for the JTAG source when an eFuse selects it (not on these boards): fine as the monitor
+converter's CS (held high from the start).
 
 ## Reference
 

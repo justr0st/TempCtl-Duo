@@ -1,7 +1,7 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32 CYD)
 
 Firmware for a two-channel temperature programmer, made for the **bottom and top heater of a BGA rework
-station** (reflow / desolder profiles). Version **1.0.59**. Two boards, built from the same sources:
+station** (reflow / desolder profiles). Version **1.0.60**. Two boards, built from the same sources:
 
 - **ESP32-S3** with a 4" 480×320 capacitive touch screen (env `s3`, the main target)
 - **ESP32-2432S028R "Cheap Yellow Display"** with a 2.8" 320×240 resistive touch screen (envs
@@ -94,6 +94,15 @@ relay / E-stop / buzzer on J1-4/5/6). Schematic of the whole device: `hardware/s
 | | | | SSR supply relay (+5 V common of both SSRs) | 4 |
 | | | | E-stop input (NC contact to GND) | 5 |
 | | | | Alarm buzzer (2.7 kHz square wave) | 6 |
+| | | | TC CS monitor channel (optional, third converter) | 3 |
+
+Monitor channel (1.0.60): an optional third MAX31855 / MAX6675 on the shared SCK / SO with its CS on GPIO 3
+(J1-13), measured only: no output, no alarm. Web: a third Channels tab (accent colour), a chart line in the
+accent colour with the reading in the legend; touch: the reading at the bottom right of the chart and a
+*Monitor* tab; CSV / SD logs: `monitor_pv` (+ `_min`, `_max` in the history). Settings `monitor.*` (`on`,
+`name`, `sensor`, `calOffset`, `calGain`, `readMs` default 1000, `median`, `medianN`); boards without it
+(CYD) keep it off. Its history costs a 4th word per live slot (24 h: 1.38 MB instead of 1 MB PSRAM)
+and its own every-reading ring (1 MB).
 
 SSR supply relay: an **active-high DC solid-state relay** (input 3–32 V DC, at most 20 mA at 3.3 V;
 output at least 0.5 A DC). Input + = GPIO4, input − = GND (driven directly by the pin, no module power);
@@ -482,7 +491,8 @@ repeated every 30 s. The PC test `test/console_host` types a script of commands 
     **Run logs (SD card)** (Log page), S3 only: one CSV file per program run on the display's micro-SD card
     (FAT32, folder `runs`, name = start time (local) + program, or start / run number when the clock is
     not set): a row every second — `time` (local, `2026-10-13 01:05:35`), `run_s, where` (phase / steps),
-    per channel `pv, sp` (active setpoint), `prog` (program setpoint), `out` (%), `state` — and a row for
+    per channel `pv, sp` (active setpoint), `prog` (program setpoint), `out` (%), `state`, then `monitor_pv`
+    (the monitor channel; empty while off) — and a row for
     each event during the run (`kind, event`). Written every 30 s and at the end of the run (a failed
     write is tried again every 5 s; nothing is lost while the rows fit into 192 kB); list with Download /
     Delete on the page, or read the card in a PC. Without a card the run is simply not logged. All card
@@ -574,7 +584,8 @@ Type `local`: thermocouple converter MAX31855 or MAX6675 (`local.sensor`) read e
 default 250; MAX6675 from 250 ms), optionally through a median filter over the last `medianN` readings
 (`median`, 3 / 5 / 7 / 9, default on, 3; the PID, the protections and the autotune all see this filtered,
 calibrated value), calibration `true = raw * calGain + calOffset`, PID (`kp`, `ki`, `kd`, or from the autotune
-(time limit `tuneMaxMin`, default 70 min): relay test around a test temperature, Tyreus–Luyben rule; started
+(time limit `tuneMaxMin`, default 70 min): relay test around a test temperature, Tyreus–Luyben rule, or with
+`tuneFast` the same Kp / Td with Ti = 0.7 Pu (faster, a little overshoot; switch in the autotune section); started
 from the touch Channels screen, the web Channels page or serial `tune`) and a time-proportional SSR output
 (`windowSec`, default 1 s; `maxOut` %). Safety: SSR pins low from the first line of `setup()`, SSR off when
 the task stops refreshing it (1.5 s), and latched faults (outputs off, run stopped) for no reading (3 bad
@@ -588,7 +599,7 @@ controller's output (Ypid); a fault switches the controller's outputs off (C.Off
   `/duo/prog0.json` … `/duo/prog19.json` on LittleFS (safe save: temp file + rename). Two types:
   - **Sequence**: up to 100 phases, one after another. `B` (bottom: target, ramp, hold), `T` (top: target,
     ramp, hold), `BT` (both: the bottom setpoint jumps to its target or goes Idle = outputs off, the top
-    ramps and holds), `P` (pause: waits for Continue, optional "Action required" and a text up to 40
+    ramps and holds; or the top goes Idle and the bottom ramps and holds), `P` (pause: waits for Continue, optional "Action required" and a text up to 40
     characters). `B` and `BT` phases can **wait for the bottom** to reach its target (± the "bottom reached"
     band, default 5 °C) before the hold (`B`) or the top ramp (`BT`) starts. A channel keeps its last
     target while other phases run.
@@ -731,10 +742,10 @@ console's api path has no such checks.
 
 | Method | Path | Body / query |
 |---|---|---|
-| GET | `/api/live` | web page, polled every second: both channels (pv, sp, out, outOn (outputs on), state, target, kept, canExtend, manual, fault, autotune, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg; `intr` while a run interrupted by a reset can be resumed: reason, exact, el, i / st / left per channel), `sel`, `accent`, `progGen`, `cfgGen` (changes with every settings save), `logSeq`, `sysSeq` (newest system log line), `boot` (start number), `time` (device clock, UTC s; 0 = unknown), `tz` (time zone, "" = not set), `sd` (S3: card, logging, file, err); `?a0=&a1=` (device millis, as `/api/raw`): also `raw` [[ms, pv in 0.1 °C or null, …], …] = the PV readings after them, up to 32 per channel (more: `rawMore`, the page then uses `/api/raw`) |
+| GET | `/api/live` | web page, polled every second: both channels (pv, sp, out, outOn (outputs on), state, target, kept, canExtend, manual, fault, autotune, …), run (state, el, rem, phase / steps, progPause, actionRequired, pauseText, edited, msg; `intr` while a run interrupted by a reset can be resumed: reason, exact, el, i / st / left per channel), `sel`, `accent`, `progGen`, `cfgGen` (changes with every settings save), `logSeq`, `sysSeq` (newest system log line), `boot` (start number), `time` (device clock, UTC s; 0 = unknown), `tz` (time zone, "" = not set), `sd` (S3: card, logging, file, err); `mon` while the monitor channel is on: name, pv, raw, cold, err; `?a0=&a1=[&a2=]` (device millis, as `/api/raw`): also `raw` [[ms, pv in 0.1 °C or null, …], …] = the PV readings after them, up to 32 per channel (a2: a third array, the monitor's; more: `rawMore`, the page then uses `/api/raw`) |
 | GET | `/api/chart?v=run` | current / last run: 300 bins of `pv`, `sp` and state lanes `st` per channel, past events `ev` [t, type, ch, idx], forecast `fc` (`seg` [t0, t1, v0, v1, src, flags] per channel, `ev`; times from now) |
-| GET | `/api/chart?v=live` | the live period (`display.liveMin`) in 300 points of `pv` / `sp` / `dlo` / `dhi` per channel; `bin` s per point, `span`, `sh` (the points before the newest end `sh` s later than whole bins before now), `have` / `cap` (s recorded / s the history holds), `ms` (device millis), `raw` (readings kept per channel; run view: also `ra` / `rn`, run time against millis) |
-| GET | `/api/raw?a0=&a1=&win=&max=` | every PV reading of both channels after `a0` / `a1` (device millis), at most `win` s old, `max` (8192) per channel. Binary, little-endian: uint32 now, n0, n1, 1; then 8-byte records uint32 millis, int16 PV in 0.1 °C (−32768 = no reading). Wi-Fi only. The web chart draws these; S3 keeps 131 072 per channel (2 MB PSRAM: 36 h at 1 s polling, 9 h at 250 ms), CYD 600 (10 min at 1 s) |
+| GET | `/api/chart?v=live` | the live period (`display.liveMin`) in 300 points of `pv` / `sp` / `dlo` / `dhi` per channel; `bin` s per point, `span`, `sh` (the points before the newest end `sh` s later than whole bins before now), `have` / `cap` (s recorded / s the history holds), `ms` (device millis), `raw` (readings kept per channel; run view: also `ra` / `rn`, run time against millis). Both views: while the monitor channel is on, `pv` / `dlo` / `dhi` have a third row (its PV) and `mon` its name |
+| GET | `/api/raw?a0=&a1=[&a2=]&win=&max=` | every PV reading of both channels after `a0` / `a1` (device millis), at most `win` s old, `max` (8192) per channel. Binary, little-endian: uint32 now, n0, n1, 1; then 8-byte records (with `a2` on a board with the monitor channel: uint32 now, n0, n1, 2, n2, then n0 + n1 + n2 records) uint32 millis, int16 PV in 0.1 °C (−32768 = no reading). Wi-Fi only. The web chart draws these; S3 keeps 131 072 per channel (2 MB PSRAM: 36 h at 1 s polling, 9 h at 250 ms), CYD 600 (10 min at 1 s) |
 | GET | `/api/log?since=n` | event log entries after n: [seq, uptime s, run time s or null, text, kind, epoch] (kind 1 event, 2 run, 3 warning, 4 error; epoch UTC s, 0 = clock unknown) |
 | GET | `/api/syslog?since=n` | system log lines after n (about 12 kB per answer, `more`: ask again): [seq, uptime s, epoch, kind (0 technical … 4 error), text]; also `first`, `boot` |
 | GET | `/api/sd` | SD run logs (S3): `slot`, `card`, `logging`, `file`, `err`, `totalKb`, `freeKb`, `files` [[name, bytes, mtime], …] newest first |
@@ -750,9 +761,9 @@ console's api path has no such checks.
 | POST | `/api/time` | `{"t":<UTC s>}`: sets the device clock if it has no NTP time (the page does it; for the log); `{"zone":…, "fixed":"UTC+02:00"}`: the time zone, only while none is set |
 | GET | `/api/timezones` | `{"zones":[…]}`: the names `time.zone` takes (besides `UTC+hh:mm`) |
 | GET | `/api/status` | live values (bottom), manual setpoint, selected program; `channels`: both channels (name, type, ok, err, pv, sp, out, mode, manual); `run`: state, `type` (`seq`/`tl`), `seq` (phase `idx`, `stage`, `el`, `dur`), `waiting`, `progPause`, `actionRequired`, `pauseText`, `elapsed`, `remaining`, `edited`, `channels[]` (inProgram, idle, sp, target, moving, Timeline `lane`) |
-| GET/POST | `/api/config` | the whole settings document (= `/duo/settings.json` without passwords) + `limits` (`rs485`, `localMax` of this board variant). POST changes only the keys given, e.g. `{"channels":[null,{"type":"modbus","modbus":{"addr":2}}]}`; `"modbus":{"loadDefaults":true}` loads the register map of the channel's controller type; errors come back as `{"ok":false,"err":"channels[1].type: one of …"}` |
-| GET | `/api/log.csv` | last program run (or, without one, the live history) as CSV, both channels |
-| GET | `/api/history.csv` | the whole live history, streamed: time_s (before now), uptime_s, then per channel pv, min, max, sp; `?pv=3&sp=3` = channels (bit 0 bottom, bit 1 top) whose PV / SP columns are included (default all; rows without any value are left out) |
+| GET/POST | `/api/config` | the whole settings document (= `/duo/settings.json` without passwords) + `limits` (`rs485`, `localMax`, `monitor` of this board variant). POST changes only the keys given, e.g. `{"channels":[null,{"type":"modbus","modbus":{"addr":2}}]}`; `"modbus":{"loadDefaults":true}` loads the register map of the channel's controller type; errors come back as `{"ok":false,"err":"channels[1].type: one of …"}` |
+| GET | `/api/log.csv` | last program run (or, without one, the live history) as CSV, both channels (+ `monitor_pv` while the monitor channel is on) |
+| GET | `/api/history.csv` | the whole live history, streamed: time_s (before now), uptime_s, then per channel pv, min, max, sp (the monitor channel: pv, min, max); `?pv=3&sp=3` = channels (bit 0 bottom, bit 1 top, pv bit 2 the monitor) whose PV / SP columns are included (default all; rows without any value are left out) |
 | GET | `/api/programs` | all 20 slots: `used`, `name`, `type`, `steps` (phases / steps), `total` (s), `uses` [bottom, top], `waits`; `sel` |
 | GET | `/api/program?i=0` | `used`, `program`: the program JSON (spec 9.3.5) |
 | POST | `/api/program` | `{"i":0,"program":{…}}` save (validated, setpoint limits checked) or `{"i":0,"delete":true}` |

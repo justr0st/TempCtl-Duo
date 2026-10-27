@@ -35,6 +35,8 @@ areas), convection, conduction from the GPU zone into the board, ambient 23 °C.
 while the SSR supply relay pin is on. Thermocouples: bottom on the board, top on the GPU, 1.5 s lag, a little
 noise; the converters' cold junction warms slowly with the heaters. Full power from cold: board 150 °C after
 about 3.3 min (up to ~0.85 °C/s); top alone with the board at 150 °C: GPU up to ~270 °C.
+The monitor channel's thermocouple (CS GPIO 3) reads the board's edge: ambient + 0.55 × the board's rise; on from
+the demo's first start ("Board edge"), and switched on once in settings saved before it existed.
 
 On the first start the PID values of an autotune of this model are set (bottom Kp 8.7 Ki 0.040 Kd 134, top
 Kp 5.7 Ki 0.053 Kd 44); the firmware's own defaults are placeholders until an autotune.

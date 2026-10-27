@@ -117,7 +117,9 @@ Unusable / kept free:
 - **GPIO 19 / 20** (native USB D−/D+ — the **control port**, 7a/7b) and **43 / 44** (UART0,
   USB-to-UART bridge port — flashing and log): kept free so
   **both USB ports stay usable** (Rost's requirement).
-- **Strapping pins 0, 3, 45, 46**: not used (GPIO45 high at boot selects 1.8 V flash voltage).
+- **Strapping pins 0, 45, 46**: not used (GPIO45 high at boot selects 1.8 V flash voltage). GPIO 3 (strap
+  only for the JTAG source when an eFuse selects it, not on these modules) is the monitor channel's CS
+  since 1.0.60 (9.15).
 - GPIO 26–32: flash/PSRAM, not on the headers.
 
 | Function | GPIO | Header | Notes |
@@ -147,6 +149,7 @@ Unusable / kept free:
 | SSR supply relay | 4 | J1 | +5 V common of both SSR inputs; active-high DC SSR driven directly (1.0.38) |
 | E-stop input | 5 | J1 | NC contact to GND, internal pull-up; `safety.estop`, off by default (1.0.38) |
 | Alarm buzzer | 6 | J1 | LEDC channel 6, 2.7 kHz; `safety.sound` (1.0.38) |
+| TC CS monitor channel | 3 | J1-13 | optional third converter, 10 kΩ pull-up; measured only (1.0.60, 9.15) |
 
 **Status LED (decided)**: green = idle · blue = running · amber blinking = waiting for bottom / program
 pause / action required · red blinking = fault · purple = AP mode. Priority when several apply: fault >
@@ -2422,6 +2425,36 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   Then still darker rectangles in the sidebar on polls and when hovering the chart / editor fields (Chrome renders
   the live blur in tiles): on desktop (> 860 px) the sidebar no longer blurs live but paints a copy of the page
   background (mesh, fixed) under its glass tint - looks the same (the mesh is smooth); phones keep the blur.
+- **1.0.60** (2026-10-26; after 1.0.59 = f5e9234): Rost: the demo's title "TempCtl Duo DEMO"; the Demo button
+  with a thicker outline and a big breathing glow; the top channel Idle in the program editor like the bottom.
+  - Top Idle (Both phase): `SeqPhase.tIdle` (JSON `"t":{"idle":true}`); the top outputs go off and the bottom
+    ramps, waits ("wait for bottom") and holds as in a Bottom phase (run_engine bDrives()); not both Idle
+    (parse error). Web editor (table + phone cards: Idle box for both channels; choosing one clears the other;
+    switching the top off gives the bottom the top's ramp / hold if it had none), touch editor (row menu
+    "<top>: on - switch off", table "off"), console `prog`. Host test testTopIdle (parse / JSON round trip, plan,
+    run, resume).
+  - Fixed: the pause text field in the web editor did nothing (the branch had ended up inside a comment).
+  - Demo: `<title>` and document.title "TempCtl Duo DEMO", a DEMO badge under the name in the sidebar (build_site);
+    Demo button with a 3 px accent outline and a breathing glow under it (own element, opacity / scale animated,
+    none with reduced motion).
+  - Static error question (Rost: in the demo the PV stays a few degrees under the SP for minutes): not a
+    simulation artefact - the Tyreus-Luyben autotune rule (Kp = Ku/2.2, Ti = 2.2 Pu, Td = Pu/6.3) has a very slow
+    integral; after the heat-up at 100 % (integrator frozen, anti-windup) the P term alone stops some degrees
+    short and the integral closes the gap with Ti (bottom 216 s, top 108 s). Demo model, manual 200 degC from
+    cold: bottom 195 -> 199.5 degC took 400 s (TL), 24 s with Ti = 0.68 Pu (ki 0.13, overshoot 0.5 degC); top
+    156 s -> 30 s (ki 0.17). ZN "no / some overshoot" overshot 4-6 degC. Rost chose a switch (below).
+  - Autotune rule switch (Rost: choose "slow / no overshoot" or "faster", a switch in the autotune section, only
+    before the start, greyed out while it runs): setting `local.tuneFast` (default off; JSON, console
+    `set b.local.tuneFast=on`, touch field "Autotune: faster" under PID control, web switch "Result: Slow, no
+    overshoot / Faster" saved at once via /api/config). The rule is latched at the start (TuneConfig.fast,
+    TuneResult.fast; live `autotune.fast`; event "autotune started at ... (faster)"; result message "..., faster").
+    Faster = TL Kp and Td, Ti = 0.7 Pu. Host test (first-order heater, dead time 8 s): 199.5 degC after 284 s
+    (slow) / 116 s (faster), peak 200.1 / 205.4 degC; demo model 0.5 degC overshoot. The demo's first start now
+    uses the faster values (B 8.7 / 0.126 / 134, T 5.7 / 0.166 / 44) with the switch on.
+  - Wiki pictures regenerated (touch + web: editor with the top Idle column, PID tab with the switch, sidebar).
+  - Glass (again): Rost still saw a less transparent band at the bottom of active channel cards. On desktop
+    (> 860 px) .panel, .chan.on, .tabbg and the inactive channel tabs now paint a copy of the page background
+    (mesh, fixed) under their tint like the sidebar, no live backdrop blur; phones keep the blur.
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
@@ -2590,6 +2623,40 @@ Decisions: see the 1.0.52 entry in 9.10. Pieces:
     light (dashboard run / phone / manual live / cards / action / interrupted / done / autotune / fault, sidebar,
     editor seq / tl / chart, programs, channels local / modbus, log, settings + update available (manifest routed to a
     fake newer release), tools, CSV replay of the demo run log, connect screen with downloads) → WebP q82 (~2 MB).
+
+### 9.15 Monitor channel (decided 2026-10-26, Rost; version 1.0.60)
+
+Rost: "a third temperature monitoring channel. No power output … just the temperature monitoring. Add the third
+tab to the channels without changing the look of the tabs. Channel color = accent." Answers: shown in the chart
+(not as a Dashboard card / touch tile) with its value next to its name in the chart legend; on touch its value
+numerically at the bottom right of the chart; **no alarm**; **S3 only, CS on GPIO 3**.
+- Hardware: a third MAX31855 / MAX6675 on the shared SCK 41 / SO 40, CS **GPIO 3** (J1-13, 10 kΩ pull-up);
+  `PIN_TC_CS_MON` in board_s3.h / board_demo.h → `HAS_MONITOR` (config.h). CYD: none (no free pin).
+- Settings `monitor` (always in the JSON; `BoardLimits.monitor`, `limits.monitor` in /api/config; a board without
+  it keeps it off, without an error: an S3 backup restores on a CYD): `on` (default off), `name` ("Monitor", 16 chars), `sensor`, `calOffset`, `calGain`, `readMs`
+  (100 … 1000, default 1000; MAX6675 ≥ 250), `median`, `medianN`.
+- Reading: the local task reads it after the channels at its own interval (`localCtrlMonConfigure / Get`); no
+  fault latching, no effect on outputs, runaway checks or the relay. `gLive.mon` (on, name, valid, pv, rawC, coldC,
+  tcFault).
+- History: `HIST_CH` = channels + monitor (S3 3, CYD 2), `CH_MON` its index. Live ring: a 4th word per slot (PV |
+  lowest | highest byte, no SP; 24 h = 1.38 MB PSRAM); the live view / run rows (`runPv/Lo/Hi`) have a 3rd row;
+  its own every-reading ring (same size as a channel's, 1 MB). chartJson: a 3rd `pv` / `dlo` / `dhi` row and `mon`
+  (name) while it is on. /api/raw + live raw: `a2` → format 2 (header + n2). CSV: `monitor_pv/_min/_max` (history,
+  `pv` mask bit 2), `monitor_pv` (last run, SD run log after `top_state`).
+- Web: chart line in the accent colour (live: a legend button with name + current value, toggles the line and the
+  CSV columns; program view: a legend entry with the value), hover row; Channels: a third tab (same tab shape,
+  `--c` = accent, "monitor" / "off") with General (on, name) and Thermocouple (converter, interval, filter,
+  calibration + two-point) cards and a live line (PV, raw, cold junction or the converter's error); CSV replay
+  reads `monitor_*`. /api/live → `mon` {name, pv, raw, cold, err}. Sidebar (Rost, 2026-10-26): a third row
+  under the channels with its name (accent) and "<PV> · Monitor" (or the converter's error, red), no button.
+- Page width (2026-10-26): `html{scrollbar-gutter:stable}` + scrollbar track in `--bg-base`: the shorter monitor tab
+  no longer drops the scrollbar, which re-flowed the auto-fill forms (text jumping when switching tabs).
+- Channel tabs (2026-10-26): an inactive tab's right foot always tucks under its right neighbour (no gap between two
+  inactive tabs).
+- Touch: the name + reading at the bottom right of the chart (accent, on a backing; hidden while off); Channels:
+  a *Monitor* tab (four tabs: 76 px each on the S3, "RS485" without "(beta)").
+- Serial: `monitor.*` keys (`get monitor`), `status` line `mon`. Demo: on from the first start, "Board edge" =
+  ambient + 0.55 × the board's rise.
 
 ## 10. Open items carried over from TempCtl
 

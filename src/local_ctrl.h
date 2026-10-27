@@ -47,6 +47,20 @@ bool localCtrlAck(int ch, char* err, size_t n);
 // another channel (local or Modbus) has its outputs on: no "heating while off" check on ch (control task)
 void localCtrlOtherHeating(int ch, bool on);
 
+// ---- Monitor channel (HAS_MONITOR): a third thermocouple on PIN_TC_CS_MON, read by the local task at its
+// own interval; shown and logged only (no output, no fault, no alarm)
+void localCtrlMonConfigure(bool on, const MonitorSettings& m);
+struct MonStatus {
+  bool enabled;
+  bool fresh;        // a good reading within the last second (longer intervals: 2.5 intervals)
+  float pv;          // calibrated temperature
+  float rawC;        // before calibration (after the median filter)
+  float coldC;       // cold junction (MAX31855)
+  uint8_t tcFault;   // TcFault of the last reading
+  uint32_t lastGoodMs;
+};
+void localCtrlMonGet(MonStatus& st);
+
 // ---- PID autotune (relay method, autotune.h) ----
 // Starts at test temperature sp; refused on a fault, without a fresh reading or
 // too close to the cut-off. The tune stops on "outputs off", a fault or its own

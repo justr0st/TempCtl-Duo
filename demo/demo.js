@@ -131,7 +131,7 @@ window.TCDemo = (() => {
     const css = document.createElement('style');
     css.textContent = `
 .dm{position:fixed;right:14px;bottom:14px;z-index:25;font:14px var(--sans);color:var(--text);display:flex;flex-direction:column;align-items:flex-end;gap:8px;max-width:calc(100vw - 28px)}
-.dm-chip{display:inline-flex;align-items:center;gap:8px;padding:14px 26px 14px 20px;border-radius:999px;border:1px solid var(--glass-border,var(--line));background:var(--glass,var(--panel));-webkit-backdrop-filter:blur(18px) saturate(1.4);backdrop-filter:blur(18px) saturate(1.4);box-shadow:var(--glass-shadow,0 6px 20px rgba(0,0,0,.2));color:var(--text);font:600 24px var(--sans);gap:14px;cursor:pointer}
+.dm-chip{position:relative;z-index:1;display:inline-flex;align-items:center;gap:8px;padding:14px 26px 14px 20px;border-radius:999px;border:3px solid var(--acc);background:var(--glass,var(--panel));-webkit-backdrop-filter:blur(18px) saturate(1.4);backdrop-filter:blur(18px) saturate(1.4);box-shadow:var(--glass-shadow,0 6px 20px rgba(0,0,0,.2));color:var(--text);font:600 24px var(--sans);gap:14px;cursor:pointer}
 .dm-chip .lamp{width:16px;height:16px;border-radius:50%;background:var(--muted);flex:none}
 .dm-chip.hot .lamp{background:#E8711C;box-shadow:0 0 12px #E8711C}
 .dm-chip.alarm .lamp{background:var(--danger);animation:dmb .5s steps(2) infinite}
@@ -155,6 +155,15 @@ window.TCDemo = (() => {
 .dm-p .end{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:6px}
 .dm-p .end button{font:600 13px var(--sans);padding:5px 12px;border-radius:999px;border:1px solid var(--pill-border,var(--line));background:var(--pill,var(--sunk));color:var(--text);cursor:pointer}
 .dm-p .end button.bad{color:var(--danger)}
+/* breathing glow under the button: an element of its own, only its opacity / size animate (no repaints) */
+html:root .dm .dm-chip,html:root .dm .dm-chip:hover{border:3px solid var(--acc)}  /* (over the page's button style) */
+.dm-cw{position:relative;display:inline-flex}
+.dm-glow{position:absolute;left:0;right:0;top:20%;bottom:-26px;border-radius:999px;background:var(--acc);filter:blur(24px);
+  opacity:.45;transform:scale(.92);animation:dmglow 2.6s ease-in-out infinite;will-change:opacity,transform;pointer-events:none}
+@keyframes dmglow{50%{opacity:1;transform:scale(1.3)}}
+@media (prefers-reduced-motion:reduce){.dm-glow{animation:none;opacity:.6;transform:none}}
+.brand b i.demo{font-style:normal;font-size:.72em;font-weight:700;letter-spacing:.06em;color:var(--acc-ink);background:var(--acc);
+  border-radius:6px;padding:1px 6px;margin-left:4px;vertical-align:2px}
 @media (max-width:720px){.dm{right:10px;bottom:10px}}`;
     document.head.appendChild(css);
     bar = document.createElement('div');
@@ -180,7 +189,7 @@ window.TCDemo = (() => {
   </div>
   <div class="end"><button class="bad" data-a="reset" title="Settings, programs and logs back to the first start">Reset demo</button><button data-a="close">Close</button></div>
 </div>
-<button class="dm-chip" aria-expanded="false" title="Demo: speed, simulated hardware, faults"><span class="lamp"></span>Demo <b>1×</b></button>`;
+<div class="dm-cw"><span class="dm-glow" aria-hidden="true"></span><button class="dm-chip" aria-expanded="false" title="Demo: speed, simulated hardware, faults"><span class="lamp"></span>Demo <b>1×</b></button></div>`;
     document.body.appendChild(bar);
     const panel = bar.querySelector('.dm-p'), chip = bar.querySelector('.dm-chip');
     const pressed = () => bar.querySelectorAll('.dm-sp button').forEach(b => b.setAttribute('aria-pressed', +b.dataset.s === speed));

@@ -132,7 +132,7 @@ def s3_diagrams():
             ('J1-7  GPIO7', 'touch INT', 'CTP_INT', 'lcd'), ('J1-11  GPIO18', 'SD card CS', 'SD_CS', 'lcd')]).note(
         'VCC 5 V recommended (backlight ≈ 100 mA); the logic is 3.3 V. MISO is read back by the automatic screen check.',
         'The display\'s micro-SD slot holds the run logs, firmware.bin for an update and the backups (FAT32).')
-    d['s3-thermocouples'] = Diagram('S3: thermocouple converters (local channels)', S3,
+    d['s3-thermocouples'] = Diagram('S3: thermocouple converters (local channels + monitor)', S3,
                                     'MAX31855 (or MAX6675) breakout boards; SCK and SO shared, one chip select each').module(
         'MAX31855 #1', 'bottom · 10 kΩ CS pull-up to 3V3', [
             ('J1-1  3V3', '3.3 V', 'VIN', '3v3'), ('J3-1  GND', '', 'GND', 'gnd'),
@@ -143,8 +143,14 @@ def s3_diagrams():
             ('J1-2  3V3', '3.3 V', 'VIN', '3v3'), ('J3-21  GND', '', 'GND', 'gnd'),
             ('J3-7  GPIO41', 'SCK (shared)', 'SCK / CLK', 'tc'), ('J3-8  GPIO40', 'SO (shared)', 'SO / DO', 'tc'),
             ('J3-10  GPIO38', 'CS top', 'CS', 'tc')],
-        ('Thermocouple', 'type K, top heater'), [('T+', 'yellow (+)', 'field', ''), ('T−', 'red (−)', 'field', '')]).note(
-        'The pull-ups keep both converters deselected while the ESP32 boots. Twisted, screened thermocouple wire; screen to GND at one end.',
+        ('Thermocouple', 'type K, top heater'), [('T+', 'yellow (+)', 'field', ''), ('T−', 'red (−)', 'field', '')]).module(
+        'MAX31855 #3 (optional)', 'monitor channel · 10 kΩ CS pull-up to 3V3', [
+            ('J1-1  3V3', '3.3 V (shared)', 'VIN', '3v3'), ('J3-22  GND', '', 'GND', 'gnd'),
+            ('J3-7  GPIO41', 'SCK (shared)', 'SCK / CLK', 'tc'), ('J3-8  GPIO40', 'SO (shared)', 'SO / DO', 'tc'),
+            ('J1-13  GPIO3', 'CS monitor', 'CS', 'tc')],
+        ('Thermocouple', 'type K, measured only'), [('T+', 'yellow (+)', 'field', ''), ('T−', 'red (−)', 'field', '')]).note(
+        'The pull-ups keep the converters deselected while the ESP32 boots. Twisted, screened thermocouple wire; screen to GND at one end.',
+        'The third converter (monitor channel) is shown on the chart and logged only: no output, no alarm (Channels › third tab).',
         'IEC colours: type K + green / − white; ANSI: + yellow / − red. A reading that falls when heating: swap T+ and T−.')
     d['s3-ssr'] = Diagram('S3: SSR drivers, SSRs and the SSR supply relay', S3,
                           'Each SSR input is switched by an NPN transistor; the relay switches the +5 V of both SSR inputs').module(

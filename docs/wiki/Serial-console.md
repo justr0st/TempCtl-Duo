@@ -14,7 +14,7 @@ the port never resets the board. The help is printed at the start and with `help
 
 | Command | |
 |---|---|
-| `status` · `watch` · `info` · `log [n]` | both channels and the run · the same as one line per second (any key stops) · firmware, uptime, memory, network · the last n events |
+| `status` · `watch` · `info` · `log [n]` | both channels (and the monitor channel, `mon`) and the run · the same as one line per second (any key stops) · firmware, uptime, memory, network · the last n events |
 | `manual b on sp=150` · `manual t sp=180` · `manual b off` | manual setpoint (b = bottom, t = top); not for a channel of the running program |
 | `ack b` | acknowledge a channel fault |
 | `programs` · `program n=2` · `show` | list, select for the next run, print the program |
@@ -25,7 +25,7 @@ the port never resets the board. The help is printed at the start and with `help
 | `tune b start temp=200` · `tune b stop` · `tune b accept` · `tune b discard` · `tune b` | PID autotune of a local channel |
 | `wifi scan` · `wifi connect n=2` · `wifi connect s="My Net"` | join a network; without `pw=` the password is asked for (hidden) |
 | `wifi ap [pw=…]` · `wifi status` · `wifi forget` | access point, state, forget the network |
-| `get [b\|t\|bus\|run\|wifi\|display\|<prefix>]` | settings as `key=value` lines |
+| `get [b\|t\|bus\|run\|wifi\|display\|safety\|monitor\|<prefix>]` | settings as `key=value` lines (`monitor.*`: S3) |
 | `set <key>=<value> …` | up to 8 settings at once (the web API's keys; `b.` / `t.` = the channels); a value out of range is an error and nothing is changed |
 | `fw` · `fw sd` · `fw sd install yes` · `fw net` · `fw net install yes` | firmware: version and slot · update from the SD card (S3) · from the release page (S3) |
 | `backup sd` · `backup sd list` · `backup sd restore n=1 [settings\|programs] yes` · `backup sd delete n=1 yes` | backups on the SD card (S3) |
@@ -41,6 +41,7 @@ the port never resets the board. The help is printed at the start and with `help
 ```
 set display.spiMhz=40
 set b.local.median=on b.local.medianN=5
+set monitor.on=on monitor.name="Board edge"
 set time.zone=Europe/Berlin
 get b.local
 ```

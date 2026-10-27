@@ -60,7 +60,7 @@ void saveSettingsQuiet() {}
 void saveSettingsAndNotify() {}
 static uint32_t hostGen = 1;
 uint32_t settingsGen() { return hostGen; }
-BoardLimits boardLimits() { return BoardLimits{true, 2}; }
+BoardLimits boardLimits() { return BoardLimits{true, 2, HAS_MONITOR != 0}; }
 uint32_t liveHistSec() { return 86400; }
 const uint16_t LIVE_PERIODS[LIVE_PERIODS_N] = {1, 5, 10, 15, 30, 60, 120, 240, 480, 720, 1440};
 uint32_t liveMinEff() { return gSettings.liveMin ? gSettings.liveMin : 5; }
@@ -393,6 +393,12 @@ static void runningState() {
   gLive.chSt[0] = (uint8_t)ChState::Keep;
   gLive.kept[0] = 2;
   gLive.ch[1].pv = 206.8f;
+#if HAS_MONITOR
+  gLive.mon.on = true;  // the monitor channel (S3): its reading bottom right on the chart
+  gLive.mon.valid = true;
+  gLive.mon.pv = 96.4f;
+  strlcpy(gLive.mon.name, "Board edge", sizeof(gLive.mon.name));
+#endif
   gLive.ch[1].spEff = 211;
   gLive.ch[1].out = 82;
   gLive.run[1] = {true, false, true, 211, 225, 14, 1};
@@ -487,12 +493,12 @@ int main(int argc, char** argv) {
     run(500);
     int fails = 0;
     auto label = [](const char* t) { return findLabel(lv_screen_active(), t); };
-    const bool rs1 = visible(label(SMALL ? "RS485" : "RS485 (beta)"));
+    const bool rs1 = visible(label(SMALL || HAS_MONITOR ? "RS485" : "RS485 (beta)"));
     gSettings.ch[0].loc.kp = 7.5f;
     gSettings.ch[1].type = CH_LOCAL;  // (as saved on the web)
     ++hostGen;
     run(1300);
-    const bool rs2 = visible(label(SMALL ? "RS485" : "RS485 (beta)"));
+    const bool rs2 = visible(label(SMALL || HAS_MONITOR ? "RS485" : "RS485 (beta)"));
     const bool kp = label("7.50") != nullptr;
     printf("[host] chan: RS485 tab %d -> %d (want 1 -> 0), Kp 7.50 shown %d\n", rs1, rs2, kp);
     fails += !rs1 || rs2 || !kp;
@@ -796,12 +802,24 @@ int main(int argc, char** argv) {
   shot("23-edit-empty");
   tShow(SCR_CHANNELS);
   shot("24-chan-local");
-  tap(SMALL ? 155 : 220, SMALL ? 18 : 22);  // second tab
+  // tabs (S3: four with the monitor channel's, 76 px each)
+  tap(SMALL ? 155 : 178, SMALL ? 18 : 22);  // second tab
   shot("25-chan-modbus");
   run(600);
-  tap(SMALL ? 225 : 330, SMALL ? 18 : 22);  // bus tab
+  tap(SMALL ? 225 : 338, SMALL ? 18 : 22);  // bus tab
   shot("26-chan-bus");
-  tap(SMALL ? 85 : 110, SMALL ? 18 : 22);  // first channel (local)
+#if HAS_MONITOR
+  {
+    Guard g;
+    gSettings.mon.on = 1;
+    strlcpy(gSettings.mon.name, "Board edge", sizeof(gSettings.mon.name));
+  }
+  tShow(SCR_MENU);
+  tShow(SCR_CHANNELS);
+  tap(258, 22);  // monitor tab
+  shot("26b-chan-monitor");
+#endif
+  tap(SMALL ? 85 : 98, SMALL ? 18 : 22);  // first channel (local)
   lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 560, LV_ANIM_OFF);
   shot("27-chan-pid");
   lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 1100, LV_ANIM_OFF);

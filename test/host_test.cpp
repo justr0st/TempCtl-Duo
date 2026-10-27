@@ -531,7 +531,7 @@ static void testTimelineEdits() {
 
 // ------------------------------------------------------------------ settings (JSON, validation)
 
-static const BoardLimits S3{true, 2}, CYD_1L485{true, 1}, CYD_2L{false, 2};
+static const BoardLimits S3{true, 2, true}, CYD_1L485{true, 1, false}, CYD_2L{false, 2, false};
 
 static void roundTrip(const Settings& in, Settings& out, bool forApi) {
   JsonDocument d;
@@ -561,6 +561,38 @@ static void testSettingsDefaults() {
   CHECK(settingsValidate(s, CYD_2L, msg, sizeof(msg)));
   settingsDefaults(s, CYD_1L485);
   CHECK(s.ch[0].type == CH_MODBUS && s.ch[1].type == CH_OFF);
+}
+
+// the monitor channel (1.0.60): a third thermocouple on boards that have it (S3)
+static void testMonitorSettings() {
+  Settings s;
+  char msg[200];
+  settingsDefaults(s, S3);
+  CHECK(s.mon.on == 0 && !strcmp(s.mon.name, "Monitor") && s.mon.readMs == 1000 && s.mon.median == 1 && s.mon.medianN == 3);
+  CHECK(s.mon.calGain == 1 && s.mon.calOffset == 0 && s.mon.sensor == SENSOR_MAX31855);
+  JsonDocument d;
+  CHECK(deserializeJson(d, R"({"monitor":{"on":true,"name":"Board edge","sensor":"max6675","calOffset":-1.5,"calGain":1.02,"readMs":100,"median":false,"medianN":6}})") == DeserializationError::Ok);
+  CHECK(settingsFromJson(d.as<JsonObjectConst>(), s, msg, sizeof(msg)));
+  CHECK(s.mon.on == 1 && !strcmp(s.mon.name, "Board edge") && s.mon.sensor == SENSOR_MAX6675 && s.mon.median == 0);
+  CHECK(fabsf(s.mon.calOffset + 1.5f) < 1e-4f && fabsf(s.mon.calGain - 1.02f) < 1e-4f);
+  CHECK(settingsValidate(s, S3, msg, sizeof(msg)));
+  CHECK(s.mon.readMs == 250 && s.mon.medianN == 7);  // MAX6675: from 250 ms; odd window
+  Settings r;
+  roundTrip(s, r, true);
+  CHECK(r.mon.on == 1 && !strcmp(r.mon.name, "Board edge") && r.mon.readMs == 250 && r.mon.sensor == SENSOR_MAX6675);
+  // a board without it: switched off without an error (an S3 backup restores on a CYD)
+  Settings c = s;
+  settingsValidate(c, CYD_2L, msg, sizeof(msg));  // (fails for the S3 channel types, not for the monitor)
+  CHECK(c.mon.on == 0 && !strstr(msg, "monitor"));
+  // empty name: back to the default; bad type: error
+  JsonDocument e;
+  CHECK(deserializeJson(e, R"({"monitor":{"name":""}})") == DeserializationError::Ok);
+  CHECK(settingsFromJson(e.as<JsonObjectConst>(), s, msg, sizeof(msg)));
+  settingsValidate(s, S3, msg, sizeof(msg));
+  CHECK(!strcmp(s.mon.name, "Monitor"));
+  JsonDocument f;
+  CHECK(deserializeJson(f, R"({"monitor":{"readMs":"fast"}})") == DeserializationError::Ok);
+  CHECK(!settingsFromJson(f.as<JsonObjectConst>(), s, msg, sizeof(msg)));
 }
 
 static void testSettingsJson() {
@@ -841,7 +873,7 @@ static void testRunaway() {
 
 static void testGuard() {
   Settings st;
-  settingsDefaults(st, BoardLimits{true, 2});
+  settingsDefaults(st, BoardLimits{true, 2, false});
   const Runaway c = st.ch[0].loc.runaway;
   CHECK(c.offEnable && c.offRise == 10 && c.offSec == 60 && c.frozenEnable && c.frozenSec == 120);
   CHECK(st.ch[0].loc.cjEnable && st.ch[0].loc.cjMax == 70);
@@ -924,26 +956,29 @@ static void testGuard() {
   b.manualIdleMin = 0;
   b.ch[0].loc.runaway.offSec = 1;
   b.ch[0].loc.cjMax = 500;
-  settingsValidate(b, BoardLimits{true, 2}, msg, sizeof(msg));
+  settingsValidate(b, BoardLimits{true, 2, false}, msg, sizeof(msg));
   CHECK(b.manualIdleMin == 2 && b.ch[0].loc.runaway.offSec == 10 && b.ch[0].loc.cjMax == 125);
   // read interval, median filter, autotune limit (1.0.51): defaults = the behaviour before the settings
   CHECK(st.ch[0].loc.readMs == 250 && st.ch[0].loc.median == 1 && st.ch[0].loc.medianN == 3 && st.ch[0].loc.tuneMaxMin == 70);
+  CHECK(st.ch[0].loc.tuneFast == 0 && st.ch[1].loc.tuneFast == 0);
   Settings m = st;
   m.ch[0].loc.readMs = 100;
   m.ch[0].loc.median = 0;
   m.ch[0].loc.medianN = 7;
   m.ch[0].loc.tuneMaxMin = 120;
+  m.ch[1].loc.tuneFast = 1;
   JsonDocument dm;
   settingsToJson(m, dm.to<JsonObject>(), false);
   Settings mb = st;
   CHECK(settingsFromJson(dm.as<JsonObjectConst>(), mb, msg, sizeof(msg)));
   CHECK(mb.ch[0].loc.readMs == 100 && mb.ch[0].loc.median == 0 && mb.ch[0].loc.medianN == 7 && mb.ch[0].loc.tuneMaxMin == 120);
+  CHECK(mb.ch[1].loc.tuneFast == 1 && mb.ch[0].loc.tuneFast == 0);
   mb.ch[0].loc.medianN = 4;  // even: the next odd
   mb.ch[1].loc.medianN = 11;
   mb.ch[0].loc.tuneMaxMin = 5;
   mb.ch[1].loc.sensor = SENSOR_MAX6675;  // MAX6675: from 250 ms
   mb.ch[1].loc.readMs = 100;
-  settingsValidate(mb, BoardLimits{true, 2}, msg, sizeof(msg));
+  settingsValidate(mb, BoardLimits{true, 2, false}, msg, sizeof(msg));
   CHECK(mb.ch[0].loc.medianN == 5 && mb.ch[1].loc.medianN == 9 && mb.ch[0].loc.tuneMaxMin == 10);
   CHECK(mb.ch[1].loc.readMs == 250 && mb.ch[0].loc.readMs == 100);
   // display SPI clock (1.0.54): default 40, JSON round trip, snapped to 20 / 40 / 80
@@ -956,7 +991,7 @@ static void testGuard() {
   CHECK(settingsFromJson(ds.as<JsonObjectConst>(), sb, msg, sizeof(msg)) && sb.spiMhz == 80);
   for (int v : {0, 25, 29, 30, 59, 60, 200}) {
     sb.spiMhz = (uint8_t)v;
-    settingsValidate(sb, BoardLimits{true, 2}, msg, sizeof(msg));
+    settingsValidate(sb, BoardLimits{true, 2, false}, msg, sizeof(msg));
     CHECK(sb.spiMhz == (v < 30 ? 20 : v < 60 ? 40 : 80));
   }
 }
@@ -1074,6 +1109,32 @@ static void testAutotune() {
     if (T > peak) peak = T;
   }
   CHECK(fabsf(T - 200) < 1.0f && peak < 203);
+  CHECK(!r.fast && !strstr(at.message(), "faster"));
+  // the faster rule (1.0.60): same Kp / Td, integral time 0.7 Pu; reaches 199.5 degC sooner, little overshoot
+  {
+    Heater hf;
+    RelayAutotune af;
+    TuneConfig cf = c;
+    cf.fast = true;
+    CHECK(runTune(hf, af, cf));
+    const TuneResult& f = af.result();
+    CHECK(f.fast && strstr(af.message(), "faster") && near(f.ki, f.kp / (0.7f * f.pu), 1e-4f) && near(f.kd, f.kp * f.pu / 6.3f, 1e-3f));
+    float t995[2] = {-1, -1}, pk[2] = {0, 0};
+    const TuneResult* rr[2] = {&r, &f};
+    for (int k = 0; k < 2; ++k) {
+      Heater hh;
+      Pid pp;
+      PidParams q{rr[k]->kp, rr[k]->ki, rr[k]->kd, 100};
+      float TT = hh.T;
+      for (int i = 0; i < 4 * 3600; ++i) {
+        TT = hh.step(pp.update(q, 200, roundf(TT * 4) / 4, 0.25f), 0.25f);
+        if (TT > pk[k]) pk[k] = TT;
+        if (t995[k] < 0 && TT >= 199.5f) t995[k] = i * 0.25f;
+      }
+    }
+    CHECK(t995[1] > 0 && (t995[0] < 0 || t995[1] < t995[0]) && pk[1] < 207);  // (this heater: 284 / 116 s, peak 200.1 / 205.4)
+    printf("autotune rules: 199.5 degC after %.0f s (slow) / %.0f s (faster), peak %.1f / %.1f\n", t995[0], t995[1], pk[0], pk[1]);
+  }
   // low setpoint (the heater needs ~25 %): the relay re-centres, still converges
   Heater h3;
   c.sp = 100;
@@ -1289,6 +1350,51 @@ static void testBackupLabel() {
   CHECK(strlen(b) == 11);
 }
 
+
+// Both phase with the top Idle (1.0.60): the top is off, the bottom ramps / waits / holds as in a Bottom phase
+static void testTopIdle() {
+  static DuoProgram p, q;
+  char err[120];
+  CHECK(progParse(R"({"type":"seq","name":"ti","phases":[{"kind":"T","t":{"t":200,"r":0,"h":10}},
+    {"kind":"BT","wait":true,"b":{"t":150,"r":60,"h":30},"t":{"idle":true}}]})", p, err, sizeof(err)));
+  CHECK(p.nPh == 2 && p.ph[1].kind == PH_BT && p.ph[1].tIdle && !p.ph[1].bIdle && p.ph[1].wait);
+  CHECK(p.ph[1].b.r == 60 && p.ph[1].b.h == 30);
+  CHECK(progHasTarget(p, CH_BOTTOM, 1) && !progHasTarget(p, CH_TOP, 1));
+  const std::string j = progJson(p);
+  CHECK(j.find("\"t\":{\"idle\":true}") != std::string::npos && j.find("\"r\":60") != std::string::npos);
+  CHECK(progParse(j.c_str(), q, err, sizeof(err)) && progJson(q) == j);
+  // not both idle
+  CHECK(!progParse(R"({"type":"seq","phases":[{"kind":"BT","b":{"idle":true},"t":{"idle":true}}]})", q, err, sizeof(err)));
+  // plan: top 200 for 10 s, then off; bottom 25 -> 150 in 60 s, holds 30 s
+  CHECK(near(programPreview(p, nullptr, nullptr, nullptr), 100));
+  Probe a = planAt(p, 5);
+  CHECK(near(a.v[1], 200) && a.idle[0]);
+  a = planAt(p, 40);
+  CHECK(a.idle[1] && near(a.v[0], 25 + 125 * 30 / 60.0f));
+  // run
+  Sim s;
+  CHECK(s.start(p));
+  s.runTo(5);
+  CHECK(near(s.sp(1), 200));
+  s.runTo(40);
+  CHECK(s.e.seq().idx == 1 && s.e.seq().st == Stage::Ramp && s.e.out(1).idle && s.e.out(0).moving);
+  CHECK(near(s.sp(0), 25 + 125 * 30 / 60.0f, 0.1f) && near(s.e.seq().dur, 60));
+  s.runTo(80);  // ramp done (the bottom follows at once: no wait), hold 30 s
+  CHECK(s.e.seq().st == Stage::Hold && near(s.sp(0), 150) && near(s.e.seq().dur, 30) && s.e.canExtend(CH_BOTTOM));
+  s.runTo(200);
+  CHECK(s.e.state() == RunState::Finished && near(s.e.elapsed(), 101, 1.01f));
+  // resume in the phase: the top stays off, the bottom ramps again
+  Sim r;
+  r.start(p);
+  r.runTo(40);
+  const RunPos pos = r.e.position();
+  q = p;
+  Sim r2;
+  r2.pv[0] = 90;
+  CHECK(r2.e.resumeAt(&q, pos, r2.pv, r2.ok, 5, false) && r2.e.seq().idx == 1 && r2.e.seq().st == Stage::Ramp);
+  CHECK(r2.e.out(1).idle && r2.e.out(0).moving);
+}
+
 int main() {
   testCrc();
   testParse();
@@ -1301,8 +1407,10 @@ int main() {
   testTimelineEdits();
   testEvents();
   testResume();
+  testTopIdle();
   testSettingsDefaults();
   testSettingsJson();
+  testMonitorSettings();
   testSettingsMerge();
   testStaticIp();
   testSettingsVariants();

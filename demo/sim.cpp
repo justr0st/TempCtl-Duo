@@ -309,16 +309,19 @@ static uint16_t frame6675(float t, bool open) {
   if (v > 4095) v = 4095;
   return (uint16_t)(v << 3);
 }
+// ch 2: the monitor channel's thermocouple, at the board's edge (well away from the heads: about half of
+// the board's rise)
 static void frameStart(int ch) {
-  const float t = (ch == 0 ? heat.tcB : heat.tcT) + noise() * 0.3f;
+  const float t = (ch == 0 ? heat.tcB : ch == 1 ? heat.tcT : AMB + (heat.b - AMB) * 0.55f) + noise() * 0.3f;
+  const bool open = ch < 2 && tcOpen[ch];
   frameCh = ch;
   frameBit = 0;
-  if (gSettings.ch[ch].loc.sensor == SENSOR_MAX6675) {
+  if ((ch < 2 ? gSettings.ch[ch].loc.sensor : gSettings.mon.sensor) == SENSOR_MAX6675) {
     frameBits = 16;
-    frame = frame6675(t, tcOpen[ch]);
+    frame = frame6675(t, open);
   } else {
     frameBits = 32;
-    frame = frame31855(t, heat.cj, tcOpen[ch]);
+    frame = frame31855(t, heat.cj, open);
   }
 }
 void pinMode(int pin, int mode) {
@@ -328,8 +331,8 @@ void digitalWrite(int pin, int v) {
   if (pin < 0 || pin >= 64) return;
   const uint8_t was = level[pin];
   level[pin] = v ? 1 : 0;
-  if (pin == PIN_TC_CS_BOTTOM || pin == PIN_TC_CS_TOP) {
-    const int ch = pin == PIN_TC_CS_BOTTOM ? 0 : 1;
+  if (pin == PIN_TC_CS_BOTTOM || pin == PIN_TC_CS_TOP || pin == PIN_TC_CS_MON) {
+    const int ch = pin == PIN_TC_CS_BOTTOM ? 0 : pin == PIN_TC_CS_TOP ? 1 : 2;
     if (was && !v) frameStart(ch);
     else if (v) frameCh = -1;
   } else if (pin == PIN_TC_SCK && was && !v && frameCh >= 0) {
@@ -392,16 +395,29 @@ EXPORT("demo_boot") int demo_boot(double wallNow, int restarted) {
   syslogBegin();
   LogSerial.printf("\n[boot] " PRODUCT_NAME " %s - browser demo (simulated hardware)\n", FW_VERSION);
   const bool first = !LittleFS.files.count("/duo/settings.json");
+  // settings saved by a demo before the monitor channel (1.0.60): switch it on once, as on a first start
+  bool noMon = false;
+  if (!first) {
+    const auto& f = *LittleFS.files["/duo/settings.json"];
+    noMon = std::string(f.begin(), f.end()).find("\"monitor\"") == std::string::npos;
+  }
   appInit();
   if (first) {  // the demo's first start: PID values from an autotune of the simulated heaters (the firmware's
                 // defaults are placeholders until the user runs one)
     Guard g;
     LocalChannelSettings& b = gSettings.ch[CH_BOTTOM].loc;
     LocalChannelSettings& t = gSettings.ch[CH_TOP].loc;
-    b.kp = 8.7f, b.ki = 0.040f, b.kd = 134.0f;
-    t.kp = 5.7f, t.ki = 0.053f, t.kd = 44.0f;
+    // (the "faster" rule, switch on: the slow one leaves the PV a few degrees short for minutes)
+    b.kp = 8.7f, b.ki = 0.126f, b.kd = 134.0f;
+    t.kp = 5.7f, t.ki = 0.166f, t.kd = 44.0f;
+    b.tuneFast = t.tuneFast = 1;
   }
-  if (first) saveSettingsQuiet();
+  if (first || noMon) {
+    Guard g;
+    gSettings.mon.on = 1;  // the third thermocouple at the board's edge
+    strlcpy(gSettings.mon.name, "Board edge", sizeof(gSettings.mon.name));
+  }
+  if (first || noMon) saveSettingsQuiet();
   controlTaskBegin();
   webBegin();
   stepAt = nowUs / 50000 * 50000 - 10000;  // (the first step reads the thermocouples, then the control task runs)

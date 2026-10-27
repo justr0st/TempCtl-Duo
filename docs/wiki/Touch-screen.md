@@ -16,6 +16,8 @@ and nothing happens — a safe way to cancel a press.
   **Stop**, **Next phase**.
 - **Chart** of both channels: temperatures (solid), setpoints, the rest of the program (dashed). Tap it to
   switch between the **program view** and the **live view** (the last minutes; period under *Display*).
+  With the [monitor channel](Channels.md#monitor-channel-s3) on (S3), its name and reading are at the bottom
+  right of the chart, in the accent colour.
 - **One tile per channel**: the temperature (PV), the setpoint (SP), the output bar, what the channel does
   (Ramp to 225 °C, Keeps 160 °C, Idle …). While its outputs are on, the tile gets a border and a tint in the
   channel colour.
@@ -71,8 +73,9 @@ can be changed (run edits).
 
 ## Channels
 
-One tab per channel and one for the RS485 bus (beta). *Save* stores the changes, with the same checks as the
-web page.
+One tab per channel, on the S3 one for the monitor channel (*Monitor*: on / off, name, converter, calibration,
+read interval, filter) and one for the RS485 bus (beta, only with a Modbus channel). *Save* stores the changes,
+with the same checks as the web page.
 
 | | |
 |---|---|

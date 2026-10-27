@@ -83,6 +83,7 @@ struct LocalChannelSettings {
   uint8_t median;       // median filter on the readings (spikes) on / off
   uint8_t medianN;      // ... over the last 3, 5, 7 or 9 readings
   uint16_t tuneMaxMin;  // autotune gives up after this many minutes (10 ... 240)
+  uint8_t tuneFast;     // autotune rule: 0 slow / no overshoot (Tyreus-Luyben), 1 faster (integral time 0.7 Pu)
 };
 
 constexpr size_t CH_NAME_LEN = 17;  // 16 characters
@@ -96,6 +97,18 @@ struct ChannelSettings {
   float manualSp;       // last manual setpoint
   ModbusChannelSettings mb;
   LocalChannelSettings loc;
+};
+
+// Monitor channel (HAS_MONITOR boards): a third thermocouple that is only shown and logged
+struct MonitorSettings {
+  uint8_t on;           // converter fitted and read
+  char name[CH_NAME_LEN];
+  uint8_t sensor;       // SensorType
+  float calOffset;      // true = raw * calGain + calOffset
+  float calGain;
+  uint16_t readMs;      // read interval, 100 ... 1000 ms (MAX6675: at least 250)
+  uint8_t median;       // median filter on / off
+  uint8_t medianN;      // ... over 3, 5, 7 or 9 readings
 };
 
 struct Settings {
@@ -148,6 +161,7 @@ struct Settings {
   uint8_t selProgram;    // program selected for the next run
 
   ChannelSettings ch[NUM_CHANNELS];
+  MonitorSettings mon;   // (always in the JSON; boards without it keep it off)
 };
 
 constexpr uint8_t THEME_DARK_DEFAULT = 0xFF;
@@ -156,6 +170,7 @@ constexpr uint8_t THEME_DARK_DEFAULT = 0xFF;
 struct BoardLimits {
   bool rs485;
   uint8_t localMax;
+  bool monitor;  // (missing in an initializer: false) the monitor channel's converter can be wired (HAS_MONITOR)
 };
 
 void regMapDefaults(RegMap& r, uint8_t profile);

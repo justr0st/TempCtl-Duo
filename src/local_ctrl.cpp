@@ -107,6 +107,10 @@ void localCtrlEarlyInit() {
     digitalWrite(p, HIGH);
     pinMode(p, OUTPUT);
   }
+#if defined(PIN_TC_CS_MON)
+  digitalWrite(PIN_TC_CS_MON, HIGH);  // monitor converter deselected
+  pinMode(PIN_TC_CS_MON, OUTPUT);
+#endif
 #if defined(PIN_SSR_RELAY)
   digitalWrite(PIN_SSR_RELAY, LOW);  // SSR supply relay off (active high, driven directly by the pin)
   pinMode(PIN_SSR_RELAY, OUTPUT);
@@ -322,6 +326,95 @@ static void step(int ch, float dt) {
   ssrSet(ch, duty, window);
 }
 
+// ------------------------------------------------------------------ monitor channel
+struct Mon {
+  bool enabled = false;
+  MonitorSettings cfg{};
+  float pv = NAN, rawC = NAN, coldC = NAN;
+  uint8_t tcFault = TC_NO_DEVICE;
+  uint8_t badReads = 0;
+  float med[9] = {};
+  uint8_t medN = 0;
+  uint32_t lastStepMs = 0, lastGoodMs = 0;
+  bool everGood = false;
+};
+static Mon mon;
+static uint32_t monFreshMs(const MonitorSettings& c) {
+  const uint32_t f = c.readMs * 5u / 2u;
+  return f > FRESH_MS ? f : FRESH_MS;
+}
+
+#if defined(PIN_TC_CS_MON) && HAVE_LOCAL
+static void monStep() {
+  uint8_t sensor;
+  {
+    LockL g;
+    if (!mon.enabled) return;
+    sensor = mon.cfg.sensor;
+  }
+  const TcReading r = readSensor(sensor, PIN_TC_CS_MON);
+  LockL g;
+  const MonitorSettings& c = mon.cfg;
+  mon.tcFault = r.fault;
+  mon.coldC = r.coldC;
+  if (r.fault != TC_OK) {
+    if (mon.badReads < 255) ++mon.badReads;
+    mon.medN = 0;
+    return;
+  }
+  mon.badReads = 0;
+  float t = r.tempC;
+  if (c.median) {  // (as the channels: single-reading spikes filtered out)
+    const uint8_t w = c.medianN >= 3 && c.medianN <= 9 ? c.medianN : 3;
+    for (int k = 0; k < 8; ++k) mon.med[k] = mon.med[k + 1];
+    mon.med[8] = r.tempC;
+    if (mon.medN < 9) ++mon.medN;
+    if (mon.medN >= w) t = medianOf(mon.med + 9 - w, w);
+  } else {
+    mon.medN = 0;
+  }
+  mon.rawC = t;
+  mon.pv = t * c.calGain + c.calOffset;
+  mon.lastGoodMs = millis();
+  mon.everGood = true;
+}
+#else
+static void monStep() {}
+#endif
+
+void localCtrlMonConfigure(bool on, const MonitorSettings& m) {
+  if (!mtx) return;
+  LockL g;
+#if defined(PIN_TC_CS_MON)
+  if (on && !mon.enabled) {
+    mon.badReads = 0;
+    mon.medN = 0;
+    mon.everGood = false;
+    mon.lastStepMs = 0;
+  }
+  mon.enabled = on;
+#else
+  (void)on;
+  mon.enabled = false;
+#endif
+  mon.cfg = m;
+}
+
+void localCtrlMonGet(MonStatus& st) {
+  st = MonStatus{};
+  st.pv = st.rawC = st.coldC = NAN;
+  st.tcFault = TC_NO_DEVICE;
+  if (!mtx) return;
+  LockL g;
+  st.enabled = mon.enabled;
+  st.fresh = mon.enabled && mon.everGood && millis() - mon.lastGoodMs < monFreshMs(mon.cfg) && mon.badReads == 0;
+  st.pv = mon.pv;
+  st.rawC = mon.rawC;
+  st.coldC = mon.coldC;
+  st.tcFault = mon.tcFault;
+  st.lastGoodMs = mon.lastGoodMs;
+}
+
 // ------------------------------------------------------------------ SSR supply relay
 #if defined(PIN_SSR_RELAY) && HAVE_LOCAL
 static volatile bool relayOn = false, relayEnabled = true;
@@ -380,6 +473,19 @@ void localCtrlTick() {
     step(ch, dt);
   }
   relayUpdate();
+  {  // the monitor channel, at its own interval (after the control channels: never delays them)
+    uint32_t every;
+    bool en;
+    {
+      LockL g;
+      en = mon.enabled;
+      every = mon.cfg.readMs >= 100 && mon.cfg.readMs <= 1000 ? mon.cfg.readMs : 1000;
+    }
+    if (en && (!mon.lastStepMs || now - mon.lastStepMs + 5 >= every)) {
+      mon.lastStepMs = now;
+      monStep();
+    }
+  }
 }
 
 static void localTask(void*) {
@@ -538,6 +644,7 @@ bool localCtrlTuneStart(int ch, float sp, char* err, size_t n) {
   c.outMax = l.cfg.maxOut;
   c.maxSec = (l.cfg.tuneMaxMin >= 10 ? l.cfg.tuneMaxMin : 70) * 60.0f;  // time limit (setting)
   c.maxOver = margin - 5 < 40 ? margin - 5 : 40;  // stays below the cut-off
+  c.fast = l.cfg.tuneFast != 0;                    // the rule (setting; fixed for this run)
   l.on = false;
   l.pid.reset();
   l.runaway.reset();

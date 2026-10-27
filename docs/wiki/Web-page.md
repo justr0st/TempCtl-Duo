@@ -15,7 +15,8 @@ The page follows the browser's light / dark setting until you switch *Dark mode*
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/web/sidebar-dark.webp"><img src="img/web/sidebar-light.webp" alt="Sidebar" width="236"></picture>
 
 On every page: the pages, then the run (program, state, time, Start / Pause / Continue / Resume, Stop), both
-channels (temperature, what they do, manual on / off), the SSR supply relay (S3), the connection, address and
+channels (temperature, what they do, manual on / off), the [monitor channel](Channels.md#monitor-channel-s3)'s
+reading while it is on, the SSR supply relay (S3), the connection, address and
 clock, and the dark mode switch. On a phone the sidebar becomes a menu and jump buttons appear in the title
 bar.
 
@@ -35,6 +36,8 @@ bar.
 
 **Live view** — the chart's *Live* tab shows the last minutes or hours (Period: 1 min … 24 h on the S3, 30
 min on the CYD). The legend switches each curve on and off; *Export CSV* downloads the whole history.
+With the **monitor channel** switched on (S3, [Channels](Channels.md#monitor-channel-s3)) the chart has a third
+line in the accent colour, and its legend entry shows the name and the current reading.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/web/dashboard-manual-dark.webp"><img src="img/web/dashboard-manual-light.webp" alt="Dashboard: live view, bottom heating to its manual setpoint" width="900"></picture>
 
@@ -99,7 +102,8 @@ The 20 slots with type, channels, phases / steps and duration: *Open* (in the Da
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/web/channels-local-dark.webp"><img src="img/web/channels-local-light.webp" alt="Channels page, local channel" width="900"></picture>
 
-The *All channels* tile (polling interval, link-loss pause, "bottom reached" band), then one tab per channel.
+The *All channels* tile (polling interval, link-loss pause, "bottom reached" band), then one tab per channel
+(S3: a third tab for the [monitor channel](Channels.md#monitor-channel-s3), in the accent colour).
 A channel's tab holds one card per section — *General*, *Thermocouple*, *PID control*, *PID autotune* and
 *Protection* (a Modbus channel: *Modbus controller*, *RS485 bus*, *Register addresses*) — with one line per
 setting; **ⓘ** shows the explanation. The protection checks read as sentences ("outputs off, but the PV rises by

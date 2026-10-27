@@ -9,6 +9,7 @@
 #include <stdarg.h>
 #include "app_state.h"
 #include "safety.h"
+#include "tc_sensor.h"
 #include "ota.h"
 #include "ota_net.h"
 #include "release.h"
@@ -407,7 +408,11 @@ static const char* const H_API[] = {
 static const char* const H_SETTINGS[] = {
     "SETTINGS - all settings, changed with set, shown with get",
     "  get                          all settings below as key=value (passwords never shown)",
+#if HAS_MONITOR
+    "  get <section>                one section: b, t, bus, run, wifi, display, safety, monitor",
+#else
     "  get <section>                one section: b, t, bus, run, wifi, display, safety",
+#endif
     "  set <key>=<value> ...        change one or more settings; checked first, nothing is",
     "                               changed if one value is wrong; saved and used at once",
     "  factory reset yes            all settings to defaults, Wi-Fi included (programs kept)",
@@ -441,8 +446,20 @@ static const char* const H_SETTINGS[] = {
     "  readMs=<ms>                  thermocouple read interval, 100 ... 1000 (MAX6675: from 250)",
     "  median=on|off  medianN=<n>   median filter over the last 3, 5, 7 or 9 readings",
     "  tuneMaxMin=<min>             autotune time limit, 10 ... 240",
+    "  tuneFast=on|off              autotune rule: off = slow, no overshoot; on = faster (a little overshoot)",
     "  e.g. set b.local.calOffset=-1.5 b.local.kp=2.5 b.local.ki=0.02 b.local.kd=40",
     "",
+#if HAS_MONITOR
+    "MONITOR CHANNEL: A THIRD THERMOCOUPLE, SHOWN AND LOGGED ONLY (monitor.*)",
+    "  on=on|off                    converter fitted (CS on GPIO 3): read, charted, logged",
+    "  name=<text>                  1 ... 16 characters",
+    "  sensor=max31855|max6675      thermocouple converter",
+    "  calOffset=<C>  calGain=<x>   calibration: -50 ... 50 / 0.5 ... 2",
+    "  readMs=<ms>                  read interval, 100 ... 1000 (MAX6675: from 250)",
+    "  median=on|off  medianN=<n>   median filter over the last 3, 5, 7 or 9 readings",
+    "  e.g. set monitor.on=on monitor.name=Board",
+    "",
+#endif
     "RUNAWAY PROTECTION (b.local.runaway.* / t.local.runaway.*,",
     "                    Modbus channel: b.modbus.runaway.* / t.modbus.runaway.*)",
     "  enable=on|off                runaway detection",
@@ -654,6 +671,10 @@ static void status() {
     char out[16] = "-";
     if (C.outValid) snprintf(out, sizeof(out), "%.0f %%", C.out);
     say("%-6s %-12s PV %-10s SP %-10s out %-5s %s", chWord(ch), C.name, pv, sp, out, chStateText(ch, st, sizeof(st)));
+  }
+  if (L.mon.on) {  // the monitor channel: its reading only
+    fmtC(L.mon.valid ? L.mon.pv : NAN, pv, sizeof(pv));
+    say("%-6s %-12s PV %-10s %s", "mon", L.mon.name, pv, L.mon.valid ? "monitor only" : L.mon.tcFault ? tcFaultName(L.mon.tcFault) : "no reading");
   }
   char t1[16], t2[16];
   fmtT(L.elapsed, t1, sizeof(t1));
@@ -957,6 +978,11 @@ static void cmdShow() {
           say("P%-3d %s: %s", i + 1, nt, b);
           break;
         case PH_BT:
+          if (f.tIdle) {
+            seg(f.b, b, sizeof(b));
+            say("P%-3d both: %s: %s%s; %s off", i + 1, nb, b, f.wait ? ", wait" : "", nt);
+            break;
+          }
           seg(f.t, c, sizeof(c));
           if (f.bIdle) snprintf(b, sizeof(b), "%s off", nb);
           else snprintf(b, sizeof(b), "%s %.0f \xC2\xB0" "C", nb, f.b.t);
@@ -1216,8 +1242,10 @@ static void cmdTune(const Args& a) {
     if (runActive() && L.run[ch].inProgram) return err("%s is running a program", chWord(ch));
     if (L.ch[ch].fault) return err("%s has a fault: ack %s first", chWord(ch), a.word(1));
     sendCmd(CMD_TUNE_START, ch, v);
-    return say("%s: autotune at %.0f \xC2\xB0" "C - the heater is switched on and off around it (tune %s stop ends it)",
-               chWord(ch), v, a.word(1));
+    say("%s: autotune at %.0f \xC2\xB0" "C - the heater is switched on and off around it (tune %s stop ends it)",
+        chWord(ch), v, a.word(1));
+    return say("  rule: %s (set %s.local.tuneFast=%s for the %s one)", S.ch[ch].loc.tuneFast ? "faster" : "slow, no overshoot",
+               a.word(1), S.ch[ch].loc.tuneFast ? "off" : "on", S.ch[ch].loc.tuneFast ? "slow" : "faster");
   }
   if (!strcmp(what, "stop")) {
     if (t.state != TuneState::Running) return err("no autotune is running on %s", chWord(ch));
@@ -1252,8 +1280,8 @@ static void cmdTune(const Args& a) {
 // One table: the keys of the settings API (channels[i]. -> b. / t.), what values they take (checked
 // before anything is changed) and how get shows them.
 enum KType : uint8_t { K_NUM, K_INT, K_BOOL, K_CHOICE, K_SET, K_STR, K_IP, K_ADDR, K_ACCENT, K_PARITY, K_HOST, K_TZ };
-enum KSec : uint8_t { KS_CH, KS_BUS, KS_RUN, KS_WIFI, KS_DISP, KS_TIME, KS_SAFETY };
-static const char* const KSEC_NAME[] = {"", "bus", "run", "wifi", "display", "time", "safety"};
+enum KSec : uint8_t { KS_CH, KS_BUS, KS_RUN, KS_WIFI, KS_DISP, KS_TIME, KS_SAFETY, KS_MON };
+static const char* const KSEC_NAME[] = {"", "bus", "run", "wifi", "display", "time", "safety", "monitor"};
 struct SKey {
   uint8_t sec, t;
   const char* key;  // path below the section (channels: below channels[i])
@@ -1289,6 +1317,7 @@ static const SKey KEYS[] = {
     {KS_CH, K_BOOL, "local.median", 0, 0, nullptr},
     {KS_CH, K_INT, "local.medianN", 3, 9, nullptr},
     {KS_CH, K_INT, "local.tuneMaxMin", 10, 240, nullptr},
+    {KS_CH, K_BOOL, "local.tuneFast", 0, 0, nullptr},
     RUNAWAY("local."),
     {KS_CH, K_INT, "modbus.addr", 1, 247, nullptr},
     {KS_CH, K_CHOICE, "modbus.profile", 0, 0, "pma|generic"},
@@ -1341,6 +1370,14 @@ static const SKey KEYS[] = {
     {KS_SAFETY, K_BOOL, "relay", 0, 0, nullptr},
     {KS_SAFETY, K_BOOL, "chipWarn", 0, 0, nullptr},
     {KS_SAFETY, K_NUM, "chipMaxC", 40, 120, nullptr},
+    {KS_MON, K_BOOL, "on", 0, 0, nullptr},
+    {KS_MON, K_STR, "name", 1, 16, nullptr},
+    {KS_MON, K_CHOICE, "sensor", 0, 0, "max31855|max6675"},
+    {KS_MON, K_NUM, "calOffset", -50, 50, nullptr},
+    {KS_MON, K_NUM, "calGain", 0.5f, 2, nullptr},
+    {KS_MON, K_INT, "readMs", 100, 1000, nullptr},
+    {KS_MON, K_BOOL, "median", 0, 0, nullptr},
+    {KS_MON, K_INT, "medianN", 3, 9, nullptr},
 };
 static const char* const ACCENT_NAMES[] = {"blue", "pink", "violet", "orange", "mauve", "green"};
 static const uint32_t ACCENT_RGB[] = {0x2196F3, 0xD1449B, 0x6C71C4, 0xD65D0E, 0x8839EF, 0x50A14F};
@@ -1413,7 +1450,8 @@ static void keyName(const SKey& k, int ch, char* b, size_t n) {
   else snprintf(b, n, "%s.%s", KSEC_NAME[k.sec], k.key);
 }
 
-static bool keyShown(const SKey& k) {  // Modbus keys only where the board has RS485
+static bool keyShown(const SKey& k) {  // Modbus keys only where the board has RS485; monitor.* where it has one
+  if (k.sec == KS_MON) return boardLimits().monitor;
   if (boardLimits().rs485) return true;
   return !(k.sec == KS_BUS && strcmp(k.key, "pollMs")) && !(k.sec == KS_CH && !strncmp(k.key, "modbus.", 7));
 }
@@ -1439,7 +1477,7 @@ static void cmdGet(const Args& a) {
       ++shown;
     }
   }
-  if (!shown) err("no settings \"%s\" (b, t, bus, run, wifi, display; help settings)", f);
+  if (!shown) err("no settings \"%s\" (b, t, bus, run, wifi, display, safety%s; help settings)", f, boardLimits().monitor ? ", monitor" : "");
 }
 
 static bool validHost(const char* h) {

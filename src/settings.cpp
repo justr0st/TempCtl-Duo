@@ -91,6 +91,7 @@ static void channelDefaults(ChannelSettings& c, int ch, uint8_t type) {
   c.loc.median = 1;  // (median of 3: what the firmware always did before the setting)
   c.loc.medianN = 3;
   c.loc.tuneMaxMin = 70;
+  c.loc.tuneFast = 0;
 }
 
 void settingsDefaults(Settings& s, const BoardLimits& lim) {
@@ -134,6 +135,15 @@ void settingsDefaults(Settings& s, const BoardLimits& lim) {
   const uint8_t t1 = lim.rs485 ? CH_OFF : (lim.localMax >= 2 ? CH_LOCAL : CH_OFF);
   channelDefaults(s.ch[CH_BOTTOM], CH_BOTTOM, t0);
   channelDefaults(s.ch[CH_TOP], CH_TOP, t1);
+  MonitorSettings& m = s.mon;
+  m.on = 0;
+  copyStr(m.name, sizeof(m.name), "Monitor");
+  m.sensor = SENSOR_MAX31855;
+  m.calOffset = 0;
+  m.calGain = 1;
+  m.readMs = 1000;
+  m.median = 1;
+  m.medianN = 3;
 }
 
 const char* channelTypeName(uint8_t t) {
@@ -305,6 +315,21 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
     if (c.type == CH_LOCAL && c.spMax > c.loc.maxTemp - 10) c.spMax = c.loc.maxTemp - 10;
     if (c.spMax < c.spMin) c.spMax = c.spMin;
     clampv(c.manualSp, c.spMin, c.spMax);
+  }
+  // monitor channel
+  {
+    MonitorSettings& m = s.mon;
+    m.name[sizeof(m.name) - 1] = 0;
+    if (!m.name[0]) copyStr(m.name, sizeof(m.name), "Monitor");
+    m.on = m.on ? 1 : 0;
+    if (!lim.monitor) m.on = 0;  // (no error: a backup from an S3 restores on a CYD)
+    clampv<uint8_t>(m.sensor, SENSOR_MAX31855, SENSOR_MAX6675);
+    clampv(m.calOffset, -50.0f, 50.0f);
+    clampv(m.calGain, 0.5f, 2.0f);
+    clampv<uint16_t>(m.readMs, m.sensor == SENSOR_MAX6675 ? 250 : 100, 1000);
+    m.median = m.median ? 1 : 0;
+    clampv<uint8_t>(m.medianN, 3, 9);
+    if (!(m.medianN & 1)) ++m.medianN;
   }
   if (s.ch[0].type == CH_MODBUS && s.ch[1].type == CH_MODBUS && s.ch[0].mb.slaveId == s.ch[1].mb.slaveId) {
     char t[96];
@@ -583,7 +608,17 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
     l["median"] = c.loc.median != 0;
     l["medianN"] = c.loc.medianN;
     l["tuneMaxMin"] = c.loc.tuneMaxMin;
+    l["tuneFast"] = c.loc.tuneFast != 0;
   }
+  JsonObject mo = o["monitor"].to<JsonObject>();
+  mo["on"] = s.mon.on != 0;
+  mo["name"] = JsonString(s.mon.name);
+  mo["sensor"] = SENSOR_NAMES[s.mon.sensor ? 1 : 0];
+  mo["calOffset"] = s.mon.calOffset;
+  mo["calGain"] = s.mon.calGain;
+  mo["readMs"] = s.mon.readMs;
+  mo["median"] = s.mon.median != 0;
+  mo["medianN"] = s.mon.medianN;
 }
 
 // --- reading: every key is optional; a present key with a wrong type is an error
@@ -842,8 +877,20 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
         R.flag(l, pl, "median", c.loc.median);
         R.num(l, pl, "medianN", c.loc.medianN);
         R.num(l, pl, "tuneMaxMin", c.loc.tuneMaxMin);
+        R.flag(l, pl, "tuneFast", c.loc.tuneFast);
       }
     }
+  }
+  JsonObjectConst mo = R.obj(o, "", "monitor");
+  if (!mo.isNull()) {
+    R.flag(mo, "monitor.", "on", s.mon.on);
+    R.str(mo, "monitor.", "name", s.mon.name, sizeof(s.mon.name));
+    R.choice(mo, "monitor.", "sensor", SENSOR_NAMES, 2, s.mon.sensor);
+    R.num(mo, "monitor.", "calOffset", s.mon.calOffset);
+    R.num(mo, "monitor.", "calGain", s.mon.calGain);
+    R.num(mo, "monitor.", "readMs", s.mon.readMs);
+    R.flag(mo, "monitor.", "median", s.mon.median);
+    R.num(mo, "monitor.", "medianN", s.mon.medianN);
   }
   return R.ok;
 }

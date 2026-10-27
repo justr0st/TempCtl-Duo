@@ -62,7 +62,7 @@ const Seg* progSeg(const DuoProgram& p, int ch, int idx) {
     if (f.kind == PH_BT && !f.bIdle) return &f.b;
     return nullptr;
   }
-  return (f.kind == PH_T || f.kind == PH_BT) ? &f.t : nullptr;
+  return (f.kind == PH_T || (f.kind == PH_BT && !f.tIdle)) ? &f.t : nullptr;
 }
 
 Seg* progSeg(DuoProgram& p, int ch, int idx) {
@@ -170,12 +170,19 @@ bool progFromJson(JsonObjectConst o, DuoProgram& p, char* err, size_t n, const c
         if ((e = readSeg(v["t"], f.t, true))) return P.fail("Phase %d: %s %s", i, P.names[CH_TOP], e);
       } else if (!strcmp(k, "BT")) {
         f.kind = PH_BT;
-        if (v["b"]["idle"] | false) {
+        const bool bIdle = v["b"]["idle"] | false, tIdle = v["t"]["idle"] | false;
+        if (bIdle && tIdle) return P.fail("Phase %d: %s and %s cannot both be Idle", i, P.names[CH_BOTTOM], P.names[CH_TOP]);
+        // the channel that is on drives the phase: top idle -> the bottom has ramp + hold (as in B)
+        if (bIdle) {
           f.bIdle = 1;
-        } else if ((e = readSeg(v["b"], f.b, false))) {
+        } else if ((e = readSeg(v["b"], f.b, tIdle))) {
           return P.fail("Phase %d: %s %s", i, P.names[CH_BOTTOM], e);
         }
-        if ((e = readSeg(v["t"], f.t, true))) return P.fail("Phase %d: %s %s", i, P.names[CH_TOP], e);
+        if (tIdle) {
+          f.tIdle = 1;
+        } else if ((e = readSeg(v["t"], f.t, true))) {
+          return P.fail("Phase %d: %s %s", i, P.names[CH_TOP], e);
+        }
         f.wait = (!f.bIdle && (v["wait"] | false)) ? 1 : 0;
       } else if (!strcmp(k, "P")) {
         f.kind = PH_P;
@@ -251,8 +258,9 @@ void progToJson(const DuoProgram& p, JsonObject o) {
         case PH_BT:
           if (f.wait) v["wait"] = true;
           if (f.bIdle) v["b"]["idle"] = true;
-          else segOut(v["b"].to<JsonObject>(), f.b, false);
-          segOut(v["t"].to<JsonObject>(), f.t, true);
+          else segOut(v["b"].to<JsonObject>(), f.b, f.tIdle);
+          if (f.tIdle) v["t"]["idle"] = true;
+          else segOut(v["t"].to<JsonObject>(), f.t, true);
           break;
         default:
           if (f.msg) v["msg"] = true;

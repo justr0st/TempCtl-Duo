@@ -117,12 +117,15 @@ void RunEngine::finish() {
 
 // ------------------------------------------------------------------ Sequence
 
+// the bottom drives the phase (ramp, wait, hold): a Bottom phase, or Both with the top Idle
+static bool bDrives(const SeqPhase& f) { return f.kind == PH_B || (f.kind == PH_BT && f.tIdle); }
+
 uint32_t RunEngine::holdOf(int idx) const {
   const SeqPhase& f = p_->ph[idx];
-  return f.kind == PH_B ? f.b.h : f.t.h;
+  return bDrives(f) ? f.b.h : f.t.h;
 }
 
-static int rampCh(const SeqPhase& f) { return f.kind == PH_B ? CH_BOTTOM : CH_TOP; }
+static int rampCh(const SeqPhase& f) { return bDrives(f) ? CH_BOTTOM : CH_TOP; }
 
 bool RunEngine::bottomReached() const {
   const Gen& g = g_[CH_BOTTOM];
@@ -149,6 +152,12 @@ void RunEngine::startPhase(int k) {
       seq_.st = Stage::Ramp;
       break;
     case PH_BT:
+      if (f.tIdle) {  // top off, the bottom ramps and holds (as in B)
+        setIdle(CH_TOP);
+        startRamp(CH_BOTTOM, f.b.t, f.b.r, k);
+        seq_.st = Stage::Ramp;
+        break;
+      }
       if (f.bIdle) setIdle(CH_BOTTOM);
       else jump(CH_BOTTOM, f.b.t, k);
       if (f.wait && !f.bIdle) {
@@ -177,14 +186,14 @@ bool RunEngine::seqStep() {
       if (!genDone(g)) return false;
       g.stageRamp = 0;
       ev(EV_RAMP_END, rampCh(f), seq_.i);
-      seq_.st = (f.kind == PH_B && f.wait) ? Stage::Wait : Stage::Hold;
+      seq_.st = (bDrives(f) && f.wait) ? Stage::Wait : Stage::Hold;
       seq_.el = 0;
       return true;
     }
     case Stage::Wait:
       if (!forecast_ && !bottomReached()) return false;
       seq_.el = 0;
-      if (f.kind == PH_B) {
+      if (bDrives(f)) {
         seq_.st = Stage::Hold;
       } else {
         startRamp(CH_TOP, f.t.t, f.t.r, seq_.i);
@@ -372,10 +381,12 @@ bool RunEngine::keptBefore(int ch, int idx, float& t, int& src) const {
         src = j;
       } else if (ch == CH_BOTTOM && f.kind == PH_BT) {
         has = false;  // idle
-      } else if (ch == CH_TOP && (f.kind == PH_T || f.kind == PH_BT)) {
+      } else if (ch == CH_TOP && (f.kind == PH_T || (f.kind == PH_BT && !f.tIdle))) {
         t = f.t.t;
         has = true;
         src = j;
+      } else if (ch == CH_TOP && f.kind == PH_BT) {
+        has = false;  // idle
       }
     }
   } else {
@@ -407,7 +418,7 @@ bool RunEngine::resumeAt(DuoProgram* p, const RunPos& r, const float* pv, const 
     const SeqPhase& f = p->ph[k];
     // channels the phase starts itself begin at the measured value (idle generator)
     const bool own[NUM_CHANNELS] = {f.kind == PH_B || f.kind == PH_BT,
-                                    f.kind == PH_T || (f.kind == PH_BT && !(f.wait && !f.bIdle))};
+                                    f.kind == PH_T || (f.kind == PH_BT && (f.tIdle || !(f.wait && !f.bIdle)))};
     for (int ch = 0; ch < NUM_CHANNELS; ++ch)
       if (!own[ch] && keptBefore(ch, k, t, src)) jump(ch, t, src);
     startPhase(k);
@@ -592,7 +603,7 @@ bool RunEngine::next() {
     }
     case Stage::Wait:
       seq_.el = 0;
-      if (f.kind == PH_B) {
+      if (bDrives(f)) {
         seq_.st = Stage::Hold;
       } else {
         startRamp(CH_TOP, f.t.t, f.t.r, seq_.i);
@@ -708,7 +719,7 @@ ChState RunEngine::chState(int ch) const {
   if (seq_.st == Stage::Ramp && tc == ch) return ChState::Ramp;
   if (seq_.st == Stage::Hold && tc == ch) return ChState::Hold;
   if (seq_.st == Stage::Wait && ch == CH_BOTTOM) return ChState::Wait;
-  if (f.kind == PH_BT && ch == CH_BOTTOM && g.src == seq_.i) return ChState::Jump;
+  if (f.kind == PH_BT && !f.tIdle && ch == CH_BOTTOM && g.src == seq_.i) return ChState::Jump;
   return ChState::Keep;
 }
 
@@ -729,7 +740,7 @@ int RunEngine::keptIdx(int ch) const {
 bool RunEngine::futureTarget(int ch, int idx) const {
   if (p_->type == PROG_SEQ) {
     if (idx > seq_.i) return true;
-    return idx == seq_.i && ch == CH_TOP && p_->ph[idx].kind == PH_BT && seq_.st == Stage::Wait;
+    return idx == seq_.i && ch == CH_TOP && p_->ph[idx].kind == PH_BT && !p_->ph[idx].tIdle && seq_.st == Stage::Wait;
   }
   return lane_[ch].st != Stage::Done && idx > lane_[ch].i;
 }
@@ -746,6 +757,7 @@ bool RunEngine::prevTarget(int ch, int idx, float& prev) const {
     }
     const SeqPhase& f = p_->ph[k];
     if (ch == CH_BOTTOM && f.kind == PH_BT && f.bIdle) return false;
+    if (ch == CH_TOP && f.kind == PH_BT && f.tIdle) return false;
     const Seg* s = progSeg(*p_, ch, k);
     if (s) {
       prev = s->t;
@@ -767,10 +779,12 @@ int RunEngine::nextRamp(int ch, int idx) const {
     const SeqPhase& f = p_->ph[k];
     if (f.kind == PH_P) continue;
     if (ch == CH_BOTTOM) {
-      if (f.kind == PH_B) return k;
+      if (bDrives(f)) return k;
       if (f.kind == PH_BT) return -1;  // jump or Idle: no ramp
-    } else if (f.kind == PH_T || f.kind == PH_BT) {
+    } else if (f.kind == PH_T || (f.kind == PH_BT && !f.tIdle)) {
       return k;
+    } else if (f.kind == PH_BT) {
+      return -1;  // Idle
     }
   }
   return -1;
@@ -849,7 +863,7 @@ bool RunEngine::setHold(int ch, int idx, float sec, char* err, size_t n) {
     if (idx >= p_->nPh || p_->ph[idx].kind == PH_P) return fail(err, n, "Phase %d has no hold", idx + 1);
     if (idx < seq_.i) return fail(err, n, "Phase %d is finished", idx + 1);
     SeqPhase& f = p_->ph[idx];
-    Seg& s = f.kind == PH_B ? f.b : f.t;
+    Seg& s = bDrives(f) ? f.b : f.t;
     uint32_t h = (uint32_t)lroundf(sec);
     if (idx == seq_.i && seq_.st == Stage::Hold && sec <= seq_.el) h = (uint32_t)seq_.el;  // ends now
     s.h = h;
@@ -890,7 +904,7 @@ bool RunEngine::setRamp(int ch, int idx, float sec, char* err, size_t n) {
   if (!active()) return fail(err, n, "No program is running");
   if (ch < 0 || ch >= NUM_CHANNELS) return fail(err, n, "Channel missing");
   Seg* s = progSeg(*p_, ch, idx);
-  if (!s || (p_->type == PROG_SEQ && ch == CH_BOTTOM && p_->ph[idx].kind == PH_BT))
+  if (!s || (p_->type == PROG_SEQ && ch == CH_BOTTOM && p_->ph[idx].kind == PH_BT && !p_->ph[idx].tIdle))
     return fail(err, n, "%s %d has no ramp for this channel", p_->type == PROG_TL ? "Step" : "Phase", idx + 1);
   if (!futureTarget(ch, idx)) return fail(err, n, "The ramp has started already (only later ramps can be changed)");
   if (!(sec >= 0)) sec = 0;

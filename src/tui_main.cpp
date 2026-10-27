@@ -14,6 +14,7 @@ const ChartData& chartData();
 static lv_obj_t* scr;
 static lv_obj_t *btnRun, *btnStop, *btnNext, *titleBox, *lblProg, *lblSub, *badge, *lblTime, *lblRem;
 static lv_obj_t *chart, *lblChartMode;
+static lv_obj_t* lblMon = nullptr;  // the monitor channel's reading, bottom right on the chart (HAS_MONITOR)
 static bool chartLive = true;  // the live view first (Rost); a run switches to its program view
 static uint32_t chartAt = 0;
 
@@ -654,6 +655,37 @@ static void headerUpdate() {
 }
 
 // ------------------------------------------------------------ create / update
+
+// The monitor channel (a third thermocouple, shown only): its name and reading at the bottom right of the chart,
+// in the accent colour, over a backing so the curves under it don't hide it. Hidden while it is off.
+static void monLabelCreate() {
+#if HAS_MONITOR
+  lblMon = tLabel(chart, &tfont_12, "");
+  lv_obj_add_style(lblMon, &S_.acc, 0);
+  lv_obj_set_style_bg_color(lblMon, tc(C_BG), 0);
+  lv_obj_set_style_bg_opa(lblMon, LV_OPA_80, 0);
+  lv_obj_set_style_radius(lblMon, 4, 0);
+  lv_obj_set_style_pad_hor(lblMon, 4, 0);
+  lv_obj_align(lblMon, LV_ALIGN_BOTTOM_RIGHT, -10, -18);  // (inside the plot, above the time labels)
+  tSetHidden(lblMon, true);
+#else
+  lblMon = nullptr;
+#endif
+}
+
+static void monLabelUpdate() {
+  if (!lblMon) return;
+  tSetHidden(lblMon, !L.mon.on);
+  if (!L.mon.on) return;
+  char v[16], b[48];
+  if (L.mon.valid) fmtTemp(L.mon.pv, v, sizeof(v));
+  else strlcpy(v, "--", sizeof(v));
+  snprintf(b, sizeof(b), "%s %s", L.mon.name, v);
+  tSetText(lblMon, b);
+  if (lv_color_to_u32(lv_obj_get_style_bg_color(lblMon, LV_PART_MAIN)) != lv_color_to_u32(tc(C_BG)))
+    lv_obj_set_style_bg_color(lblMon, tc(C_BG), 0);  // (the theme changed)
+}
+
 #if TUI_SMALL
 // 320x240: header (program, where, badge, time), chart, the two tiles, run buttons + menu at the bottom
 lv_obj_t* mainCreate() {
@@ -697,6 +729,7 @@ lv_obj_t* mainCreate() {
   lblChartMode = tLabel(chart, &tfont_12, "");
   lv_obj_add_style(lblChartMode, &S_.muted, 0);
   lv_obj_align(lblChartMode, LV_ALIGN_TOP_RIGHT, -4, 0);
+  monLabelCreate();
 
   const int ty = 30 + 76 + 2, tw = (SCREEN_W - 10) / 2, th = 96;
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) tileCreateSmall(ch, scr, 3 + ch * (tw + 4), ty, tw, th);
@@ -758,6 +791,7 @@ lv_obj_t* mainCreate() {
   lblChartMode = tLabel(chart, &tfont_12, "");
   lv_obj_add_style(lblChartMode, &S_.muted, 0);
   lv_obj_align(lblChartMode, LV_ALIGN_TOP_RIGHT, -6, 3);
+  monLabelCreate();
 
   const int ty = 46 + 132 + 4, tw = (SCREEN_W - 12) / 2, th = SCREEN_H - ty - 4;
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) tileCreate(ch, scr, 4 + ch * (tw + 4), ty, tw, th);
@@ -768,6 +802,7 @@ lv_obj_t* mainCreate() {
 void mainUpdate() {
   headerUpdate();
   for (int ch = 0; ch < NUM_CHANNELS; ++ch) tileUpdate(ch);
+  monLabelUpdate();
   // chart: every second (more often brings nothing: one point per second at most)
   if (!chartAt || lv_tick_elaps(chartAt) >= 1000) {
     chartAt = tTickNow();

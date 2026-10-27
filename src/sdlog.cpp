@@ -212,7 +212,7 @@ static size_t csvQuoted(char* b, size_t n, const char* s) {  // "text" with "" f
 
 static const char* const HEADER =
     "time,run_s,where,bottom_pv,bottom_sp,bottom_prog,bottom_out,bottom_state,top_pv,top_sp,top_prog,top_out,"
-    "top_state,kind,event\n";
+    "top_state,monitor_pv,kind,event\n";
 
 // ------------------------------------------------------------ writing
 static bool nameUsed(const char* rel) {
@@ -461,6 +461,7 @@ void sdlogRow(const SdRow& r) {
     num(p, end, r.out[c], 0);
     p += snprintf(p, end - p, "%s,", r.state[c] ? r.state[c] : "");
   }
+  num(p, end, r.mon, 1);
   *p++ = ',';  // kind, event: empty
   *p++ = '\n';
   append(l, p - l);
@@ -470,7 +471,7 @@ void sdlogEvent(uint8_t kind, const char* text) {
   if (!open_) return;
   char l[256];
   int k = timeText(l, sizeof(l));
-  k += snprintf(l + k, sizeof(l) - k, ",%.0f,,,,,,,,,,,,%s,", lastRunS, logKindName((LogKind)kind));
+  k += snprintf(l + k, sizeof(l) - k, ",%.0f,,,,,,,,,,,,,%s,", lastRunS, logKindName((LogKind)kind));
   k += csvQuoted(l + k, sizeof(l) - k - 1, text);
   l[k++] = '\n';
   append(l, k);

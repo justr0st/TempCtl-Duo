@@ -18,6 +18,7 @@ for the browser (WebAssembly) and runs in the page. Only the hardware around it 
 | Top heater | 450 W IR head above the GPU, on the *Top* channel (local, MAX31855, SSR) |
 | Board | a medium-sized graphics card PCB; the bottom thermocouple sits on its underside next to the GPU |
 | GPU | the chip under the top head; the top thermocouple sits on it |
+| Board edge | a third thermocouple at the board's edge (about half of its rise): the [monitor channel](Channels.md#monitor-channel-s3), measured only (on from the start) |
 | Wiring | SSR supply relay, E-stop input, buzzer, as on the [ESP32-S3 board](Hardware-S3.md); no RS485, display or SD card |
 
 The heaters need time: the emitters warm up first, the board follows at up to about 1 °C/s, and everything

@@ -61,6 +61,10 @@
 #define PIN_TC_CS_TOP 38  // v1.1 board (WS2812 on GPIO38): swap 38 <-> 48
 #define PIN_SSR_BOTTOM 21
 #define PIN_SSR_TOP 47
+// Third thermocouple converter, monitoring only (no output, no alarm): on the same SCK / SO, its own CS.
+// GPIO 3 is a strapping pin only for JTAG selection when eFuses say so (not set on these modules): harmless
+// as an output held high from the first line of setup().
+#define PIN_TC_CS_MON 3
 // SSR supply relay in the common +5 V supply of both SSR inputs (high side): on only while a local channel's
 // outputs are on, off at once on a fault or E-stop (a stuck driver transistor / SSR input can't be switched
 // off by its control pin, the relay can; a shorted SSR output needs a contactor in the heater supply).

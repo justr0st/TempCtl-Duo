@@ -41,7 +41,8 @@ def build_demo(out):
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(WEB, "index.html"), encoding="utf-8") as f:
         page = f.read()
-    for a, b in (('<html lang="en">', '<html lang="en" data-demo>'), ("<title>TempCtl Duo</title>", "<title>TempCtl Duo - Demo</title>"),
+    for a, b in (('<html lang="en">', '<html lang="en" data-demo>'), ("<title>TempCtl Duo</title>", "<title>TempCtl Duo DEMO</title>"),
+                 ('<span><b>TempCtl Duo</b><small id="fw">', '<span><b>TempCtl Duo <i class="demo">DEMO</i></b><small id="fw">'),
                  ("<script>", '<script src="demo.js"></script>\n<script>')):
         if page.count(a) != 1:
             raise SystemExit("build_site: demo: %r not found once in web/index.html" % a)

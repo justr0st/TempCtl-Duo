@@ -18,6 +18,7 @@ struct SdRow {
   char where[40];      // "P3 ramp" / "B2 hold / T4 ramp"
   float pv[2], sp[2], prog[2], out[2];  // NAN = none
   const char* state[2];
+  float mon;           // monitor channel PV (NAN = off / no reading)
 };
 void sdlogRow(const SdRow& r);
 void sdlogRunEnd();

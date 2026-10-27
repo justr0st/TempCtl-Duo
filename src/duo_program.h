@@ -34,10 +34,11 @@ struct SeqPhase {
   uint8_t kind;   // PhaseKind
   uint8_t wait;   // B, BT: "wait for bottom to reach target"
   uint8_t bIdle;  // BT: bottom Idle (outputs off) instead of a jump target
+  uint8_t tIdle;  // BT: top Idle (outputs off); the bottom then has a full target / ramp / hold (as in B)
   uint8_t msg;    // P: show "Action required"
   uint8_t text;   // P: index into DuoProgram::text, NO_TEXT = none
-  Seg b;          // B: target/ramp/hold; BT: b.t = jump target (r, h unused)
-  Seg t;          // T, BT: target/ramp/hold
+  Seg b;          // B, BT with tIdle: target/ramp/hold; BT: b.t = jump target (r, h unused)
+  Seg t;          // T, BT: target/ramp/hold (unused with tIdle)
 };
 
 struct TlStep {

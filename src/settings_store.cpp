@@ -9,7 +9,7 @@ static const char* const PATH = "/duo/settings.json";
 static const char* const TMP = "/duo/settings.tmp";
 static const char* const BAD = "/duo/settings.bad";
 
-BoardLimits boardLimits() { return BoardLimits{HAS_RS485 != 0, (uint8_t)LOCAL_CHANNELS_MAX}; }
+BoardLimits boardLimits() { return BoardLimits{HAS_RS485 != 0, (uint8_t)LOCAL_CHANNELS_MAX, HAS_MONITOR != 0}; }
 
 bool settingsLoad(Settings& s) {
   const BoardLimits lim = boardLimits();
