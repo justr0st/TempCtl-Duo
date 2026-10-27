@@ -61,7 +61,7 @@ The autotune measures the heater and proposes PID values:
 3. When it is done the web page opens a dialog with the **current and the new values**: *Accept* (saved),
    *Edit…* (change them first), *Dismiss* or *Later*. Touch: *Take over* or *Discard* in the channel's PID part.
 
-**Result: slow or faster** (switch in the autotune section; touch: *Autotune: faster*; serial
+**Result: slow or faster** (switch in the autotune section; touch: *Autotune result: faster*; serial
 `set b.local.tuneFast=on`). Chosen before the start, greyed out while the autotune runs:
 
 | | Rule | Behaviour |

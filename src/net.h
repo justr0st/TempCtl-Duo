@@ -26,3 +26,6 @@ uint32_t netDisconnects(uint8_t* lastReason);
 // starts the access point (name TempCtl-Duo-XXXX, password from the settings) next to the station
 void netStartAp();
 String netApName();  // "" if the access point is not running
+// Wi-Fi switched on (setting wifi.enabled). Off: the radio is off - no station, no access point, no scan, no mDNS;
+// netApplyWifi() switches it off / on again after the setting changed.
+bool netEnabled();

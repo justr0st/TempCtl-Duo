@@ -510,6 +510,7 @@ void displayUpdate() {
 
 // ------------------------------------------------------------ network
 static lv_obj_t *nStatus, *nSsid, *nPass, *nAp, *nHost, *nStatic, *nIpBox, *nIp[5];
+static lv_obj_t *nOn, *nRest, *nSave;  // Wi-Fi on / off (applied at once), the other rows and Save (hidden while off)
 static PSRAM_VAR(Settings, nEdit);  // edited copy, saved with "Save and connect"
 static bool nPassChanged, nApChanged;
 static bool scanning = false, scanShown = false;
@@ -528,6 +529,10 @@ static uint8_t* ipField(Settings& s, int i) {
 
 static void networkFill() {
   char b[40];
+  const bool on = netEnabled();
+  tSetChecked(nOn, on);
+  tSetHidden(nRest, !on);
+  tSetHidden(nSave, !on);
   tButtonText(nSsid, nEdit.ssid[0] ? nEdit.ssid : "(none)");
   tButtonText(nPass, nEdit.pass[0] ? "\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2" : "(none)");
   tButtonText(nAp, nEdit.apPass[0] ? "\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2" : "(none)");
@@ -613,7 +618,23 @@ static void onScanPick(int i, int) {
 
 static void onScanCancel(int, int) { scanShown = false; }
 
+// Wi-Fi completely on / off (wifi.enabled): saved and applied at once
+static void onWifiOn(lv_event_t*) {
+  const bool on = lv_obj_has_state(nOn, LV_STATE_CHECKED);
+  {
+    Guard g;
+    gSettings.wifiOn = on ? 1 : 0;
+  }
+  saveSettingsQuiet();
+  netApplyWifi();
+  scanning = scanShown = false;
+  networkFill();
+  tSetText(nStatus, netInfo().c_str());
+  tToast(on ? "Wi-Fi on" : "Wi-Fi off: no network, no access point");
+}
+
 static void onScan(lv_event_t*) {
+  if (!netEnabled()) return;
   if (!scanning) netScanStart();
   scanning = true;
   scanShown = true;
@@ -668,27 +689,31 @@ lv_obj_t* networkCreate() {
   nStatus = tLabel(p.body, &tfont_14, "");
   lv_obj_set_width(nStatus, LV_PCT(100));
   lv_label_set_long_mode(nStatus, LV_LABEL_LONG_MODE_WRAP);
-  lv_obj_t* r = settingRow(p.body, "Network name", nullptr);
+  lv_obj_t* r = settingRow(p.body, "Wi-Fi", "Off: no network, no access point, no scan");
+  nOn = tSwitch(r, onWifiOn);
+  nRest = tCol(p.body, 2);  // (the body's own gap)
+  lv_obj_set_width(nRest, LV_PCT(100));
+  r = settingRow(nRest, "Network name", nullptr);
   nSsid = tButton(r, "", onSsid, nullptr, CW, BH);
   tOneLine(lv_obj_get_child(nSsid, 0));
   lv_obj_set_width(lv_obj_get_child(nSsid, 0), CW - 20);
   tButton(r, "Scan", onScan, nullptr, TUI_SMALL ? 52 : 70, BH);
-  r = settingRow(p.body, "Password", nullptr);
+  r = settingRow(nRest, "Password", nullptr);
   nPass = tButton(r, "", onPass, nullptr, CW, BH);
-  r = settingRow(p.body, "Access point password", "Used when no network is reachable; 8+ characters");
+  r = settingRow(nRest, "Access point password", "Used when no network is reachable; 8+ characters");
   nAp = tButton(r, "", onAp, nullptr, CW, BH);
-  r = settingRow(p.body, "Host name", "http://<name>.local");
+  r = settingRow(nRest, "Host name", "http://<name>.local");
   nHost = tButton(r, "", onHost, nullptr, CW, BH);
-  r = settingRow(p.body, "Fixed IP address", "No DHCP: use an address outside the router's DHCP range");
+  r = settingRow(nRest, "Fixed IP address", "No DHCP: use an address outside the router's DHCP range");
   nStatic = tSwitch(r, onStatic);
-  nIpBox = tCol(p.body, 6);
+  nIpBox = tCol(nRest, 6);
   lv_obj_set_width(nIpBox, LV_PCT(100));
   for (int i = 0; i < 5; ++i) {
     r = settingRow(nIpBox, IP_LABELS[i], i == 3 ? "Empty = the gateway" : nullptr);
     nIp[i] = tButton(r, "", onIp, (void*)(intptr_t)i, CW, BH);
   }
-  lv_obj_t* b = tButton(p.header, TUI_SMALL ? "Save + connect" : "Save and connect", onNetSave, nullptr, LV_SIZE_CONTENT, T_HDR - 8);  // always visible
-  lv_obj_add_style(b, &S_.btnPri, 0);
+  nSave = tButton(p.header, TUI_SMALL ? "Save + connect" : "Save and connect", onNetSave, nullptr, LV_SIZE_CONTENT, T_HDR - 8);  // always visible
+  lv_obj_add_style(nSave, &S_.btnPri, 0);
   return p.scr;
 }
 
@@ -1084,26 +1109,32 @@ lv_obj_t* systemCreate() {
   sPoll = tButton(r, "", onPoll, nullptr, CW2, BH);
   r = settingRow(p.body, "\"Bottom reached\" band", "\"Wait for bottom\" goes on within \xC2\xB1 this");
   sBand = tButton(r, "", onBand, nullptr, CW2, BH);
-  r = settingRow(p.body, "Time zone", "Local time in the SD run logs");
-  sTz = tButton(r, "", onTz, nullptr, CW2, BH);
+  // groups (Rost's design): update, backup, time zone, then the device's own settings
+  const int G = TUI_SMALL ? 10 : 20;  // space above a group
   if (netOtaAvailable()) {
-    r = settingRow(p.body, "Online update", "The newest release from the release page (Wi-Fi with internet access)");
+    r = settingRow(p.body, "OTA update", "The newest FW from the release page (Internet over Wi-Fi)");
     tButton(r, "Check", onNetFw, nullptr, CW2, BH);
   } else {
-    settingRow(p.body, "Online update", "Web page, Settings, Firmware update: Check for updates (this board installs releases through the browser)");
+    r = settingRow(p.body, "OTA update", "Web page, Settings, Firmware update: Check for updates (this board installs releases through the browser)");
   }
+  lv_obj_set_style_pad_top(r, G, 0);
   sFw = nullptr;
   if (sdlogSlot()) {
     r = settingRow(p.body, "Firmware update", "firmware.bin in the SD card's root folder (or: web page, Settings)");
     sFw = tButton(r, "SD card", onSdFw, nullptr, CW2, BH);
 #if HAS_SD
     r = settingRow(p.body, "Backup to SD card", "Settings and all programs in one file (backup folder on the card)");
+    lv_obj_set_style_pad_top(r, G, 0);
     tButton(r, "Back up", onBackup, nullptr, CW2, BH);
     r = settingRow(p.body, "Restore from SD card", "Settings, programs or both from a backup on the card");
     tButton(r, "Choose" "\xE2\x80\xA6", onRestoreList, nullptr, CW2, BH);
 #endif
   }
+  r = settingRow(p.body, "Time zone", "Local time in the SD run logs");
+  lv_obj_set_style_pad_top(r, G, 0);
+  sTz = tButton(r, "", onTz, nullptr, CW2, BH);
   r = settingRow(p.body, "Manual mode timeout", "Manual mode ends after this long without a touch, web or serial action (a beep 1 min before)");
+  lv_obj_set_style_pad_top(r, G, 0);
   sIdle = tButton(r, "", onIdle, nullptr, CW2, BH);
   sEstop = sSound = sRelay = sChip = nullptr;
   if (safetyEstopWired()) {

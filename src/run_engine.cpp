@@ -152,6 +152,12 @@ void RunEngine::startPhase(int k) {
       seq_.st = Stage::Ramp;
       break;
     case PH_BT:
+      if (f.tIdle && f.bIdle) {  // both off: a timed hold (b.h)
+        setIdle(CH_TOP);
+        setIdle(CH_BOTTOM);
+        seq_.st = Stage::Hold;
+        break;
+      }
       if (f.tIdle) {  // top off, the bottom ramps and holds (as in B)
         setIdle(CH_TOP);
         startRamp(CH_BOTTOM, f.b.t, f.b.r, k);

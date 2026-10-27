@@ -124,6 +124,7 @@ struct Settings {
   float bottomBand;     // "bottom reached" band (+-degC) for "wait for bottom"
 
   // Network
+  uint8_t wifiOn;        // 0: Wi-Fi completely off (no station, no access point, no scan); default 1
   char ssid[33];
   char pass[65];
   char apPass[33];

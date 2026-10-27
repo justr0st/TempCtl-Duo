@@ -14,7 +14,7 @@ Phases one after another (up to 100):
 |---|---|
 | **Bottom** (`B`) | the bottom ramps to its target, then holds it |
 | **Top** (`T`) | the top ramps to its target, then holds it |
-| **Both** (`BT`) | the bottom jumps to its target (or goes *Idle* = outputs off), the top ramps and holds. With the **top *Idle*** it is the other way round: the top outputs go off, the bottom ramps and holds |
+| **Both** (`BT`) | the bottom jumps to its target (or goes *Idle* = outputs off), the top ramps and holds. With the **top *Idle*** it is the other way round: the top outputs go off, the bottom ramps and holds. **Both *Idle***: both outputs off for the phase's time (the bottom's *Hold*) |
 | **Pause** (`P`) | waits for *Continue*; optionally **"Action required"** with a text up to 40 characters ("Place the board") |
 
 - **Wait for the bottom** (Bottom and Both phases): the hold (Bottom, Both with the top Idle) or the top ramp

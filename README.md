@@ -1,7 +1,7 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32 CYD)
 
 Firmware for a two-channel temperature programmer, made for the **bottom and top heater of a BGA rework
-station** (reflow / desolder profiles). Version **1.0.60**. Two boards, built from the same sources:
+station** (reflow / desolder profiles). Version **1.0.61**. Two boards, built from the same sources:
 
 - **ESP32-S3** with a 4" 480×320 capacitive touch screen (env `s3`, the main target)
 - **ESP32-2432S028R "Cheap Yellow Display"** with a 2.8" 320×240 resistive touch screen (envs
@@ -222,7 +222,7 @@ local.
   (also checked by itself when Settings opens, at most every 10 min) shows whether a newer release exists;
   *Install* lets the browser download this board's image and upload it as above (the device also checks its
   MD5). Works on every board, as long as the computer or phone has internet access. The **S3** can also fetch
-  it itself over HTTPS (Wi-Fi with internet): touch *Menu › System › Online update*, serial `fw net` /
+  it itself over HTTPS (Wi-Fi with internet): touch *Menu › System › OTA update*, serial `fw net` /
   `fw net install yes` (root certificates: `src/ca_roots.h`, `tools/gen_ca_roots.py`). The CYD leaves this to
   the web page: an HTTPS session needs about 70 kB of RAM; the S3 takes it from its PSRAM (mbedTLS allocates
   there while the download runs), the CYD has none.
@@ -359,6 +359,7 @@ their ranges and an example per section.
 | `tune b\|t start temp=<C>` · `tune b\|t stop` · `tune b\|t accept\|discard` · `tune b\|t` | autotune of a local channel (test temperature 50 … max − 20 °C, not during a run) · stop · take over / drop the values found · its state |
 | `wifi scan` · `wifi connect n=<number> [pw=…]` · `wifi connect s=<SSID> [pw=…]` | join a network; without `pw=` the password is asked for (hidden; empty = open network). The result: `connected, IP …` (then saved) or `failed: wrong password / network not found / timeout` (the previous network is used again) |
 | `wifi ap [pw=…]` · `wifi status` · `wifi forget` | start the access point (`TempCtl-Duo-XXXX`, password 8–32 characters, saved), Wi-Fi state, forget the network (access point only) |
+| `wifi off` · `wifi on` | Wi-Fi completely off / on (setting `wifi.enabled`, default on; also touch *Network* and web *Settings › Wi-Fi*): off = radio off, no station, no access point, no scan, no mDNS; the touch screen and USB keep working |
 | `get [b\|t\|bus\|run\|wifi\|display\|<key prefix>]` | settings as `key=value` lines, ready to be used with `set` |
 | `set <key>=<value> …` | up to 8 settings at once, the keys of the web API (`b.` / `t.` = the channels). Stricter than touch / web: a value out of range is an error and then nothing is changed; a value the device adjusts because of another setting is reported. Saved at once |
 | `factory reset yes` | all settings to their defaults, Wi-Fi included (programs are kept), then a restart; not while a program runs |
@@ -599,7 +600,8 @@ controller's output (Ypid); a fault switches the controller's outputs off (C.Off
   `/duo/prog0.json` … `/duo/prog19.json` on LittleFS (safe save: temp file + rename). Two types:
   - **Sequence**: up to 100 phases, one after another. `B` (bottom: target, ramp, hold), `T` (top: target,
     ramp, hold), `BT` (both: the bottom setpoint jumps to its target or goes Idle = outputs off, the top
-    ramps and holds; or the top goes Idle and the bottom ramps and holds), `P` (pause: waits for Continue, optional "Action required" and a text up to 40
+    ramps and holds; or the top goes Idle and the bottom ramps and holds; or both Idle: both outputs off for
+    the bottom's hold time, JSON `"b":{"idle":true,"h":…},"t":{"idle":true}`), `P` (pause: waits for Continue, optional "Action required" and a text up to 40
     characters). `B` and `BT` phases can **wait for the bottom** to reach its target (± the "bottom reached"
     band, default 5 °C) before the hold (`B`) or the top ramp (`BT`) starts. A channel keeps its last
     target while other phases run.

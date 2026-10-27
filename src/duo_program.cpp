@@ -171,9 +171,14 @@ bool progFromJson(JsonObjectConst o, DuoProgram& p, char* err, size_t n, const c
       } else if (!strcmp(k, "BT")) {
         f.kind = PH_BT;
         const bool bIdle = v["b"]["idle"] | false, tIdle = v["t"]["idle"] | false;
-        if (bIdle && tIdle) return P.fail("Phase %d: %s and %s cannot both be Idle", i, P.names[CH_BOTTOM], P.names[CH_TOP]);
-        // the channel that is on drives the phase: top idle -> the bottom has ramp + hold (as in B)
-        if (bIdle) {
+        // the channel that is on drives the phase: top idle -> the bottom has ramp + hold (as in B); both idle:
+        // both outputs off for the bottom's hold time ("b":{"idle":true,"h":...})
+        if (bIdle && tIdle) {
+          bool ok = true;
+          readSec(v["b"]["h"], f.b.h, ok);
+          if (!ok) return P.fail("Phase %d: %s hold time must be 0 .. 599940 s", i, P.names[CH_BOTTOM]);
+          f.bIdle = 1;
+        } else if (bIdle) {
           f.bIdle = 1;
         } else if ((e = readSeg(v["b"], f.b, tIdle))) {
           return P.fail("Phase %d: %s %s", i, P.names[CH_BOTTOM], e);
@@ -257,8 +262,12 @@ void progToJson(const DuoProgram& p, JsonObject o) {
           break;
         case PH_BT:
           if (f.wait) v["wait"] = true;
-          if (f.bIdle) v["b"]["idle"] = true;
-          else segOut(v["b"].to<JsonObject>(), f.b, f.tIdle);
+          if (f.bIdle) {
+            v["b"]["idle"] = true;
+            if (f.tIdle) v["b"]["h"] = f.b.h;  // both off: the phase's time
+          } else {
+            segOut(v["b"].to<JsonObject>(), f.b, f.tIdle);
+          }
           if (f.tIdle) v["t"]["idle"] = true;
           else segOut(v["t"].to<JsonObject>(), f.t, true);
           break;

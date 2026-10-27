@@ -595,6 +595,22 @@ static void testMonitorSettings() {
   CHECK(!settingsFromJson(f.as<JsonObjectConst>(), s, msg, sizeof(msg)));
 }
 
+// Wi-Fi completely off (wifi.enabled, 1.0.61): default on, JSON round trip
+static void testWifiEnabled() {
+  Settings s, r;
+  char msg[120];
+  settingsDefaults(s, S3);
+  CHECK(s.wifiOn == 1);
+  JsonDocument d;
+  CHECK(deserializeJson(d, R"({"wifi":{"enabled":false}})") == DeserializationError::Ok);
+  CHECK(settingsFromJson(d.as<JsonObjectConst>(), s, msg, sizeof(msg)) && s.wifiOn == 0);
+  roundTrip(s, r, true);
+  CHECK(r.wifiOn == 0);
+  JsonDocument e;
+  CHECK(deserializeJson(e, R"({"wifi":{"enabled":"no"}})") == DeserializationError::Ok);
+  CHECK(!settingsFromJson(e.as<JsonObjectConst>(), s, msg, sizeof(msg)));
+}
+
 static void testSettingsJson() {
   Settings a, b;
   settingsDefaults(a, S3);
@@ -1363,8 +1379,6 @@ static void testTopIdle() {
   const std::string j = progJson(p);
   CHECK(j.find("\"t\":{\"idle\":true}") != std::string::npos && j.find("\"r\":60") != std::string::npos);
   CHECK(progParse(j.c_str(), q, err, sizeof(err)) && progJson(q) == j);
-  // not both idle
-  CHECK(!progParse(R"({"type":"seq","phases":[{"kind":"BT","b":{"idle":true},"t":{"idle":true}}]})", q, err, sizeof(err)));
   // plan: top 200 for 10 s, then off; bottom 25 -> 150 in 60 s, holds 30 s
   CHECK(near(programPreview(p, nullptr, nullptr, nullptr), 100));
   Probe a = planAt(p, 5);
@@ -1395,6 +1409,37 @@ static void testTopIdle() {
   CHECK(r2.e.out(1).idle && r2.e.out(0).moving);
 }
 
+// Both phase with both channels Idle (1.0.61): both outputs off for the bottom's hold time
+static void testBothIdle() {
+  static DuoProgram p, q;
+  char err[120];
+  CHECK(progParse(R"({"type":"seq","name":"bi","phases":[{"kind":"BT","b":{"t":150},"t":{"t":200,"r":0,"h":10}},
+    {"kind":"BT","wait":true,"b":{"idle":true,"h":40},"t":{"idle":true}},{"kind":"B","b":{"t":120,"r":0,"h":20}}]})", p, err, sizeof(err)));
+  CHECK(p.nPh == 3 && p.ph[1].bIdle && p.ph[1].tIdle && p.ph[1].b.h == 40 && !p.ph[1].wait);
+  CHECK(!progHasTarget(p, CH_BOTTOM, 1) && !progHasTarget(p, CH_TOP, 1));
+  const std::string j = progJson(p);
+  CHECK(j.find("\"b\":{\"idle\":true,\"h\":40}") != std::string::npos);
+  CHECK(progParse(j.c_str(), q, err, sizeof(err)) && progJson(q) == j);
+  CHECK(!progParse(R"({"type":"seq","phases":[{"kind":"BT","b":{"idle":true,"h":-5},"t":{"idle":true}}]})", q, err, sizeof(err)));
+  // plan: 10 s both on, 40 s both off, bottom 120 for 20 s
+  CHECK(near(programPreview(p, nullptr, nullptr, nullptr), 70));
+  Probe a = planAt(p, 30);
+  CHECK(a.idle[0] && a.idle[1]);
+  a = planAt(p, 60);
+  CHECK(near(a.v[0], 120) && a.idle[1]);
+  // run: both off in phase 2, the bottom's hold can be extended there
+  Sim s;
+  CHECK(s.start(p));
+  s.runTo(30);
+  CHECK(s.e.seq().idx == 1 && s.e.seq().st == Stage::Hold && s.e.out(0).idle && s.e.out(1).idle && near(s.e.seq().dur, 40));
+  CHECK(s.e.chState(CH_BOTTOM) == ChState::Off && s.e.chState(CH_TOP) == ChState::Off && s.e.canExtend(CH_BOTTOM));
+  CHECK(s.e.extendHold(CH_BOTTOM, 10, err, sizeof(err)) && near(s.e.seq().dur, 50));
+  s.runTo(65);
+  CHECK(s.e.seq().idx == 2 && near(s.sp(0), 120));
+  s.runTo(200);
+  CHECK(s.e.state() == RunState::Finished && near(s.e.elapsed(), 80, 1.01f));
+}
+
 int main() {
   testCrc();
   testParse();
@@ -1408,9 +1453,11 @@ int main() {
   testEvents();
   testResume();
   testTopIdle();
+  testBothIdle();
   testSettingsDefaults();
   testSettingsJson();
   testMonitorSettings();
+  testWifiEnabled();
   testSettingsMerge();
   testStaticIp();
   testSettingsVariants();

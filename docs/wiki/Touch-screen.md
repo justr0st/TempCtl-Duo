@@ -57,7 +57,9 @@ Timeline.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/20-edit-seq-dark.png"><img src="img/touch/20-edit-seq-light.png" alt="Sequence editor" width="480"></picture>
 
-- Tap a value (target °C, ramp, hold) to change it with the number pad.
+- Tap a value (target °C, ramp, hold) to change it with the number pad. In a **Both** phase and in a Timeline step a
+  target of **0** switches that channel **off** for the phase / step; tap *off* and enter a temperature to switch it
+  on again.
 - Tap **#** or **Type** for the row menu: phase type (Bottom, Top, Both, Pause), *wait for bottom*, the pause
   text, insert, move, delete.
 - The ☰ menu: Undo, Save, Start, Rename, Discard, Delete.
@@ -75,14 +77,16 @@ can be changed (run edits).
 
 One tab per channel, on the S3 one for the monitor channel (*Monitor*: on / off, name, converter, calibration,
 read interval, filter) and one for the RS485 bus (beta, only with a Modbus channel). *Save* stores the changes,
-with the same checks as the web page.
+with the same checks as the web page. On the 480 × 320 screen related values share a row (setpoint range,
+calibration offset and gain, Kp / Ki / Kd, the protection values with their time); the 320 × 240 screen has one
+value per row. With the median filter off its reading count stays in place, greyed out.
 
 | | |
 |---|---|
 | <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/24-chan-local-dark.png"><img src="img/touch/24-chan-local-light.png" alt="Local channel" width="360"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/27-chan-pid-dark.png"><img src="img/touch/27-chan-pid-light.png" alt="PID and autotune" width="360"></picture> |
 | Name, type, end action, setpoint limits, thermocouple converter, filter | PID values and the **autotune** (test temperature, Start) |
 | <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/28-chan-runaway-dark.png"><img src="img/touch/28-chan-runaway-light.png" alt="Protection settings" width="360"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/25-chan-modbus-dark.png"><img src="img/touch/25-chan-modbus-light.png" alt="Modbus channel" width="360"></picture> |
-| Protection: runaway, heating while off, frozen reading, converter too hot | A Modbus channel (beta): address, controller type, setpoint ramps |
+| Thermal protection: converter too hot, runaway, heating while off, frozen reading | A Modbus channel (beta): address, controller type, setpoint ramps |
 
 Register addresses and the two-point calibration are on the web page.
 
@@ -90,8 +94,8 @@ Register addresses and the two-point calibration are on the web page.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/13-network-dark.png"><img src="img/touch/13-network-light.png" alt="Network settings" width="480"></picture>
 
-Network name (tap: scan and pick), password, access point password, host name (`http://<name>.local`), fixed
-IP address. The on-screen keyboard:
+**Wi-Fi** on / off (off: no network, no access point, no scan; applied at once), network name (tap: scan and
+pick), password, access point password, host name (`http://<name>.local`), fixed IP address. The on-screen keyboard:
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/16-keyboard-dark.png"><img src="img/touch/16-keyboard-light.png" alt="Keyboard" width="480"></picture>
 
@@ -109,14 +113,15 @@ web page too), upside down, live chart period, the automatic **screen check**, t
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/14-system-dark.png"><img src="img/touch/14-system-light.png" alt="System settings" width="480"></picture>
 
-Polling interval, "bottom reached" band, time zone, then (S3) **Online update**, **Firmware update** from the
-SD card, **Backup to SD card** and **Restore from SD card**, then the safety settings (manual mode timeout,
-E-stop input, SSR supply relay, alarm sound, chip temperature warning), device info and restart.
+In groups: polling interval and "bottom reached" band; **OTA update** (S3: the newest release over Wi-Fi) and
+**Firmware update** from the SD card; **Backup to SD card** and **Restore from SD card**; time zone; the safety
+settings (manual mode timeout, E-stop input, SSR supply relay, alarm sound, chip temperature warning); device
+info and restart.
 
 | | |
 |---|---|
-| <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/14j-online-update-dark.png"><img src="img/touch/14j-online-update-light.png" alt="Online update dialog" width="360"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/14f-restore-list-dark.png"><img src="img/touch/14f-restore-list-light.png" alt="Restore from the SD card" width="360"></picture> |
-| Online update: a newer release was found | Restore: the backups on the SD card, newest first |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/14j-online-update-dark.png"><img src="img/touch/14j-online-update-light.png" alt="OTA update dialog" width="360"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/14f-restore-list-dark.png"><img src="img/touch/14f-restore-list-light.png" alt="Restore from the SD card" width="360"></picture> |
+| OTA update: a newer release was found | Restore: the backups on the SD card, newest first |
 | <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/14b-tz-regions-dark.png"><img src="img/touch/14b-tz-regions-light.png" alt="Time zone" width="360"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/14d-system-safety-dark.png"><img src="img/touch/14d-system-safety-light.png" alt="Safety settings" width="360"></picture> |
 | Time zone: region, then place | Safety settings ([Safety](Safety.md)) |
 

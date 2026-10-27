@@ -9,6 +9,7 @@
 #include "status_led.h"
 #include "syslog.h"
 #include "ui.h"
+#include "app_state.h"
 
 // the log port: system log (web System page) and the browser's console
 LogPort LogSerial;
@@ -20,7 +21,8 @@ size_t LogPort::write(const uint8_t* b, size_t n) {
 static const char NO[] = "Not in the demo";
 
 // Wi-Fi: a simulated network
-String netInfo() { return String("Simulated device, no Wi-Fi"); }
+String netInfo() { return String(gSettings.wifiOn ? "Simulated device, no Wi-Fi" : "Simulated device, Wi-Fi off"); }
+bool netEnabled() { return gSettings.wifiOn != 0; }
 bool netApActive() { return false; }
 void netApplyWifi() {}
 static uint32_t scanAt = 0;

@@ -8,6 +8,7 @@
 #include "syslog.h"
 
 static bool apStarted = false, mdnsStarted = false, haveSta = false;
+static bool radioOn = true;  // setting wifi.enabled (netEnabled)
 static uint32_t t0 = 0;
 // Station (re)connect: WiFi.begin() right after WiFi.disconnect() is cancelled by the late
 // "disconnected (assoc leave)" event, and the core does not retry after that reason, so the
@@ -17,6 +18,8 @@ static uint32_t beginAt = 0;          // millis() for the pending WiFi.begin(), 
 static uint32_t lastBegin = 0;
 static constexpr uint32_t STA_RETRY_MS = 30000;
 static bool scanBusyNow();
+static void scanStop();
+static void radioStart(const Settings& s);
 
 // Fixed address or DHCP for the station; call right before WiFi.begin()
 static void ipConfig(const Settings& s) {
@@ -106,8 +109,21 @@ void netBegin() {
     }
   });
   WiFi.persistent(false);
-  WiFi.setSleep(false);  // no modem sleep: steadier transfers (the device is mains powered)
   WiFi.setHostname(s.hostname);
+  t0 = millis();
+  if (!s.wifiOn) {  // Wi-Fi switched off: the radio stays off
+    radioOn = false;
+    WiFi.mode(WIFI_OFF);
+    LogSerial.println("[wifi] off (setting wifi.enabled)");
+    return;
+  }
+  radioStart(s);
+}
+
+// station (or the access point without a network), as at boot
+static void radioStart(const Settings& s) {
+  radioOn = true;
+  WiFi.setSleep(false);  // no modem sleep: steadier transfers (the device is mains powered)
   haveSta = s.ssid[0] != 0;
   if (haveSta) {
     WiFi.mode(WIFI_STA);
@@ -120,7 +136,26 @@ void netBegin() {
   t0 = millis();
 }
 
+// everything off: station, access point, mDNS, a scan
+static void radioStop() {
+  if (mdnsStarted) MDNS.end();
+  mdnsStarted = false;
+  scanStop();
+  WiFi.setAutoReconnect(false);
+  if (apStarted) WiFi.softAPdisconnect(true);
+  apStarted = false;
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  haveSta = false;
+  beginAt = 0;
+  radioOn = false;
+  LogSerial.println("[wifi] switched off (setting wifi.enabled)");
+}
+
+bool netEnabled() { return radioOn; }
+
 void netLoop() {
+  if (!radioOn) return;
   static bool ntpStarted = false;
   if (ntpWanted && !ntpStarted) {
     ntpStarted = true;
@@ -162,6 +197,7 @@ void netLoop() {
 bool netApActive() { return apStarted && WiFi.status() != WL_CONNECTED; }
 
 String netInfo() {
+  if (!radioOn) return "Wi-Fi off";
   String out;
   if (WiFi.status() == WL_CONNECTED)
     out = "Wi-Fi " + WiFi.SSID() + "  " + WiFi.localIP().toString();
@@ -179,6 +215,16 @@ void netApplyWifi() {
   {
     Guard g;
     s = gSettings;
+  }
+  if (!s.wifiOn) {  // switched off
+    if (radioOn) radioStop();
+    return;
+  }
+  if (!radioOn) {  // switched on again
+    gotIpSinceApply = false;
+    WiFi.setAutoReconnect(true);
+    radioStart(s);
+    return;
   }
   if (apStarted) startAp(s);  // new AP password, if any
   haveSta = s.ssid[0] != 0;
@@ -238,8 +284,16 @@ static void scanFinish() {
   }
 }
 
+// (Wi-Fi switched off: no scan; one that runs ends without a result)
+static void scanStop() {
+  if (!scanActive) return;
+  WiFi.scanDelete();
+  scanActive = false;
+  scanResume = false;
+}
+
 void netScanStart() {
-  if (scanActive) return;
+  if (scanActive || !radioOn) return;
   WiFi.scanDelete();
   if (WiFi.getMode() == WIFI_AP || WiFi.getMode() == WIFI_OFF) WiFi.mode(WIFI_AP_STA);  // scanning needs the station
   scanResume = haveSta && WiFi.status() != WL_CONNECTED;
@@ -321,6 +375,7 @@ uint32_t netDisconnects(uint8_t* lastReason) {
 }
 
 void netStartAp() {
+  if (!radioOn) return;
   Settings s;
   {
     Guard g;

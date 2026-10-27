@@ -40,7 +40,8 @@ void logEvent(const char* f, ...) {
 static int scanState = -2;
 static uint32_t disc = 0; static uint8_t reason = 0; static bool gotIp = false;
 String netInfo() { return String("Wi-Fi Workshop  192.168.1.50"); }
-void netApplyWifi() { printf("<apply wifi: %s>", gSettings.ssid); gotIp = false; }
+void netApplyWifi() { printf("<apply wifi: %s%s>", gSettings.ssid, gSettings.wifiOn ? "" : " (off)"); gotIp = false; }
+bool netEnabled() { return gSettings.wifiOn != 0; }
 bool netConnectedSinceApply() { return gotIp; }
 void netScanStart() { scanState = -1; }
 bool netScanBusy() { return scanState == -1; }
@@ -239,6 +240,14 @@ int main() {
   type("wifi ap\r");
   type("longenough\r");
   type("wifi status\r");
+  // Wi-Fi completely off / on (wifi.enabled): scan, connect and ap refused while off
+  type("wifi off\r");
+  type("wifi scan\r");
+  type("wifi status\r");
+  type("get wifi.enabled\r");
+  type("wifi on\r");
+  type("set wifi.enabled=off\r");
+  type("set wifi.enabled=on\r");
   type("bogus cmd\r");
   // a log line while typing (shared port): the typed text comes back after it
   Serial.feed("stat"); run(100);

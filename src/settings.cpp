@@ -106,6 +106,7 @@ void settingsDefaults(Settings& s, const BoardLimits& lim) {
   s.bottomBand = 5;
   copyStr(s.apPass, sizeof(s.apPass), "tempctl123");
   copyStr(s.hostname, sizeof(s.hostname), DEFAULT_HOSTNAME);
+  s.wifiOn = 1;
   s.staticIp = 0;
   memset(s.ip, 0, 4); memset(s.gateway, 0, 4); memset(s.dns1, 0, 4); memset(s.dns2, 0, 4);
   s.subnet[0] = s.subnet[1] = s.subnet[2] = 255; s.subnet[3] = 0;
@@ -233,6 +234,7 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
   if (strlen(s.apPass) < 8) copyStr(s.apPass, sizeof(s.apPass), "tempctl123");
   s.hostname[sizeof(s.hostname) - 1] = 0;
   if (!validHostname(s.hostname)) copyStr(s.hostname, sizeof(s.hostname), DEFAULT_HOSTNAME);
+  s.wifiOn = s.wifiOn ? 1 : 0;
   s.staticIp = s.staticIp ? 1 : 0;
   if (s.staticIp) {
     if (const char* e = staticIpError(s)) {  // never lock the device out of the network: back to DHCP
@@ -522,6 +524,7 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
   JsonObject r = o["run"].to<JsonObject>();
   r["bottomBand"] = s.bottomBand;
   JsonObject w = o["wifi"].to<JsonObject>();
+  w["enabled"] = s.wifiOn != 0;
   w["ssid"] = JsonString(s.ssid);
   w["hostname"] = JsonString(s.hostname);
   w["staticIp"] = s.staticIp != 0;
@@ -734,6 +737,7 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
   }
   JsonObjectConst w = R.obj(o, "", "wifi");
   if (!w.isNull()) {
+    R.flag(w, "wifi.", "enabled", s.wifiOn);
     R.str(w, "wifi.", "ssid", s.ssid, sizeof(s.ssid));
     R.str(w, "wifi.", "pass", s.pass, sizeof(s.pass));
     R.str(w, "wifi.", "apPass", s.apPass, sizeof(s.apPass));

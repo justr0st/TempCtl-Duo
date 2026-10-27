@@ -2425,7 +2425,7 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   Then still darker rectangles in the sidebar on polls and when hovering the chart / editor fields (Chrome renders
   the live blur in tiles): on desktop (> 860 px) the sidebar no longer blurs live but paints a copy of the page
   background (mesh, fixed) under its glass tint - looks the same (the mesh is smooth); phones keep the blur.
-- **1.0.60** (2026-10-26; after 1.0.59 = f5e9234): Rost: the demo's title "TempCtl Duo DEMO"; the Demo button
+- **1.0.60** (2026-10-26, 0619d8f; after 1.0.59 = f5e9234): Rost: the demo's title "TempCtl Duo DEMO"; the Demo button
   with a thicker outline and a big breathing glow; the top channel Idle in the program editor like the bottom.
   - Top Idle (Both phase): `SeqPhase.tIdle` (JSON `"t":{"idle":true}`); the top outputs go off and the bottom
     ramps, waits ("wait for bottom") and holds as in a Bottom phase (run_engine bDrives()); not both Idle
@@ -2445,7 +2445,7 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
     156 s -> 30 s (ki 0.17). ZN "no / some overshoot" overshot 4-6 degC. Rost chose a switch (below).
   - Autotune rule switch (Rost: choose "slow / no overshoot" or "faster", a switch in the autotune section, only
     before the start, greyed out while it runs): setting `local.tuneFast` (default off; JSON, console
-    `set b.local.tuneFast=on`, touch field "Autotune: faster" under PID control, web switch "Result: Slow, no
+    `set b.local.tuneFast=on`, touch field "Autotune result: faster" under PID control, web switch "Result: Slow, no
     overshoot / Faster" saved at once via /api/config). The rule is latched at the start (TuneConfig.fast,
     TuneResult.fast; live `autotune.fast`; event "autotune started at ... (faster)"; result message "..., faster").
     Faster = TL Kp and Td, Ti = 0.7 Pu. Host test (first-order heater, dead time 8 s): 199.5 degC after 284 s
@@ -2455,6 +2455,8 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   - Glass (again): Rost still saw a less transparent band at the bottom of active channel cards. On desktop
     (> 860 px) .panel, .chan.on, .tabbg and the inactive channel tabs now paint a copy of the page background
     (mesh, fixed) under their tint like the sidebar, no live backdrop blur; phones keep the blur.
+- **1.0.61** (2026-10-27; after 1.0.60 = 0619d8f): see 9.16 - Both phase with both channels Idle, Wi-Fi
+  completely off, web page jump fixes, touch editor 0 °C = off, touch Channels / System layout from Rost's design.
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
@@ -2581,7 +2583,7 @@ Decisions: see the 1.0.52 entry in 9.10. Pieces:
   asm label: esp_mem.h has no extern "C"). Errors name the stage (DNS with the server, TLS text + code from
   `lastError`, HTTP code); the log line adds the internal RAM before the connect. OTA source "net": log "download from the
   release page", touch overlay "Download:", ota.json src "net". S3 image +~240 kB (TLS), 33 % of its slot; CYD 93.0 % (cyd-2xlocal-2x485; the page grew ~2.5 kB).
-- **Touch** System: row "Online update" — S3: Check → toast "Asking the release page…" → dialog "Install
+- **Touch** System: row "OTA update" — S3: Check → toast "Asking the release page…" → dialog "Install
   firmware X?" (size, build date, current version; Cancel / Install) or a toast (newest / older / can't start /
   error); CYD: the row only names the web page's button. UI host shots 14j (S3 dialog), 14e0-system-online (CYD).
 - **Serial**: `fw net` (alias `fw check`) → result line when there; `fw net install yes` (progress every 10 s);
@@ -2657,6 +2659,52 @@ numerically at the bottom right of the chart; **no alarm**; **S3 only, CS on GPI
   a *Monitor* tab (four tabs: 76 px each on the S3, "RS485" without "(beta)").
 - Serial: `monitor.*` keys (`get monitor`), `status` line `mon`. Demo: on from the first start, "Board edge" =
   ambient + 0.55 × the board's rise.
+
+### 9.16 1.0.61 (decided 2026-10-27, Rost)
+
+- **Both phase with both channels Idle**: "I need to be able to set both channels to idle on Both step type."
+  Both outputs off for the bottom's hold time (`f.bIdle && f.tIdle`, time in `b.h`; JSON
+  `"b":{"idle":true,"h":90},"t":{"idle":true}`; wait not possible). Engine: startPhase sets both idle, goes straight
+  to Hold (bDrives: holdOf = b.h, extend hold on the bottom). Web editor: the Idle boxes no longer clear each other;
+  both on: the bottom's Hold field is the phase's time ("Both off for" on the phone cards); plan / forecast flat off,
+  hold-end handle; Timeline conversion: idle steps. Touch editor: the toggles no longer exclusive, table: hold in the
+  bottom's hold column, row menu "Both off for"; console `show`. Host test testBothIdle.
+- **Wi-Fi completely off** (`wifi.enabled`, default on; Settings.wifiOn): "no AP and no network ... WiFi scan should
+  be also disabled when it's off." net.cpp: radioStop() (mDNS end, scan stopped, AP off, disconnect, WIFI_OFF),
+  radioStart() as at boot; netApplyWifi() switches; netLoop does nothing while off; netScanStart / netStartAp refuse;
+  netInfo "Wi-Fi off"; netEnabled(). Web: a switch at the top of Settings › Wi-Fi (confirm: the page loses its
+  connection; the rest hidden while off), POST /api/config applies a change after the answer, /api/wifiscan
+  {"err":"Wi-Fi is switched off"}. Touch: Network screen switch (applied at once; the other rows and Save hidden
+  while off). Serial: `wifi off` / `wifi on`, `set wifi.enabled=…`; scan / connect / ap refused while off.
+- **Page jumping** (Rost's screen record: the Dashboard moved up and down while editing a program): an edit replaced
+  the live chart by the program preview (previewDraft) until the next poll brought the live chart back - different
+  chart and legend heights. previewDraft now only in the program view. `test/web_jumps.js` (Playwright on the demo)
+  samples every panel's position: also fixed the phone's run time line ("6:00 + waits left · …" wrapped with some
+  numbers: one line with an ellipsis now), the editor's "Unsaved changes" (its space is kept) and the phone's
+  channel card state text (two lines reserved). Only the event log still grows (the last panel).
+- **Touch editor: 0 degC = off** (Rost): in a Both phase and a Timeline step a target of 0 switches the channel off
+  (Both: bIdle / tIdle, top off gives the bottom the top's ramp / hold if it had none; Timeline: an off step); tapping
+  "off" opens the number pad (title "(0 = off)", lower limit 0) and a temperature switches it on again. 320x240: row
+  menu "<channel> target: off". Not during a run. UI host test `./uihost editoff`.
+- Touch reference pictures (Rost, for a UI reorganization): `./uihost tall` renders whole settings pages as one tall
+  picture (header + all body rows, scrolled and stitched): channels (local, Modbus, monitor, RS485), system,
+  network, display.
+- **Touch Channels / System layout from Rost's Claude Design** (canvas "TempCtl Duo touch screens", 2026-10-27;
+  "The channel settings obviously should be applied to all channels"). Rost's answers: pairs on the S3 only (CYD:
+  one value per row, but the new texts, order, headings and spacing), touch only (web unchanged), the autotune
+  Start in the accent colour, the median count greyed out (not hidden) while the filter is off.
+  tui_chan.cpp: Field got trailing layout members (lay L_JOIN / L_BEFORE / L_GAP10 / L_GAP20 / L_TRIM / L_COL, w,
+  rl, rh, pre, en). S3: selectors 200 px; "Setpoint range" 0 °C .. 390 °C (90 px each, whole values without .0,
+  hint "Local: max = Tcutoff − 10 °C"); calibration offset (80) + "Gain" (110); median: count (150) then switch;
+  autotune text "Find PID values:\n…", "▶ Start" (btnPri, 110 px); "Autotune result: faster" (new hint); Kp / Ki /
+  Kd in one row (80 px each, right-aligned label + unit columns, Kp unit "% out. per °C"); heading "Thermal
+  protection" (instead of "Thermal runaway protection") above "Converter too hot"; "Heating failed: output over"
+  [80] … for [110]; "Holding: PV/SP difference over" ± [80] … for [110]; "… PV rises by" [80] … within [110];
+  gaps 10 / 20 px (CYD half, none right under a heading). Monitor tab: no note (the Name hint "Measure only. Chart,
+  CSV and logs. CS on GPIO 3"), "Converter enabled". System (tui_menu.cpp): groups with 20 px (CYD 10) above:
+  polling + band; "OTA update" (hint "The newest FW from the release page (Internet over Wi-Fi)") + firmware
+  update; backup + restore; time zone; manual mode timeout + safety. UI host: chan test checks the greyed count;
+  wiki screenshots scroll to labels (scrollToLabel) instead of fixed offsets.
 
 ## 10. Open items carried over from TempCtl
 

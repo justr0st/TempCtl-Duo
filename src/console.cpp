@@ -334,6 +334,8 @@ static const char* const H_TUNE[] = {
 };
 static const char* const H_WIFI[] = {
     "WI-FI",
+    "  wifi on | wifi off             Wi-Fi completely on / off (off: no network, no access point,",
+    "                                 no scan; the touch screen and USB keep working)",
     "  wifi status                    mode, network, IP address, signal",
     "  wifi scan                      list networks (numbered)",
     "  wifi connect n=<n> [pw=<PW>]   join a network from the scan list",
@@ -503,6 +505,7 @@ static const char* const H_SETTINGS[] = {
     "  e.g. set bus.pollMs=500 run.bottomBand=3",
     "",
     "NETWORK (wifi.*; network name and passwords: wifi connect / wifi ap)",
+    "  enabled=on|off               Wi-Fi completely on / off (the same as wifi on / wifi off)",
     "  hostname=<name>              http://<name>.local; letters, digits and '-', 1 ... 23",
     "  staticIp=on|off              fixed IP address instead of DHCP",
     "  ip=  subnet=  gateway=       fixed address, subnet mask, router (a.b.c.d)",
@@ -851,8 +854,25 @@ static void askPassword(void (*done)(const char*)) {
   len = 0;
 }
 
+static void wifiSwitch(bool on) {
+  {
+    Guard g;
+    gSettings.wifiOn = on ? 1 : 0;
+  }
+  saveSettingsQuiet();
+  netApplyWifi();
+}
+
 static void cmdWifi(const Args& a) {
   const char* sub = a.word(1);
+  if (!strcmp(sub, "on") || !strcmp(sub, "off")) {  // Wi-Fi completely on / off (wifi.enabled)
+    const bool on = sub[1] == 'n';
+    if (on == netEnabled()) return say("Wi-Fi is already %s", on ? "on" : "off");
+    wifiSwitch(on);
+    return say(on ? "Wi-Fi on: joining the network (or the access point)" : "Wi-Fi off: no network, no access point, no scan");
+  }
+  if (!netEnabled() && (!strcmp(sub, "scan") || !strcmp(sub, "connect") || !strcmp(sub, "ap") || a.get("ap")))
+    return err("Wi-Fi is switched off (wifi on)");
   if (!strcmp(sub, "scan")) {
     if (netScanBusy() || scanPending) return err("a scan is already running");
     if (!scanNames) scanNames = (char*)malloc(SCAN_LIST);
@@ -864,6 +884,7 @@ static void cmdWifi(const Args& a) {
     return say("Scanning...");
   }
   if (!strcmp(sub, "status") || (!*sub && !a.nk)) {
+    if (!netEnabled()) return say("Wi-Fi switched off (wifi on)");
     const wifi_mode_t m = WiFi.getMode();
     say("mode   %s", m == WIFI_AP_STA ? "station + access point" : m == WIFI_STA ? "station" : m == WIFI_AP ? "access point" : "off");
     if (WiFi.status() == WL_CONNECTED)
@@ -914,7 +935,7 @@ static void cmdWifi(const Args& a) {
     netApplyWifi();  // no station: the access point runs
     return say("network forgotten - access point \"%s\" (connect with wifi connect ...)", netApName().length() ? netApName().c_str() : AP_NAME_PREFIX "-XXXX");
   }
-  err("wifi scan | wifi connect ... | wifi ap [pw=...] | wifi forget | wifi status");
+  err("wifi on | wifi off | wifi scan | wifi connect ... | wifi ap [pw=...] | wifi forget | wifi status");
 }
 
 // ------------------------------------------------------------ programs
@@ -978,6 +999,11 @@ static void cmdShow() {
           say("P%-3d %s: %s", i + 1, nt, b);
           break;
         case PH_BT:
+          if (f.tIdle && f.bIdle) {
+            fmtT(f.b.h, b, sizeof(b));
+            say("P%-3d both: %s off, %s off for %s", i + 1, nb, nt, b);
+            break;
+          }
           if (f.tIdle) {
             seg(f.b, b, sizeof(b));
             say("P%-3d both: %s: %s%s; %s off", i + 1, nb, b, f.wait ? ", wait" : "", nt);
@@ -1348,6 +1374,7 @@ static const SKey KEYS[] = {
     {KS_BUS, K_INT, "commLossSec", 0, 3600, nullptr},
     {KS_BUS, K_INT, "pollMs", 100, 10000, nullptr},  // (raised to 250 by the channels: settingsValidate)
     {KS_RUN, K_NUM, "bottomBand", 0.5f, 50, nullptr},
+    {KS_WIFI, K_BOOL, "enabled", 0, 0, nullptr},
     {KS_WIFI, K_HOST, "hostname", 1, 23, nullptr},
     {KS_WIFI, K_BOOL, "staticIp", 0, 0, nullptr},
     {KS_WIFI, K_IP, "ip", 0, 0, nullptr},
@@ -1669,7 +1696,7 @@ static void cmdSet(const Args& a) {
   for (int i = 0; i < a.nk; ++i) pollSet |= it[i].k->sec == KS_BUS && !strcmp(it[i].k->key, "pollMs");
   if (!pollSet && nx->pollMs != poll0) say("bus.pollMs=%u (raised: the lowest for a MAX6675 or Modbus channel)", (unsigned)nx->pollMs);
   free(nx);
-  say("saved%s%s", wifi ? ", Wi-Fi reconnects" : "", host ? " (the new host name is used after a reboot)" : "");
+  say("saved%s%s", !wifi ? "" : gSettings.wifiOn ? ", Wi-Fi reconnects" : ", Wi-Fi off", host ? " (the new host name is used after a reboot)" : "");
   if (wifi) netApplyWifi();  // after the report: its log lines come after it
 }
 

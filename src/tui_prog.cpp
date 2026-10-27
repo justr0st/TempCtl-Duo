@@ -229,6 +229,11 @@ static void fillSeq() {
       case PH_T: seg3(f.t, b, sizeof(b)); break;
       case PH_BT: {
         char tt[40];
+        if (f.tIdle && f.bIdle) {  // both off for a time
+          fmtSec(f.b.h, h1, sizeof(h1));
+          snprintf(b, sizeof(b), "B off \xC2\xB7 T off \xC2\xB7 %s", h1);
+          break;
+        }
         if (f.tIdle) {
           seg3(f.b, tt, sizeof(tt));
           snprintf(b, sizeof(b), "B %s \xC2\xB7 T off", tt);
@@ -276,8 +281,15 @@ static void fillSeq() {
         seg(t, i, 5, f.t, true, c);
         break;
       case PH_BT:
-        if (f.bIdle) none3(t, i, 2, c, "off");
-        else seg(t, i, 2, f.b, f.tIdle, c);
+        if (f.bIdle && f.tIdle) {  // both off: the phase's time in the bottom's hold column
+          none3(t, i, 2, c, "off");
+          fmtSec(f.b.h, b, sizeof(b));
+          cell(t, i, 4, b, c);
+        } else if (f.bIdle) {
+          none3(t, i, 2, c, "off");
+        } else {
+          seg(t, i, 2, f.b, f.tIdle, c);
+        }
         if (f.tIdle) none3(t, i, 5, c, "off");
         else seg(t, i, 5, f.t, true, c);
         break;
@@ -399,9 +411,29 @@ static void onCellValue(float v, int) {
   if (ed->type == PROG_TL) {
     TlStep& st = ed->st[cellCh][cellIdx];
     s = &st.s;
+    if (cellField == 0) {  // 0 degC: the step switches the outputs off; a temperature: a target step again
+      if (v != 0 && v < ES.ch[cellCh].spMin) return editMsg("Below the channel's lowest setpoint (0 = off).");
+      st.kind = v == 0 ? ST_IDLE : ST_TARGET;
+      if (v != 0) st.s.t = v;
+      undoPush();
+      edRefresh();
+      return;
+    }
   } else {
     SeqPhase& f = ed->ph[cellIdx];
     s = cellCh == CH_BOTTOM ? &f.b : &f.t;
+    if (cellField == 0 && f.kind == PH_BT) {  // Both: 0 degC = the channel Idle (off), a temperature = on again
+      if (v != 0 && v < ES.ch[cellCh].spMin) return editMsg("Below the channel's lowest setpoint (0 = off).");
+      uint8_t& idle = cellCh == CH_BOTTOM ? f.bIdle : f.tIdle;
+      const bool off = v == 0;
+      if (off && cellCh == CH_TOP && !f.bIdle && !f.b.r && !f.b.h) f.b.r = f.t.r, f.b.h = f.t.h;  // (top off: the bottom drives)
+      if (off && cellCh == CH_BOTTOM && f.tIdle && !f.b.h) f.b.h = f.t.h;  // (both off: the phase's time)
+      idle = off ? 1 : 0;
+      if (!off) s->t = v;
+      undoPush();
+      edRefresh();
+      return;
+    }
   }
   if (cellField == 0) s->t = v;
   else if (cellField == 1) s->r = (uint32_t)v;
@@ -419,9 +451,19 @@ static void editField(int ch, int idx, int field, float cur) {
   const char* name = ES.ch[ch].name;
   if (ed->type == PROG_SEQ) snprintf(title, sizeof(title), "P%d %s %s", idx + 1, name, F[field]);
   else snprintf(title, sizeof(title), "%s step %d %s", name, idx + 1, F[field]);
-  if (field == 0) tNumPad(title, cur, ES.ch[ch].spMin, ES.ch[ch].spMax, 0, "\xC2\xB0" "C", onCellValue, 0);
+  // a channel that can be off in this phase / step (Both, Timeline): 0 = off
+  const bool offOk = !edRun && (ed->type == PROG_TL || ed->ph[idx].kind == PH_BT);
+  if (field == 0 && offOk) {
+    strlcat(title, " (0 = off)", sizeof(title));
+    tNumPad(title, cur, ES.ch[ch].spMin < 0 ? ES.ch[ch].spMin : 0, ES.ch[ch].spMax, 0, "\xC2\xB0" "C", onCellValue, 0);
+  } else if (field == 0) {
+    tNumPad(title, cur, ES.ch[ch].spMin, ES.ch[ch].spMax, 0, "\xC2\xB0" "C", onCellValue, 0);
+  }
   else tNumPad(title, cur, 0, PROG_MAX_SEC, 0, "s", onCellValue, 0);
 }
+
+// the "off" target of a Both phase / Timeline step: the number entry, starting at the stored target (0 if none)
+static float offStart(const Seg& g) { return g.t > 0 ? g.t : 0; }
 
 // --- row menu
 enum RowAct : uint8_t {
@@ -482,6 +524,10 @@ static void onRowAct(int i, int) {
     const int ch = ed->type == PROG_TL ? rowCh : a >= A_FT_T ? CH_TOP : CH_BOTTOM, field = (a - A_FB_T) % 3;
     const Seg* g = progSeg(*ed, ch, rowIdx);
     if (!g && ed->type == PROG_TL) g = &ed->st[ch][rowIdx].s;  // an "off" step: its time
+    if (!g && f && f->kind == PH_BT && field == 0) g = ch == CH_BOTTOM ? &f->b : &f->t;  // an "off" target
+    if (!g && f && f->kind == PH_BT && f->bIdle && f->tIdle) g = &f->b;  // both off: the phase's time
+    const bool offT = field == 0 && ((f && f->kind == PH_BT && (ch == CH_BOTTOM ? f->bIdle : f->tIdle)) || (s && s->kind == ST_IDLE));
+    if (g && offT) return editField(ch, rowIdx, 0, offStart(*g));
     if (g) editField(ch, rowIdx, field, field == 0 ? g->t : field == 1 ? g->r : g->h);
     return;
   }
@@ -495,13 +541,11 @@ static void onRowAct(int i, int) {
     case A_KIND_IDLE: s->kind = ST_IDLE; break;
     case A_KIND_PAUSE: s->kind = ST_PAUSE; break;
     case A_WAIT: f->wait = !f->wait; break;
-    case A_BIDLE:
+    case A_BIDLE:  // (both off: a timed phase with the bottom's hold time)
       f->bIdle = !f->bIdle;
-      if (f->bIdle) f->tIdle = 0;  // (not both)
       break;
     case A_TIDLE:
       f->tIdle = !f->tIdle;
-      if (f->tIdle) f->bIdle = 0;
       break;
     case A_MSG:
       if (f) f->msg = !f->msg;
@@ -558,6 +602,10 @@ static void rowMenu(int ch, int idx) {
   const int n = count();
 #if TUI_SMALL
   // the values first (the table shows them in one line)
+  auto offItem = [&](int vch, uint8_t a0) {  // an "off" target: tap for a temperature (0 = stays off)
+    snprintf(b, sizeof(b), "%s target: off", ES.ch[vch].name);
+    add(a0, b);
+  };
   auto values = [&](int vch, uint8_t a0, bool rampHold, bool target = true) {
     const Seg* g = progSeg(*ed, vch, idx);
     if (!g && ed->type == PROG_TL) g = &ed->st[vch][idx].s;  // an "off" step: its time
@@ -583,11 +631,22 @@ static void rowMenu(int ch, int idx) {
     const SeqPhase& f = ed->ph[idx];
     if (f.kind == PH_B) values(CH_BOTTOM, A_FB_T, true);
     if (f.kind == PH_BT && !f.bIdle) values(CH_BOTTOM, A_FB_T, f.tIdle);  // (top off: the bottom ramps and holds)
+    if (f.kind == PH_BT && f.bIdle && !edRun) offItem(CH_BOTTOM, A_FB_T);
+    if (f.kind == PH_BT && f.tIdle && !edRun) offItem(CH_TOP, A_FT_T);
+    if (f.kind == PH_BT && f.bIdle && f.tIdle) {  // both off for a time
+      char t2[12];
+      fmtSec(f.b.h, t2, sizeof(t2));
+      snprintf(b, sizeof(b), "Both off for: %s", t2);
+      add(A_FB_H, b);
+    }
     if (f.kind == PH_T || (f.kind == PH_BT && !f.tIdle)) values(CH_TOP, A_FT_T, true);
   } else {
     const TlStep& st = ed->st[ch][idx];
     if (st.kind == ST_TARGET) values(ch, A_FB_T, true);
-    if (st.kind == ST_IDLE) values(ch, A_FB_T, true, false);
+    if (st.kind == ST_IDLE) {
+      if (!edRun) offItem(ch, A_FB_T);
+      values(ch, A_FB_T, true, false);
+    }
   }
   if (edRun) {
     if (!rowN) return editMsg("During a run only targets and times can be changed.");
@@ -668,6 +727,9 @@ static void onTable(lv_event_t* e) {
     const int cch = c >= 5 ? CH_TOP : CH_BOTTOM, field = (c - 2) % 3;
     const Seg* s = progSeg(*ed, cch, r);
     if (f.kind == PH_P) return rowMenu(0, r);
+    if (f.kind == PH_BT && f.bIdle && f.tIdle && cch == CH_BOTTOM && field == 2) return editField(CH_BOTTOM, r, 2, f.b.h);
+    if (f.kind == PH_BT && field == 0 && (cch == CH_BOTTOM ? f.bIdle : f.tIdle))  // "off": enter a temperature to switch it on
+      return editField(cch, r, 0, edRun ? 0 : offStart(cch == CH_BOTTOM ? f.b : f.t));
     if (!s || (cch == CH_BOTTOM && f.kind == PH_BT && !f.tIdle && field > 0)) return;
     editField(cch, r, field, field == 0 ? s->t : field == 1 ? s->r : s->h);
   } else {
@@ -676,6 +738,7 @@ static void onTable(lv_event_t* e) {
     if (c == 0 || s.kind == ST_PAUSE) return rowMenu(ch, r);
     if (s.kind == ST_IDLE) {
       if (c == 3) editField(ch, r, 2, s.s.h);
+      else if (c == 1 && !edRun) editField(ch, r, 0, offStart(s.s));  // "off": a temperature makes it a target step
       else rowMenu(ch, r);
       return;
     }

@@ -139,7 +139,9 @@ moves, Shift + drag zooms to a range, double click shows all; *Crop to view* + *
 
 - **Device**: info, *Restart device*, *Restart screen* (display and touch set up again; the device keeps
   running), **Firmware update** ([Updates](Updates-and-backups.md)).
-- **Wi-Fi**: network (with scan), password, access point password, host name, fixed IP.
+- **Wi-Fi**: on / off (off: no network, no access point, no scan — the page loses its connection unless it runs
+  over USB; switch it on again on the touch screen or with `wifi on`), network (with scan), password, access point
+  password, host name, fixed IP.
 - **Safety**: manual mode timeout, E-stop, SSR supply relay, alarm sound (with a test beep), chip
   temperature ([Safety](Safety.md)).
 - **Display** (applied at once): accent colour, theme, brightness, rotation, screen check, SPI clock.

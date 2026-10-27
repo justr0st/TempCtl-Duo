@@ -839,6 +839,7 @@ static void handleGetConfig() {
 
 static void handlePostConfig() {
   JsonDocument d;
+  bool wifiChanged = false;
   if (!parseBody(d)) return sendError("Invalid JSON");
   {
     ScratchSettings S;
@@ -856,12 +857,17 @@ static void handlePostConfig() {
     if (!settingsValidate(*S, boardLimits(), msg, sizeof(msg))) return sendError(msg);
     {
       Guard g;
+      wifiChanged = gSettings.wifiOn != S->wifiOn;
       gSettings = *S;
     }
   }
   d.clear();
   saveSettingsAndNotify();
   handleGetConfig();
+  if (wifiChanged) {  // Wi-Fi switched off / on (wifi.enabled): after the answer went out
+    delay(300);
+    netApplyWifi();
+  }
 }
 
 static void handleWifi() {
@@ -879,7 +885,8 @@ static void handleWifi() {
   saveSettingsQuiet();
   JsonDocument r;
   r["ok"] = true;
-  r["msg"] = "Saved. Connecting... If the address changes, reopen the page at the new IP or http://<host name>.local";
+  r["msg"] = netEnabled() ? "Saved. Connecting... If the address changes, reopen the page at the new IP or http://<host name>.local"
+                          : "Saved. Wi-Fi is switched off: it connects when Wi-Fi is switched on.";
   sendJson(r);
   delay(300);  // let the response go out before the station reconnects
   netApplyWifi();
@@ -890,6 +897,12 @@ static void handleWifi() {
 static void handleWifiScan() {
   static String last;     // names of the last scan, '\n'-separated
   static bool have = false;
+  if (!netEnabled()) {  // Wi-Fi switched off: no scan
+    JsonDocument d;
+    d["err"] = "Wi-Fi is switched off";
+    d["networks"].to<JsonArray>();
+    return sendJson(d);
+  }
   if (reqHas("start") && !netScanBusy()) {
     netScanStart();
     have = false;

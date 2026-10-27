@@ -2,7 +2,7 @@
 // https://RELEASE_HOST/dl/manifest.json (release.h), compares the version and, when asked, downloads its
 // board's image straight into the other firmware slot (ota.h, source OTA_NET; MD5 checked at the end).
 // Both run in a task of their own, so the touch screen, web page and control loop keep running.
-// Touch: Setup › System › Online update; serial: fw net / fw net install yes. (The web page, on every
+// Touch: Setup › System › OTA update; serial: fw net / fw net install yes. (The web page, on every
 // board, does the same through the browser and the normal upload.)
 #pragma once
 #include <stddef.h>

@@ -15,7 +15,7 @@ static bool eDirty = false;
 static uint32_t eGen = 0;  // settingsGen() of the copy in E (a save elsewhere - web, serial - reloads it)
 // control sizes (480x320 / 320x240)
 // (with the monitor channel's tab four tabs share the header: narrower)
-constexpr int CW = TUI_SMALL ? 128 : 150, CW2 = TUI_SMALL ? 90 : 110, BH = TUI_SMALL ? 32 : 36,
+constexpr int CW = TUI_SMALL ? 128 : 200, CW2 = TUI_SMALL ? 90 : 110, BH = TUI_SMALL ? 32 : 36,
               TAB_W = TUI_SMALL ? 66 : HAS_MONITOR ? 76 : 104;
 constexpr int TAB_BUS = 2, TAB_MON = 3;
 static int tab = 0;  // 0, 1 = channel, 2 = bus, 3 = monitor channel
@@ -33,6 +33,22 @@ struct Field {
   float (*get)(const Settings&, int);
   void (*set)(Settings&, int, float);
   bool (*show)(const Settings&, int);
+  // layout (left out: 0 / nullptr). On the 480 px screen related values share a row; the 320 px
+  // screen keeps one value per row (label / hint), only the spacing applies there too.
+  uint8_t lay;     // L_* below
+  uint8_t w;       // 480 px: control width (0: the default)
+  const char* rl;  // 480 px: row label instead of label (the first value of a shared row)
+  const char* rh;  // 480 px: row hint instead of hint
+  const char* pre;  // 480 px: small text right before the control (a joined value: default its label)
+  bool (*en)(const Settings&, int);  // false: shown, but greyed out
+};
+enum : uint8_t {
+  L_JOIN = 1,     // 480 px: into the row above, after its control
+  L_BEFORE = 2,   // ... before its control instead
+  L_GAP10 = 4,    // space above (10 px; 320 px: 5)
+  L_GAP20 = 8,    // (20 px; 320 px: 10)
+  L_TRIM = 16,    // whole values without ".0"
+  L_COL = 32,     // 480 px: label + hint as a right-aligned column before the control (Kp, Ki, Kd)
 };
 
 static Runaway& ra(Settings& s, int c) { return s.ch[c].type == CH_LOCAL ? s.ch[c].loc.runaway : s.ch[c].mb.runaway; }
@@ -373,9 +389,10 @@ static const Field CH_FIELDS[] = {
      fs4, isOn},
     {F_NUM, "End setpoint", nullptr, -200, 1500, 1, "\xC2\xB0" "C", nullptr, fg5, fs6,
      fl7},
-    {F_NUM, "Lowest setpoint", nullptr, -200, 1500, 1, "\xC2\xB0" "C", nullptr, fg8, fs9, isOn},
+    {F_NUM, "Lowest setpoint", nullptr, -200, 1500, 1, "\xC2\xB0" "C", nullptr, fg8, fs9, isOn, L_TRIM, 90,
+     "Setpoint range", "Local: max = Tcutoff \xE2\x88\x92 10 \xC2\xB0" "C"},
     {F_NUM, "Highest setpoint", "Local: at most the cut-off temperature \xE2\x88\x92 10 \xC2\xB0" "C", -200, 1500, 1,
-     "\xC2\xB0" "C", nullptr, fg10, fs11, isOn},
+     "\xC2\xB0" "C", nullptr, fg10, fs11, isOn, L_JOIN | L_TRIM, 90, nullptr, nullptr, ".."},
     // Modbus
     {F_HEAD, "Modbus controller (beta)", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, isMb},
     {F_NUM, "Slave address", nullptr, 1, 247, 0, "", nullptr, fg12, fs13, isMb},
@@ -397,46 +414,47 @@ static const Field CH_FIELDS[] = {
     {F_SEL, "Converter", nullptr, 0, 0, 0, nullptr, "MAX31855\nMAX6675", fg24, fs25,
      isLoc},
     {F_NUM, "Calibration offset", "Calibrated = raw \xC3\x97 gain + offset", -50, 50, 2, "\xC2\xB0" "C", nullptr,
-     fg26, fs27, isLoc},
-    {F_NUM, "Calibration gain", nullptr, 0.5f, 2, 4, "", nullptr, fg28, fs29, isLoc},
+     fg26, fs27, isLoc, 0, 80},
+    {F_NUM, "Calibration gain", nullptr, 0.5f, 2, 4, "", nullptr, fg28, fs29, isLoc, L_JOIN | L_COL, 0, "Gain"},
     {F_NUM, "Read every", "MAX6675: at least 250 ms (its conversion time)", 100, 1000, 0, "ms", nullptr, gReadMs, sReadMs,
      isLoc},
     {F_SW, "Median filter", "Removes single-reading spikes; a change shows about half the window later", 0, 0, 0,
      nullptr, nullptr, gMedian, sMedian, isLoc},
     {F_SEL, "\xE2\x80\xA6 over the last", nullptr, 0, 0, 0, nullptr, "3 readings\n5 readings\n7 readings\n9 readings", gMedianN,
-     sMedianN, medOn},
+     sMedianN, isLoc, L_JOIN | L_BEFORE, 150, nullptr, nullptr, "", medOn},
     {F_HEAD, "PID control", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, isLoc},
     {F_NUM, "Autotune time limit", "The autotune gives up after this time", 10, 240, 0, "min", nullptr, gTuneMax, sTuneMax,
      isLoc},
-    {F_SW, "Autotune: faster", "Off: slow, no overshoot. On: reaches the setpoint 2-3x sooner, a little overshoot",
+    {F_SW, "Autotune result: faster", "Off: slow, no overshoot.\nOn: reaches the setpoint much sooner, a little overshoot",
      0, 0, 0, nullptr, nullptr, gTuneFast, sTuneFast, isLoc},
-    {F_NUM, "Kp", "% output per \xC2\xB0" "C", 0, 1000, 2, "", nullptr, fg30, fs31, isLoc},
-    {F_NUM, "Ki", "% per \xC2\xB0" "C\xC2\xB7s", 0, 100, 4, "", nullptr, fg32, fs33, isLoc},
-    {F_NUM, "Kd", "%\xC2\xB7s per \xC2\xB0" "C", 0, 10000, 1, "", nullptr, fg34, fs35, isLoc},
+    {F_NUM, "Kp", "% output per \xC2\xB0" "C", 0, 1000, 2, "", nullptr, fg30, fs31, isLoc, L_GAP10 | L_COL, 80, nullptr,
+     "% out. per \xC2\xB0" "C"},
+    {F_NUM, "Ki", "% per \xC2\xB0" "C\xC2\xB7s", 0, 100, 4, "", nullptr, fg32, fs33, isLoc, L_JOIN | L_COL, 80},
+    {F_NUM, "Kd", "%\xC2\xB7s per \xC2\xB0" "C", 0, 10000, 1, "", nullptr, fg34, fs35, isLoc, L_JOIN | L_COL, 80},
     {F_NUM, "SSR window", "The SSR is on for the output share of every window", 0.2f, 10, 1, "s", nullptr,
-     fg36, fs37, isLoc},
+     fg36, fs37, isLoc, L_GAP10},
     {F_NUM, "Max. output", nullptr, 0, 100, 0, "%", nullptr, fg38, fs39, isLoc},
     {F_NUM, "Cut-off temperature", "Outputs off above", 50, 600, 0, "\xC2\xB0" "C", nullptr, fg40,
      fs41, isLoc},
+    // protection (runaway: the values of the channel's type)
+    {F_HEAD, "Thermal protection", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, isOn, L_GAP10},
     {F_SW, "Converter too hot: fault", "MAX31855 cold junction (the converter's own temperature)", 0, 0, 0, nullptr, nullptr,
      fg42, fs43, isLoc},
     {F_NUM, "\xE2\x80\xA6 above", nullptr, 30, 125, 0, "\xC2\xB0" "C", nullptr, fg44, fs45, cjOn},
-    // runaway (values of the channel's type)
-    {F_HEAD, "Thermal runaway protection", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, isOn},
-    {F_SW, "Runaway detection", nullptr, 0, 0, 0, nullptr, nullptr, fg46, fs47, isOn},
-    {F_NUM, "Heating failed: output at least", nullptr, 0, 100, 0, "%", nullptr, fg48, fs49, raOn},
-    {F_NUM, "\xE2\x80\xA6 for", nullptr, 10, 3600, 0, "s", nullptr, fg50, fs51, raOn},
+    {F_SW, "Runaway detection", nullptr, 0, 0, 0, nullptr, nullptr, fg46, fs47, isOn, L_GAP20},
+    {F_NUM, "Heating failed: output over", nullptr, 0, 100, 0, "%", nullptr, fg48, fs49, raOn, 0, 80},
+    {F_NUM, "\xE2\x80\xA6 for", nullptr, 10, 3600, 0, "s", nullptr, fg50, fs51, raOn, L_JOIN},
     {F_NUM, "\xE2\x80\xA6 with a rise below", nullptr, 0.5f, 100, 1, "\xC2\xB0" "C", nullptr, fg52,
      fs53, raOn},
-    {F_NUM, "Holding: PV off the setpoint by more than \xC2\xB1", nullptr, 1, 200, 0, "\xC2\xB0" "C", nullptr,
-     fg54, fs55, raOn},
-    {F_NUM, "\xE2\x80\xA6 for longer than", nullptr, 5, 3600, 0, "s", nullptr, fg56, fs57, raOn},
+    {F_NUM, "Holding: PV/SP difference over \xC2\xB1", nullptr, 1, 200, 0, "\xC2\xB0" "C", nullptr,
+     fg54, fs55, raOn, L_GAP10, 80, "Holding: PV/SP difference over", nullptr, "\xC2\xB1"},
+    {F_NUM, "\xE2\x80\xA6 for", nullptr, 5, 3600, 0, "s", nullptr, fg56, fs57, raOn, L_JOIN},
     {F_SW, "Heating while off (stuck SSR)", "Checked from 2 min after off, not while the other channel heats", 0, 0, 0,
-     nullptr, nullptr, fg58, fs59, isOn},
-    {F_NUM, "\xE2\x80\xA6 PV rises by", nullptr, 2, 100, 1, "\xC2\xB0" "C", nullptr, fg60, fs61, offOn},
-    {F_NUM, "\xE2\x80\xA6 within", nullptr, 10, 3600, 0, "s", nullptr, fg62, fs63, offOn},
+     nullptr, nullptr, fg58, fs59, isOn, L_GAP20},
+    {F_NUM, "\xE2\x80\xA6 PV rises by", nullptr, 2, 100, 1, "\xC2\xB0" "C", nullptr, fg60, fs61, offOn, L_TRIM, 80},
+    {F_NUM, "\xE2\x80\xA6 within", nullptr, 10, 3600, 0, "s", nullptr, fg62, fs63, offOn, L_JOIN},
     {F_SW, "Reading frozen", "Outputs on, but the reading does not change at all", 0, 0, 0, nullptr, nullptr,
-     fg64, fs65, isOn},
+     fg64, fs65, isOn, L_GAP20},
     {F_NUM, "\xE2\x80\xA6 for", nullptr, 10, 3600, 0, "s", nullptr, fg66, fs67, frozenOn},
 };
 
@@ -472,16 +490,16 @@ static float mgMedN(const Settings& s, int) { return (s.mon.medianN - 3) / 2; }
 static void msMedN(Settings& s, int, float v) { s.mon.medianN = (uint8_t)(3 + 2 * (int)v); }
 
 static const Field MON_FIELDS[] = {
-    {F_NOTE, "A third thermocouple, measured only: its reading is shown at the bottom right of the chart and logged. "
-             "No output, no alarm. CS on GPIO 3.", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, nullptr},
-    {F_SW, "Converter fitted", "Read, charted and logged while on", 0, 0, 0, nullptr, nullptr, mgOn, msOn, nullptr},
+    {F_SW, "Converter enabled", "Read, charted and logged while on", 0, 0, 0, nullptr, nullptr, mgOn, msOn, nullptr},
     {F_SEL, "Converter", nullptr, 0, 0, 0, nullptr, "MAX31855\nMAX6675", mgSensor, msSensor, monOn},
-    {F_NUM, "Calibration offset", "Calibrated = raw \xC3\x97 gain + offset", -50, 50, 2, "\xC2\xB0" "C", nullptr, mgOff, msOff, monOn},
-    {F_NUM, "Calibration gain", nullptr, 0.5f, 2, 4, "", nullptr, mgGain, msGain, monOn},
+    {F_NUM, "Calibration offset", "Calibrated = raw \xC3\x97 gain + offset", -50, 50, 2, "\xC2\xB0" "C", nullptr, mgOff, msOff, monOn,
+     0, 80},
+    {F_NUM, "Calibration gain", nullptr, 0.5f, 2, 4, "", nullptr, mgGain, msGain, monOn, L_JOIN | L_COL, 0, "Gain"},
     {F_NUM, "Read every", "MAX6675: at least 250 ms (its conversion time)", 100, 1000, 0, "ms", nullptr, mgRead, msRead, monOn},
-    {F_SW, "Median filter", "Removes single-reading spikes", 0, 0, 0, nullptr, nullptr, mgMed, msMed, monOn},
+    {F_SW, "Median filter", "Removes single-reading spikes; a change shows about half the window later", 0, 0, 0, nullptr, nullptr,
+     mgMed, msMed, monOn},
     {F_SEL, "\xE2\x80\xA6 over the last", nullptr, 0, 0, 0, nullptr, "3 readings\n5 readings\n7 readings\n9 readings", mgMedN, msMedN,
-     monMedOn},
+     monOn, L_JOIN | L_BEFORE, 150, nullptr, nullptr, "", monMedOn},
 };
 
 static const Field* fieldsOf(int& n) {
@@ -587,7 +605,7 @@ static void tuneUpdate() {
       snprintf(b, sizeof(b), "Done: Kp %.2f, Ki %.4f, Kd %.1f. Take them over?", t.res.kp, t.res.ki, t.res.kd);
       break;
     case TuneState::Failed: snprintf(b, sizeof(b), "Failed: %s", t.msg); break;
-    default: strlcpy(b, "Finds PID values: the heater is switched on and off around a test temperature.", sizeof(b)); break;
+    default: strlcpy(b, "Find PID values:\nthe heater is switched on and off around a test temperature.", sizeof(b)); break;
   }
   tSetText(tuneLbl, b);
   if (tuneSw) tSetEnabled(tuneSw, t.state != TuneState::Running);
@@ -615,7 +633,30 @@ static void onTest(lv_event_t*) {
 }
 
 // ------------------------------------------------------------ layout
-static lv_obj_t* row(const char* label, const char* hint) {
+// label + hint column (grows; right: right-aligned, the Kp / Ki / Kd style)
+static lv_obj_t* labelCol(lv_obj_t* r, const char* label, const char* hint, bool right, bool grow = true) {
+  lv_obj_t* col = tCol(r, 0);
+  if (!grow) {  // as wide as its text ("Gain")
+    tLabel(col, &tfont_14, label);
+    return col;
+  }
+  lv_obj_set_flex_grow(col, 1);
+  if (right) lv_obj_set_flex_align(col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+  lv_obj_t* l = tLabel(col, &tfont_14, label);
+  lv_obj_set_width(l, LV_PCT(100));
+  lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
+  if (right) lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_RIGHT, 0);
+  if (hint) {
+    lv_obj_t* h = tLabel(col, &tfont_12, hint);
+    lv_obj_add_style(h, &S_.muted, 0);
+    lv_obj_set_width(h, LV_PCT(100));
+    lv_label_set_long_mode(h, LV_LABEL_LONG_MODE_WRAP);
+    if (right) lv_obj_set_style_text_align(h, LV_TEXT_ALIGN_RIGHT, 0);
+  }
+  return col;
+}
+
+static lv_obj_t* row(const char* label, const char* hint, bool right = false) {
   lv_obj_t* r = lv_obj_create(cBody);  // no tile (Rost): label left, control right
   lv_obj_remove_style_all(r);
   lv_obj_set_scrollable(r, false);
@@ -625,18 +666,13 @@ static lv_obj_t* row(const char* label, const char* hint) {
   lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(r, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_gap(r, 8, 0);
-  lv_obj_t* col = tCol(r, 0);
-  lv_obj_set_flex_grow(col, 1);
-  lv_obj_t* l = tLabel(col, &tfont_14, label);
-  lv_obj_set_width(l, TUI_SMALL ? LV_PCT(100) : 260);
-  lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
-  if (hint) {
-    lv_obj_t* h = tLabel(col, &tfont_12, hint);
-    lv_obj_add_style(h, &S_.muted, 0);
-    lv_obj_set_width(h, TUI_SMALL ? LV_PCT(100) : 260);
-    lv_label_set_long_mode(h, LV_LABEL_LONG_MODE_WRAP);
-  }
+  labelCol(r, label, hint, right);
   return r;
+}
+
+// a small text before a control ("..", "... for", "Gain")
+static void preLabel(lv_obj_t* r, const char* t) {
+  if (t && *t) tLabel(r, &tfont_14, t);
 }
 
 static void selText(const char* opts, int i, char* b, size_t n) {
@@ -672,27 +708,44 @@ static void build() {
   if (eDirty) lv_obj_add_style(cSave, &S_.btnPri, 0);
   else lv_obj_remove_style(cSave, &S_.btnPri, 0);
   if (tab < 2 || tab == TAB_MON) {
-    lv_obj_t* r = row("Name", tab == TAB_MON ? "Chart, CSV and logs" : "Shown on all screens");
+    char mh[64] = "";
+#if HAS_MONITOR
+    snprintf(mh, sizeof(mh), "Measure only. Chart, CSV and logs. CS on GPIO %d", PIN_TC_CS_MON);
+#endif
+    lv_obj_t* r = row("Name", tab == TAB_MON ? mh : "Shown on all screens");
     tButton(r, nameOf(tab), onNameBtn, nullptr, CW, BH);
   }
   int n;
   const Field* F = fieldsOf(n);
+  lv_obj_t *r = nullptr, *last = nullptr;  // the current row, the control added last
+  bool rowCols = false, afterHead = false;  // the row is a Kp / Ki / Kd one; the item above is a heading
+  int prev = -1;                             // the field shown last
   for (int i = 0; i < n; ++i) {
     const Field& f = F[i];
     if (f.show && !f.show(E, tab)) continue;
+    // space above (not right under a heading)
+    const int gap = afterHead ? 0 : (f.lay & L_GAP20) ? 20 : (f.lay & L_GAP10) ? 10 : 0;
+    afterHead = false;
     if (f.k == F_HEAD) {
       lv_obj_t* h = tLabel(cBody, &tfont_16b, f.label);
-      lv_obj_set_style_pad_top(h, 6, 0);
+      lv_obj_set_style_pad_top(h, gap ? (TUI_SMALL ? gap / 2 + 4 : gap) : 6, 0);
       lv_obj_add_style(h, &S_.acc, 0);
+      afterHead = true;
+      r = nullptr;
       if (!strcmp(f.label, "PID control")) {  // autotune under the PID heading
-        lv_obj_t* r = row("Autotune", nullptr);
+        r = row("Autotune", nullptr);
         lv_obj_t* col = lv_obj_get_child(r, 0);
         tuneLbl = lv_obj_get_child(col, 0);
         lv_obj_set_style_text_font(tuneLbl, &tfont_12, 0);
         tuneRow = tCol(r, 4);
-        static const char* const B[] = {"Start", "Stop", "Take over", "Discard"};
-        for (int k = 0; k < 4; ++k) tButton(tuneRow, B[k], onTune, (void*)(intptr_t)k, TUI_SMALL ? 86 : 100, TUI_SMALL ? 30 : 34);
+        static const char* const B[] = {LV_SYMBOL_PLAY " Start", "Stop", "Take over", "Discard"};
+        for (int k = 0; k < 4; ++k) {
+          lv_obj_t* tb = tButton(tuneRow, B[k], onTune, (void*)(intptr_t)k, TUI_SMALL ? 86 : 110, TUI_SMALL ? 30 : 34);
+          if (k == 0) lv_obj_add_style(tb, &S_.btnPri, 0);
+        }
         tuneUpdate();
+        afterHead = false;
+        r = nullptr;
       }
       continue;
     }
@@ -702,27 +755,52 @@ static void build() {
       lv_obj_set_width(nt, LV_PCT(100));
       lv_label_set_long_mode(nt, LV_LABEL_LONG_MODE_WRAP);
       if (tab < 2 && isMb(E, tab) && !strncmp(f.label, "Register", 8)) tButton(cBody, "Test link", onTest, nullptr, 120, BH);
+      r = nullptr;
       continue;
     }
-    lv_obj_t* r = row(f.label, f.hint);
+    const bool join = !TUI_SMALL && (f.lay & L_JOIN) && r && prev == i - 1;  // (its row shown)
+    if (join) {
+      if (f.lay & L_COL) {
+        labelCol(r, f.rl ? f.rl : f.label, f.rh ? f.rh : f.hint, rowCols, rowCols);  // ("Gain": next to its value)
+      } else {
+        preLabel(r, f.pre ? f.pre : f.label);
+      }
+    } else {
+      const bool big = !TUI_SMALL;
+      rowCols = big && (f.lay & L_COL);
+      r = row(big && f.rl ? f.rl : f.label, big && f.rh ? f.rh : f.hint, rowCols);
+      if (gap) lv_obj_set_style_pad_top(r, TUI_SMALL ? gap / 2 : gap, 0);
+      if (rowCols) lv_obj_set_style_pad_gap(r, 5, 0);  // (three label columns: room for the units)
+      if (big) preLabel(r, f.pre);
+    }
+    const int w = !TUI_SMALL && f.w ? f.w : f.k == F_SEL ? CW : CW2;
     char b[64];
+    lv_obj_t* ctl;
     if (f.k == F_SW) {
-      lv_obj_t* sw = tSwitch(r, onSw, (void*)(intptr_t)i);
-      tSetChecked(sw, f.get(E, tab) != 0);
+      ctl = tSwitch(r, onSw, (void*)(intptr_t)i);
+      tSetChecked(ctl, f.get(E, tab) != 0);
       if (f.get == gTuneFast) {  // the autotune rule: greyed out while an autotune runs
-        tuneSw = sw;
+        tuneSw = ctl;
         tuneUpdate();
       }
     } else if (f.k == F_SEL) {
       selText(f.opts, (int)f.get(E, tab), b, sizeof(b));
-      lv_obj_t* btn = tButton(r, b, onField, (void*)(intptr_t)i, CW, BH);
-      lv_obj_t* l = lv_obj_get_child(btn, 0);
-      lv_obj_set_width(l, CW - 10);
+      ctl = tButton(r, b, onField, (void*)(intptr_t)i, w, BH);
+      lv_obj_t* l = lv_obj_get_child(ctl, 0);
+      lv_obj_set_width(l, w - 10);
       tOneLine(l);
     } else {
-      snprintf(b, sizeof(b), "%.*f%s%s", f.dec, f.get(E, tab), f.unit && *f.unit ? " " : "", f.unit ? f.unit : "");
-      tButton(r, b, onField, (void*)(intptr_t)i, CW2, BH);
+      const float v = f.get(E, tab);
+      const int dec = (f.lay & L_TRIM) && v == roundf(v) ? 0 : f.dec;
+      snprintf(b, sizeof(b), "%.*f%s%s", dec, v, f.unit && *f.unit ? " " : "", f.unit ? f.unit : "");
+      ctl = tButton(r, b, onField, (void*)(intptr_t)i, w, BH);
     }
+    if (f.en && !f.en(E, tab)) tSetEnabled(ctl, false);
+    if (join && (f.lay & L_BEFORE) && last) {  // before the control of the row (the median filter's count, its switch)
+      lv_obj_move_to_index(ctl, lv_obj_get_index(last));
+    }
+    last = ctl;
+    prev = i;
   }
   lv_obj_update_layout(cBody);
   lv_obj_scroll_to_y(cBody, sy, LV_ANIM_OFF);

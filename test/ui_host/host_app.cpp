@@ -9,6 +9,7 @@
 #include "tui.h"
 #include "version.h"
 #include <vector>
+#include "lvgl_private.h"
 #ifdef MEMTEST
 #include <malloc.h>
 #include "src/display/lv_display_private.h"
@@ -190,6 +191,7 @@ void chartSnapshot(ChartData& d, bool live) {
 String netInfo() { return String("Wi-Fi \"Workshop\" \xC2\xB7 192.168.1.50 \xC2\xB7 -58 dBm"); }
 void netApplyWifi() {}
 void netScanStart() {}
+bool netEnabled() { return gSettings.wifiOn != 0; }
 bool netScanBusy() { return false; }
 int netScanResult(char* out, size_t n) {
   strlcpy(out, "Workshop\nWorkshop-5G\nNeighbour\nFRITZ!Box 7590 XY", n);
@@ -307,6 +309,19 @@ static lv_obj_t* findLabel(lv_obj_t* o, const char* t) {
   for (uint32_t i = 0; i < lv_obj_get_child_count(o); ++i)
     if (lv_obj_t* r = findLabel(lv_obj_get_child(o, i), t)) return r;
   return nullptr;
+}
+
+// scrolls the page body so that the row with this label starts `above` px below the header
+static void scrollToLabel(const char* t, int above = 4) {
+  lv_obj_t* body = lv_obj_get_child(lv_screen_active(), 1);
+  lv_obj_t* l = findLabel(body, t);
+  if (!l) return (void)printf("[host] scrollToLabel: no \"%s\"\n", t);
+  lv_obj_update_layout(body);
+  lv_area_t a, b;
+  lv_obj_get_coords(l, &a);
+  lv_obj_get_coords(body, &b);
+  lv_obj_scroll_to_y(body, lv_obj_get_scroll_y(body) + a.y1 - b.y1 - above, LV_ANIM_OFF);
+  run(100);
 }
 static bool visible(lv_obj_t* o) {
   for (; o; o = lv_obj_get_parent(o))
@@ -484,6 +499,124 @@ int main(int argc, char** argv) {
     return 0;
   }
 #endif
+  // ./uihost editoff: program editor - a Both phase target / a Timeline target set to 0 becomes "off"; tapping "off"
+  // and entering a temperature switches it on again (exit code 0 = ok)
+  if (argc > 1 && !strcmp(argv[1], "editoff")) {
+    uiInit();
+    run(500);
+    int fails = 0;
+    auto table = []() -> lv_obj_t* {
+      std::vector<lv_obj_t*> st{lv_screen_active()};
+      while (!st.empty()) {
+        lv_obj_t* o = st.back();
+        st.pop_back();
+        if (lv_obj_check_type(o, &lv_table_class) && !lv_obj_is_hidden(o)) return o;
+        for (uint32_t i = 0; i < lv_obj_get_child_count(o); ++i) st.push_back(lv_obj_get_child(o, i));
+      }
+      return nullptr;
+    };
+    auto tapCell = [&](lv_obj_t* t, int row, int col) {
+      lv_table_t* tb = (lv_table_t*)t;
+      lv_area_t a;
+      lv_obj_get_coords(t, &a);
+      int x = a.x1 + lv_obj_get_style_pad_left(t, LV_PART_MAIN), y = a.y1 + lv_obj_get_style_pad_top(t, LV_PART_MAIN);
+      for (int c = 0; c < col; ++c) x += tb->col_w[c];
+      for (int r = 0; r < row; ++r) y += tb->row_h[r];
+      tap(x + tb->col_w[col] / 2, y + tb->row_h[row] / 2);
+      run(200);
+    };
+    auto key = [&](const char* k) {
+      int x, y;
+      if (!findText(lv_screen_active(), k, x, y) && !findText(lv_layer_top(), k, x, y)) { printf("[host] editoff: no key %s\n", k); ++fails; return; }
+      tap(x, y);
+      run(100);
+    };
+    auto cellIs = [&](lv_obj_t* t, int row, int col, const char* want, const char* what) {
+      const char* v = lv_table_get_cell_value(t, row, col);
+      const bool ok = v && !strcmp(v, want);
+      printf("[host] editoff: %s: \"%s\" (want \"%s\")\n", what, v ? v : "", want);
+      fails += !ok;
+    };
+    progEditOpen(0);  // Lead-free BGA: phase 3 = Both (bottom jump 160)
+    run(400);
+    lv_obj_t* t = table();
+    if (!t) return printf("[host] editoff: no table\n"), 1;
+    tapCell(t, 2, 2);
+    key("0"); key("OK");
+    cellIs(t, 2, 2, "off", "Both: bottom 0 -> off");
+    tapCell(t, 2, 2);
+    key("1"); key("7"); key("0"); key("OK");
+    cellIs(t, 2, 2, "170", "Both: off -> 170");
+    tapCell(t, 2, 5);
+    key("0"); key("OK");
+    cellIs(t, 2, 5, "off", "Both: top 0 -> off");
+    shot("edit-off-seq");
+    progEditOpen(2);  // the Timeline example
+    run(400);
+    t = table();
+    tapCell(t, 0, 1);
+    key("0"); key("OK");
+    cellIs(t, 0, 1, "off", "Timeline: step 1 0 -> off");
+    tapCell(t, 0, 1);
+    key("2"); key("0"); key("0"); key("OK");
+    cellIs(t, 0, 1, "200", "Timeline: off -> 200");
+    printf("[host] editoff: %s\n", fails ? "FAILED" : "ok");
+    return fails;
+  }
+  // ./uihost tall: whole settings pages as one tall picture each (header + every row of the scrolled body):
+  // shots[_light]/tall-<name>.raw, 480 wide, height in the file name (tall-<name>-<h>.raw)
+  if (argc > 1 && !strcmp(argv[1], "tall")) {
+    {
+      Guard g;
+      gSettings.mon.on = 1;
+      strlcpy(gSettings.mon.name, "Board edge", sizeof(gSettings.mon.name));
+    }
+    ++hostGen;
+    uiInit();
+    run(500);
+    auto tall = [](const char* name) {
+      run(400);
+      lv_obj_t* body = lv_obj_get_child(lv_screen_active(), 1);
+      lv_obj_set_scrollbar_mode(body, LV_SCROLLBAR_MODE_OFF);
+      lv_obj_scroll_to_y(body, 0, LV_ANIM_OFF);
+      lv_obj_update_layout(body);
+      const int vis = SCREEN_H - T_HDR, total = vis + (int)lv_obj_get_scroll_bottom(body);
+      const int H = T_HDR + total;
+      std::vector<uint16_t> img((size_t)SCREEN_W * H);
+      for (int y = 0;; y += vis) {
+        lv_obj_scroll_to_y(body, y, LV_ANIM_OFF);
+        run(150);
+        lv_refr_now(hostDisp);
+        const int sy = (int)lv_obj_get_scroll_y(body);
+        if (y == 0) memcpy(img.data(), fb, sizeof(uint16_t) * SCREEN_W * T_HDR);  // the header
+        for (int r = 0; r < vis && T_HDR + sy + r < H; ++r)
+          memcpy(&img[(size_t)(T_HDR + sy + r) * SCREEN_W], &fb[(size_t)(T_HDR + r) * SCREEN_W], sizeof(uint16_t) * SCREEN_W);
+        if (sy + vis >= total) break;
+      }
+      char path[160];
+      snprintf(path, sizeof(path), "%s/tall-%s-%d.raw", hostLight ? "shots_light" : "shots", name, H);
+      FILE* f = fopen(path, "wb");
+      fwrite(img.data(), 2, img.size(), f);
+      fclose(f);
+      printf("[host] %s\n", path);
+      lv_obj_scroll_to_y(body, 0, LV_ANIM_OFF);
+    };
+    tShow(SCR_CHANNELS);
+    tall("channels-1-bottom-local");
+    tap(178, 22);
+    tall("channels-2-top-modbus");
+    tap(258, 22);
+    tall("channels-3-monitor");
+    tap(338, 22);
+    tall("channels-4-rs485");
+    tShow(SCR_SYSTEM);
+    tall("system");
+    tShow(SCR_NETWORK);
+    tall("network");
+    tShow(SCR_DISPLAY);
+    tall("display");
+    return 0;
+  }
   // Channels screen: a save elsewhere (web) shows without leaving the screen; the RS485 tab only with a Modbus
   // channel; a change further down keeps the list where it was
   if (argc > 1 && !strcmp(argv[1], "chan")) {
@@ -521,6 +654,21 @@ int main(int argc, char** argv) {
     const bool on1 = lv_obj_has_state(sw2, LV_STATE_CHECKED);
     printf("[host] chan: switch %d -> %d; scroll %d before, %d after (want equal, > 0)\n", on0, on1, (int)y0, (int)y1);
     fails += on0 == on1 || y0 <= 0 || y0 != y1;
+    // median filter off (its switch): its reading count stays, greyed out
+    {
+      lv_obj_t* mr = lv_obj_get_parent(lv_obj_get_parent(label("Median filter")));
+      lv_obj_t* msw = lv_obj_get_child(mr, -1);
+      lv_area_t ma;
+      lv_obj_get_coords(msw, &ma);
+      lv_obj_scroll_to_y(body, lv_obj_get_scroll_y(body) + (ma.y1 + ma.y2) / 2 - SCREEN_H / 2, LV_ANIM_OFF);
+      run(100);
+      lv_obj_get_coords(msw, &ma);
+      tap((ma.x1 + ma.x2) / 2, (ma.y1 + ma.y2) / 2);
+      lv_obj_t* mc = label("3 readings");
+      const bool grey = mc && lv_obj_has_state(lv_obj_get_parent(mc), LV_STATE_DISABLED);
+      printf("[host] chan: median off, count shown %d greyed %d (want 1 1)\n", mc != nullptr, grey);
+      fails += !grey;
+    }
     // the thermocouple and PID / autotune rows (screenshots)
     for (const char* t : {"Read every", "Autotune time limit"}) {
       lv_obj_t* r = label(t);
@@ -704,7 +852,13 @@ int main(int argc, char** argv) {
   strcpy(gSettings.tzName, "Europe/Berlin");
   tShow(SCR_SYSTEM);
   shot("14-system");
-  tap(SMALL ? 270 : 400, SMALL ? 150 : 175);  // time zone -> regions
+  {  // time zone -> regions
+    scrollToLabel("Time zone", 4);
+    lv_obj_t* tzRow = lv_obj_get_parent(lv_obj_get_parent(findLabel(lv_screen_active(), "Time zone")));
+    lv_area_t a;
+    lv_obj_get_coords(lv_obj_get_child(tzRow, -1), &a);
+    tap((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2);
+  }
   run(300);
   shot("14b-tz-regions");
   tap(SMALL ? 120 : 200, SMALL ? 100 : 128);  // the second row: Europe
@@ -715,13 +869,12 @@ int main(int argc, char** argv) {
   gLive.chipC = 47.3f;
   tShow(SCR_SYSTEM);
   run(2100);
-  lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 400, LV_ANIM_OFF);
+  scrollToLabel("Manual mode timeout", 4);
   shot("14d-system-safety");
   gLive.estopRaw = false;
   if (!SMALL) {  // SD card backup (S3)
     int x, y;
-    lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 110, LV_ANIM_OFF);
-    run(100);
+    scrollToLabel("OTA update", 24);
     shot("14e0-system-backup");
     if (findText(lv_screen_active(), "Back up", x, y)) {
       slide(x, y, x - 120, y + 60);  // pressed, slid away, released: cancelled
@@ -759,8 +912,7 @@ int main(int argc, char** argv) {
       otaOk = false;
     } else printf("[host] online update button not found\n");
   } else {
-    lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 160, LV_ANIM_OFF);
-    run(100);
+    scrollToLabel("OTA update", 24);
     shot("14e0-system-online");
   }
   run(6000);  // (the toasts of the online update check go away)
@@ -820,9 +972,9 @@ int main(int argc, char** argv) {
   shot("26b-chan-monitor");
 #endif
   tap(SMALL ? 85 : 98, SMALL ? 18 : 22);  // first channel (local)
-  lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 560, LV_ANIM_OFF);
+  scrollToLabel("PID control");
   shot("27-chan-pid");
-  lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 1100, LV_ANIM_OFF);
+  scrollToLabel("Thermal protection");
   shot("28-chan-runaway");
   lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 3000, LV_ANIM_OFF);
   shot("28b-chan-guard");
