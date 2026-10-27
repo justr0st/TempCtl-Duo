@@ -2455,7 +2455,7 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   - Glass (again): Rost still saw a less transparent band at the bottom of active channel cards. On desktop
     (> 860 px) .panel, .chan.on, .tabbg and the inactive channel tabs now paint a copy of the page background
     (mesh, fixed) under their tint like the sidebar, no live backdrop blur; phones keep the blur.
-- **1.0.61** (2026-10-27; after 1.0.60 = 0619d8f): see 9.16 - Both phase with both channels Idle, Wi-Fi
+- **1.0.61** (2026-10-27, 3a7c772; after 1.0.60 = 0619d8f): see 9.16 - Both phase with both channels Idle, Wi-Fi
   completely off, web page jump fixes, touch editor 0 °C = off, touch Channels / System layout from Rost's design.
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
