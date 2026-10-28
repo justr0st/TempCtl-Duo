@@ -62,6 +62,8 @@ def build(out, web=False):
         dst = os.path.join(out, "index.html" if url == "/" else url.lstrip("/"))
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copyfile(os.path.join(WEB, rel), dst)
+    for src, name in (("LICENSE", "LICENSE.txt"), ("THIRD-PARTY-NOTICES.md", "THIRD-PARTY-NOTICES.txt")):
+        shutil.copyfile(os.path.join(ROOT, src), os.path.join(out, name))  # (the licence and the notices: Downloads)
     if web:
         with open(os.path.join(out, "_headers"), "w", newline="\n") as f:
             f.write(HEADERS)

@@ -21,3 +21,5 @@
 - [Troubleshooting](Troubleshooting.md)
 - [Modbus controllers (beta)](Modbus.md)
 - [For developers](Development.md)
+- [Web API](Web-API.md)
+- [How it works inside](Internals.md)

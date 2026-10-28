@@ -399,7 +399,7 @@ static const char* const H_API[] = {
     "  answer: {\"id\":1,\"code\":200,\"body\":{...}}  (code 400 / 404: body {\"ok\":false,\"err\":...})",
     "  text (CSV) in pieces: {\"id\":4,\"code\":200,\"type\":\"text/csv\",\"chunk\":\"...\"}",
     "                        ... then {\"id\":4,\"end\":true}",
-    "  paths, parameters and JSON as the HTTP API (README section 5), e.g. /api/status,",
+    "  paths, parameters and JSON as the HTTP API (wiki page Web API), e.g. /api/status,",
     "  /api/chart?v=live, /api/programs, /api/program?i=0, /api/config, /api/log?since=0,",
     "  /api/history.csv, /api/manual, /api/run, /api/cmd",
     "  CYD: log lines come as {\"t\":\"log\",\"m\":\"...\"} (the S3 logs on its UART port)",

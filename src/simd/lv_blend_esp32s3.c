@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0 (follows Espressif's esp_lvgl_port_lv_blend.h, (c) 2024 Espressif Systems;
+// see THIRD-PARTY-NOTICES.md and src/simd/LICENSE)
 // C side of the ESP32-S3 SIMD fills / copies (include/lv_blend_esp32s3.h): LVGL's blend descriptors
 // translated into the argument block of Espressif's assembly (asm_dsc_t, as in esp_lvgl_port's
 // esp_lvgl_port_lv_blend.h, Apache-2.0), plus a run-time switch for measuring (serial "perf simd on|off").

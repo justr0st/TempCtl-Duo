@@ -1,6 +1,6 @@
 # TempCtl Duo wiki
 
-TempCtl Duo is a two-channel ramp / soak temperature programmer for the **bottom and top heater of a BGA
+TempCtl Duo is a two-channel programmable temperature controller for the **bottom and top heater of a BGA
 rework station**: reflow and desolder profiles that drive both heaters together, from a touch screen, a web
 page or a USB cable. This wiki follows the newest firmware release: how to build the hardware, wire it, flash
 it and use it.

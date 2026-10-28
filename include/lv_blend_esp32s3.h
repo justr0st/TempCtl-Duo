@@ -1,4 +1,6 @@
-/* LVGL's hooks for its software renderer's fills and copies (LV_USE_DRAW_SW_ASM = LV_DRAW_SW_ASM_CUSTOM,
+/* SPDX-License-Identifier: Apache-2.0 (follows Espressif's esp_lvgl_port_lv_blend.h, (c) 2024 Espressif Systems;
+ * see THIRD-PARTY-NOTICES.md and src/simd/LICENSE)
+ * LVGL's hooks for its software renderer's fills and copies (LV_USE_DRAW_SW_ASM = LV_DRAW_SW_ASM_CUSTOM,
  * include/lv_conf.h; S3 only): solid fills of RGB565 and ARGB8888 buffers and RGB565 -> RGB565 copies go to
  * Espressif's ESP32-S3 SIMD assembly (src/simd/, from esp_lvgl_port, Apache-2.0) through the C wrappers in
  * src/simd/lv_blend_esp32s3.c. LVGL calls them only for the simple cases (no mask, full opacity); a wrapper

@@ -2,7 +2,8 @@
 
 The main target (PlatformIO env `s3`): an **ESP32-S3-DevKitC-1 v1.0 N16R8** with a **4.0" SPI display**
 (MSP4031: ST7796S 480×320, FT6336U capacitive touch, micro-SD slot). All modules are connected with cables;
-the pins are in `src/board_s3.h`. The complete KiCad schematic is in `hardware/s3-schematic/`.
+the pins are in `src/board_s3.h`. The complete schematic: **[TempCtl-Duo-S3.pdf](../../hardware/s3-schematic/TempCtl-Duo-S3.pdf)**
+(A3; KiCad project in `hardware/s3-schematic/`).
 
 The DevKit has two pin headers: **J1** (left) and **J3** (right), top view with the USB ports at the bottom.
 Its two USB ports:
@@ -85,5 +86,6 @@ converter's CS (held high from the start).
 
 ## Reference
 
-The earlier all-in-one drawing (`claude/wiring/s3-wiring.png`) and the KiCad schematic
-(`hardware/s3-schematic/`, PDF and PNG next to it) show the same connections in one picture.
+- **Schematic of the whole device** (A3): [TempCtl-Duo-S3.pdf](../../hardware/s3-schematic/TempCtl-Duo-S3.pdf) — the KiCad
+  project (KiCad 7 … 10) and a PNG are next to it in `hardware/s3-schematic/`; `hardware/gen/` generated it.
+- The earlier all-in-one drawing: `claude/wiring/s3-wiring.png`.

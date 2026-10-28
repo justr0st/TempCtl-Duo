@@ -2,14 +2,14 @@
 
 The **ESP32-2432S028R** ("Cheap Yellow Display"): an ESP32 with a 2.8" 320×240 ILI9341 display and a
 resistive touch screen on one board. It has very few free pins, so there are three wirings, each with its own
-firmware build (PlatformIO env). The pins are in `src/board_cyd.h`; KiCad schematics of all three are in
-`hardware/cyd-schematic/`.
+firmware build (PlatformIO env). The pins are in `src/board_cyd.h`; a schematic of each wiring (PDF, A3) is linked in its section below, the
+KiCad projects are in `hardware/cyd-schematic/`.
 
-| Wiring | Env | Channels |
-|---|---|---|
-| **A** | `cyd-1xlocal-1x485` | RS485 (one or two Modbus controllers) + one local channel (bottom or top) |
-| **B** | `cyd-2xlocal` | two local channels, no RS485 |
-| **C** | `cyd-2xlocal-2x485` | RS485 + two local channels, each channel local or Modbus; the on-board RGB LED is removed |
+| Wiring | Env | Channels | Schematic |
+|---|---|---|---|
+| **A** | `cyd-1xlocal-1x485` | RS485 (one or two Modbus controllers) + one local channel (bottom or top) | [PDF](../../hardware/cyd-schematic/TempCtl-Duo-CYD-A.pdf) |
+| **B** | `cyd-2xlocal` | two local channels, no RS485 | [PDF](../../hardware/cyd-schematic/TempCtl-Duo-CYD-B.pdf) |
+| **C** | `cyd-2xlocal-2x485` | RS485 + two local channels, each channel local or Modbus; the on-board RGB LED is removed | [PDF](../../hardware/cyd-schematic/TempCtl-Duo-CYD-C.pdf) |
 
 > **Note:** the ST7789 variant of the board with two USB ports is not supported yet.
 
@@ -27,13 +27,19 @@ firmware build (PlatformIO env). The pins are in `src/board_cyd.h`; KiCad schema
 
 <img src="img/wiring/cyd-a.svg" alt="CYD wiring A: RS485 module, one MAX31855 and one SSR driver" width="900">
 
+Schematic: [TempCtl-Duo-CYD-A.pdf](../../hardware/cyd-schematic/TempCtl-Duo-CYD-A.pdf)
+
 ## Wiring B: two local channels
 
 <img src="img/wiring/cyd-b.svg" alt="CYD wiring B: two MAX31855 and two SSR drivers" width="900">
 
+Schematic: [TempCtl-Duo-CYD-B.pdf](../../hardware/cyd-schematic/TempCtl-Duo-CYD-B.pdf)
+
 ## Wiring C: RS485 + two local channels
 
 <img src="img/wiring/cyd-c.svg" alt="CYD wiring C: RS485, two MAX31855, two SSR drivers and an external status LED" width="900">
+
+Schematic: [TempCtl-Duo-CYD-C.pdf](../../hardware/cyd-schematic/TempCtl-Duo-CYD-C.pdf)
 
 The RGB LED's three pads become the top channel's chip select (R, IO4, with a 10 kΩ pull-up to 3V3), the top
 SSR (G, IO16) and the data line of an external WS2812 status LED (B, IO17).

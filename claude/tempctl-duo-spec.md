@@ -2462,8 +2462,10 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   before building a page). On the board: Channels page 51260 -> 37712 bytes (33944 free with it open).
 - **1.0.63** (2026-10-28, 0194f61; after 1.0.62 = 7bdc93c): see 9.18 - setpoint margin below the cut-off as a general
   setting (run.spMargin), a cleared number pad entry is 0, the Modbus write limits paired on the S3.
-- **1.0.64** (2026-10-28; after 1.0.63 = 0194f61): see 9.19 - web page: reorder phases / steps by dragging (and
+- **1.0.64** (2026-10-28, 41aadd2; after 1.0.63 = 0194f61): see 9.19 - web page: reorder phases / steps by dragging (and
   Alt+Up / Down), chart handles on a touch screen move after a short hold (a swipe scrolls the page).
+- **1.0.65** (2026-10-28; after 1.0.64 = 41aadd2): see 9.20, 9.21 - README shortened (features, screenshots,
+  wiring), its reference parts moved to the wiki (Web API, How it works inside), schematic PDFs linked, MIT License.
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
@@ -2781,6 +2783,39 @@ undo, Esc, Alt+Down, Timeline 3 -> 1, no grips while running); web_jumps unchang
   scrolls too), `-webkit-touch-callout:none`. Mouse: drag at once as before. Editor hint "(touch screen:
   hold a point briefly, then drag)". Test `test/web_chart_hold.js` (390 px touch: swipe scrolls and changes
   nothing; hold + drag changes the target, the page stays; 1280 px mouse).
+
+### 9.20 README shortened, its reference parts moved to the wiki (Rost 2026-10-28)
+
+Rost: "rewrite README.md to a much shorter, pleasant for a human to read project description with some nice
+simplified wirings and screenshots of main features. List the main features ... close to the title"; new title
+"TempCtl Duo: two-channel programmable temperature controller (ESP32-S3 / ESP32 CYD)" (wiki Home: the same
+wording). README (912 -> ~100 lines): title, short description, S3 touch picture, main features, links (wiki,
+demo, release page), status, screenshot table (web Dashboard / editor / channels, touch editor / PID, CYD),
+hardware (two boards, overview.svg, s3-thermocouples.svg, s3-ssr.svg, links to the wiki pages and the KiCad
+PDFs), getting started in 4 steps, documentation table, built with. Everything only the README had went to the
+wiki: new pages **Web API** (`Web-API.md`: request checks, endpoint table, serial API mode) and **How it works
+inside** (`Internals.md`: touch UI files / CYD RAM / slide off / drawing and SPI speed / screen check / touch
+gaps / INT line, web page build and assets / chart data / live history / refresh, system and SD run logs,
+LittleFS files, backup format, image check / HTTPS / rollback / CYD partition, status); **For developers**
+(`Development.md`) now has the host test command, the web tests, the full release pipeline with its setup and
+the project layout. Sidebar: both new pages under Maintenance. The user-facing parts were already on the wiki
+pages. KiCad PDFs linked: Hardware-S3 (intro + Reference), Hardware-CYD (table column + each wiring section) as
+repository paths `../../hardware/<folder>/<name>.pdf` (GitHub); `tools/wiki_site.py` copies
+`hardware/**/*.pdf` to `/wiki/hw/` and rewrites such links (the hosted wiki). Code messages that pointed at
+README sections now name the wiki pages (console `help api`, OTA "no second firmware slot").
+Note: the S3 KiCad schematic (1.0.43) does not have the monitor channel's third converter (GPIO 3) yet.
+
+### 9.21 License (Rost 2026-10-28: MIT)
+
+`LICENSE`: MIT, "Copyright (c) 2026 Rost (justr0st)" — firmware, web page, tools, documentation, schematics.
+`THIRD-PARTY-NOTICES.md`: the parts with their own licences (Espressif SIMD `src/simd/` Apache-2.0 with
+`src/simd/LICENSE`; `src/simd/lv_blend_esp32s3.c` / `include/lv_blend_esp32s3.h` follow esp_lvgl_port's blend
+header: SPDX `Apache-2.0` lines added; Barlow fonts OFL 1.1; LVGL (+ Montserrat OFL), ArduinoJson,
+XPT2046_Touchscreen MIT with the MIT text; Arduino core LGPL-2.1 (statically linked: the source is public, the
+firmware can be rebuilt with a changed core); ESP-IDF Apache-2.0 and others; demo wasi-libc / libc++; Go stdlib
+BSD-3). Apache-2.0 is permissive: no need to put the project under it (discussed with Rost). README "License",
+wiki For developers "License". `tools/build_site.py` copies both files to `/LICENSE.txt` and
+`/THIRD-PARTY-NOTICES.txt` (hosted page and desktop app), linked in the Downloads panel.
 
 ## 10. Open items carried over from TempCtl
 

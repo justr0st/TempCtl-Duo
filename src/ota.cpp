@@ -47,7 +47,7 @@ bool otaSlot(uint32_t& size, char* why, size_t n) {
   size = 0;
   const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
   if (!next || next == esp_ota_get_running_partition()) {
-    if (n) snprintf(why, n, "no second firmware slot: flash once over USB with the OTA partition table (README)");
+    if (n) snprintf(why, n, "no second firmware slot: flash once over USB with the OTA partition table (wiki: Getting started)");
     return false;
   }
   size = next->size;

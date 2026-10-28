@@ -2,7 +2,8 @@
 """The wiki (docs/wiki/*.md) as HTML pages for the hosted page (<site>/wiki/): called by tools/build_site.py
 --web; by hand: python3 tools/wiki_site.py <out dir>. No packages: a small Markdown converter for what the
 wiki pages use (headings, paragraphs, lists, tables, code, quotes, images, links, inline HTML such as
-<picture>). Links between pages (Page.md#part) become Page.html#part, Home.md the index; the navigation
+<picture>). Links between pages (Page.md#part) become Page.html#part, Home.md the index, a schematic PDF
+(../../hardware/<folder>/<name>.pdf) hw/<name>.pdf (copied); the navigation
 comes from docs/wiki/_Sidebar.md. GitHub shows the same .md files as they are."""
 import html, os, re, shutil, sys
 
@@ -23,6 +24,8 @@ def page_url(name):
 def link(u):
     m = re.match(r"^([A-Za-z0-9_\-]+)\.md(#.*)?$", u)
     if m: return page_url(m.group(1)) + (m.group(2) or "")
+    m = re.match(r"^\.\./\.\./hardware/[\w\-]+/([\w\-]+\.pdf)$", u)  # a schematic (repository path): copied to hw/
+    if m: return "hw/" + m.group(1)
     return u
 
 
@@ -201,6 +204,12 @@ def build(out):
     dst = os.path.join(out, "wiki")
     if os.path.isdir(dst): shutil.rmtree(dst)
     shutil.copytree(os.path.join(WIKI, "img"), os.path.join(dst, "img"))
+    hw = os.path.join(ROOT, "hardware")  # the schematics' PDFs, linked from the hardware pages
+    if os.path.isdir(hw):
+        os.makedirs(os.path.join(dst, "hw"))
+        for d, _, fs in os.walk(hw):
+            for f in fs:
+                if f.endswith(".pdf"): shutil.copyfile(os.path.join(d, f), os.path.join(dst, "hw", f))
     nav = sidebar()
     pages = [p for _, _, p in nav]
     for f in sorted(os.listdir(WIKI)):
