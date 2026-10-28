@@ -1,7 +1,7 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32 CYD)
 
 Firmware for a two-channel temperature programmer, made for the **bottom and top heater of a BGA rework
-station** (reflow / desolder profiles). Version **1.0.62**. Two boards, built from the same sources:
+station** (reflow / desolder profiles). Version **1.0.63**. Two boards, built from the same sources:
 
 - **ESP32-S3** with a 4" 480×320 capacitive touch screen (env `s3`, the main target)
 - **ESP32-2432S028R "Cheap Yellow Display"** with a 2.8" 320×240 resistive touch screen (envs
@@ -872,7 +872,8 @@ test/host_test.cpp        g++ -std=c++17 -Wall -Wextra -Isrc -I<ArduinoJson>/src
 A software programmer must never be the only protection against overheating. Fit an independent
 over-temperature limiter (PMA recommends the TB 40-1 in the KS 4x-1 manual) and use the controller's own
 limit alarms and `SP.Hi` setpoint limit. Set each channel's *Highest setpoint* (Channels page) to match the
-controller's `SP.Hi` (Modbus); a local channel's is at most its max. temperature − 10 °C.
+controller's `SP.Hi` (Modbus); a local channel's is at most its max. temperature minus the setpoint margin
+(`run.spMargin`, default 10 °C: room for an overshoot before the cut-off; web *All channels*, touch System).
 
 ### 12.1 Protections in the firmware (spec 9.2a)
 

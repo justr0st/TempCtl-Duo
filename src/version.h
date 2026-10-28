@@ -4,7 +4,7 @@
 #pragma once
 
 #define PRODUCT_NAME "TempCtl Duo"
-#define FW_VERSION "1.0.62"
+#define FW_VERSION "1.0.63"
 
 // Host name (mDNS <host>.local) and prefix of the access point name
 // (<AP_NAME_PREFIX>-XXXX, last MAC digits)

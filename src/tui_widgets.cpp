@@ -400,8 +400,8 @@ static void numKey(lv_event_t* e) {
 }
 
 static void numOk(lv_event_t*) {
-  const float v = atof(numBuf);
-  if (!numBuf[0] || v < numLo - 1e-6f || v > numHi + 1e-6f) {
+  const float v = atof(numBuf);  // (cleared: 0, as shown - Rost)
+  if (v < numLo - 1e-6f || v > numHi + 1e-6f) {
     char b[64], lo[16], hi[16];
     snprintf(lo, sizeof(lo), "%.*f", numDec, numLo);
     snprintf(hi, sizeof(hi), "%.*f", numDec, numHi);

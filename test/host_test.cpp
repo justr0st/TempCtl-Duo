@@ -611,6 +611,34 @@ static void testWifiEnabled() {
   CHECK(!settingsFromJson(e.as<JsonObjectConst>(), s, msg, sizeof(msg)));
 }
 
+// a local channel's highest setpoint stays run.spMargin below its cut-off (default 10, 0 ... 100)
+static void testSpMargin() {
+  Settings s, r;
+  char msg[160];
+  settingsDefaults(s, S3);
+  CHECK(s.spMargin == 10);
+  s.ch[0].type = CH_LOCAL;
+  s.ch[0].loc.maxTemp = 400;
+  s.ch[0].spMax = 400;
+  CHECK(settingsValidate(s, S3, msg, sizeof(msg)) && s.ch[0].spMax == 390);
+  s.spMargin = 0;
+  s.ch[0].spMax = 400;
+  CHECK(settingsValidate(s, S3, msg, sizeof(msg)) && s.ch[0].spMax == 400);
+  JsonDocument d;
+  CHECK(deserializeJson(d, R"({"run":{"spMargin":25}})") == DeserializationError::Ok);
+  CHECK(settingsFromJson(d.as<JsonObjectConst>(), s, msg, sizeof(msg)) && s.spMargin == 25);
+  CHECK(settingsValidate(s, S3, msg, sizeof(msg)) && s.ch[0].spMax == 375);
+  roundTrip(s, r, true);
+  CHECK(r.spMargin == 25);
+  s.spMargin = 500;
+  CHECK(settingsValidate(s, S3, msg, sizeof(msg)) && s.spMargin == 100);
+  // settings saved before the setting: the default
+  JsonDocument e;
+  CHECK(deserializeJson(e, R"({"run":{"bottomBand":3}})") == DeserializationError::Ok);
+  settingsDefaults(s, S3);
+  CHECK(settingsFromJson(e.as<JsonObjectConst>(), s, msg, sizeof(msg)) && s.spMargin == 10);
+}
+
 static void testSettingsJson() {
   Settings a, b;
   settingsDefaults(a, S3);
@@ -1458,6 +1486,7 @@ int main() {
   testSettingsJson();
   testMonitorSettings();
   testWifiEnabled();
+  testSpMargin();
   testSettingsMerge();
   testStaticIp();
   testSettingsVariants();

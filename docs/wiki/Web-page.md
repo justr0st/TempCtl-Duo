@@ -102,7 +102,8 @@ The 20 slots with type, channels, phases / steps and duration: *Open* (in the Da
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/web/channels-local-dark.webp"><img src="img/web/channels-local-light.webp" alt="Channels page, local channel" width="900"></picture>
 
-The *All channels* tile (polling interval, link-loss pause, "bottom reached" band), then one tab per channel
+The *All channels* tile (polling interval, link-loss pause, "bottom reached" band, setpoint margin below the
+cut-off), then one tab per channel
 (S3: a third tab for the [monitor channel](Channels.md#monitor-channel-s3), in the accent colour).
 A channel's tab holds one card per section — *General*, *Thermocouple*, *PID control*, *PID autotune* and
 *Protection* (a Modbus channel: *Modbus controller*, *RS485 bus*, *Register addresses*) — with one line per

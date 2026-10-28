@@ -525,6 +525,22 @@ int main(int argc, char** argv) {
 #endif
   // ./uihost editoff: program editor - a Both phase target / a Timeline target set to 0 becomes "off"; tapping "off"
   // and entering a temperature switches it on again (exit code 0 = ok)
+  // number pad: a cleared value is 0 (shown and accepted - Rost)
+  if (argc > 1 && !strcmp(argv[1], "numclear")) {
+    uiInit();
+    run(300);
+    static float got = -1;
+    tNumPad("Test", 25, 0, 100, 0, "\xC2\xB0" "C", [](float v, int) { got = v; }, 0);
+    run(100);
+    int x, y;
+    for (const char* k : {LV_SYMBOL_BACKSPACE, "OK"}) {
+      if (!findText(lv_layer_top(), k, x, y)) return printf("[host] numclear: no key %s\n", k), 1;
+      tap(x, y);
+      run(100);
+    }
+    printf("[host] numclear: %g (want 0)\n", got);
+    return got == 0 ? 0 : 1;
+  }
   if (argc > 1 && !strcmp(argv[1], "editoff")) {
     if (SMALL) return printf("[host] editoff: the 480x320 table only (320x240: row menu)\n"), 0;
     uiInit();
@@ -596,6 +612,7 @@ int main(int argc, char** argv) {
       gSettings.mon.on = 1;
       strlcpy(gSettings.mon.name, "Board edge", sizeof(gSettings.mon.name));
     }
+    gSettings.ch[1].mb.rampMode = RAMP_HOST;  // (the Modbus channel's write limits shown)
     ++hostGen;
     uiInit();
     run(500);

@@ -739,7 +739,7 @@ void networkUpdate() {
 }
 
 // ------------------------------------------------------------ system
-static lv_obj_t *sInfo, *sPoll, *sBand, *sTz, *sFw, *sIdle, *sEstop, *sSound, *sRelay, *sChip;
+static lv_obj_t *sInfo, *sPoll, *sBand, *sMargin, *sTz, *sFw, *sIdle, *sEstop, *sSound, *sRelay, *sChip;
 
 // ------------------------------------------------------------ time zone (two steps: region, then the place)
 static const char* const TZ_OFFSETS[] = {"UTC-12:00", "UTC-11:00", "UTC-10:00", "UTC-09:30", "UTC-09:00", "UTC-08:00",
@@ -859,6 +859,24 @@ static void onBandNum(float v, int) {
   }
   saveSettingsAndNotify();
   systemShow();
+}
+static void onMarginNum(float v, int) {  // (lowers a local channel's highest setpoint where needed: validate)
+  Settings s;
+  settingsCopy(s);
+  s.spMargin = v;
+  char msg[160];
+  if (!settingsValidate(s, boardLimits(), msg, sizeof(msg))) return tToast(msg, true);
+  {
+    Guard g;
+    gSettings = s;
+  }
+  saveSettingsAndNotify();
+  systemShow();
+}
+static void onMargin(lv_event_t*) {
+  Settings s;
+  settingsCopy(s);
+  tNumPad("Setpoint margin below the cut-off", s.spMargin, 0, 100, 0, "\xC2\xB0" "C", onMarginNum, 0);
 }
 static void onPoll(lv_event_t*) {
   Settings s;
@@ -1110,6 +1128,8 @@ lv_obj_t* systemCreate() {
   sPoll = tButton(r, "", onPoll, nullptr, CW2, BH);
   r = settingRow(p.body, "\"Bottom reached\" band", "\"Wait for bottom\" goes on within \xC2\xB1 this");
   sBand = tButton(r, "", onBand, nullptr, CW2, BH);
+  r = settingRow(p.body, "Setpoint margin below the cut-off", "A local channel's highest setpoint is at most its cut-off temperature \xE2\x88\x92 this");
+  sMargin = tButton(r, "", onMargin, nullptr, CW2, BH);
   // groups (Rost's design): update, backup, time zone, then the device's own settings
   const int G = TUI_SMALL ? 10 : 20;  // space above a group
   if (netOtaAvailable()) {
@@ -1172,6 +1192,8 @@ void systemShow() {
   tButtonText(sPoll, b);
   snprintf(b, sizeof(b), "%.1f \xC2\xB0" "C", s.bottomBand);
   tButtonText(sBand, b);
+  snprintf(b, sizeof(b), "%.0f \xC2\xB0" "C", s.spMargin);
+  tButtonText(sMargin, b);
   const char* tz = s.tzName[0] ? (strchr(s.tzName, '/') ? strrchr(s.tzName, '/') + 1 : s.tzName) : "Not set (UTC)";
   char tzb[32];
   strlcpy(tzb, tz, sizeof(tzb));

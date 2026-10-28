@@ -12,7 +12,7 @@ them on the web page's *Channels* page or on the touch screen (*Menu › Channel
 | Name | up to 16 characters, shown everywhere (default Bottom / Top) |
 | Type | *Local (thermocouple + SSR)*, *Modbus controller (beta)*, *Off* |
 | When the program ends or stops | keep the last setpoint, go to an end setpoint, outputs off |
-| Lowest / highest setpoint | programs, manual setpoints and run edits stay inside; a local channel's highest setpoint is at most its max. temperature − 10 °C |
+| Lowest / highest setpoint | programs, manual setpoints and run edits stay inside; a local channel's highest setpoint is at most its max. temperature minus the *setpoint margin below the cut-off* (all channels, default 10 °C) |
 
 The *All channels* tile holds the **polling interval** (how often PV, setpoint and output are taken over for
 the control, the displays and the logs; default 1 s), the **link-loss pause** (Modbus) and the **"bottom

@@ -104,6 +104,7 @@ void settingsDefaults(Settings& s, const BoardLimits& lim) {
   s.pollMs = 1000;
   s.commLossSec = 30;
   s.bottomBand = 5;
+  s.spMargin = 10;
   copyStr(s.apPass, sizeof(s.apPass), "tempctl123");
   copyStr(s.hostname, sizeof(s.hostname), DEFAULT_HOSTNAME);
   s.wifiOn = 1;
@@ -228,6 +229,8 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
   clampv<uint16_t>(s.pollMs, 100, 10000);  // (the lower limit depends on the channels: below)
   clampv<uint16_t>(s.commLossSec, 0, 3600);
   clampv(s.bottomBand, 0.5f, 50.0f);
+  if (!(s.spMargin >= 0)) s.spMargin = 10;  // (NaN)
+  clampv(s.spMargin, 0.0f, 100.0f);
   s.ssid[sizeof(s.ssid) - 1] = 0;
   s.pass[sizeof(s.pass) - 1] = 0;
   s.apPass[sizeof(s.apPass) - 1] = 0;
@@ -313,8 +316,8 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
     clampv<uint8_t>(c.loc.medianN, 3, 9);
     if (!(c.loc.medianN & 1)) ++c.loc.medianN;  // odd: 3, 5, 7, 9
     clampv<uint16_t>(c.loc.tuneMaxMin, 10, 240);
-    // the setpoint limit stays at least 10 degC below the local cut-off (spec 9.2)
-    if (c.type == CH_LOCAL && c.spMax > c.loc.maxTemp - 10) c.spMax = c.loc.maxTemp - 10;
+    // the setpoint limit stays run.spMargin (default 10 degC) below the local cut-off (spec 9.2, 9.18)
+    if (c.type == CH_LOCAL && c.spMax > c.loc.maxTemp - s.spMargin) c.spMax = c.loc.maxTemp - s.spMargin;
     if (c.spMax < c.spMin) c.spMax = c.spMin;
     clampv(c.manualSp, c.spMin, c.spMax);
   }
@@ -523,6 +526,7 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
   b["commLossSec"] = s.commLossSec;
   JsonObject r = o["run"].to<JsonObject>();
   r["bottomBand"] = s.bottomBand;
+  r["spMargin"] = s.spMargin;
   JsonObject w = o["wifi"].to<JsonObject>();
   w["enabled"] = s.wifiOn != 0;
   w["ssid"] = JsonString(s.ssid);
@@ -734,6 +738,7 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
   JsonObjectConst r = R.obj(o, "", "run");
   if (!r.isNull()) {
     R.num(r, "run.", "bottomBand", s.bottomBand);
+    R.num(r, "run.", "spMargin", s.spMargin);
   }
   JsonObjectConst w = R.obj(o, "", "wifi");
   if (!w.isNull()) {

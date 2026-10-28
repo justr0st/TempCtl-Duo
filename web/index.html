@@ -2495,7 +2495,8 @@ function commonGroups(){ const bn=CFG.channels[0].name;
   return [{h:'',fields:[
     {k:'bus.pollMs',l:'Polling interval',t:'num',get min(){ return pollMin(); },max:10000,step:50,u:'ms',h:'How often PV, SP and output are read: at least 100 ms when every channel is local with a MAX31855, else 250 ms (a MAX6675 or Modbus channel; raised by itself). With two Modbus controllers each one is polled every 2 × this interval.'},
     {k:'bus.commLossSec',l:'Pause the run after no answer for',t:'num',min:0,max:3600,u:'s',h:'0 = never pause'},
-    {k:'run.bottomBand',l:`“${bn} reached” band ±`,t:'num',min:0.5,max:50,step:0.5,u:'°C',h:`Used by “Wait for ${bn}” in Sequence phases.`}]},
+    {k:'run.bottomBand',l:`“${bn} reached” band ±`,t:'num',min:0.5,max:50,step:0.5,u:'°C',h:`Used by “Wait for ${bn}” in Sequence phases.`},
+    {k:'run.spMargin',l:'Setpoint margin below the cut-off',t:'num',min:0,max:100,step:1,u:'°C',h:'A local channel’s highest setpoint is at most its max. temperature (cut-off) minus this: room for an overshoot before the outputs are cut off.'}]},
   ]; }
 // RS485 bus: in the tile of each Modbus channel (one bus, shared by both: a change shows in both tiles)
 function busGroup(P){ return {h:'RS485 bus',beta:true,show:g=>CFG.limits.rs485&&g(P+'type')==='modbus',note:'Shared by both Modbus channels. Modbus is a beta feature: not tested with a real controller yet.',fields:[

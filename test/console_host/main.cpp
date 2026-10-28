@@ -197,6 +197,10 @@ int main() {
   type("set bus.pollMs=100\r");
   type("set t.local.sensor=max6675\r");  // the polling interval is raised to 250 ms (settings.cpp pollMinMs)
   type("get bus.pollMs\r");
+  type("set run.spMargin=25\r");  // the setpoint margin below the cut-off (b.spMax 390 -> 375)
+  type("get run\r");
+  type("get b.spMax\r");
+  type("set run.spMargin=10\r");
   type("set t.local.sensor=max31855 bus.pollMs=1000\r");
   type("get display\r");
 #if HAS_MONITOR

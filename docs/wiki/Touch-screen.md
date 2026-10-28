@@ -113,7 +113,7 @@ web page too), upside down, live chart period, the automatic **screen check**, t
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/14-system-dark.png"><img src="img/touch/14-system-light.png" alt="System settings" width="480"></picture>
 
-In groups: polling interval and "bottom reached" band; **OTA update** (S3: the newest release over Wi-Fi) and
+In groups: polling interval, "bottom reached" band and the setpoint margin below the cut-off; **OTA update** (S3: the newest release over Wi-Fi) and
 **Firmware update** from the SD card; **Backup to SD card** and **Restore from SD card**; time zone; the safety
 settings (manual mode timeout, E-stop input, SSR supply relay, alarm sound, chip temperature warning); device
 info and restart.

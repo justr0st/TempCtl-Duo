@@ -381,6 +381,9 @@ static void fs77(Settings& s, int c, float v) {
   s.commLossSec = (uint16_t)v;
 }
 
+// the setpoint limit's hints name the margin below the cut-off (System setting run.spMargin): filled in build()
+static char spHintS3[48], spHintMax[72];
+
 static const Field CH_FIELDS[] = {
     {F_SEL, "Type", nullptr, 0, 0, 0, nullptr, "Off (not used)\nModbus controller (beta)\nLocal (thermocouple + SSR)",
      fg1, fs2, nullptr},
@@ -390,8 +393,8 @@ static const Field CH_FIELDS[] = {
     {F_NUM, "End setpoint", nullptr, -200, 1500, 1, "\xC2\xB0" "C", nullptr, fg5, fs6,
      fl7},
     {F_NUM, "Lowest setpoint", nullptr, -200, 1500, 1, "\xC2\xB0" "C", nullptr, fg8, fs9, isOn, L_TRIM, 90,
-     "Setpoint range", "Local: max = Tcutoff \xE2\x88\x92 10 \xC2\xB0" "C"},
-    {F_NUM, "Highest setpoint", "Local: at most the cut-off temperature \xE2\x88\x92 10 \xC2\xB0" "C", -200, 1500, 1,
+     "Setpoint range", spHintS3},
+    {F_NUM, "Highest setpoint", spHintMax, -200, 1500, 1,
      "\xC2\xB0" "C", nullptr, fg10, fs11, isOn, L_JOIN | L_TRIM, 90, nullptr, nullptr, ".."},
     // Modbus
     {F_HEAD, "Modbus controller (beta)", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, isMb},
@@ -403,9 +406,9 @@ static const Field CH_FIELDS[] = {
     {F_SEL, "Setpoint ramps", nullptr, 0, 0, 0, nullptr, "ESP32 writes setpoint steps\nController ramps (r.SP)",
      fg16, fs17, isMb},
     {F_NUM, "Min. step between writes", nullptr, 0.1f, 100, 1, "\xC2\xB0" "C", nullptr, fg18,
-     fs19, isHostRamp},
+     fs19, isHostRamp, 0, 80, "Between writes at least"},
     {F_NUM, "Min. time between writes", nullptr, 1, 3600, 0, "s", nullptr, fg20,
-     fs21, isHostRamp},
+     fs21, isHostRamp, L_JOIN, 0, nullptr, nullptr, "and"},
     {F_SW, "Lock the front panel while running", nullptr, 0, 0, 0, nullptr, nullptr, fg22,
      fs23, isMb},
     {F_NOTE, "Register addresses: web page, Channels.", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, isMb},
@@ -745,6 +748,9 @@ static void build() {
   // rebuilt after every change: keep the scroll position (a value entered further down stays in view)
   const int32_t sy = lv_obj_get_scroll_y(cBody);
   tuneLbl = tuneRow = tuneSw = nullptr;
+  snprintf(spHintS3, sizeof(spHintS3), "Local: max = Tcutoff \xE2\x88\x92 %g \xC2\xB0" "C", (double)E.spMargin);
+  snprintf(spHintMax, sizeof(spHintMax), "Local: at most the cut-off temperature \xE2\x88\x92 %g \xC2\xB0" "C",
+           (double)E.spMargin);
   lv_obj_clean(cBody);
   for (int i = 0; i < 4; ++i)
     if (cTabs[i]) tSetChecked(cTabs[i], i == tab);

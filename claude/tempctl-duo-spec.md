@@ -1516,7 +1516,7 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   **Touch bug found**: the touch drivers report screen coordinates, but LVGL 9 rotates pointer input by
   the display rotation itself → rotated twice, off screen (`Y is 269 which is greater than ver. res`).
   `ui.cpp` now converts to the panel's native orientation first (`touchToNative`, checked for 0/90/180/
-  270°). The same applies to the S3 (its touch is untested so far).
+  270°). The same applies to the S3 (its touch tested by Rost 2026-10-28: works).
   Fifth try (touch works): Wi-Fi scan from the touch screen → LVGL "No memory" for a 320-byte glyph
   buffer → abort; joining Rost's network → `disconnected (reason 202)` (auth failed) again and again.
   **Finding: the `[mem]` numbers were misleading** — `ESP.getFreeHeap()` / `getMaxAllocHeap()` count the
@@ -2457,9 +2457,11 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
     (mesh, fixed) under their tint like the sidebar, no live backdrop blur; phones keep the blur.
 - **1.0.61** (2026-10-27, 3a7c772; after 1.0.60 = 0619d8f): see 9.16 - Both phase with both channels Idle, Wi-Fi
   completely off, web page jump fixes, touch editor 0 °C = off, touch Channels / System layout from Rost's design.
-- **1.0.62** (2026-10-28; after 1.0.61 = 3a7c772): see 9.17 - CYD out of memory on the Channels page fixed (the
+- **1.0.62** (2026-10-28, 7bdc93c; after 1.0.61 = 3a7c772): see 9.17 - CYD out of memory on the Channels page fixed (the
   left page deleted first, shared styles, single-label value buttons, no row objects on the CYD, a free-RAM check
   before building a page). On the board: Channels page 51260 -> 37712 bytes (33944 free with it open).
+- **1.0.63** (2026-10-28; after 1.0.62 = 7bdc93c): see 9.18 - setpoint margin below the cut-off as a general
+  setting (run.spMargin), a cleared number pad entry is 0, the Modbus write limits paired on the S3.
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
@@ -2738,6 +2740,21 @@ deleted only afterwards (lv_obj_delete_async), so both were in RAM while the pag
 - On the board (Rost, CYD 2x local): `[mem] channels page: 37712 bytes (33944 free)`.
 - Left: 87 labels each get a spec_attr (LVGL's label sets an ext draw size of font height / 4).
 - UI host: `./uihost_mem memleak <screen> x` (allocations by caller, MEMBY=1/2); editoff test S3 only.
+
+### 9.18 After 1.0.62 (Rost's test results 2026-10-28)
+
+Tested by Rost and working: Both phase with both channels Idle, Wi-Fi completely off, touch editor 0 °C = off,
+the redesigned Channels / System screens on the S3, the S3 touch screen in general. The web page keeps its
+layout (Rost: "good already").
+- **Number pad**: a cleared value shows 0 but OK said "Allowed: …"; now an empty entry is 0 (then the usual
+  range check). UI host `./uihost numclear`.
+- **Setpoint margin below the cut-off** as a general setting (Rost: "make it a general setting"; it was the
+  fixed 10 degC of 9.2): `run.spMargin`, 0 … 100 degC, default 10. settingsValidate lowers a local channel's
+  spMax to maxTemp − spMargin (a smaller margin later does not raise it again). Web: *All channels* tile
+  ("Setpoint margin below the cut-off"); touch: System, first group (number pad 0 … 100, validated, saved at
+  once); serial `set run.spMargin=…`; the Channels hints show the value. Host test testSpMargin, console host.
+- **Modbus write limits paired on the S3**: "Between writes at least" [0.5 °C] and [5 s] (minStep 80 px +
+  minWriteSec); CYD two rows as before.
 
 ## 10. Open items carried over from TempCtl
 
