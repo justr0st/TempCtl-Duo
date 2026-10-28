@@ -77,8 +77,14 @@ Under the channel cards: the selected program as tables and as handles on the ch
 - The **step / phase type** is a dropdown; every value you can change is a darker field (targets in °C, ramp
   and hold as m:ss — plain seconds work too). *Ends* shows when each step or phase finishes (without waits and
   pauses).
+- **Reorder**: drag a phase or step by its grip (⋮⋮ at the start of the row or card; mouse or finger) to
+  another place — the other rows make room, the list scrolls near the window's edge, *Esc* cancels. With
+  the keyboard: *Alt+↑ / Alt+↓* on the grip. One undo step; Timeline steps stay in their channel. Not
+  during a run.
 - **On the chart**: drag the squares up / down (target), the diamonds (end of a ramp) and the circles (end of
-  a hold) left / right; whole seconds and °C.
+  a hold) left / right; whole seconds and °C. On a touch screen **hold a point briefly** (a short vibration,
+  the point's value shows), then drag — the page does not scroll then; a plain swipe over the chart scrolls
+  the page as usual. The finger may be a little off the point (the nearest one within about 24 px).
 - Changes go to a **draft** in the browser: *Save*, *Discard changes*, *Undo / Redo* (Ctrl+Z / Ctrl+Y). Drafts
   are lost when the page is reloaded; the program list marks unsaved programs.
 - **Convert to Timeline** (Sequence, outside a run): the same temperatures and times as a Timeline, either

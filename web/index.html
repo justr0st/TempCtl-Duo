@@ -93,7 +93,7 @@ button:disabled,select:disabled,input:disabled{opacity:.42;cursor:not-allowed}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .seg button{border:0;border-radius:0;min-height:30px;padding:3px 12px}
 .seg button[aria-pressed=true]{background:var(--sunk);box-shadow:inset 0 -2px 0 var(--acc)}
-.chartbox{margin:0 -4px;touch-action:pan-y;user-select:none;-webkit-user-select:none}
+.chartbox{margin:0 -4px;touch-action:pan-y;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .chartbox{position:relative;will-change:transform}  /* (a layer of its own: its updates don't repaint the glass around it) */
 #chHover,#rpHov{pointer-events:none}  /* (the hover line and dots never take a click: the handles stay draggable) */
 .ctip{position:absolute;z-index:3;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12.5px;
@@ -227,6 +227,18 @@ table.ed td.bl,table.ed th.bl{border-left:1px solid var(--line)}
 button.x{min-width:32px;padding:3px 8px;min-height:30px;color:var(--muted)}
 .cbl{display:inline-flex;align-items:center;gap:5px;font-size:13.5px;color:var(--text);white-space:nowrap}
 .pcs{display:flex;flex-direction:column;gap:8px}
+/* reorder (drag the grip, or Alt+Up / Down on it): the row follows the pointer, the others make room */
+.grip{display:inline-flex;align-items:center;justify-content:center;width:22px;min-width:22px;min-height:30px;padding:0;margin:0 2px 0 -4px;border:0;background:none;box-shadow:none;color:var(--muted);cursor:grab;touch-action:none;border-radius:6px;vertical-align:middle}
+html:root .grip{width:22px;min-width:22px;min-height:30px;padding:0;background:none;border:0;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
+html:root .grip:hover,html:root .grip:focus-visible{color:var(--text);background:var(--sunk)}.grip:focus-visible{outline-offset:0}
+.grip svg{width:10px;height:16px;flex:none;fill:currentColor}
+td.nr{white-space:nowrap}
+.mvR{transition:transform .16s ease}
+.drg{position:relative;z-index:5}
+tr.drg td{background:var(--panel)}tr.drg td:first-child{box-shadow:inset 3px 0 0 var(--acc)}
+tr.drg{outline:2px solid var(--acc);outline-offset:-2px}
+.pc.drg{background:var(--panel);border-color:var(--acc);box-shadow:0 10px 28px -10px rgba(0,0,0,.45)}
+body.drgOn,body.drgOn *{cursor:grabbing!important;user-select:none!important;-webkit-user-select:none!important}
 .pc{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--sunk)}
 .pc.cur{border-color:var(--amber);box-shadow:inset 3px 0 0 var(--amber)}.pc.done{opacity:.55}
 .pch{display:flex;align-items:center;gap:8px}.pch b{font-family:var(--cond);font-size:17px;min-width:18px}.pch .grow{flex:1}
@@ -239,7 +251,6 @@ button.x{min-width:32px;padding:3px 8px;min-height:30px;color:var(--muted)}
 .tl2>div{padding:0 12px}.tl2>div:first-child{padding-left:0;border-right:3px double var(--line)}.tl2>div:last-child{padding-right:0}
 .tl2 h3{font-family:var(--cond);font-size:17px;margin:0 0 6px}
 @media (max-width:760px){.tl2{grid-template-columns:minmax(0,1fr)}.tl2>div{padding:0}.tl2>div:first-child{border-right:0;border-bottom:3px double var(--line);padding-bottom:12px;margin-bottom:12px}}
-.chartbox [data-h]{touch-action:none}
 /* settings pages */
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr));gap:12px;align-items:start}
 .sub{min-width:0}
@@ -1080,6 +1091,7 @@ document.addEventListener('click',e=>{ if($('side').classList.contains('open')&&
 function chName(i){ if(i===MON) return live&&live.mon?live.mon.name:CFG&&CFG.monitor?CFG.monitor.name:'Monitor';
   return live&&live.ch[i]?live.ch[i].name:(i?'Top':'Bottom'); }
 const MAXN=100, MAXSEC=599940, J=o=>JSON.stringify(o), clone=o=>o==null?null:JSON.parse(J(o));
+let rowDrag=null;  // a phase / step row being dragged (reorder, below)
 // editable form: every phase has b {t,r,h,idle} and t {t,r,h,idle}; Timeline steps {kind,t,r,h,msg,text}
 function normProg(d){ if(!d) return null;
   if(d.type==='tl'){ const st=x=>x.pause?{kind:'pause',t:0,r:0,h:0,msg:!!x.msg,text:x.text||''}:x.idle?{kind:'idle',t:0,r:0,h:x.h||0,msg:false,text:''}:{kind:'step',t:x.t,r:x.r||0,h:x.h||0,msg:false,text:''};
@@ -1488,18 +1500,39 @@ function legend(){ const n=[chName(0),chName(1)]; legendKind=(M&&M.kind==='live'
   <span><svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="5" style="fill:none;stroke:var(--muted);stroke-width:2"/></svg>Hold end: drag left / right</span>`; }
 function svgPt(ev){ const svg=$('chartbox').querySelector('svg'); const pt=svg.createSVGPoint(); pt.x=ev.clientX; pt.y=ev.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); }
 const ptrs=new Map(); let pz=null;
+// touch / pen (Rost): a handle moves only after a short hold - a swipe over the chart still scrolls the page (and
+// pans the chart sideways). The finger may be up to 24 px off the handle. Held: a short vibration, the handle's
+// ghost; from then on the page does not scroll (touchmove prevented) until the finger is lifted.
+const HOLD_MS=350; let hold=null;
+function nearHandle(ev){ let best=null, bd=24*24;
+  $('chartbox').querySelectorAll('[data-h]').forEach(el=>{ const r=el.getBoundingClientRect(), dx=(r.left+r.right)/2-ev.clientX, dy=(r.top+r.bottom)/2-ev.clientY, d=dx*dx+dy*dy; if(d<bd){ bd=d; best=el; } });
+  return best; }
+function holdCancel(){ if(hold){ clearTimeout(hold.tm); hold=null; } }
+function holdDone(){ const q=hold; hold=null; if(!q||drag) return;
+  ptrs.delete(q.id); if(!ptrs.size) pz=null;  // (no more panning with this finger)
+  drag={h:q.h,px:q.p.x,py:q.p.y,t:q.h.t,v:q.h.v,touch:true}; try{$('chartbox').setPointerCapture(q.id);}catch(e){}
+  try{ if(navigator.vibrate) navigator.vibrate(12); }catch(e){}
+  dragMove({clientX:q.x,clientY:q.y}); }
 $('chartbox').addEventListener('pointerdown',ev=>{ if(!M||M.kind==='live'||!$('chartbox').querySelector('svg')) return; if(ev.pointerType==='mouse'&&ev.button!==0) return;
-  const hc=ev.target.closest('[data-h]'); if(hc){ const h=handles[+hc.dataset.h]; if(!h) return; const p=svgPt(ev); drag={h,px:p.x,py:p.y,t:h.t,v:h.v};
-    try{$('chartbox').setPointerCapture(ev.pointerId);}catch(e){} ev.preventDefault(); return; }
+  const fing=ev.pointerType!=='mouse';
+  if(fing&&(hold||drag||ptrs.size)) holdCancel();  // (a second finger: zoom, no hold)
+  const hc=fing?(ptrs.size||drag?null:ev.target.closest('[data-h]')||nearHandle(ev)):ev.target.closest('[data-h]');
+  if(hc){ const h=handles[+hc.dataset.h]; if(!h) return; const p=svgPt(ev);
+    if(fing) hold={id:ev.pointerId,h,p,x:ev.clientX,y:ev.clientY,tm:setTimeout(holdDone,HOLD_MS)};  // (and on: pans until held)
+    else { drag={h,px:p.x,py:p.y,t:h.t,v:h.v}; try{$('chartbox').setPointerCapture(ev.pointerId);}catch(e){} ev.preventDefault(); return; } }
   const p=svgPt(ev); ptrs.set(ev.pointerId,p.x); try{$('chartbox').setPointerCapture(ev.pointerId);}catch(e){}
   pz={v0:zv.fit?0:zv.v0,span:zv.fit?xfull:zv.span,pts:new Map(ptrs)}; });
-$('chartbox').addEventListener('pointermove',ev=>{ if(drag){ dragMove(ev); return; } if(!ptrs.has(ev.pointerId)||!pz) return; const p=svgPt(ev); ptrs.set(ev.pointerId,p.x); const ids=[...pz.pts.keys()];
+$('chartbox').addEventListener('pointermove',ev=>{ if(hold&&ev.pointerId===hold.id&&Math.hypot(ev.clientX-hold.x,ev.clientY-hold.y)>8) holdCancel();  // (moved: a swipe)
+  if(drag){ dragMove(ev); return; } if(!ptrs.has(ev.pointerId)||!pz) return; const p=svgPt(ev); ptrs.set(ev.pointerId,p.x); const ids=[...pz.pts.keys()];
   if(ptrs.size>=2&&ids.length>=2){ const a0=pz.pts.get(ids[0]),b0=pz.pts.get(ids[1]),a1=ptrs.get(ids[0]),b1=ptrs.get(ids[1]); if(a1==null||b1==null) return;
     const d0=Math.max(10,Math.abs(b0-a0)),d1=Math.max(10,Math.abs(b1-a1)),m0=(a0+b0)/2,m1=(a1+b1)/2, span=Math.max(20,Math.min(xfull,pz.span*d0/d1)), tm=pz.v0+(m0-CL)/plotW()*pz.span;
     zv.fit=span>=xfull; zv.span=span; zv.v0=tm-(m1-CL)/plotW()*span; afterView(); }
   else if(ptrs.size===1&&!zv.fit){ const x0=pz.pts.get(ev.pointerId); if(x0==null) return; zv.v0=pz.v0-(p.x-x0)/plotW()*pz.span; afterView(); } });
 const panUp=ev=>{ ptrs.delete(ev.pointerId); if(pz) pz={v0:zv.fit?0:zv.v0,span:zv.fit?xfull:zv.span,pts:new Map(ptrs)}; if(!ptrs.size) pz=null; };
-$('chartbox').addEventListener('pointerup',ev=>{ panUp(ev); if(drag) dragEnd(); }); $('chartbox').addEventListener('pointercancel',ev=>{ panUp(ev); drag=null; lastChart=0; });
+$('chartbox').addEventListener('pointerup',ev=>{ if(hold&&ev.pointerId===hold.id) holdCancel(); panUp(ev); if(drag) dragEnd(); });
+$('chartbox').addEventListener('pointercancel',ev=>{ if(hold&&ev.pointerId===hold.id) holdCancel(); panUp(ev); if(drag){ drag=null; lastChart=0; } });
+$('chartbox').addEventListener('touchmove',ev=>{ if(drag&&drag.touch) ev.preventDefault(); },{passive:false});  // (held: the page stays)
+$('chartbox').addEventListener('contextmenu',ev=>{ if(hold||drag) ev.preventDefault(); });
 $('chartbox').addEventListener('wheel',ev=>{ if(!M||M.kind==='live') return;
   if(ev.ctrlKey||ev.metaKey){ ev.preventDefault(); zoomAt(tAtX(svgPt(ev).x),ev.deltaY>0?1.25:.8); }
   else if(!zv.fit&&(ev.shiftKey||Math.abs(ev.deltaX)>Math.abs(ev.deltaY))){ ev.preventDefault(); zv.v0+=(ev.shiftKey?ev.deltaY:ev.deltaX)/plotW()*zv.span; afterView(); } },{passive:false});
@@ -1815,6 +1848,8 @@ function numIn(f,v,en,lab,extra){ return `<input type="number" class="v" data-f=
 function timeIn(f,v,en,lab){ return `<input type="text" inputmode="numeric" class="v tm" data-f="${f}" data-tm value="${fmt(v)}" ${en?'':'disabled'} aria-label="${esc(lab)}" title="m:ss or seconds" autocomplete="off">`; }
 function parseT(t){ t=String(t).trim(); if(!t) return NaN; const p=t.split(':'); if(p.length>3||p.some(x=>!/^\d+(\.\d+)?$/.test(x))) return NaN;
   return p.reduce((a,x)=>a*60+parseFloat(x),0); }
+// the reorder handle of a phase / step row (rowDrag below)
+function grip(what){ return `<button type="button" class="grip" data-grip aria-label="Move ${esc(what)}: drag, or Alt+Up / Alt+Down" title="Drag to move (Alt+↑ / ↓)"><svg viewBox="0 0 10 16" aria-hidden="true"><circle cx="2.5" cy="3" r="1.5"/><circle cx="7.5" cy="3" r="1.5"/><circle cx="2.5" cy="8" r="1.5"/><circle cx="7.5" cy="8" r="1.5"/><circle cx="2.5" cy="13" r="1.5"/><circle cx="7.5" cy="13" r="1.5"/></svg></button>`; }
 function buildEditor(){
   const p=editProg(), run=running(), i=live?live.sel:0, box=$('editor');
   $('pName').disabled=run||!p; if(document.activeElement!==$('pName')) $('pName').value=p?p.name:'';
@@ -1824,12 +1859,13 @@ function buildEditor(){
   $('edTitle').textContent=`${p.name} — ${p.type==='seq'?'sequence':'timeline'}${run?' (running copy)':''}`;
   const ph=p.type==='seq'?'phases':'steps';
   $('edHint').textContent=run?`Editing the running copy: finished ${ph} are locked (a target the channel still keeps can change); in the current one the targets and the hold. Changes go to the device at once; after the run you can save them into the program.`
-    :'Times as m:ss (or seconds); a ramp of 0 is a jump. The step type and every darker field can be changed; on the chart: drag squares up / down (target), diamonds (ramp end) and circles (hold end) left / right.';
+    :'Times as m:ss (or seconds); a ramp of 0 is a jump. The step type and every darker field can be changed; on the chart: drag squares up / down (target), diamonds (ramp end) and circles (hold end) left / right (touch screen: hold a point briefly, then drag).';
   const kept=[live&&live.ch[0].kept,live&&live.ch[1].kept];
   if(p.type==='seq'){
     const cur=run?curIdx(0):-1, narrow=box.clientWidth<720;
     let tEnd=0; const ends=p.phases.map(x=>(tEnd+=x.kind==='P'?0:bothOff(x)?x.b.h:bDrv(x)?x.b.r+x.b.h:x.t.r+x.t.h));
     const na=t=>`<span class="na">${t}</span>`, del=k=>`<button class="x" data-del="${k}" ${run?'disabled':''} aria-label="Delete phase ${k+1}" title="Delete phase">✕</button>`;
+    const gr=k=>run||p.phases.length<2?'':grip(`phase ${k+1}`);
     const rows=p.phases.map((x,k)=>{
       const done=run&&k<cur, isCur=run&&k===cur, hasB=x.kind==='B'||x.kind==='BT', hasT=x.kind==='T'||x.kind==='BT', bIdle=x.kind==='BT'&&x.b.idle, tIdle=x.kind==='BT'&&x.t.idle, bD=bDrv(x), isP=x.kind==='P';
       const en=f=>{ if(!run) return true; if(done||(isCur&&isP)) return (f==='b.t'&&k===kept[0])||(f==='t.t'&&k===kept[1]);
@@ -1851,12 +1887,12 @@ function buildEditor(){
           :(x.kind!=='T'?cb('wait',x.wait,`Wait for ${esc(n[0])}`,run||bIdle):na('—'))
       };
       const cls=`${done?'done':''}${isCur?' cur':''}`;
-      if(narrow) return `<div class="pc ${cls}" data-i="${k}"><div class="pch"><b>${k+1}</b>${sel}<span class="grow"></span>${del(k)}</div>`+
+      if(narrow) return `<div class="pc ${cls}" data-i="${k}"><div class="pch">${gr(k)}<b>${k+1}</b>${sel}<span class="grow"></span>${del(k)}</div>`+
         (isP?`<div class="pcr"><span class="na">Both channels keep their setpoints.</span></div><div class="pcr">${c.opt}</div>`:
         `<div class="pcr"><span class="pl gB">${esc(n[0])}</span>${!hasB?na('keeps its setpoint'):bIdle&&tIdle?na('off')+`<label class="fl"><span>Both off for</span>${c.bh}</label>`+c.bi:bIdle?na('off')+c.bi:x.kind==='BT'&&!bD?`<label class="fl"><span>°C</span>${c.bt}</label>${na('jump')}${c.bi}`:`<label class="fl"><span>°C</span>${c.bt}</label><label class="fl"><span>Ramp</span>${c.br}</label><label class="fl"><span>Hold</span>${c.bh}</label>${c.bi}`}</div>
          <div class="pcr"><span class="pl gT">${esc(n[1])}</span>${!hasT?na('keeps its setpoint'):tIdle?na('off')+c.ti:`<label class="fl"><span>°C</span>${c.tt}</label><label class="fl"><span>Ramp</span>${c.tr}</label><label class="fl"><span>Hold</span>${c.th}</label>${c.ti}`}</div>
          ${x.kind!=='T'?`<div class="pcr">${c.opt}</div>`:''}`)+`</div>`;
-      return `<tr class="${cls}" data-i="${k}"><td>${k+1}</td><td>${sel}</td>`+
+      return `<tr class="${cls}" data-i="${k}"><td class="nr">${gr(k)}${k+1}</td><td>${sel}</td>`+
         (isP?`<td class="bl" colspan="4">${na('keeps its setpoint')}</td><td class="bl" colspan="4">${na('keeps its setpoint')}</td>`:
         `<td class="bl">${c.bt}</td><td>${c.br}</td><td>${c.bh}</td><td>${c.bi}</td><td class="bl">${c.tt}</td><td>${c.tr}</td><td>${c.th}</td><td>${c.ti}</td>`)+
         `<td class="bl">${c.opt}</td><td class="end">${fmt(ends[k])}</td><td>${del(k)}</td></tr>`;
@@ -1874,7 +1910,7 @@ function buildEditor(){
         const done=run&&q&&(q.stage==='done'||j<q.idx), isCur=run&&q&&q.stage!=='done'&&j===q.idx;
         const en=f=>{ if(done) return f==='t'&&j===keptI; if(!run) return true; if(isCur) return x.kind!=='pause'&&(f==='h'||(f==='t'&&x.kind==='step')); return x.kind!=='pause'&&f!=='kind'; };
         const opt=(v,t)=>`<option value="${v}"${x.kind===v?' selected':''}>${t}</option>`, nm=`${n[ch]} step ${j+1}`;
-        h+=`<tr class="${done?'done':''}${isCur?' cur':''}" data-k="${k}" data-i="${j}"><td>${j+1}</td>
+        h+=`<tr class="${done?'done':''}${isCur?' cur':''}" data-k="${k}" data-i="${j}"><td class="nr">${run||L.length<2?'':grip(nm)}${j+1}</td>
           <td><select class="k${x.kind==='step'?'':' '+x.kind}" data-f="kind" ${run?'disabled':''} aria-label="${esc(nm)} type">${opt('step','Step')}${opt('idle','Idle')}${opt('pause','Pause')}</select></td>`;
         if(x.kind==='pause') h+=`<td colspan="3"><label class="cbl"><input type="checkbox" data-f="msg" ${x.msg?'checked':''} ${run?'disabled':''}> "Action required"</label>
           <input type="text" data-f="text" maxlength="40" value="${esc(x.text)}" placeholder="text (optional)" ${run?'disabled':''} aria-label="${esc(nm)} pause text"></td>`;
@@ -1892,7 +1928,7 @@ function updateEditor(){
   const pos=run?J([r.seq&&[r.seq.idx,r.seq.stage],live.ch.map(c=>[c.lane&&c.lane.idx,c.lane&&c.lane.stage,c.kept])]):'';
   const key=($('editor').clientWidth<720?'n':'w')+J(p)+run+pos+i+chName(0)+chName(1);
   const ae=document.activeElement, typing=ae&&$('edP').contains(ae)&&ae.matches('input[type=number],input[type=text]');
-  if(key!==edKey&&!typing){ edKey=key; buildEditor(); }
+  if(key!==edKey&&!typing&&!rowDrag){ edKey=key; buildEditor(); }
   const d=!run&&isDirty(i);
   document.querySelectorAll('button[data-act]').forEach(b=>{ const a=b.dataset.act;
     b.disabled=run||!UNDO[i]||(a==='undo'&&!UNDO[i].length)||(a==='redo'&&!REDO[i].length)||((a==='save'||a==='discard')&&!d); });
@@ -1924,7 +1960,7 @@ $('editor').addEventListener('change',async e=>{
   afterEdit();
 });
 $('editor').addEventListener('click',e=>{
-  const b=e.target.closest('button'); if(!b||!live||running()||b.dataset.act) return; const i=live.sel;
+  const b=e.target.closest('button'); if(!b||!live||running()||b.dataset.act||b.dataset.grip!=null) return; const i=live.sel;
   if(b.dataset.new){ newDraft(i,b.dataset.new); afterEdit(); return; }
   const q=beginEdit(); if(!q) return;
   if(b.id==='addPh'&&q.phases.length<MAXN) q.phases.push(newPhase('T'));
@@ -1932,6 +1968,51 @@ $('editor').addEventListener('click',e=>{
   else if(b.dataset.del!=null){ const tr=b.closest('[data-i]'); if(q.type==='seq') q.phases.splice(+b.dataset.del,1); else q[tr.dataset.k].splice(+b.dataset.del,1); }
   afterEdit();
 });
+
+// ---- reorder phases / steps: drag a row by its grip (pointer events: mouse, touch and pen alike - the browser's
+// own drag and drop has no touch), or Alt+Up / Alt+Down on the grip. One list: the Sequence table or its phone
+// cards, or one channel's Timeline table. While a row is dragged the editor is not rebuilt (updateEditor); the
+// move itself is one edit (undo / redo, "Unsaved changes"), not while a program runs (no grips then).
+const rowList=item=>[...item.parentElement.children].filter(x=>x.dataset.i!=null&&(x.dataset.k||'')===(item.dataset.k||''));
+function moveRow(k,from,to){ if(from===to) return false; const q=beginEdit(); if(!q) return false;
+  const a=k?q[k]:q.phases; if(!a||from<0||to<0||from>=a.length||to>=a.length){ afterEdit(); return false; }
+  a.splice(to,0,a.splice(from,1)[0]); afterEdit(); return true; }
+function focusGrip(k,i){ const r=$('editor').querySelector(`[data-i="${i}"]${k?`[data-k="${k}"]`:''}`), g=r&&r.querySelector('.grip'); if(g) g.focus({preventScroll:true}); }
+function rowDragAt(d,y){  // the dragged row follows the pointer; the rows it passes make room
+  d.y=y; const dy=y+scrollY-d.y0-d.s0; d.item.style.transform=`translateY(${dy}px)`;
+  const at=y+scrollY; let to=0; d.mids.forEach((m,j)=>{ if(j!==d.from&&m<at) to++; });  // (where the finger / pointer is: tall phone cards)
+  if(to===d.to) return; d.to=to;
+  d.list.forEach((x,j)=>{ if(j===d.from) return; const s=d.from<to&&j>d.from&&j<=to?-d.h:d.from>to&&j>=to&&j<d.from?d.h:0; x.style.transform=s?`translateY(${s}px)`:''; }); }
+function rowDragGo(d){  // over the threshold: lifted
+  d.on=true; document.body.classList.add('drgOn');
+  d.mids=d.list.map(x=>{ const r=x.getBoundingClientRect(); return r.top+scrollY+r.height/2; });
+  const r=d.item.getBoundingClientRect(), nx=d.list[d.from+1], pv=d.list[d.from-1];
+  d.h=r.height+(nx?nx.getBoundingClientRect().top-r.bottom:pv?r.top-pv.getBoundingClientRect().bottom:0);  // (+ the gap)
+  d.list.forEach(x=>x.classList.add(x===d.item?'drg':'mvR'));
+  const tick=()=>{ if(rowDrag!==d) return; const e=56, v=d.y<e?-(e-d.y):d.y>innerHeight-e?d.y-innerHeight+e:0;  // near an edge: scroll
+    if(v){ const s0=scrollY; scrollBy(0,Math.round(v/3)); if(scrollY!==s0) rowDragAt(d,d.y); } d.raf=requestAnimationFrame(tick); };
+  d.raf=requestAnimationFrame(tick); }
+function rowDragEnd(ok){ const d=rowDrag; if(!d) return; rowDrag=null; cancelAnimationFrame(d.raf); document.body.classList.remove('drgOn');
+  d.list.forEach(x=>{ x.style.transform=''; x.classList.remove('mvR','drg'); });
+  if(d.on&&ok) moveRow(d.item.dataset.k,d.from,d.to);
+  updateEditor(); }  // (a rebuild held back meanwhile)
+$('editor').addEventListener('pointerdown',e=>{
+  const g=e.target.closest('.grip'); if(!g||e.button!==0||rowDrag||running()||!live) return;
+  const item=g.closest('[data-i]'); if(!item) return;
+  e.preventDefault();  // (no text selection; the grip takes no focus: no focus ring after a drag)
+  const list=rowList(item);
+  rowDrag={g,item,list,from:list.indexOf(item),to:list.indexOf(item),id:e.pointerId,y0:e.clientY,s0:scrollY,y:e.clientY,on:false,raf:0};
+  try{ g.setPointerCapture(e.pointerId); }catch(_){}
+});
+document.addEventListener('pointermove',e=>{ const d=rowDrag; if(!d||e.pointerId!==d.id) return;
+  if(!d.on){ if(Math.abs(e.clientY-d.y0)<4) return; rowDragGo(d); } e.preventDefault(); rowDragAt(d,e.clientY); });
+document.addEventListener('pointerup',e=>{ if(rowDrag&&e.pointerId===rowDrag.id) rowDragEnd(true); });
+document.addEventListener('pointercancel',e=>{ if(rowDrag&&e.pointerId===rowDrag.id) rowDragEnd(false); });
+document.addEventListener('keydown',e=>{ if(rowDrag&&e.key==='Escape'){ rowDragEnd(false); e.preventDefault(); } },true);
+$('editor').addEventListener('keydown',e=>{
+  const g=e.target.closest&&e.target.closest('.grip'); if(!g||!e.altKey||(e.key!=='ArrowUp'&&e.key!=='ArrowDown')||rowDrag) return;
+  e.preventDefault(); const item=g.closest('[data-i]'), list=rowList(item), from=list.indexOf(item), to=from+(e.key==='ArrowUp'?-1:1);
+  if(to<0||to>=list.length) return; if(moveRow(item.dataset.k,from,to)) focusGrip(item.dataset.k,to); });
 
 // chart handles: target (square, drag up / down), ramp end (diamond) and hold end (circle, drag left / right)
 let handles=[], drag=null;

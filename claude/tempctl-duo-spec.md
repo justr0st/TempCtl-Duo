@@ -2460,8 +2460,10 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
 - **1.0.62** (2026-10-28, 7bdc93c; after 1.0.61 = 3a7c772): see 9.17 - CYD out of memory on the Channels page fixed (the
   left page deleted first, shared styles, single-label value buttons, no row objects on the CYD, a free-RAM check
   before building a page). On the board: Channels page 51260 -> 37712 bytes (33944 free with it open).
-- **1.0.63** (2026-10-28; after 1.0.62 = 7bdc93c): see 9.18 - setpoint margin below the cut-off as a general
+- **1.0.63** (2026-10-28, 0194f61; after 1.0.62 = 7bdc93c): see 9.18 - setpoint margin below the cut-off as a general
   setting (run.spMargin), a cleared number pad entry is 0, the Modbus write limits paired on the S3.
+- **1.0.64** (2026-10-28; after 1.0.63 = 0194f61): see 9.19 - web page: reorder phases / steps by dragging (and
+  Alt+Up / Down), chart handles on a touch screen move after a short hold (a swipe scrolls the page).
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
@@ -2755,6 +2757,30 @@ layout (Rost: "good already").
   once); serial `set run.spMargin=…`; the Channels hints show the value. Host test testSpMargin, console host.
 - **Modbus write limits paired on the S3**: "Between writes at least" [0.5 °C] and [5 s] (minStep 80 px +
   minWriteSec); CYD two rows as before.
+
+### 9.19 Reorder phases / steps on the web page (Rost 2026-10-28: "like Spotify songs in the queue")
+
+Until now only the touch editor could move rows (row menu Move up / down). Web: a grip (⋮⋮, `button.grip
+[data-grip]`, 6-dot SVG) at the start of every row - Sequence table, its phone cards (< 720 px), each
+Timeline channel's table - not during a run, not with one row. Pointer events (mouse, touch, pen; the
+browser's own drag and drop has no touch): `touch-action:none` on the grip only (the page still scrolls
+elsewhere), a drag starts after 4 px; the row follows the pointer (translateY), the rows it passes slide
+by its height + gap (transition .16 s), the drop index is where the pointer is (tall phone cards), near the
+window edge (56 px) the page scrolls; Esc / pointercancel cancel. The move is one edit (beginEdit / splice /
+afterEdit: undo / redo, "Unsaved changes", preview). Keyboard: Alt+Up / Alt+Down on the grip (keeps the
+focus). updateEditor does not rebuild while a row is dragged (`rowDrag`). Names rowDragAt / rowDragGo /
+rowDragEnd (the chart handles already have drag / dragEnd). No firmware change.
+Test: `test/web_reorder.js` (Playwright on the demo, 1280 px mouse and 390 px touch: drag 1 -> 3, unsaved,
+undo, Esc, Alt+Down, Timeline 3 -> 1, no grips while running); web_jumps unchanged.
+- **Chart handles on touch (Rost, done the same day)**: on the phone, dragging a chart handle (program view)
+  scrolled the page. Now (touch and pen): a hold of 350 ms on a handle starts the edit (navigator.vibrate(12),
+  the ghost with the value at once); moved more than 8 px before that: a swipe (the page scrolls, the chart
+  pans sideways as before); a second finger cancels (zoom). The finger may be up to 24 px off: the handle under
+  it, else the nearest. While held: touchmove prevented (non-passive listener on #chartbox; the page stays),
+  contextmenu prevented; `.chartbox [data-h]{touch-action:none}` removed (a swipe starting on a handle
+  scrolls too), `-webkit-touch-callout:none`. Mouse: drag at once as before. Editor hint "(touch screen:
+  hold a point briefly, then drag)". Test `test/web_chart_hold.js` (390 px touch: swipe scrolls and changes
+  nothing; hold + drag changes the target, the page stays; 1280 px mouse).
 
 ## 10. Open items carried over from TempCtl
 
