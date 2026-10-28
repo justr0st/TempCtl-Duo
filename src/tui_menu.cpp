@@ -128,24 +128,25 @@ void logUpdate() {
 // ------------------------------------------------------------ helpers: setting rows
 // A row: label (+ hint) on the left, a control on the right
 static lv_obj_t* settingRow(lv_obj_t* parent, const char* label, const char* hint, lv_obj_t** hintOut = nullptr) {
-  lv_obj_t* row = lv_obj_create(parent);  // no tile (Rost): label left, control right
-  lv_obj_remove_style_all(row);
-  lv_obj_set_scrollable(row, false);
-  lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
-  lv_obj_set_style_pad_hor(row, 4, 0);
-  lv_obj_set_style_pad_ver(row, 1, 0);
-  lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_style_pad_gap(row, 8, 0);
+  static lv_style_t st;  // (shared: no local style per row)
+  static bool init = false;
+  if (!init) {
+    lv_style_init(&st);
+    lv_style_set_pad_hor(&st, 4);
+    lv_style_set_pad_ver(&st, 1);
+    init = true;
+  }
+  lv_obj_t* row = tRow(parent, 8);  // no tile (Rost): label left, control right
+  lv_obj_add_style(row, &st, 0);
   lv_obj_t* col = tCol(row, 0);
-  lv_obj_set_flex_grow(col, 1);
+  lv_obj_add_style(col, tStyleGrow(), 0);
   lv_obj_t* l = tLabel(col, TUI_SMALL ? &tfont_14 : &tfont_16b, label);
-  if (TUI_SMALL) lv_obj_set_width(l, LV_PCT(100));  // long labels wrap
+  if (TUI_SMALL) lv_obj_add_style(l, tStyleFullWidth(), 0);  // long labels wrap
   lv_obj_t* h = nullptr;
   if (hint) {
     h = tLabel(col, &tfont_12, hint);
     lv_obj_add_style(h, &S_.muted, 0);
-    lv_obj_set_width(h, LV_PCT(100));  // wraps where the control leaves too little room
+    lv_obj_add_style(h, tStyleFullWidth(), 0);  // wraps where the control leaves too little room
     lv_label_set_long_mode(h, LV_LABEL_LONG_MODE_WRAP);
   }
   if (hintOut) *hintOut = h;

@@ -2457,6 +2457,9 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
     (mesh, fixed) under their tint like the sidebar, no live backdrop blur; phones keep the blur.
 - **1.0.61** (2026-10-27, 3a7c772; after 1.0.60 = 0619d8f): see 9.16 - Both phase with both channels Idle, Wi-Fi
   completely off, web page jump fixes, touch editor 0 °C = off, touch Channels / System layout from Rost's design.
+- **1.0.62** (2026-10-28; after 1.0.61 = 3a7c772): see 9.17 - CYD out of memory on the Channels page fixed (the
+  left page deleted first, shared styles, single-label value buttons, no row objects on the CYD, a free-RAM check
+  before building a page). On the board: Channels page 51260 -> 37712 bytes (33944 free with it open).
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
@@ -2705,6 +2708,36 @@ numerically at the bottom right of the chart; **no alarm**; **S3 only, CS on GPI
   polling + band; "OTA update" (hint "The newest FW from the release page (Internet over Wi-Fi)") + firmware
   update; backup + restore; time zone; manual mode timeout + safety. UI host: chan test checks the greyed count;
   wiki screenshots scroll to labels (scrollToLabel) instead of fixed offsets.
+
+### 9.17 CYD out of memory on the Channels page (Rost's crash log 2026-10-28; after 1.0.61)
+
+CYD 2x local, 1.0.61: `lv_obj_class_create_obj: Assertion obj != NULL failed. Out of memory` in tLabel <
+row < build < chanShow < tShow (menu item), 105 s after boot (after web: 77.9 kB free, largest 73.7 kB). Not
+new in 1.0.61 (1.0.60's Channels page is the same size, UI host). The page holds ~200 objects; the menu was
+deleted only afterwards (lv_obj_delete_async), so both were in RAM while the page was built.
+- tShow (TUI_SMALL): the screen being left is deleted first (synchronously: LVGL 9 allows it while its own
+  event runs), then the next one is built.
+- Shared styles instead of local ones (tui_widgets.cpp): label fonts (fontStyle), tRow / tCol (boxStyle: flex
+  flow, gap, size), button and switch sizes (setSize), S_.btn has the flex centring, tStyleGrow /
+  tStyleFullWidth; the settings rows (tui_chan row / labelCol, tui_menu settingRow) one static style. UI host
+  (64-bit): Channels page 61.9 kB / 1188 blocks -> 52.6 kB / 890 blocks; screenshots unchanged.
+- Guard: a page is built only with buildCost (measured RAM of its last build, first time 40 kB) + 12 kB free;
+  otherwise main screen + message "Not enough free memory for this page (N kB). Close the web page and try
+  again."; serial `[mem] <page> page: N bytes (M free)` after every build. UI host `./uihost_cyd lowmem`.
+- Rost's log with that build (2026-10-28): pages on the CYD: menu 7.1 kB, programs 30.4, channels 51.3 (20.4 kB
+  left free; lowest while running 14.4), network 19.5, display 16.1, system 12.6, log 1.9; UI host (64-bit)
+  within 3 % of these. And LVGL's warning "the active screen was deleted" on every switch.
+- Then: tShow loads the main screen before deleting the one being left (no warning; nothing drawn in between).
+  Channels page smaller: tValueButton (the value buttons are one label with the button styles, clickable, one
+  line with "...": half the objects; pixel-identical), a label without hint gets no column object, and on the
+  CYD no object per row: label (column) and control straight into the page body, a flex ROW_WRAP whose labels
+  start a new track (lv_obj_set_flex_in_new_track); pad_left 4 on the label (a margin is not counted for a
+  growing flex item), margin_right 4 on the control, margin top / bottom 1 (the row's padding); gap rows:
+  margin_top on both. UI host: Channels 52.6 -> 39.6 kB (608 blocks); screenshots identical (the last one of
+  the page 2 px lower). Chan test finds a row's switch on both layouts (switchOf).
+- On the board (Rost, CYD 2x local): `[mem] channels page: 37712 bytes (33944 free)`.
+- Left: 87 labels each get a spec_attr (LVGL's label sets an ext draw size of font height / 4).
+- UI host: `./uihost_mem memleak <screen> x` (allocations by caller, MEMBY=1/2); editoff test S3 only.
 
 ## 10. Open items carried over from TempCtl
 

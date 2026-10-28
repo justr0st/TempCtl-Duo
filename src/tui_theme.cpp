@@ -112,6 +112,10 @@ static void initStyles() {
   lv_style_set_pad_ver(&S_.btn, 4);
   lv_style_set_text_font(&S_.btn, &tfont_14);
   lv_style_set_text_align(&S_.btn, LV_TEXT_ALIGN_CENTER);
+  lv_style_set_layout(&S_.btn, LV_LAYOUT_FLEX);  // the label centred
+  lv_style_set_flex_main_place(&S_.btn, LV_FLEX_ALIGN_CENTER);
+  lv_style_set_flex_cross_place(&S_.btn, LV_FLEX_ALIGN_CENTER);
+  lv_style_set_flex_track_place(&S_.btn, LV_FLEX_ALIGN_CENTER);
 
   lv_style_set_bg_opa(&S_.btnPri, LV_OPA_COVER);
   lv_style_set_opa(&S_.btnDis, LV_OPA_40);

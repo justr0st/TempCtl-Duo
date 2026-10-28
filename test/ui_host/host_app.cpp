@@ -15,6 +15,7 @@
 #include "src/display/lv_display_private.h"
 void trackStart();
 void trackReport();
+void trackSummary();
 #endif
 
 SerialT Serial;
@@ -294,7 +295,7 @@ static void shot(const char* name) {
 static bool findText(lv_obj_t* o, const char* t, int& x, int& y) {
   if (lv_obj_check_type(o, &lv_label_class) && !strcmp(lv_label_get_text(o), t) && !lv_obj_is_hidden(o)) {
     lv_area_t a;
-    lv_obj_get_coords(lv_obj_get_parent(o), &a);
+    lv_obj_get_coords(lv_obj_is_clickable(o) ? o : lv_obj_get_parent(o), &a);  // (tValueButton: the label itself)
     x = (a.x1 + a.x2) / 2;
     y = (a.y1 + a.y2) / 2;
     return true;
@@ -446,6 +447,29 @@ static void monkey(int n) {
 int main(int argc, char** argv) {
   baseState();
 #ifdef MEMTEST
+#ifdef MEMTEST
+  // what stays allocated after visits of one screen (warm-up first): ./uihost_mem memleak 2   (index as in "mem")
+  if (argc > 2 && !strcmp(argv[1], "memleak")) {
+    const TScreen S[] = {SCR_MENU, SCR_PROGRAMS, SCR_CHANNELS, SCR_NETWORK, SCR_DISPLAY, SCR_SYSTEM, SCR_LOG};
+    const TScreen sc = S[atoi(argv[2])];
+    uiInit();
+    run(500);
+    for (int k = 0; k < 3; ++k) { tShow(sc); run(300); tShow(SCR_MAIN); run(300); }
+    trackStart();
+    for (int k = 0; k < 5; ++k) { tShow(sc); run(300); tShow(SCR_MAIN); run(300); }
+    trackReport();
+    if (argc > 3) {  // what the screen holds while shown, opened from the menu (the menu still there)
+      tShow(SCR_MENU);
+      run(300);
+      trackStart();
+      tShow(sc);
+      trackSummary();
+      run(300);
+      trackSummary();
+    }
+    return 0;
+  }
+#endif
   if (argc > 1 && !strcmp(argv[1], "mem")) {  // heap in use per screen (no sanitizer build)
     auto used = [] { return (long)mallinfo2().uordblks; };
     const long base = used();
@@ -502,6 +526,7 @@ int main(int argc, char** argv) {
   // ./uihost editoff: program editor - a Both phase target / a Timeline target set to 0 becomes "off"; tapping "off"
   // and entering a temperature switches it on again (exit code 0 = ok)
   if (argc > 1 && !strcmp(argv[1], "editoff")) {
+    if (SMALL) return printf("[host] editoff: the 480x320 table only (320x240: row menu)\n"), 0;
     uiInit();
     run(500);
     int fails = 0;
@@ -619,6 +644,30 @@ int main(int argc, char** argv) {
   }
   // Channels screen: a save elsewhere (web) shows without leaving the screen; the RS485 tab only with a Modbus
   // channel; a change further down keeps the list where it was
+#if SMALL
+  // 320x240: a page is not built without enough free RAM (a message instead of an out-of-memory abort)
+  if (argc > 1 && !strcmp(argv[1], "lowmem")) {
+    extern size_t hostHeapFree;
+    baseState();
+    uiInit();
+    run(300);
+    tShow(SCR_MENU);
+    run(300);
+    hostHeapFree = 30000;
+    tShow(SCR_CHANNELS);
+    run(300);
+    const bool refused = tCurrent() == SCR_MAIN;
+    int x, y;
+    const bool toast = findText(lv_layer_top(), "Not enough free memory for this page (29 kB). Close the web page and try again.", x, y);
+    hostHeapFree = (size_t)1 << 30;
+    tShow(SCR_MENU);
+    tShow(SCR_CHANNELS);
+    run(300);
+    const bool opened = tCurrent() == SCR_CHANNELS;
+    printf("[host] lowmem: refused %d, message %d, opened later %d (want 1 1 1)\n", refused, toast, opened);
+    return refused && toast && opened ? 0 : 1;
+  }
+#endif
   if (argc > 1 && !strcmp(argv[1], "chan")) {
     baseState();
     uiInit();
@@ -626,6 +675,22 @@ int main(int argc, char** argv) {
     run(500);
     int fails = 0;
     auto label = [](const char* t) { return findLabel(lv_screen_active(), t); };
+    // the switch of the row with this label (480x320: in the row object; 320x240: the next items of the body)
+    auto switchOf = [](lv_obj_t* l) -> lv_obj_t* {
+      lv_obj_t* bd = lv_obj_get_child(lv_screen_active(), 1);
+      if (!l) return nullptr;
+      lv_obj_t* start = l;  // the row's first item: in the body (320x240) / in a row of the body (480x320)
+      while (SMALL ? lv_obj_get_parent(start) != bd : lv_obj_get_parent(lv_obj_get_parent(start)) != bd)
+        start = lv_obj_get_parent(start);
+      lv_obj_t* p = lv_obj_get_parent(start);
+      for (uint32_t i = lv_obj_get_index(start) + 1; i < lv_obj_get_child_count(p); ++i) {
+        lv_obj_t* c = lv_obj_get_child(p, i);
+        if (lv_obj_is_flex_in_new_track(c)) break;
+        if (lv_obj_check_type(c, &lv_switch_class)) return c;
+      }
+      return nullptr;
+    };
+    lv_obj_t* body = lv_obj_get_child(lv_screen_active(), 1);
     const bool rs1 = visible(label(SMALL || HAS_MONITOR ? "RS485" : "RS485 (beta)"));
     gSettings.ch[0].loc.kp = 7.5f;
     gSettings.ch[1].type = CH_LOCAL;  // (as saved on the web)
@@ -638,9 +703,8 @@ int main(int argc, char** argv) {
     // a switch far down: the list stays where it was
     lv_obj_t* l = label("Converter too hot: fault");
     if (!l) return printf("[host] chan: no switch row\n"), 1;
-    lv_obj_t* body = lv_obj_get_parent(lv_obj_get_parent(lv_obj_get_parent(l)));
-    lv_obj_t* row = lv_obj_get_parent(lv_obj_get_parent(l));
-    lv_obj_t* sw = lv_obj_get_child(row, -1);
+    lv_obj_t* sw = switchOf(l);
+    if (!sw) return printf("[host] chan: no switch\n"), 1;
     lv_area_t a;
     lv_obj_get_coords(sw, &a);
     lv_obj_scroll_to_y(body, lv_obj_get_scroll_y(body) + (a.y1 + a.y2) / 2 - SCREEN_H / 2, LV_ANIM_OFF);  // to the middle
@@ -650,14 +714,14 @@ int main(int argc, char** argv) {
     const bool on0 = lv_obj_has_state(sw, LV_STATE_CHECKED);
     tap((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2);
     const int32_t y1 = lv_obj_get_scroll_y(body);
-    lv_obj_t* sw2 = lv_obj_get_child(lv_obj_get_parent(lv_obj_get_parent(label("Converter too hot: fault"))), -1);  // (rebuilt)
+    lv_obj_t* sw2 = switchOf(label("Converter too hot: fault"));  // (rebuilt)
     const bool on1 = lv_obj_has_state(sw2, LV_STATE_CHECKED);
     printf("[host] chan: switch %d -> %d; scroll %d before, %d after (want equal, > 0)\n", on0, on1, (int)y0, (int)y1);
     fails += on0 == on1 || y0 <= 0 || y0 != y1;
     // median filter off (its switch): its reading count stays, greyed out
     {
-      lv_obj_t* mr = lv_obj_get_parent(lv_obj_get_parent(label("Median filter")));
-      lv_obj_t* msw = lv_obj_get_child(mr, -1);
+      lv_obj_t* msw = switchOf(label("Median filter"));
+      if (!msw) return printf("[host] chan: no median switch\n"), 1;
       lv_area_t ma;
       lv_obj_get_coords(msw, &ma);
       lv_obj_scroll_to_y(body, lv_obj_get_scroll_y(body) + (ma.y1 + ma.y2) / 2 - SCREEN_H / 2, LV_ANIM_OFF);
@@ -665,7 +729,7 @@ int main(int argc, char** argv) {
       lv_obj_get_coords(msw, &ma);
       tap((ma.x1 + ma.x2) / 2, (ma.y1 + ma.y2) / 2);
       lv_obj_t* mc = label("3 readings");
-      const bool grey = mc && lv_obj_has_state(lv_obj_get_parent(mc), LV_STATE_DISABLED);
+      const bool grey = mc && lv_obj_has_state(mc, LV_STATE_DISABLED);  // (a value button: one label)
       printf("[host] chan: median off, count shown %d greyed %d (want 1 1)\n", mc != nullptr, grey);
       fails += !grey;
     }
@@ -677,7 +741,7 @@ int main(int argc, char** argv) {
         ++fails;
         continue;
       }
-      lv_obj_t* bd = lv_obj_get_parent(lv_obj_get_parent(lv_obj_get_parent(r)));
+      lv_obj_t* bd = body;
       lv_area_t ra;
       lv_obj_get_coords(r, &ra);
       lv_obj_scroll_to_y(bd, lv_obj_get_scroll_y(bd) + ra.y1 - 60, LV_ANIM_OFF);

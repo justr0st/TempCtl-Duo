@@ -48,6 +48,7 @@ lv_obj_t* tLabel(lv_obj_t* parent, const lv_font_t* f, const char* text = "");
 lv_obj_t* tButton(lv_obj_t* parent, const char* text, lv_event_cb_t cb, void* user = nullptr, int w = LV_SIZE_CONTENT,
                   int h = 36);
 lv_obj_t* tIconButton(lv_obj_t* parent, const char* symbol, lv_event_cb_t cb, void* user = nullptr, int w = 40, int h = 36);
+lv_obj_t* tValueButton(lv_obj_t* parent, const char* text, lv_event_cb_t cb, void* user, int w, int h);  // one label
 void tButtonText(lv_obj_t* btn, const char* text);
 void tSetEnabled(lv_obj_t* o, bool en);
 void tSetHidden(lv_obj_t* o, bool hidden);
@@ -57,6 +58,8 @@ lv_obj_t* tPanel(lv_obj_t* parent);
 lv_obj_t* tRow(lv_obj_t* parent, int gap = 6);  // transparent flex row, full width
 lv_obj_t* tCol(lv_obj_t* parent, int gap = 4);  // transparent flex column
 lv_obj_t* tSwitch(lv_obj_t* parent, lv_event_cb_t cb, void* user = nullptr);
+lv_style_t* tStyleGrow();       // shared styles (no per-object local style): flex_grow 1,
+lv_style_t* tStyleFullWidth();  // width 100 %
 void tSetChecked(lv_obj_t* o, bool on);
 // A page with a header (back button, title, optional right-side area) and a scrolling body
 struct TPage {

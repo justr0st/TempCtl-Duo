@@ -6,6 +6,7 @@
 #   ./uihost monkey 4000   random taps on every screen (with AddressSanitizer)
 #   ./uihost stepper   tile + / - while the device takes the new setpoint over late (exit code 0 = ok)
 #   ./uihost chan   Channels screen: reload after a web save, RS485 tab, scroll position (exit code 0 = ok)
+#   ./uihost_cyd lowmem   320x240: a page is not built without enough free RAM (exit code 0 = ok)
 #   MEM=1 BOARD=cyd ./build.sh && ./uihost_mem mem   heap per screen, malloc tracking (memtrack.cpp)
 set -e
 cd "$(dirname "$0")"

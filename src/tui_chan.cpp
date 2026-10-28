@@ -635,39 +635,86 @@ static void onTest(lv_event_t*) {
 // ------------------------------------------------------------ layout
 // label + hint column (grows; right: right-aligned, the Kp / Ki / Kd style)
 static lv_obj_t* labelCol(lv_obj_t* r, const char* label, const char* hint, bool right, bool grow = true) {
-  lv_obj_t* col = tCol(r, 0);
-  if (!grow) {  // as wide as its text ("Gain")
-    tLabel(col, &tfont_14, label);
-    return col;
+  if (!grow) return tLabel(r, &tfont_14, label);  // as wide as its text ("Gain")
+  if (!hint && !right) {  // a label alone: no column object (fewer objects - the CYD's RAM)
+    lv_obj_t* l = tLabel(r, &tfont_14, label);
+    lv_obj_add_style(l, tStyleGrow(), 0);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
+    return l;
   }
-  lv_obj_set_flex_grow(col, 1);
+  lv_obj_t* col = tCol(r, 0);
+  lv_obj_add_style(col, tStyleGrow(), 0);
   if (right) lv_obj_set_flex_align(col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
   lv_obj_t* l = tLabel(col, &tfont_14, label);
-  lv_obj_set_width(l, LV_PCT(100));
+  lv_obj_add_style(l, tStyleFullWidth(), 0);
   lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
   if (right) lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_RIGHT, 0);
   if (hint) {
     lv_obj_t* h = tLabel(col, &tfont_12, hint);
     lv_obj_add_style(h, &S_.muted, 0);
-    lv_obj_set_width(h, LV_PCT(100));
+    lv_obj_add_style(h, tStyleFullWidth(), 0);
     lv_label_set_long_mode(h, LV_LABEL_LONG_MODE_WRAP);
     if (right) lv_obj_set_style_text_align(h, LV_TEXT_ALIGN_RIGHT, 0);
   }
   return col;
 }
 
+#if TUI_SMALL
+// 320x240 (no PSRAM): no object per row - the label (column) and the control go straight into the page body,
+// a flex wrap whose every label starts a new line; margins stand in for the row's padding. 40 objects less.
+static lv_style_t* edgeStyle(bool start) {
+  static lv_style_t st[2];
+  static bool init = false;
+  if (!init) {
+    for (int i = 0; i < 2; ++i) {
+      lv_style_init(&st[i]);
+      lv_style_set_margin_top(&st[i], 1);
+      lv_style_set_margin_bottom(&st[i], 1);
+    }
+    lv_style_set_pad_left(&st[1], 4);      // the label: as the row's padding (a margin is not counted for
+                                           // a growing flex item)
+    lv_style_set_margin_right(&st[0], 4);  // the control
+    init = true;
+  }
+  return &st[start ? 1 : 0];
+}
+#endif
+static lv_obj_t* rowLabel;  // the label (column) of the row made last
+
 static lv_obj_t* row(const char* label, const char* hint, bool right = false) {
-  lv_obj_t* r = lv_obj_create(cBody);  // no tile (Rost): label left, control right
-  lv_obj_remove_style_all(r);
-  lv_obj_set_scrollable(r, false);
-  lv_obj_set_size(r, LV_PCT(100), LV_SIZE_CONTENT);
-  lv_obj_set_style_pad_hor(r, 4, 0);
-  lv_obj_set_style_pad_ver(r, 1, 0);
-  lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(r, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_style_pad_gap(r, 8, 0);
-  labelCol(r, label, hint, right);
+#if TUI_SMALL
+  rowLabel = labelCol(cBody, label, hint, right);
+  lv_obj_add_style(rowLabel, edgeStyle(true), 0);
+  lv_obj_set_flex_in_new_track(rowLabel, true);
+  return cBody;
+#else
+  static lv_style_t st;  // (shared: no local style per row)
+  static bool init = false;
+  if (!init) {
+    lv_style_init(&st);
+    lv_style_set_pad_hor(&st, 4);
+    lv_style_set_pad_ver(&st, 1);
+    init = true;
+  }
+  lv_obj_t* r = tRow(cBody, 8);  // no tile (Rost): label left, control right
+  lv_obj_add_style(r, &st, 0);
+  rowLabel = labelCol(r, label, hint, right);
   return r;
+#endif
+}
+
+// the control of a row (320x240: its margin; gap: the space above the row)
+static void rowControl(lv_obj_t* c, int gap = 0) {
+#if TUI_SMALL
+  lv_obj_add_style(c, edgeStyle(false), 0);
+  if (gap) {
+    lv_obj_set_style_margin_top(c, gap, 0);  // (as the row's padding at the top was)
+    lv_obj_set_style_margin_top(rowLabel, gap, 0);
+  }
+#else
+  (void)c;
+  (void)gap;
+#endif
 }
 
 // a small text before a control ("..", "... for", "Gain")
@@ -713,7 +760,7 @@ static void build() {
     snprintf(mh, sizeof(mh), "Measure only. Chart, CSV and logs. CS on GPIO %d", PIN_TC_CS_MON);
 #endif
     lv_obj_t* r = row("Name", tab == TAB_MON ? mh : "Shown on all screens");
-    tButton(r, nameOf(tab), onNameBtn, nullptr, CW, BH);
+    rowControl(tValueButton(r, nameOf(tab), onNameBtn, nullptr, CW, BH));
   }
   int n;
   const Field* F = fieldsOf(n);
@@ -730,14 +777,15 @@ static void build() {
       lv_obj_t* h = tLabel(cBody, &tfont_16b, f.label);
       lv_obj_set_style_pad_top(h, gap ? (TUI_SMALL ? gap / 2 + 4 : gap) : 6, 0);
       lv_obj_add_style(h, &S_.acc, 0);
+      if (TUI_SMALL) lv_obj_set_flex_in_new_track(h, true);
       afterHead = true;
       r = nullptr;
       if (!strcmp(f.label, "PID control")) {  // autotune under the PID heading
         r = row("Autotune", nullptr);
-        lv_obj_t* col = lv_obj_get_child(r, 0);
-        tuneLbl = lv_obj_get_child(col, 0);
+        tuneLbl = rowLabel;  // (no hint: the label itself)
         lv_obj_set_style_text_font(tuneLbl, &tfont_12, 0);
         tuneRow = tCol(r, 4);
+        rowControl(tuneRow);
         static const char* const B[] = {LV_SYMBOL_PLAY " Start", "Stop", "Take over", "Discard"};
         for (int k = 0; k < 4; ++k) {
           lv_obj_t* tb = tButton(tuneRow, B[k], onTune, (void*)(intptr_t)k, TUI_SMALL ? 86 : 110, TUI_SMALL ? 30 : 34);
@@ -754,7 +802,11 @@ static void build() {
       lv_obj_add_style(nt, &S_.muted, 0);
       lv_obj_set_width(nt, LV_PCT(100));
       lv_label_set_long_mode(nt, LV_LABEL_LONG_MODE_WRAP);
-      if (tab < 2 && isMb(E, tab) && !strncmp(f.label, "Register", 8)) tButton(cBody, "Test link", onTest, nullptr, 120, BH);
+      if (TUI_SMALL) lv_obj_set_flex_in_new_track(nt, true);
+      if (tab < 2 && isMb(E, tab) && !strncmp(f.label, "Register", 8)) {
+        lv_obj_t* tl = tButton(cBody, "Test link", onTest, nullptr, 120, BH);
+        if (TUI_SMALL) lv_obj_set_flex_in_new_track(tl, true);
+      }
       r = nullptr;
       continue;
     }
@@ -769,7 +821,7 @@ static void build() {
       const bool big = !TUI_SMALL;
       rowCols = big && (f.lay & L_COL);
       r = row(big && f.rl ? f.rl : f.label, big && f.rh ? f.rh : f.hint, rowCols);
-      if (gap) lv_obj_set_style_pad_top(r, TUI_SMALL ? gap / 2 : gap, 0);
+      if (gap && !TUI_SMALL) lv_obj_set_style_pad_top(r, gap, 0);
       if (rowCols) lv_obj_set_style_pad_gap(r, 5, 0);  // (three label columns: room for the units)
       if (big) preLabel(r, f.pre);
     }
@@ -785,16 +837,14 @@ static void build() {
       }
     } else if (f.k == F_SEL) {
       selText(f.opts, (int)f.get(E, tab), b, sizeof(b));
-      ctl = tButton(r, b, onField, (void*)(intptr_t)i, w, BH);
-      lv_obj_t* l = lv_obj_get_child(ctl, 0);
-      lv_obj_set_width(l, w - 10);
-      tOneLine(l);
+      ctl = tValueButton(r, b, onField, (void*)(intptr_t)i, w, BH);
     } else {
       const float v = f.get(E, tab);
       const int dec = (f.lay & L_TRIM) && v == roundf(v) ? 0 : f.dec;
       snprintf(b, sizeof(b), "%.*f%s%s", dec, v, f.unit && *f.unit ? " " : "", f.unit ? f.unit : "");
-      ctl = tButton(r, b, onField, (void*)(intptr_t)i, w, BH);
+      ctl = tValueButton(r, b, onField, (void*)(intptr_t)i, w, BH);
     }
+    if (!join) rowControl(ctl, gap / 2);  // (320x240: half the space)
     if (f.en && !f.en(E, tab)) tSetEnabled(ctl, false);
     if (join && (f.lay & L_BEFORE) && last) {  // before the control of the row (the median filter's count, its switch)
       lv_obj_move_to_index(ctl, lv_obj_get_index(last));
@@ -868,6 +918,11 @@ lv_obj_t* chanCreate() {
   cScr = p.scr;
   cBody = p.body;
   lv_obj_set_style_pad_gap(cBody, 2, 0);
+#if TUI_SMALL  // rows without an object of their own (row())
+  lv_obj_set_flex_flow(cBody, LV_FLEX_FLOW_ROW_WRAP);
+  lv_obj_set_flex_align(cBody, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
+  lv_obj_set_style_pad_column(cBody, 8, 0);
+#endif
   lv_label_set_text(p.title, "");
   lv_obj_set_flex_grow(p.title, 0);
   lv_obj_set_width(p.title, 0);

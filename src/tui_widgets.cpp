@@ -18,10 +18,106 @@ void fmtTemp(float v, char* out, size_t n, bool unit) {
   else snprintf(out, n, unit ? "%.1f \xC2\xB0" "C" : "%.1f", v);
 }
 
+// ------------------------------------------------------------ shared styles
+// A local style (lv_obj_set_style_...) gives the object its own style and value array: a few dozen bytes
+// per object and setting. The settings every label / row / column / button repeats are shared styles
+// instead (the 320x240 board has little RAM: a settings page has some 200 objects).
+static lv_style_t* fontStyle(const lv_font_t* f) {
+  static const lv_font_t* key[10];
+  static lv_style_t st[10];
+  for (int i = 0; i < 10; ++i) {
+    if (key[i] == f) return &st[i];
+    if (!key[i]) {
+      key[i] = f;
+      lv_style_init(&st[i]);
+      lv_style_set_text_font(&st[i], f);
+      return &st[i];
+    }
+  }
+  return nullptr;  // (more fonts than places: a local style)
+}
+
+// flex box: flow, gap, size (full width x content, or content x content)
+static lv_style_t* boxStyle(lv_flex_flow_t flow, int gap, bool fullWidth) {
+  struct K {
+    int16_t gap;
+    uint8_t flow, full, used;
+  };
+  static K key[16];
+  static lv_style_t st[16];
+  for (int i = 0; i < 16; ++i) {
+    K& k = key[i];
+    if (k.used && k.gap == gap && k.flow == (uint8_t)flow && k.full == fullWidth) return &st[i];
+    if (!k.used) {
+      k = {(int16_t)gap, (uint8_t)flow, (uint8_t)fullWidth, 1};
+      lv_style_t* s = &st[i];
+      lv_style_init(s);
+      lv_style_set_layout(s, LV_LAYOUT_FLEX);
+      lv_style_set_flex_flow(s, flow);
+      lv_style_set_pad_row(s, gap);
+      lv_style_set_pad_column(s, gap);
+      lv_style_set_width(s, fullWidth ? LV_PCT(100) : LV_SIZE_CONTENT);
+      lv_style_set_height(s, LV_SIZE_CONTENT);
+      if (fullWidth) {  // tRow: centred across
+        lv_style_set_flex_main_place(s, LV_FLEX_ALIGN_START);
+        lv_style_set_flex_cross_place(s, LV_FLEX_ALIGN_CENTER);
+        lv_style_set_flex_track_place(s, LV_FLEX_ALIGN_CENTER);
+      }
+      return s;
+    }
+  }
+  return nullptr;
+}
+
+// a fixed size (buttons, switches: a few sizes, many objects)
+static void setSize(lv_obj_t* o, int32_t w, int32_t h) {
+  static int32_t kw[32], kh[32];
+  static lv_style_t st[32];
+  static int n = 0;
+  for (int i = 0; i < n; ++i)
+    if (kw[i] == w && kh[i] == h) return lv_obj_add_style(o, &st[i], 0);
+  if (n < 32) {
+    kw[n] = w;
+    kh[n] = h;
+    lv_style_init(&st[n]);
+    lv_style_set_width(&st[n], w);
+    lv_style_set_height(&st[n], h);
+    lv_obj_add_style(o, &st[n++], 0);
+    return;
+  }
+  lv_obj_set_size(o, w, h);
+}
+
+lv_style_t* tStyleGrow() {  // flex_grow 1
+  static lv_style_t s;
+  static bool init = false;
+  if (!init) {
+    lv_style_init(&s);
+    lv_style_set_flex_grow(&s, 1);
+    init = true;
+  }
+  return &s;
+}
+
+lv_style_t* tStyleFullWidth() {  // width 100 %
+  static lv_style_t s;
+  static bool init = false;
+  if (!init) {
+    lv_style_init(&s);
+    lv_style_set_width(&s, LV_PCT(100));
+    init = true;
+  }
+  return &s;
+}
+
 // ------------------------------------------------------------ basics
 lv_obj_t* tLabel(lv_obj_t* parent, const lv_font_t* f, const char* text) {
   lv_obj_t* l = lv_label_create(parent);
-  if (f) lv_obj_set_style_text_font(l, f, 0);
+  if (f) {
+    lv_style_t* fs = fontStyle(f);
+    if (fs) lv_obj_add_style(l, fs, 0);
+    else lv_obj_set_style_text_font(l, f, 0);
+  }
   lv_label_set_text(l, text);
   return l;
 }
@@ -42,22 +138,52 @@ static void styleButton(lv_obj_t* b) {
   lv_obj_add_style(b, &S_.btn, 0);
   lv_obj_add_style(b, &S_.btnPressed, LV_STATE_PRESSED);
   lv_obj_add_style(b, &S_.btnDis, LV_STATE_DISABLED);
-  lv_obj_add_style(b, &S_.btnChecked, LV_STATE_CHECKED);
-  lv_obj_set_style_layout(b, LV_LAYOUT_FLEX, 0);
-  lv_obj_set_style_flex_main_place(b, LV_FLEX_ALIGN_CENTER, 0);
-  lv_obj_set_style_flex_cross_place(b, LV_FLEX_ALIGN_CENTER, 0);
-  lv_obj_set_style_flex_track_place(b, LV_FLEX_ALIGN_CENTER, 0);
+  lv_obj_add_style(b, &S_.btnChecked, LV_STATE_CHECKED);  // (S_.btn: flex, the label centred)
   lv_obj_set_ext_click_area(b, 4);
 }
 
 lv_obj_t* tButton(lv_obj_t* parent, const char* text, lv_event_cb_t cb, void* user, int w, int h) {
   lv_obj_t* b = lv_button_create(parent);
   styleButton(b);
-  lv_obj_set_size(b, w, h);
+  setSize(b, w, h);
   lv_obj_t* l = lv_label_create(b);
   lv_label_set_text(l, text);
   if (cb) lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, user);
   return b;
+}
+
+// A button that is one label (no button object with a label inside): half the objects for the value buttons
+// of the settings pages. One line, "..." when too long; the look of tButton.
+lv_obj_t* tValueButton(lv_obj_t* parent, const char* text, lv_event_cb_t cb, void* user, int w, int h) {
+  static int32_t kh[8];
+  static lv_style_t vp[8];  // padding: the text in the middle (per height)
+  static int n = 0;
+  lv_obj_t* l = lv_label_create(parent);
+  lv_obj_remove_style_all(l);
+  lv_obj_add_style(l, &S_.btn, 0);
+  lv_obj_add_style(l, &S_.btnPressed, LV_STATE_PRESSED);
+  lv_obj_add_style(l, &S_.btnDis, LV_STATE_DISABLED);
+  lv_obj_add_style(l, &S_.btnChecked, LV_STATE_CHECKED);
+  setSize(l, w, h);
+  int i = 0;
+  while (i < n && kh[i] != h) ++i;
+  if (i == n && n < 8) {
+    kh[n] = h;
+    lv_style_init(&vp[n]);
+    lv_style_value_t bw;
+    const int32_t border = lv_style_get_prop(&S_.btn, LV_STYLE_BORDER_WIDTH, &bw) == LV_STYLE_RES_FOUND ? bw.num : 0;
+    const int32_t pad = (h - 2 * border - lv_font_get_line_height(&tfont_14)) / 2;
+    lv_style_set_pad_ver(&vp[n], pad > 0 ? pad : 0);
+    lv_style_set_pad_hor(&vp[n], 4 - border);  // (one-line text as wide as tButton's)
+    ++n;
+  }
+  if (i < n) lv_obj_add_style(l, &vp[i], 0);
+  lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
+  lv_label_set_text(l, text);
+  lv_obj_set_clickable(l, true);
+  lv_obj_set_ext_click_area(l, 4);
+  if (cb) lv_obj_add_event_cb(l, cb, LV_EVENT_CLICKED, user);
+  return l;
 }
 
 lv_obj_t* tIconButton(lv_obj_t* parent, const char* symbol, lv_event_cb_t cb, void* user, int w, int h) {
@@ -92,31 +218,29 @@ lv_obj_t* tPanel(lv_obj_t* parent) {
   return p;
 }
 
-static lv_obj_t* flexBox(lv_obj_t* parent, lv_flex_flow_t flow, int gap) {
+static lv_obj_t* flexBox(lv_obj_t* parent, lv_flex_flow_t flow, int gap, bool fullWidth) {
   lv_obj_t* r = lv_obj_create(parent);
   lv_obj_remove_style_all(r);
-  lv_obj_set_flex_flow(r, flow);
-  lv_obj_set_style_pad_gap(r, gap, 0);
+  lv_style_t* s = boxStyle(flow, gap, fullWidth);
+  if (s) {
+    lv_obj_add_style(r, s, 0);
+  } else {
+    lv_obj_set_flex_flow(r, flow);
+    lv_obj_set_style_pad_gap(r, gap, 0);
+    lv_obj_set_size(r, fullWidth ? LV_PCT(100) : LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    if (fullWidth) lv_obj_set_flex_align(r, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  }
   lv_obj_set_scrollable(r, false);
   return r;
 }
 
-lv_obj_t* tRow(lv_obj_t* parent, int gap) {
-  lv_obj_t* r = flexBox(parent, LV_FLEX_FLOW_ROW, gap);
-  lv_obj_set_size(r, LV_PCT(100), LV_SIZE_CONTENT);
-  lv_obj_set_flex_align(r, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  return r;
-}
+lv_obj_t* tRow(lv_obj_t* parent, int gap) { return flexBox(parent, LV_FLEX_FLOW_ROW, gap, true); }
 
-lv_obj_t* tCol(lv_obj_t* parent, int gap) {
-  lv_obj_t* c = flexBox(parent, LV_FLEX_FLOW_COLUMN, gap);
-  lv_obj_set_size(c, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-  return c;
-}
+lv_obj_t* tCol(lv_obj_t* parent, int gap) { return flexBox(parent, LV_FLEX_FLOW_COLUMN, gap, false); }
 
 lv_obj_t* tSwitch(lv_obj_t* parent, lv_event_cb_t cb, void* user) {
   lv_obj_t* s = lv_switch_create(parent);
-  lv_obj_set_size(s, 50, 28);
+  setSize(s, 50, 28);
   lv_obj_set_ext_click_area(s, 8);
   if (cb) lv_obj_add_event_cb(s, cb, LV_EVENT_VALUE_CHANGED, user);
   return s;

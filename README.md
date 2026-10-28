@@ -1,7 +1,7 @@
 # TempCtl Duo: two-channel ramp/soak temperature programmer (ESP32-S3 / ESP32 CYD)
 
 Firmware for a two-channel temperature programmer, made for the **bottom and top heater of a BGA rework
-station** (reflow / desolder profiles). Version **1.0.61**. Two boards, built from the same sources:
+station** (reflow / desolder profiles). Version **1.0.62**. Two boards, built from the same sources:
 
 - **ESP32-S3** with a 4" 480×320 capacitive touch screen (env `s3`, the main target)
 - **ESP32-2432S028R "Cheap Yellow Display"** with a 2.8" 320×240 resistive touch screen (envs
@@ -269,7 +269,15 @@ supplies the symbols. **Preview without a board**: `test/ui_host/build.sh` build
 and renders screenshots of the main states (and `./uihost monkey` taps around at random under
 AddressSanitizer, `./uihost stepper` checks the tile's + / - while the device takes a value over late, `./uihost chan` the Channels screen); `BOARD=cyd ./build.sh` does the same for the 320×240 set (`uihost_cyd`, `shots_cyd/`),
 `python3 sheet.py [cyd] [names]` converts the shots and puts them on one sheet, `MEM=1 BOARD=cyd ./build.sh`
-+ `./uihost_mem mem` prints the heap used per screen.
++ `./uihost_mem mem` prints the heap used per screen (`./uihost_mem memleak <n> x`: what one screen holds,
+by caller; `./uihost_cyd lowmem`: a page is not opened without enough free RAM).
+
+**RAM on the CYD**: only the main screen stays; another page is built when opened, after the one being left
+was deleted. A page is built only with the RAM it took last time (first time: 40 kB) + 12 kB free; otherwise
+the message "Not enough free memory for this page" (serial: `[mem] <page> page: N bytes (M free)` after each
+build). Labels, rows, columns, button and switch sizes use shared styles (no per-object local style); the
+Channels page's value buttons are single labels (`tValueButton`), and on the CYD its rows have no object of
+their own (label and control in the page body, a flex wrap): about 39 kB instead of 51 kB.
 
 **Slide off to cancel** (both boards): a press released away from the widget it started on (more than 10 px
 outside it, CYD 6 px) does nothing — no click, no switch toggle; a held stepper stops repeating while the

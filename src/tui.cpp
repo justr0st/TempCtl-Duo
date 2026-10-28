@@ -150,12 +150,58 @@ void liveCopy(LiveData& out) {
 }
 
 // ------------------------------------------------------------ screens
+#if TUI_SMALL
+#ifdef ESP_PLATFORM
+#include <esp_heap_caps.h>
+static size_t heapFree() { return heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT); }
+#else
+size_t hostHeapFree = (size_t)1 << 30;  // (UI host: set by a test)
+static size_t heapFree() { return hostHeapFree; }
+#endif
+// the RAM the last build of each screen took (measured; before the first: an estimate). A page is only
+// built with that much free plus room for Wi-Fi and the web server; otherwise a message instead of an
+// out-of-memory abort halfway through.
+static uint32_t buildCost[SCR_COUNT];
+constexpr uint32_t BUILD_GUESS = 40000, BUILD_ROOM = 12000;
+static const char* const SCR_NAME[SCR_COUNT] = {"main", "menu", "log", "display", "network", "system", "programs", "editor", "channels"};
+#endif
 static lv_obj_t* screens[SCR_COUNT];
 static TScreen cur = SCR_MAIN;
 
 TScreen tCurrent() { return cur; }
 
 void tShow(TScreen s) {
+#if TUI_SMALL
+  // 320x240 (no PSRAM, short internal RAM): only the main screen stays; the others are built again when
+  // opened (a few ms), so their objects don't use RAM while they aren't shown. The screen being left goes
+  // first, then the next one is built: both at once may not fit (the Channels page alone holds some 200
+  // objects; out of memory there aborted, Rost 2026-10-28). LVGL 9 allows deleting an object while its own
+  // event runs (the menu item / back button that called this): the event stops there.
+  if (s != cur && cur != SCR_MAIN && screens[cur]) {
+    const TScreen prev = cur;
+    tModalClose();
+    lv_obj_t* old = screens[prev];
+    screens[prev] = nullptr;
+    cur = SCR_MAIN;  // (no screen of its own any more)
+    lv_screen_load(screens[SCR_MAIN]);  // (not deleting the active screen; nothing is drawn in between)
+    lv_obj_delete(old);
+    if (prev == SCR_PROGEDIT) progEditRelease();
+  }
+#endif
+#if TUI_SMALL
+  size_t free0 = 0;
+  bool refused = false;
+  if (!screens[s] && s != SCR_MAIN) {
+    free0 = heapFree();
+    const uint32_t need = (buildCost[s] ? buildCost[s] : BUILD_GUESS) + BUILD_ROOM;
+    if (free0 < need) {
+      LogSerial.printf("[mem] %s page not opened: %u bytes free, it needs about %u\n", SCR_NAME[s], (unsigned)free0,
+                       (unsigned)need);
+      refused = true;
+      s = SCR_MAIN;
+    }
+  }
+#endif
   if (!screens[s]) {
     switch (s) {
       case SCR_MAIN: screens[s] = mainCreate(); break;
@@ -170,8 +216,6 @@ void tShow(TScreen s) {
       default: return;  // not there yet
     }
   }
-  const TScreen prev = cur;
-  (void)prev;
   cur = s;
   tModalClose();
   if (s == SCR_DISPLAY) displayShow();
@@ -182,12 +226,16 @@ void tShow(TScreen s) {
   if (s == SCR_PROGEDIT) progEditShow();
   lv_screen_load(screens[s]);
 #if TUI_SMALL
-  // 320x240 (no PSRAM, short internal RAM): only the main screen stays; the others are built again when
-  // opened (a few ms), so their objects don't use RAM while they aren't shown
-  if (prev != s && prev != SCR_MAIN && screens[prev]) {
-    lv_obj_delete_async(screens[prev]);
-    screens[prev] = nullptr;
-    if (prev == SCR_PROGEDIT) progEditRelease();
+  if (free0 && s != SCR_MAIN) {  // measured: the page with its content
+    const size_t free1 = heapFree();
+    if (free1 < free0) buildCost[s] = (uint32_t)(free0 - free1);
+    LogSerial.printf("[mem] %s page: %u bytes (%u free)\n", SCR_NAME[s], (unsigned)buildCost[s], (unsigned)free1);
+  }
+  if (refused) {
+    char t[120];
+    snprintf(t, sizeof(t), "Not enough free memory for this page (%u kB). Close the web page and try again.",
+             (unsigned)(heapFree() / 1024));
+    tToast(t, true);
   }
 #endif
 }
