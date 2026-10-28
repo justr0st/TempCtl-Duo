@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>TempCtl Duo</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
-@font-face{font-family:"Barlow";font-weight:400;font-display:swap;src:url(/f/barlow-400.woff2) format("woff2")}
-@font-face{font-family:"Barlow";font-weight:500;font-display:swap;src:url(/f/barlow-500.woff2) format("woff2")}
-@font-face{font-family:"Barlow";font-weight:600 700;font-display:swap;src:url(/f/barlow-600.woff2) format("woff2")}
-@font-face{font-family:"Barlow Semi Condensed";font-weight:500 700;font-display:swap;src:url(/f/barlow-semi-condensed-600.woff2) format("woff2")}
+@font-face{font-family:"Barlow";font-weight:400;font-display:swap;src:url(f/barlow-400.woff2) format("woff2")}
+@font-face{font-family:"Barlow";font-weight:500;font-display:swap;src:url(f/barlow-500.woff2) format("woff2")}
+@font-face{font-family:"Barlow";font-weight:600 700;font-display:swap;src:url(f/barlow-600.woff2) format("woff2")}
+@font-face{font-family:"Barlow Semi Condensed";font-weight:500 700;font-display:swap;src:url(f/barlow-semi-condensed-600.woff2) format("woff2")}
 :root{--violet:#7650C8;--bg:#EDF0F1;--panel:#FFFFFF;--sunk:#F4F6F7;--line:#D3DADD;--text:#172024;--muted:#5B6970;--acc:#1F6FB2;--acc-ink:#FFFFFF;--amber:#A87400;--amber-bg:#FFF3D1;--danger:#B3261E;--ok:#2E7D32;--manual:#B85C00;
 --pvB:#1F6FB2;--spB:#4B8CC4;--pvT:#C65A14;--spT:#D9803F;
 --sans:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--cond:"Barlow Semi Condensed","Barlow",system-ui,sans-serif;color-scheme:light}
@@ -629,7 +629,7 @@ html:root .conn .head img{width:56px;height:56px;filter:drop-shadow(0 0 6px rgba
 <body>
 <div class="conn" id="conn" hidden>
   <div class="card">
-    <div class="head"><img src="/favicon.svg" alt=""><div><h1>TempCtl Duo</h1><small id="cVer"></small></div></div>
+    <div class="head"><img src="favicon.svg" alt=""><div><h1>TempCtl Duo</h1><small id="cVer"></small></div></div>
     <section class="panel"><h3><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14"/><path d="M9 6l3-3 3 3"/><path d="M12 13l-4-2.5V8"/><circle cx="8" cy="7" r="1.2"/><path d="M12 11l4-2V6.5"/><rect x="14.8" y="4.5" width="2.4" height="2.2"/><circle cx="12" cy="19" r="2"/></svg>USB cable</h3>
       <p>The device's page over its USB port: S3 the port marked "USB", CYD its only port. Needs Chrome or Edge.</p>
       <div class="row"><button class="pri" id="cUsb">Connect…</button></div></section>
@@ -640,23 +640,23 @@ html:root .conn .head img{width:56px;height:56px;filter:drop-shadow(0 0 6px rgba
     <div class="msg" id="cMsg" role="status"></div>
     <section class="panel wk"><h3><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/><path d="M10.2 7.6l4 2.4-4 2.4z"/></svg>Try the demo</h3>
       <p>This page with a simulated device: an 1100 W bottom and a 450 W top heater warming a GPU board. Start programs, edit them, change channels, colours and settings — no hardware needed. It runs in your browser and keeps your changes there.</p>
-      <div class="row"><a class="btn" href="https://tempctl-duo.just-r0st.workers.dev/demo/" target="_blank" rel="noopener">Open the demo ↗</a></div></section>
+      <div class="row"><a class="btn" href="https://justr0st.github.io/TempCtl-Duo/demo/" target="_blank" rel="noopener">Open the demo ↗</a></div></section>
     <section class="panel wk"><h3><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/><path d="M8 7h8M8 11h6"/></svg>Manual and wiring</h3>
       <p>How to build, wire, flash and use the device: wiring diagrams for both boards and pictures of every screen.</p>
-      <div class="links"><a href="https://tempctl-duo.just-r0st.workers.dev/wiki/Getting-started.html" target="_blank" rel="noopener">Getting started</a><a href="https://tempctl-duo.just-r0st.workers.dev/wiki/Hardware-S3.html" target="_blank" rel="noopener">Wiring S3</a><a href="https://tempctl-duo.just-r0st.workers.dev/wiki/Hardware-CYD.html" target="_blank" rel="noopener">Wiring CYD</a><a href="https://tempctl-duo.just-r0st.workers.dev/wiki/Troubleshooting.html" target="_blank" rel="noopener">Troubleshooting</a></div>
-      <div class="row"><a class="btn" href="https://tempctl-duo.just-r0st.workers.dev/wiki/" target="_blank" rel="noopener">Open the wiki ↗</a></div></section>
+      <div class="links"><a href="https://justr0st.github.io/TempCtl-Duo/wiki/Getting-started.html" target="_blank" rel="noopener">Getting started</a><a href="https://justr0st.github.io/TempCtl-Duo/wiki/Hardware-S3.html" target="_blank" rel="noopener">Wiring S3</a><a href="https://justr0st.github.io/TempCtl-Duo/wiki/Hardware-CYD.html" target="_blank" rel="noopener">Wiring CYD</a><a href="https://justr0st.github.io/TempCtl-Duo/wiki/Troubleshooting.html" target="_blank" rel="noopener">Troubleshooting</a></div>
+      <div class="row"><a class="btn" href="https://justr0st.github.io/TempCtl-Duo/wiki/" target="_blank" rel="noopener">Open the wiki ↗</a></div></section>
     <section class="panel" id="cDl" hidden><h3><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/></svg>Downloads</h3>
       <p id="cDlV"></p>
       <div class="dl" id="cDlApp"></div>
       <details><summary>Firmware for the boards</summary><div class="dlfw" id="cDlFw"></div>
         <p class="hint">Update: the device’s web page installs it by itself (Settings › Firmware update › Check for updates), or upload the file there. Full image: the first install of a new board over USB, written at address 0x0 (esptool or the ESP web flasher).</p></details>
       <p class="hint">The desktop app is not signed: Windows asks once (More info › Run anyway); macOS: unzip, then right-click › Open.</p>
-      <p class="hint">Open source, <a href="/LICENSE.txt" target="_blank" rel="noopener">MIT licence</a> · <a href="/THIRD-PARTY-NOTICES.txt" target="_blank" rel="noopener">third-party notices</a></p></section>
+      <p class="hint">Open source, <a href="LICENSE.txt" target="_blank" rel="noopener">MIT licence</a> · <a href="THIRD-PARTY-NOTICES.txt" target="_blank" rel="noopener">third-party notices</a></p></section>
   </div>
 </div>
 <div class="app">
 <aside id="side" aria-label="Pages">
-  <div class="brand"><img src="/favicon.svg" alt=""><span><b>TempCtl Duo</b><small id="fw"></small></span></div>
+  <div class="brand"><img src="favicon.svg" alt=""><span><b>TempCtl Duo</b><small id="fw"></small></span></div>
   <nav>
     <a href="#/" data-pg="status" class="on" aria-current="page"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 4-7 5 9"/><path d="M3 21h18"/></svg>Dashboard</a>
     <a href="#/programs" data-pg="programs"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Programs</a>
@@ -665,7 +665,7 @@ html:root .conn .head img{width:56px;height:56px;filter:drop-shadow(0 0 6px rgba
     <a href="#/log" data-pg="log"><svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>Log</a>
     <a href="#/settings" data-pg="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</a>
     <a href="#/tools" data-pg="tools"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 17.8V21h3.2l6.3-6.3a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg>Tools</a>
-    <a href="https://tempctl-duo.just-r0st.workers.dev/wiki/" target="_blank" rel="noopener" title="Manual, wiring and help on the release page (needs internet)"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/><path d="M8 7h8M8 11h6"/></svg>Help (wiki)<small>↗</small></a>
+    <a href="https://justr0st.github.io/TempCtl-Duo/wiki/" target="_blank" rel="noopener" title="Manual, wiring and help on the release page (needs internet)"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/><path d="M8 7h8M8 11h6"/></svg>Help (wiki)<small>↗</small></a>
   </nav>
   <div class="sctl" id="sCtl" aria-label="Run and channels" hidden>
     <div class="srun"><div class="st"><b id="sRunName"></b><small id="sRunSt"></small></div>
@@ -2762,7 +2762,8 @@ async function buildTimeForm(){
   mkForm('time',$('sTime'),[{h:'',fields:[
     {k:'time.zone',l:'Time zone',t:'sel',o,h:`For the times in the SD run logs (local time). This browser: ${esc(b.zone||b.fixed)}.`}]}],{title:'Clock',auto:true}); }
 /* ---------- releases on the hosted page (spec 9.13): /dl/manifest.json, built by .github/workflows/release.yml ---------- */
-const REL_HOST='tempctl-duo.just-r0st.workers.dev', REL_BASE=location.hostname===REL_HOST?'':'https://'+REL_HOST;
+// the release page (spec 9.13, 9.22): GitHub Pages, a project page under /TempCtl-Duo (the files: REL_BASE + /dl/…)
+const REL_HOST='justr0st.github.io', REL_BASE='https://'+REL_HOST+'/TempCtl-Duo';
 const verCmp=(a,b)=>{ const x=String(a||'').split('.'), y=String(b||'').split('.');
   for(let i=0;i<Math.max(x.length,y.length);i++){ const d=(parseInt(x[i],10)||0)-(parseInt(y[i],10)||0); if(d) return d<0?-1:1; } return 0; };
 const relDate=d=>{ const t=d?new Date(d):null; return t&&!isNaN(t)?t.toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}):''; };

@@ -33,7 +33,7 @@ The first install goes over USB; later updates go over Wi-Fi ([Updates and backu
 
 **Without a build environment** — the full image from the release page:
 
-1. Open <https://tempctl-duo.just-r0st.workers.dev>, *Downloads* › *Firmware for the boards* and download the
+1. Open <https://justr0st.github.io/TempCtl-Duo/>, *Downloads* › *Firmware for the boards* and download the
    **full image** of your board (`tempctl-duo-<version>-<env>-full.bin`: bootloader, partition table and
    firmware in one file).
 2. Write it at address **0x0** with esptool (`pip install esptool`), board on the USB port marked **"UART"**

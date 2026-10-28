@@ -49,10 +49,11 @@ bool releaseParse(const char* json, size_t len, const char* board, ReleaseInfo& 
   const char* md5 = f["md5"] | "";
   if (*md5 && !isHex32(md5)) return snprintf(err, n, "release %s: bad checksum", r.version), false;
   for (int i = 0; md5[i] && i < 32; ++i) r.md5[i] = (char)tolower((unsigned char)md5[i]);
-  if (url[0] == '/') {
+  if (url[0] == '/') {  // (on the release site, under its base path)
     snprintf(r.host, sizeof(r.host), "%s", RELEASE_HOST);
-    if (strlen(url) >= sizeof(r.path)) return snprintf(err, n, "release %s: file name too long", r.version), false;
-    snprintf(r.path, sizeof(r.path), "%s", url);
+    if (strlen(RELEASE_BASE) + strlen(url) >= sizeof(r.path))
+      return snprintf(err, n, "release %s: file name too long", r.version), false;
+    snprintf(r.path, sizeof(r.path), "%s%s", RELEASE_BASE, url);
   } else if (!strncmp(url, "https://", 8)) {
     const char* h = url + 8;
     const char* s = strchr(h, '/');

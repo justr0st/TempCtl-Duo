@@ -1,11 +1,13 @@
-# Release (spec 9.13): every push to main builds the four firmware images and the desktop app and publishes
-# them with the page on Cloudflare (https://tempctl-duo.just-r0st.workers.dev, files under /dl/, list in
+# Release (spec 9.13, 9.22): every push to main builds the four firmware images and the desktop app and
+# publishes them with the page on GitHub Pages (https://justr0st.github.io/TempCtl-Duo/, files under /dl/, list in
 # /dl/manifest.json; the wiki under /wiki/, the browser demo under /demo/). The device's web page (all boards)
-# and the S3 itself read the list to offer updates.
-# Needs two repository secrets (Settings > Secrets and variables > Actions):
-#   CLOUDFLARE_API_TOKEN   a token with the template "Edit Cloudflare Workers"
-#   CLOUDFLARE_ACCOUNT_ID  the account id (Workers & Pages overview, right side)
-# and Workers Builds on the Cloudflare side switched off (it would deploy the page without the release files).
+# and the S3 itself read the list to offer updates. A new version (FW_VERSION in src/version.h without a tag
+# v<version> yet) also becomes a GitHub release with the same files; a push without a version change only updates
+# the page.
+# Setup: Settings > Pages > Source: GitHub Actions (a public repository).
+# Transition (devices with 1.0.65 or older ask the Cloudflare page): while the secrets CLOUDFLARE_API_TOKEN (a
+# token with the template "Edit Cloudflare Workers") and CLOUDFLARE_ACCOUNT_ID exist, the same files also go to
+# https://tempctl-duo.just-r0st.workers.dev (Workers Builds there switched off). Remove the secrets to stop that.
 name: Release
 
 on:
@@ -20,16 +22,24 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write   # the GitHub release (tag + files)
+  pages: write      # GitHub Pages
+  id-token: write   # (deploy-pages)
 
 jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
     env:
       ENVS: s3 cyd-1xlocal-1x485 cyd-2xlocal cyd-2xlocal-2x485
+      HAS_CF: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # (the release notes: the commits since the last release tag)
 
       - uses: actions/setup-python@v5
         with:
@@ -99,7 +109,40 @@ jobs:
           path: dist/dl
           retention-days: 14
 
-      - name: Deploy to Cloudflare
+      - name: Upload the page (GitHub Pages)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy the page (GitHub Pages)
+        id: pages
+        uses: actions/deploy-pages@v4
+
+      - name: GitHub release (a new version only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(sed -n 's/^#define FW_VERSION "\(.*\)".*/\1/p' src/version.h | tr -d '\r')
+          if gh release view "v$V" >/dev/null 2>&1; then echo "release v$V exists: only the page was updated"; exit 0; fi
+          PREV=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          {
+            echo "## Changes"
+            if [ -n "$PREV" ]; then git log --no-merges --format='- %s' "$PREV..HEAD"; else git log -1 --format='- %s'; fi
+            echo
+            echo "## Files"
+            echo "- \`tempctl-duo-$V-<board>.bin\`: firmware update (web page *Settings › Firmware update*, SD card on the S3)"
+            echo "- \`tempctl-duo-$V-<board>-full.bin\`: first install over USB, written at address 0x0"
+            echo "- desktop app: Windows \`.exe\`, macOS \`.zip\`, Linux \`.tar.gz\`"
+            echo
+            echo "Boards: \`s3\` (ESP32-S3), \`cyd-1xlocal-1x485\`, \`cyd-2xlocal\`, \`cyd-2xlocal-2x485\` (CYD wirings A, B, C)."
+            echo "How to update: https://justr0st.github.io/TempCtl-Duo/wiki/Updates-and-backups.html"
+          } > /tmp/notes.md
+          cat /tmp/notes.md
+          gh release create "v$V" --target "$GITHUB_SHA" --title "TempCtl Duo $V" --notes-file /tmp/notes.md \
+            $(ls dist/dl/* | grep -v manifest.json)
+
+      - name: Deploy to Cloudflare (transition)
+        if: env.HAS_CF == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

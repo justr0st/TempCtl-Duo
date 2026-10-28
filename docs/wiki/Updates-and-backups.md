@@ -2,9 +2,10 @@
 
 ## Releases
 
-Every new firmware version is published on the release page **<https://tempctl-duo.just-r0st.workers.dev>**:
+Every new firmware version is published on the release page **<https://justr0st.github.io/TempCtl-Duo/>**:
 the update image and a full image for each board, and the desktop app for Windows, macOS and Linux. Only the
-newest release is online.
+newest release is on the release page; every version is also kept as a
+[GitHub release](https://github.com/justr0st/TempCtl-Duo/releases) with the same files.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/web/connect-dark.webp"><img src="img/web/connect-light.webp" alt="Release page: connect screen with the downloads" width="900"></picture>
 

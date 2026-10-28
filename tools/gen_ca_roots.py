@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Writes src/ca_roots.h: the root certificates the S3 trusts for the firmware download from the release page
-(spec 9.13, ota_net.cpp). Cloudflare issues the workers.dev certificates from Let's Encrypt, Google Trust Services
-or SSL.com (backup certificates: Sectigo); the roots below cover these chains and their cross-signs.
+(spec 9.13, ota_net.cpp). The release page is on GitHub Pages (justr0st.github.io: DigiCert or Sectigo
+certificates; with a custom domain Let's Encrypt); the earlier Cloudflare page (workers.dev: Let's Encrypt, Google
+Trust Services, SSL.com, backup Sectigo) stays covered too. The roots below cover these chains and cross-signs.
 Source: the Mozilla CA list of the Python package certifi (pip install certifi).
   python3 tools/gen_ca_roots.py"""
 import os, re, certifi
@@ -15,7 +16,7 @@ ROOTS = [  # subject CN in certifi's cacert.pem
     "Certum Trusted Network CA",                                      # (SSL.com cross-sign)
     "USERTrust RSA Certification Authority", "USERTrust ECC Certification Authority",
     "Sectigo Public Server Authentication Root R46", "Sectigo Public Server Authentication Root E46",
-    "DigiCert Global Root G2", "DigiCert Global Root G3",
+    "DigiCert Global Root G2", "DigiCert Global Root G3",             # (GitHub Pages)
 ]
 
 text = open(certifi.where(), encoding="utf-8").read()

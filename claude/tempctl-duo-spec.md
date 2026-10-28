@@ -2464,8 +2464,11 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   setting (run.spMargin), a cleared number pad entry is 0, the Modbus write limits paired on the S3.
 - **1.0.64** (2026-10-28, 41aadd2; after 1.0.63 = 0194f61): see 9.19 - web page: reorder phases / steps by dragging (and
   Alt+Up / Down), chart handles on a touch screen move after a short hold (a swipe scrolls the page).
-- **1.0.65** (2026-10-28; after 1.0.64 = 41aadd2): see 9.20, 9.21 - README shortened (features, screenshots,
+- **1.0.65** (2026-10-28, 352a605; after 1.0.64 = 41aadd2): see 9.20, 9.21 - README shortened (features, screenshots,
   wiring), its reference parts moved to the wiki (Web API, How it works inside), schematic PDFs linked, MIT License.
+- **1.0.66** (2026-10-28; after 1.0.65 = 352a605): see 9.22 - release page on GitHub Pages
+  (https://justr0st.github.io/TempCtl-Duo/, relative paths), a GitHub release per new version, Cloudflare kept
+  for the transition.
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
@@ -2816,6 +2819,33 @@ firmware can be rebuilt with a changed core); ESP-IDF Apache-2.0 and others; dem
 BSD-3). Apache-2.0 is permissive: no need to put the project under it (discussed with Rost). README "License",
 wiki For developers "License". `tools/build_site.py` copies both files to `/LICENSE.txt` and
 `/THIRD-PARTY-NOTICES.txt` (hosted page and desktop app), linked in the Downloads panel.
+
+### 9.22 Release page on GitHub Pages, GitHub releases (Rost 2026-10-28)
+
+Rost makes the repository public (history kept: nothing secret in it, checked) and moves the release page from
+Cloudflare to GitHub Pages as a project page: **https://justr0st.github.io/TempCtl-Duo/**. Every push builds as
+before; a new version (no tag `v<FW_VERSION>` yet) also becomes a **GitHub release** with the firmware images and
+the desktop apps (notes: the commit subjects since the previous release tag + what the files are); a push without
+a version change only updates the page (Rost asked whether automatic or manual: automatic, keyed to the
+version, as every commit here bumps it).
+- Paths: the page, the wiki and the demo use relative paths (`f/…`, `favicon.svg`, `LICENSE.txt`; wiki
+  `../favicon.svg`, `../f/`, `../`, `../demo/`; the demo page's own copy is rewritten to `../` by build_site.py),
+  so the same `dist/` works under `/TempCtl-Duo/` (GitHub) and at a root (device, launcher, Cloudflare).
+- Release base: web `REL_BASE = 'https://justr0st.github.io/TempCtl-Duo'` (always absolute; the hosted page, the
+  device's page, the desktop app); firmware `RELEASE_HOST "justr0st.github.io"`, `RELEASE_BASE "/TempCtl-Duo"`,
+  manifest `RELEASE_BASE "/dl/manifest.json"`; a manifest url `/dl/…` is under RELEASE_BASE (releaseParse; host
+  test). The manifest itself is unchanged, so devices with 1.0.65 or older reading it on Cloudflare (root) work.
+- `src/ca_roots.h` unchanged: it already has DigiCert Global Root G2 / G3 and the Sectigo / USERTrust roots
+  (GitHub Pages) and ISRG (a custom domain). DigiCert Global Root CA (G1) is no longer in certifi 2026.04.22.
+  To verify on the first S3 online update from GitHub.
+- release.yml: permissions contents / pages write + id-token; environment github-pages;
+  upload-pages-artifact@v3 + deploy-pages@v4; `gh release create` (once per version); Cloudflare deploy kept
+  for the transition while its secrets exist (`HAS_CF`). GitHub Pages: CORS `*` on every file (the device's page
+  reads the manifest and images from there), `_headers` ignored, 10 min cache.
+- Checked: the site under `/TempCtl-Duo/` (local server, github.io requests mapped to it): page (Downloads from the
+  manifest, licence links), wiki, demo: every request found, fonts loaded, 44 same-site links exist; at a root
+  the same. web_reorder / web_chart_hold ok.
+- Rost, once: repository public, *Settings › Pages › Source: GitHub Actions*; later delete the Cloudflare secrets.
 
 ## 10. Open items carried over from TempCtl
 

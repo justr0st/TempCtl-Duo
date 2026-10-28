@@ -1,6 +1,6 @@
 # Browser demo
 
-Try the web page without any hardware: **<https://tempctl-duo.just-r0st.workers.dev/demo/>** (any current
+Try the web page without any hardware: **<https://justr0st.github.io/TempCtl-Duo/demo/>** (any current
 browser, also on a phone). The connect screen of the release page and the desktop app has a *Try the demo*
 card that opens it.
 

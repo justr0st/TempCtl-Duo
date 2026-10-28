@@ -2,7 +2,7 @@
 
 Firmware for a two-channel temperature controller, made for the **bottom and top heater of a BGA rework
 station**: reflow and desolder profiles that drive both heaters together, from a touch screen, a web page or a
-USB cable. Version **1.0.65**.
+USB cable. Version **1.0.66**.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/wiki/img/touch/03-running-dark.png"><img src="docs/wiki/img/touch/03-running-light.png" alt="Touch screen of the ESP32-S3 build during a run" width="480"></picture>
 
@@ -24,9 +24,10 @@ USB cable. Version **1.0.65**.
   backups (S3).
 
 **[Wiki](docs/wiki/Home.md)** (instructions, wiring, every screen) ·
-**[Browser demo](https://tempctl-duo.just-r0st.workers.dev/demo/)** (the firmware with a simulated rework
-station, in your browser) · **[Release page](https://tempctl-duo.just-r0st.workers.dev)** (downloads, the page
-over USB)
+**[Browser demo](https://justr0st.github.io/TempCtl-Duo/demo/)** (the firmware with a simulated rework
+station, in your browser) · **[Release page](https://justr0st.github.io/TempCtl-Duo/)** (downloads, the page
+over USB) · **[Releases](https://github.com/justr0st/TempCtl-Duo/releases)** (every version's firmware and desktop
+app)
 
 > **Status:** local thermocouple + SSR channels are the tested path, on both boards. Modbus RTU channels are built
 > in but not tested with a real controller yet (beta).
@@ -92,7 +93,7 @@ Step by step: [Getting started](docs/wiki/Getting-started.md).
 | Maintenance | [Updates and backups](docs/wiki/Updates-and-backups.md) · [Desktop app and USB](docs/wiki/Desktop-app.md) · [Serial console](docs/wiki/Serial-console.md) · [Troubleshooting](docs/wiki/Troubleshooting.md) · [Modbus controllers (beta)](docs/wiki/Modbus.md) |
 | Developers | [For developers](docs/wiki/Development.md) (build, tests, releases, project layout) · [Web API](docs/wiki/Web-API.md) · [How it works inside](docs/wiki/Internals.md) |
 
-The wiki is also on the release page: <https://tempctl-duo.just-r0st.workers.dev/wiki/> (linked from the device's
+The wiki is also on the release page: <https://justr0st.github.io/TempCtl-Duo/wiki/> (linked from the device's
 web page, *Help (wiki)*). Design notes and decisions: `claude/tempctl-duo-spec.md`.
 
 ## Built with

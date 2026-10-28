@@ -20,10 +20,10 @@ Environments: `s3`, `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485` (`pi
 | Web page | Playwright against the browser demo (`tools/build_site.py <dir> --web`, served on :8790): `test/web_jumps.js` (layout jumps), `test/web_reorder.js` (reorder by drag), `test/web_chart_hold.js` (chart handles on touch) |
 | Browser demo | `demo/build.sh` (wasi-sdk): the firmware's control code as WebAssembly, `demo/README.md` |
 
-## Releases (GitHub Actions → Cloudflare)
+## Releases (GitHub Actions → GitHub Pages and Releases)
 
-Every push to `main` (pushes that change only documentation are skipped; *Actions › Release › Run workflow*
-starts one by hand) runs `.github/workflows/release.yml`:
+Every push to `main` (pushes that change only `README.md`, `claude/`, `hardware/`, `logo/` are skipped; *Actions ›
+Release › Run workflow* starts one by hand) runs `.github/workflows/release.yml`:
 
 1. PlatformIO builds the four envs; per env the update image (`firmware.bin`) and a full image for the
    first USB flash (`esptool merge_bin`: bootloader, partition table, boot_app0, firmware; write it at
@@ -31,22 +31,28 @@ starts one by hand) runs `.github/workflows/release.yml`:
 2. `demo/build.sh` with the wasi-sdk: the browser demo (the firmware's control code as WebAssembly, `demo/README.md`).
    `tools/launcher/build.sh all`: the desktop app for Windows, macOS (Apple silicon, Intel; zipped) and
    Linux (tar.gz).
-3. `tools/build_site.py dist --web` (the page, `_headers`, the wiki under `/wiki/`, the demo under `/demo/`), then `tools/release.py dist art`: the files go to
-   `dist/dl/` with the version in their names, plus `dist/dl/manifest.json` (version, date, commit; per board
-   url, size, MD5, SHA-256; the app files). It stops if an image does not carry its env and this version.
-4. `npx wrangler deploy --tag v<version> --message "<first line of the commit>"` (`wrangler.jsonc`, assets
-   from `dist/`): Cloudflare's deployment list shows the version and what changed (`release_local.sh`:
-   "<version> local build from <commit>"). The files are also kept 14 days as a run
-   artifact.
+3. `tools/build_site.py dist --web` (the page, the wiki under `wiki/`, the demo under `demo/`, the licence files),
+   then `tools/release.py dist art`: the files go to `dist/dl/` with the version in their names, plus
+   `dist/dl/manifest.json` (version, date, commit; per board url, size, MD5, SHA-256; the app files). It stops if
+   an image does not carry its env and this version. The files are also kept 14 days as a run artifact.
+4. **GitHub Pages**: `dist/` becomes the release page <https://justr0st.github.io/TempCtl-Duo/> (a project page:
+   every path in the page, the wiki and the demo is relative, so the same files work under `/TempCtl-Duo/` and
+   at a site's root). The device's page and the S3 read `/TempCtl-Duo/dl/manifest.json` there (`REL_BASE` in
+   `web/index.html`, `RELEASE_HOST` / `RELEASE_BASE` in `src/release.h`; a manifest url `/dl/…` is under that
+   base). GitHub Pages lets any site read the files (CORS), as the device's own page needs; it caches them for
+   10 min.
+5. **GitHub release**: a version that has no tag `v<version>` yet (FW_VERSION in `src/version.h`) becomes a
+   release with the firmware images and the desktop apps; its notes list the commits since the previous release
+   tag. A push without a version change only updates the page.
+6. **Cloudflare (transition)**: while the secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` exist, the
+   same `dist/` also goes to <https://tempctl-duo.just-r0st.workers.dev> (`wrangler deploy`), where devices and
+   desktop apps with 1.0.65 or older look for updates. Delete the secrets to stop it once those are updated.
 
-Setup, once: GitHub › repository › *Settings › Secrets and variables › Actions*: `CLOUDFLARE_API_TOKEN` (a
-Cloudflare API token from the template "Edit Cloudflare Workers") and `CLOUDFLARE_ACCOUNT_ID`; in Cloudflare
-*Workers & Pages › tempctl-duo › Settings › Build*: disconnect the Git repository (Workers Builds would
-otherwise deploy the page without the release files). `/dl/*` is served with `Access-Control-Allow-Origin: *`
-(the device's own page reads it) and `Cache-Control: no-cache`. A private repository has 2000 free Actions
-minutes a month; one release takes about 10–15.
+Setup, once: the repository public, *Settings › Pages › Source: GitHub Actions*. The S3 trusts the roots in
+`src/ca_roots.h` for its own download (`tools/gen_ca_roots.py`: GitHub's DigiCert / Sectigo chains, Let's
+Encrypt for a custom domain, the Cloudflare chains).
 
-**Without commit / push** (a test release from the PC, same steps, your own Cloudflare login): in the
+**Without commit / push** (a test release from the PC to Cloudflare, your own Cloudflare login): in the
 PlatformIO terminal, Git Bash: `bash tools/release_local.sh` (needs Node.js for `npx wrangler`, the first time
 `npx wrangler login`; Go for the desktop app, else `--no-app`; `--dry` builds `dist/` only).
 
@@ -98,7 +104,7 @@ hardware/cyd-schematic/   KiCad schematics of the three CYD wirings (+ PDF / PNG
 hardware/gen/             generator of both (Python 3: python3 make.py ..)
 web/, tools/web_embed.py  web page + fonts → src/web_assets.h (generated before each build)
 tools/build_site.py       the same page as static files (device URL layout), for the launcher / the hosted page
-wrangler.jsonc            the hosted page: Cloudflare Workers static assets (dist/, built by build_site.py --web)
+wrangler.jsonc            the hosted page on Cloudflare (transition; dist/, built by build_site.py --web)
 tools/release.py          release files + dl/manifest.json for the hosted page
 tools/release_local.sh    the same release from a PC, without commit / push
 docs/wiki/                the wiki (Markdown, _Sidebar.md = page list; img/: wiring SVGs, touch PNGs, web WebPs)
@@ -107,7 +113,7 @@ tools/wiki/               the wiki pictures: make_shots.sh (all), wiring.py, tou
                           mock/server.py (demo device), demo_run.cpp (runs from the firmware's run engine)
 demo/                     browser demo: the firmware's control code + simulated hardware (sim.cpp) as WebAssembly
                           (build.sh), demo.js connects the page to it; README.md
-.github/workflows/        release.yml: builds firmware + desktop app, deploys page and files to Cloudflare
+.github/workflows/        release.yml: builds firmware + desktop app, deploys page and files to GitHub Pages, GitHub releases
 tools/launcher/           local app: Go launcher (build.sh → dist/tempctl-duo-<version>.exe)
 test/ui_host/             touch UI preview on a PC (screenshots, random-tap test)
 test/console_host/        serial console on a PC (scripted commands -> output)

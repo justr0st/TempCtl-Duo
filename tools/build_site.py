@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Builds the static page site (spec 7b) from web/: the same files at the same URLs as the device serves
 them (tools/web_embed.py ASSETS), plus shell.html (the local app's tabs), for the local launcher
-(tools/launcher) and the hosted page (Cloudflare Workers static assets, wrangler.jsonc).
+(tools/launcher) and the hosted page (GitHub Pages, a project page under /TempCtl-Duo/: every path in the page,
+the wiki and the demo is relative; the same files on Cloudflare during the transition, wrangler.jsonc).
   python3 tools/build_site.py [out_dir]          (default: tools/launcher/site)
   python3 tools/build_site.py dist --web         the hosted page: without the launcher's shell.html, with _headers
                                                  and the wiki (docs/wiki -> /wiki/, tools/wiki_site.py) and the
@@ -12,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ["WEB_EMBED_NO_BUILD"] = "1"
 from web_embed import ASSETS, WEB, ROOT  # noqa: E402
 
-# hosted page (Cloudflare static assets): headers per path. HTML and icons are checked on every visit (the
+# hosted page on Cloudflare (transition; GitHub Pages ignores this file): headers per path. HTML and icons are checked on every visit (the
 # default); the fonts never change under their name. /dl/ = the release files (tools/release.py): the device's
 # own page (http://<device>/) fetches the manifest and the image from here, so they allow any origin.
 HEADERS = """/*
@@ -46,6 +47,13 @@ def build_demo(out):
                  ("<script>", '<script src="demo.js"></script>\n<script>')):
         if page.count(a) != 1:
             raise SystemExit("build_site: demo: %r not found once in web/index.html" % a)
+        page = page.replace(a, b)
+    # the page's own files (fonts, icons, licence) are relative to the site's root: one level up from /demo/
+    for a, b in (("url(f/", "url(../f/"), ('href="favicon', 'href="../favicon'), ('src="favicon', 'src="../favicon'),
+                 ('href="apple-touch-icon', 'href="../apple-touch-icon'), ('href="LICENSE.txt"', 'href="../LICENSE.txt"'),
+                 ('href="THIRD-PARTY-NOTICES.txt"', 'href="../THIRD-PARTY-NOTICES.txt"')):
+        if a not in page:
+            raise SystemExit("build_site: demo: %r not found in web/index.html" % a)
         page = page.replace(a, b)
     with open(os.path.join(d, "index.html"), "w", encoding="utf-8", newline="\n") as f:
         f.write(page)

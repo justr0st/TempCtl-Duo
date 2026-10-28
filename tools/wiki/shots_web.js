@@ -9,7 +9,7 @@ const fs = require('fs');
 const BASE = process.argv[2] || 'http://127.0.0.1:8770';
 const OUT = process.argv[3] || path.join(__dirname, '..', '..', 'docs', 'wiki', 'img', 'web');
 const ONLY = process.argv[4] || '';
-const REL = 'https://tempctl-duo.just-r0st.workers.dev';
+const REL = 'https://justr0st.github.io/TempCtl-Duo';  // (the release page: web/index.html REL_BASE)
 const VER = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'version.h'), 'utf8').match(/FW_VERSION "([^"]+)"/)[1];
 const NEXT = VER.replace(/(\d+)$/, n => String(+n + 1));
 

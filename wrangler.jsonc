@@ -1,3 +1,5 @@
+// Transition only (spec 9.22): the release page moved to GitHub Pages (https://justr0st.github.io/TempCtl-Duo/);
+// the same files still go to Cloudflare while devices with 1.0.65 or older ask it (release.yml, secrets set).
 // The hosted page (spec 7b) with the release files (spec 9.13): Cloudflare Workers static assets, no Worker
 // code. Built and deployed by .github/workflows/release.yml on every push to main:
 //   python3 tools/build_site.py dist --web && python3 tools/release.py dist art && npx wrangler deploy

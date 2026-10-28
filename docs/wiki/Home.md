@@ -42,7 +42,7 @@ Two boards run the same firmware:
 ## Where to start
 
 No hardware yet? The [browser demo](Demo.md) runs the firmware with a simulated rework station in your browser:
-<https://tempctl-duo.just-r0st.workers.dev/demo/>.
+<https://justr0st.github.io/TempCtl-Duo/demo/>.
 
 1. [Getting started](Getting-started.md): parts, flashing, Wi-Fi, the first run.
 2. Wiring: [ESP32-S3 board](Hardware-S3.md) or [CYD board](Hardware-CYD.md).

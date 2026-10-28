@@ -1109,7 +1109,7 @@ static void testRelease() {
   char e[120] = "";
   CHECK(releaseParse(M, strlen(M), "s3", r, e, sizeof(e)));
   CHECK(!strcmp(r.version, "1.0.52") && !strcmp(r.date, "2026-10-20T09:15:00Z") && r.size == 1923456);
-  CHECK(!strcmp(r.host, RELEASE_HOST) && !strcmp(r.path, "/dl/tempctl-duo-1.0.52-s3.bin"));
+  CHECK(!strcmp(r.host, RELEASE_HOST) && !strcmp(r.path, RELEASE_BASE "/dl/tempctl-duo-1.0.52-s3.bin"));
   CHECK(!strcmp(r.md5, "0123456789abcdef0123456789abcdef"));
   CHECK(releaseParse(M, strlen(M), "cyd-2xlocal", r, e, sizeof(e)));
   CHECK(!strcmp(r.host, "other.example") && !strcmp(r.path, "/dl/c.bin") && !r.md5[0]);

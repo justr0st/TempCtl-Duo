@@ -139,10 +139,10 @@ def lists(lines, i):
     return build(0, items[0][0])[0] if items else ""
 
 
-CSS = """@font-face{font-family:"Barlow";font-weight:400;font-display:swap;src:url(/f/barlow-400.woff2) format("woff2")}
-@font-face{font-family:"Barlow";font-weight:500;font-display:swap;src:url(/f/barlow-500.woff2) format("woff2")}
-@font-face{font-family:"Barlow";font-weight:600 700;font-display:swap;src:url(/f/barlow-600.woff2) format("woff2")}
-@font-face{font-family:"Barlow Semi Condensed";font-weight:600;font-display:swap;src:url(/f/barlow-semi-condensed-600.woff2) format("woff2")}
+CSS = """@font-face{font-family:"Barlow";font-weight:400;font-display:swap;src:url(../f/barlow-400.woff2) format("woff2")}
+@font-face{font-family:"Barlow";font-weight:500;font-display:swap;src:url(../f/barlow-500.woff2) format("woff2")}
+@font-face{font-family:"Barlow";font-weight:600 700;font-display:swap;src:url(../f/barlow-600.woff2) format("woff2")}
+@font-face{font-family:"Barlow Semi Condensed";font-weight:600;font-display:swap;src:url(../f/barlow-semi-condensed-600.woff2) format("woff2")}
 :root{--bg:#EDF0F1;--panel:#FFFFFF;--sunk:#F4F6F7;--line:#D3DADD;--text:#172024;--muted:#5B6970;--acc:#1F6FB2;--amber:#A87400;--amber-bg:#FFF3D1;--danger:#B3261E;--danger-bg:#FDECEA;--code:#EEF1F3;color-scheme:light}
 @media (prefers-color-scheme:dark){:root{--bg:#11161A;--panel:#192024;--sunk:#141A1E;--line:#2B353B;--text:#E3E9EB;--muted:#8D9BA2;--acc:#86C9FF;--amber:#F3C335;--amber-bg:#3A3217;--danger:#F2867E;--danger-bg:#3A1F1D;--code:#222B30;color-scheme:dark}}
 *{box-sizing:border-box}html{scroll-padding-top:16px}
@@ -180,10 +180,10 @@ blockquote.q p{margin:4px 0}blockquote.warning,blockquote.safety{border-color:va
 
 TPL = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{title} · TempCtl Duo wiki</title><link rel="icon" href="/favicon.svg"><style>{css}</style></head>
-<body><div class="wrap"><aside id="side"><div class="bar"><a class="brand" href="index.html"><img src="/favicon.svg" alt=""><span><b>TempCtl Duo</b><small>Wiki · firmware {ver}</small></span></a>
+<title>{title} · TempCtl Duo wiki</title><link rel="icon" href="../favicon.svg"><style>{css}</style></head>
+<body><div class="wrap"><aside id="side"><div class="bar"><a class="brand" href="index.html"><img src="../favicon.svg" alt=""><span><b>TempCtl Duo</b><small>Wiki · firmware {ver}</small></span></a>
 <button class="top" onclick="document.getElementById('side').classList.toggle('open')">Pages</button></div>
-<nav>{nav}<div class="ext"><a href="/">Open the app (connect · downloads)</a><a href="/demo/">Try the demo (simulated device)</a></div></nav></aside>
+<nav>{nav}<div class="ext"><a href="../">Open the app (connect · downloads)</a><a href="../demo/">Try the demo (simulated device)</a></div></nav></aside>
 <main>{body}<div class="pn">{prev}{next}</div></main></div></body></html>
 """
 

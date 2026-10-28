@@ -6,7 +6,7 @@ Serial API), and the page must come from the desktop app or the release page (no
 
 ## The desktop app
 
-Download it from the release page <https://tempctl-duo.just-r0st.workers.dev> (*Downloads*): one file, nothing
+Download it from the release page <https://justr0st.github.io/TempCtl-Duo/> (*Downloads*): one file, nothing
 to install.
 
 | System | File | First start |
