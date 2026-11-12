@@ -23,6 +23,7 @@
 #include <algorithm>
 #include "settings.h"
 #include "tc_sensor.h"
+#include "sdlog.h"
 
 static int fails = 0;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++fails; } } while (0)
@@ -248,6 +249,140 @@ static void testSeqRun() {
   w.ok[0] = true;
   w.runTo(162);
   CHECK(!w.e.waiting());
+}
+
+// SD run log: an event row's empty fields reach exactly the header's kind column (1.0.67 added columns)
+static void testSdlogColumns() {
+  const std::string h = SDLOG_HEADER;
+  auto commasBefore = [&](const char* col) {
+    const size_t at = h.find(std::string(",") + col + ",");
+    return at == std::string::npos ? -1 : (int)std::count(h.begin(), h.begin() + at + 1, ',');
+  };
+  const int kind = commasBefore("kind");
+  CHECK(kind == 18 && commasBefore("bottom_ff") == 7 && commasBefore("top_i") == 15);
+  CHECK((int)strlen(SDLOG_GAP_TIME_KIND) == kind);     // "<time>" + gap + "kind,event"
+  CHECK((int)strlen(SDLOG_GAP_RUN_KIND) == kind - 1);  // "<time>,<run_s>" + gap + "kind,event"
+  CHECK(std::string(SDLOG_GAP_TIME_KIND).find_first_not_of(',') == std::string::npos);
+  CHECK(std::string(SDLOG_GAP_RUN_KIND).find_first_not_of(',') == std::string::npos);
+}
+
+// feed-forward settings (spec 9.23): defaults off, JSON, limits, the autotune result taken over
+static void testFfSettings() {
+  Settings st;
+  settingsDefaults(st, BoardLimits{true, 2, false});
+  for (int c = 0; c < 2; ++c)
+    CHECK(st.ch[c].loc.ff == 0 && st.ch[c].loc.ffK == 3 && st.ch[c].loc.ffTau == 120 && st.ch[c].loc.ffDead == 8);
+  char msg[96];
+  for (bool api : {false, true}) {  // round trip, file and API form
+    Settings a = st;
+    a.ch[1].loc.ff = 1;
+    a.ch[1].loc.ffK = 2.5f;
+    a.ch[1].loc.ffTau = 300;
+    a.ch[1].loc.ffDead = 15;
+    JsonDocument d;
+    settingsToJson(a, d.to<JsonObject>(), api);
+    CHECK(d["channels"][1]["local"]["ff"] == true && d["channels"][1]["local"]["ffK"] == 2.5f);
+    Settings b = st;
+    CHECK(settingsFromJson(d.as<JsonObjectConst>(), b, msg, sizeof(msg)));
+    CHECK(b.ch[1].loc.ff == 1 && b.ch[1].loc.ffK == 2.5f && b.ch[1].loc.ffTau == 300 && b.ch[1].loc.ffDead == 15);
+    CHECK(b.ch[0].loc.ff == 0 && b.ch[0].loc.ffK == 3);
+  }
+  // a file from before 1.0.67 (no ff keys): the defaults, feed-forward off
+  {
+    JsonDocument d;
+    settingsToJson(st, d.to<JsonObject>(), false);
+    for (int c = 0; c < 2; ++c)
+      for (const char* k : {"ff", "ffK", "ffTau", "ffDead"}) d["channels"][c]["local"].remove(k);
+    Settings b;
+    settingsDefaults(b, BoardLimits{true, 2, false});
+    CHECK(settingsFromJson(d.as<JsonObjectConst>(), b, msg, sizeof(msg)));
+    CHECK(b.ch[0].loc.ff == 0 && b.ch[1].loc.ffK == 3 && b.ch[1].loc.ffTau == 120 && b.ch[1].loc.ffDead == 8);
+  }
+  // limits
+  Settings v = st;
+  v.ch[0].loc.ffK = 50;
+  v.ch[0].loc.ffTau = 1;
+  v.ch[0].loc.ffDead = -1;
+  v.ch[1].loc.ffK = 0;
+  v.ch[1].loc.ffTau = 9000;
+  v.ch[1].loc.ffDead = 500;
+  v.ch[1].loc.ff = 7;
+  settingsValidate(v, BoardLimits{true, 2, false}, msg, sizeof(msg));
+  CHECK(v.ch[0].loc.ffK == 20 && v.ch[0].loc.ffTau == 5 && v.ch[0].loc.ffDead == 0);
+  CHECK(v.ch[1].loc.ffK == 0.1f && v.ch[1].loc.ffTau == 3600 && v.ch[1].loc.ffDead == 120 && v.ch[1].loc.ff == 1);
+  // autotune Accept: PID always, the model only when there is one, the switch never
+  LocalChannelSettings l = st.ch[0].loc;
+  TuneResult r{};
+  r.kp = 5;
+  r.ki = 0.05f;
+  r.kd = 30;
+  r.modelOk = false;
+  r.ffK = 9;
+  settingsTakeTune(l, r);
+  CHECK(l.kp == 5 && l.ki == 0.05f && l.kd == 30 && l.ffK == 3 && l.ff == 0);
+  r.modelOk = true;
+  r.ffK = 2.2f;
+  r.ffTau = 200;
+  r.ffDead = 12;
+  settingsTakeTune(l, r);
+  CHECK(l.ffK == 2.2f && l.ffTau == 200 && l.ffDead == 12 && l.ff == 0);
+  l.ff = 1;
+  settingsTakeTune(l, r);
+  CHECK(l.ff == 1);
+}
+
+// setpoint preview for the feed-forward (spec 9.23): SP and slope sec seconds ahead, the engine untouched
+static int gPrevEvents = 0;
+static void countEv(const PlanEv&, void*) { ++gPrevEvents; }
+static void testSpPreview() {
+  static DuoProgram p;
+  progExample(0, p);  // bottom 25 -> 150 in 60 s, hold 60 s, Pause, Both (bottom 160, top waits, 25 -> 150 in 60 s)
+  Sim s;
+  s.e.setEventSink(countEv, nullptr);
+  CHECK(s.start(p));
+  float sp = 0, rate = 0;
+  s.runTo(10);
+  const int ev = gPrevEvents;
+  const float el = s.e.elapsed(), sp0 = s.sp(0);
+  CHECK(s.e.preview(0, 8, sp, rate) && near(sp, 25 + 125 * 18 / 60.0f) && near(rate, 125 / 60.0f));
+  CHECK(gPrevEvents == ev && near(s.e.elapsed(), el) && near(s.sp(0), sp0) && s.e.seq().st == Stage::Ramp);
+  CHECK(!s.e.preview(1, 8, sp, rate) && isnan(sp) && rate == 0);  // the top is idle in this phase
+  s.runTo(57);  // 3 s before the ramp's end: the hold at 150
+  CHECK(s.e.preview(0, 8, sp, rate) && near(sp, 150) && rate == 0);
+  s.runTo(115);  // the hold ends at 120, then a program pause: nothing moves ahead of it
+  CHECK(s.e.preview(0, 8, sp, rate) && near(sp, 150) && rate == 0);
+  // user pause during a ramp: the setpoint stays where it is
+  Sim u;
+  u.start(p);
+  u.runTo(10);
+  u.e.pause();
+  CHECK(u.e.preview(0, 8, sp, rate) && near(sp, u.sp(0)) && rate == 0);
+  // run edit: a new target during the ramp, the preview follows the new course
+  Sim r;
+  r.start(p);
+  r.runTo(10);
+  char err[64];
+  CHECK(r.e.setTarget(0, -1, 60, err, sizeof(err)));
+  CHECK(r.e.preview(0, 8, sp, rate) && sp <= 60.01f && !near(sp, 25 + 125 * 18 / 60.0f));
+  // wait for bottom: the top doesn't start in the preview while the bottom is short of its target
+  progExample(0, p);  // (the run edit above changed the running copy)
+  Sim w;
+  w.autoCont = true;
+  w.start(p);
+  w.runTo(119);
+  w.ok[0] = false;
+  w.runTo(160);
+  CHECK(w.e.waiting() && !w.e.preview(1, 8, sp, rate));
+  // Timeline: each lane on its own (top idle 120 s, then 25 -> 150 in 40 s; bottom holds 150)
+  progExample(2, p);
+  Sim t;
+  t.start(p);
+  t.runTo(115);
+  CHECK(t.e.preview(1, 8, sp, rate) && near(sp, 25 + 125 * 3 / 40.0f) && near(rate, 125 / 40.0f));
+  CHECK(t.e.preview(0, 8, sp, rate) && near(sp, 150) && rate == 0);
+  // not running: nothing to preview
+  RunEngine idle;
+  CHECK(!idle.preview(0, 8, sp, rate) && isnan(sp));
 }
 
 static void testNextPause() {
@@ -858,6 +993,115 @@ static void testPid() {
   CHECK(peak < 215);
 }
 
+// ------------------------------------------------------------------ feed-forward (spec 9.23)
+
+// ramp 25 -> 200 degC at 0.5 degC/s (350 s), then a hold of holdSec on the Heater above; m = the model the
+// controller uses (null = no feed-forward). lag = max(SP - PV) from 30 s to the ramp's end, over = peak - 200
+struct RampRun {
+  float lag = 0, over = 0, end = 0;
+};
+static RampRun runRamp(const FfModel* m, float holdSec) {
+  auto spAt = [](float t) { return fminf(25 + 0.5f * t, 200); };
+  auto rateAt = [](float t) { return 25 + 0.5f * t < 200 ? 0.5f : 0.0f; };
+  Heater h;
+  Pid pid;
+  PidParams cl{3.0f, 0.03f, 20, 100};
+  RampRun r;
+  float T = h.T, peak = 0;
+  const int n = (int)((350 + holdSec) * 4);
+  for (int i = 0; i < n; ++i) {
+    const float t = i * 0.25f;
+    const float ff = m ? ffInput(*m, spAt(t), spAt(t + m->dead), rateAt(t + m->dead), 0) : NAN;
+    T = h.step(pid.update(cl, spAt(t), roundf(T * 4) / 4, 0.25f, ff, m ? rateAt(t) : 0), 0.25f);
+    if (t >= 30 && t <= 350 && spAt(t) - T > r.lag) r.lag = spAt(t) - T;
+    if (T > peak) peak = T;
+  }
+  r.over = peak - 200;
+  r.end = T;
+  return r;
+}
+
+static void testFeedForward() {
+  const FfModel m{3, 120, 8};
+  CHECK(near(ffOutput(m, 200, 0), 58.33f));
+  CHECK(near(ffOutput(m, 200, 0.5f), 78.33f));
+  CHECK(near(ffOutput(m, 100, -1), -15));
+  // the preview counts for 2 s; older (control task stalled) or none: the channel's own SP, no ramp power
+  CHECK(near(ffInput(m, 100, 150, 1, 2000), ffOutput(m, 150, 1)));
+  CHECK(near(ffInput(m, 100, 150, 1, 2001), ffOutput(m, 100, 0)));
+  CHECK(near(ffInput(m, 100, NAN, 1, 0), ffOutput(m, 100, 0)));
+  // a slow control cycle (bus.pollMs up to 10 s): the limit is 2.5 cycles (at least 2 s), so a preview is not
+  // dropped between two regular updates
+  CHECK(ffMaxAgeMs(250) == 2000 && ffMaxAgeMs(3000) == 7500 && ffMaxAgeMs(0) == 2000);
+  CHECK(near(ffInput(m, 100, 150, 1, 5000, ffMaxAgeMs(3000)), ffOutput(m, 150, 1)));
+  CHECK(near(ffInput(m, 100, 150, 1, 7501, ffMaxAgeMs(3000)), ffOutput(m, 100, 0)));
+  // ramp tracking with the true model vs. the PID alone
+  const RampRun no = runRamp(nullptr, 300), ff = runRamp(&m, 300);
+  CHECK(ff.lag < 3.0f && ff.over < 2.0f && ff.lag < no.lag);
+  printf("feed-forward ramp 0.5 C/s: lag %.1f / %.1f C, overshoot %.1f / %.1f C (PID alone / with FF)\n", no.lag, ff.lag,
+         no.over, ff.over);
+  // a wrong model (K -30 % / +30 %) still settles on the hold, no runaway-like overshoot
+  for (float f : {0.7f, 1.3f}) {
+    const FfModel w{3 * f, 120, 8};
+    const RampRun r = runRamp(&w, 600);
+    CHECK(fabsf(r.end - 200) < 1.0f && r.over < 15);
+  }
+  // bumpless: switching FF on / off at a settled hold moves the output by less than 2 %
+  {
+    Heater h;
+    Pid pid;
+    PidParams cl{3.0f, 0.03f, 20, 100};
+    float T = h.T, o = 0;
+    for (int i = 0; i < 4 * 1800; ++i) T = h.step(o = pid.update(cl, 200, roundf(T * 4) / 4, 0.25f), 0.25f);
+    const float f = ffOutput(m, 200, 0);
+    pid.shiftIntegral(-f);
+    const float on = pid.update(cl, 200, roundf(T * 4) / 4, 0.25f, f);
+    CHECK(fabsf(on - o) < 2.0f && near(pid.lastFf(), f));
+    pid.shiftIntegral(pid.lastFf());
+    const float off = pid.update(cl, 200, roundf(T * 4) / 4, 0.25f);
+    CHECK(fabsf(off - on) < 2.0f && pid.lastFf() == 0);
+    // FF above the output limit (a slow heater's ramp power): used as at most outMax, so switching on is still
+    // bumpless (the integrator can take back at most outMax) and a too-low model K stays correctable
+    const float big = 200, used = clampFf(big, cl.outMax);
+    CHECK(used == 100 && clampFf(-15, cl.outMax) == 0 && clampFf(40, 60) == 40);
+    pid.shiftIntegral(-used);
+    const float on2 = pid.update(cl, 200, roundf(T * 4) / 4, 0.25f, big);
+    CHECK(fabsf(on2 - off) < 2.0f && pid.lastFf() == 100);
+  }
+  // with FF the derivative leaves the ramp alone: PV rising with the setpoint ramp gives no D share; without FF
+  // the ramp rate is ignored (derivative on the measurement as before)
+  {
+    Pid a, b;
+    const PidParams pd{0, 0, 20, 100};
+    a.update(pd, 100, 100, 0.25f, 0, 1.0f);
+    b.update(pd, 100, 100, 0.25f, NAN, 1.0f);
+    float oa = 0, ob = 0;
+    for (int i = 1; i <= 40; ++i) {  // 10 s, PV and SP both rising 1 degC/s
+      oa = a.update(pd, 100 + i * 0.25f, 100 + i * 0.25f, 0.25f, 0, 1.0f);
+      ob = b.update(pd, 100 + i * 0.25f, 100 + i * 0.25f, 0.25f, NAN, 1.0f);
+    }
+    CHECK(near(oa, 0, 0.5f) && ob == 0);  // b: D = -20 % -> clamped at 0
+    // no kick on a setpoint jump with FF either
+    Pid j;
+    j.update(pd, 100, 100, 0.25f, 0, 0);
+    CHECK(near(j.update(pd, 200, 100, 0.25f, 0, 0), 0));
+  }
+  // running(): false until the first update after a reset (the local task shifts the integrator for a
+  // bumpless switch only while the PID is already running, not at the start)
+  {
+    Pid r;
+    CHECK(!r.running());
+    r.update(PidParams{3.0f, 0.03f, 20, 100}, 100, 90, 0.25f);
+    CHECK(r.running());
+    r.reset();
+    CHECK(!r.running());
+  }
+  // cooling ramp: negative FF, the output is clamped at 0 (no NaN)
+  Pid c;
+  const float o = c.update(PidParams{3.0f, 0.03f, 20, 100}, 100, 150, 0.25f, ffOutput(m, 100, -1));
+  CHECK(o == 0);
+}
+
 // ------------------------------------------------------------------ runaway
 
 static void testRunaway() {
@@ -1154,6 +1398,23 @@ static void testAutotune() {
   }
   CHECK(fabsf(T - 200) < 1.0f && peak < 203);
   CHECK(!r.fast && !strstr(at.message(), "faster"));
+  // heater model for the feed-forward (spec 9.23): K from the relay bias, tau and dead time from Ku / Pu
+  CHECK(r.modelOk && strstr(at.message(), "heater model") && !strstr(at.message(), "no heater model"));
+  CHECK(fabsf(r.ffK - 3) < 0.6f && fabsf(r.ffTau - 120) < 24 && fabsf(r.ffDead - 8) < 1.6f);
+  printf("autotune model: K %.2f (3), tau %.0f s (120), dead %.1f s (8)\n", r.ffK, r.ffTau, r.ffDead);
+  {  // the ramp of testFeedForward with the measured model instead of the true one
+    const FfModel am{r.ffK, r.ffTau, r.ffDead};
+    const RampRun rr = runRamp(&am, 300);
+    CHECK(rr.lag < 3.0f && rr.over < 2.0f);
+    printf("feed-forward with the autotune model: lag %.1f C, overshoot %.1f C\n", rr.lag, rr.over);
+  }
+  {
+    float k, tau, dead;
+    CHECK(!fopdtFromRelay(200, 58, 0.005f, 30, k, tau, dead));  // K * Ku <= 1: no first-order + dead-time fit
+    CHECK(!fopdtFromRelay(200, 0, 2, 30, k, tau, dead));        // no bias
+    CHECK(!fopdtFromRelay(200, 2, 5, 30, k, tau, dead));        // K 87.5 degC/%: outside 0.1 ... 20
+    CHECK(fopdtFromRelay(200, 58.33f, 2, 30, k, tau, dead) && near(k, 3, 0.01f) && tau > 0 && dead > 0);
+  }
   // the faster rule (1.0.60): same Kp / Td, integral time 0.7 Pu; reaches 199.5 degC sooner, little overshoot
   {
     Heater hf;
@@ -1183,6 +1444,7 @@ static void testAutotune() {
   Heater h3;
   c.sp = 100;
   CHECK(runTune(h3, at, c));
+  CHECK(at.result().modelOk && fabsf(at.result().ffK - 3) < 0.6f);
   // output limit is respected
   Heater h4;
   c.sp = 150;
@@ -1474,6 +1736,9 @@ int main() {
   testProgJson();
   testPreview();
   testSeqRun();
+  testSpPreview();
+  testFfSettings();
+  testSdlogColumns();
   testNextPause();
   testTimelineRun();
   testSeqEdits();
@@ -1492,6 +1757,7 @@ int main() {
   testSettingsVariants();
   testThermocouple();
   testPid();
+  testFeedForward();
   testRunaway();
   testGuard();
   testImageScanner();

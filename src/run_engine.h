@@ -136,6 +136,10 @@ class RunEngine {
   // take no time, idle channels at pv (may be null) when a ramp starts after
   // Idle. Returns the remaining seconds.
   float forecast(PlanFn fn, void* user, const float* pv, EvFn efn = nullptr, void* euser = nullptr) const;
+  // Setpoint of ch sec seconds ahead, for the feed-forward (spec 9.23): a copy of the engine runs on with the
+  // PVs frozen (a wait for the bottom stays unsatisfied, a pause stops it). rate = its slope there in degC/s
+  // (signed, 0 when not ramping). False (sp NaN, rate 0) when not running, ch not in the program or idle then.
+  bool preview(int ch, float sec, float& sp, float& rate) const;
 
  private:
   struct Gen {

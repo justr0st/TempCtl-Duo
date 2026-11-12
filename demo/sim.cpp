@@ -411,6 +411,10 @@ EXPORT("demo_boot") int demo_boot(double wallNow, int restarted) {
     b.kp = 8.7f, b.ki = 0.126f, b.kd = 134.0f;
     t.kp = 5.7f, t.ki = 0.166f, t.kd = 44.0f;
     b.tuneFast = t.tuneFast = 1;
+    // feed-forward model (spec 9.23) from the same autotune (firmware autotune.cpp on heatStep: bottom at
+    // 150 degC, top at 200 degC, the other heater off); feed-forward itself stays off, as on a device
+    b.ffK = 3.05f, b.ffTau = 984, b.ffDead = 25;
+    t.ffK = 2.39f, t.ffTau = 273, t.ffDead = 12.5f;
   }
   if (first || noMon) {
     Guard g;

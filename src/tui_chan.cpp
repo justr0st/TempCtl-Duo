@@ -75,6 +75,15 @@ static float gTuneMax(const Settings& s, int c) { return s.ch[c].loc.tuneMaxMin;
 static void sTuneMax(Settings& s, int c, float v) { s.ch[c].loc.tuneMaxMin = (uint16_t)v; }
 static float gTuneFast(const Settings& s, int c) { return s.ch[c].loc.tuneFast; }
 static void sTuneFast(Settings& s, int c, float v) { s.ch[c].loc.tuneFast = v != 0; }
+// feed-forward (spec 9.23)
+static float gFf(const Settings& s, int c) { return s.ch[c].loc.ff; }
+static void sFf(Settings& s, int c, float v) { s.ch[c].loc.ff = v != 0; }
+static float gFfK(const Settings& s, int c) { return s.ch[c].loc.ffK; }
+static void sFfK(Settings& s, int c, float v) { s.ch[c].loc.ffK = v; }
+static float gFfTau(const Settings& s, int c) { return s.ch[c].loc.ffTau; }
+static void sFfTau(Settings& s, int c, float v) { s.ch[c].loc.ffTau = v; }
+static float gFfDead(const Settings& s, int c) { return s.ch[c].loc.ffDead; }
+static void sFfDead(Settings& s, int c, float v) { s.ch[c].loc.ffDead = v; }
 
 static const uint32_t BAUDS[] = {2400, 4800, 9600, 19200, 38400};
 
@@ -434,6 +443,12 @@ static const Field CH_FIELDS[] = {
      "% out. per \xC2\xB0" "C"},
     {F_NUM, "Ki", "% per \xC2\xB0" "C\xC2\xB7s", 0, 100, 4, "", nullptr, fg32, fs33, isLoc, L_JOIN | L_COL, 80},
     {F_NUM, "Kd", "%\xC2\xB7s per \xC2\xB0" "C", 0, 10000, 1, "", nullptr, fg34, fs35, isLoc, L_JOIN | L_COL, 80},
+    {F_SW, "Feed-forward", "Adds the output the heater model expects for the setpoint ahead; the PID corrects the rest",
+     0, 0, 0, nullptr, nullptr, gFf, sFf, isLoc, L_GAP10},
+    {F_NUM, "Heater model: \xC2\xB0" "C per % output", "Measured by the autotune", 0.1f, 20, 2, "", nullptr, gFfK, sFfK,
+     isLoc, L_COL, 70, "Heater model", "\xC2\xB0" "C per % out."},
+    {F_NUM, "Time constant", nullptr, 5, 3600, 0, "s", nullptr, gFfTau, sFfTau, isLoc, L_JOIN | L_COL, 70},
+    {F_NUM, "Dead time", nullptr, 0, 120, 1, "s", nullptr, gFfDead, sFfDead, isLoc, L_JOIN | L_COL, 70},
     {F_NUM, "SSR window", "The SSR is on for the output share of every window", 0.2f, 10, 1, "s", nullptr,
      fg36, fs37, isLoc, L_GAP10},
     {F_NUM, "Max. output", nullptr, 0, 100, 0, "%", nullptr, fg38, fs39, isLoc},
@@ -578,17 +593,14 @@ static void onTune(lv_event_t* e) {
   } else if (a == 2 && t.state == TuneState::Done) {  // accept
     {
       Guard g;
-      LocalChannelSettings& l = gSettings.ch[tab].loc;
-      l.kp = t.res.kp;
-      l.ki = t.res.ki;
-      l.kd = t.res.kd;
+      settingsTakeTune(gSettings.ch[tab].loc, t.res);
     }
     saveSettingsAndNotify();
     localCtrlTuneClear(tab);
     loadE();
     eDirty = false;
     build();
-    tToast("PID values taken over.");
+    tToast(t.res.modelOk ? "PID values and heater model taken over." : "PID values taken over.");
   } else if (a == 3) {
     localCtrlTuneClear(tab);
   }
@@ -605,7 +617,11 @@ static void tuneUpdate() {
       snprintf(b, sizeof(b), "Running at %.0f \xC2\xB0" "C (%s), cycle %d, %s. %s", t.sp, t.res.fast ? "faster" : "slow", t.cycle, el, t.msg);
       break;
     case TuneState::Done:
-      snprintf(b, sizeof(b), "Done: Kp %.2f, Ki %.4f, Kd %.1f. Take them over?", t.res.kp, t.res.ki, t.res.kd);
+      if (t.res.modelOk)
+        snprintf(b, sizeof(b), "Done: Kp %.2f, Ki %.4f, Kd %.1f; heater model %.2f \xC2\xB0" "C/%%, %.0f s, %.1f s. Take them over?",
+                 t.res.kp, t.res.ki, t.res.kd, t.res.ffK, t.res.ffTau, t.res.ffDead);
+      else
+        snprintf(b, sizeof(b), "Done: Kp %.2f, Ki %.4f, Kd %.1f (no heater model). Take them over?", t.res.kp, t.res.ki, t.res.kd);
       break;
     case TuneState::Failed: snprintf(b, sizeof(b), "Failed: %s", t.msg); break;
     default: strlcpy(b, "Find PID values:\nthe heater is switched on and off around a test temperature.", sizeof(b)); break;

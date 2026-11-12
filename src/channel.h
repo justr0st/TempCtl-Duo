@@ -23,6 +23,7 @@ struct ChannelLive {
   bool pvValid; float pv; uint8_t pvFlag;
   bool spEffValid; float spEff;
   bool outValid; float out;
+  float ff, integ;          // local: feed-forward share and integrator of the output % (NaN = none, spec 9.23)
   bool statusValid; uint16_t status;
   bool alarmValid; uint16_t alarm;
   bool manualOn; float manualSp; bool manualSynced;

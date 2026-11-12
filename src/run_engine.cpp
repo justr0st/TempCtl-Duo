@@ -1032,6 +1032,21 @@ void RunEngine::emit(PlanFn fn, void* user, float t, float d) const {
   }
 }
 
+bool RunEngine::preview(int ch, float sec, float& sp, float& rate) const {
+  sp = NAN;
+  rate = 0;
+  if (!active() || ch < 0 || ch >= NUM_CHANNELS || !used_[ch]) return false;
+  RunEngine s = *this;
+  s.evFn_ = nullptr;
+  s.evUser_ = nullptr;
+  if (sec > 0) s.tick(sec, s.lastPv_, s.pvOk_);
+  const ChOut o = s.out(ch);
+  if (o.idle || isnan(o.sp)) return false;
+  sp = o.sp;
+  rate = o.moving && o.rampLeft > 0 ? (o.target - o.sp) / o.rampLeft : 0;
+  return true;
+}
+
 float RunEngine::forecast(PlanFn fn, void* user, const float* pv, EvFn efn, void* euser) const {
   if (!active()) return 0;
   RunEngine s = *this;

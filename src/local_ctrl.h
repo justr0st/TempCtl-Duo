@@ -24,6 +24,11 @@ void localCtrlTick();  // one pass of the local task (every 50 ms; the browser d
 // enabled = the channel is of type local (else its SSR stays off and it is not read)
 void localCtrlConfigure(int ch, bool enabled, const LocalChannelSettings& l);
 void localCtrlSetSp(int ch, float sp);
+// Feed-forward preview (spec 9.23), from the control task every cycle while the channel's FF is on: the
+// setpoint ffDead s ahead and its slope there, and the ramp rate now (degC/s). spAhead NaN = none (manual, no
+// run): the local task uses its own setpoint without ramp power; so it does for a stale preview.
+// A preview counts for 2.5 control cycles (cycleMs = bus.pollMs), at least 2 s.
+void localCtrlSetPreview(int ch, float spAhead, float rateAhead, float rateNow, uint32_t cycleMs);
 // Returns false if the outputs can't be switched on (fault latched, not configured)
 bool localCtrlSetOutputs(int ch, bool on);
 
@@ -37,6 +42,8 @@ struct LocalStatus {
   float sp;
   bool on;           // outputs on (PID active)
   float out;         // PID output %
+  float ff;          // its feed-forward share % (NaN: FF off or the PID not running)
+  float integ;       // the PID's integrator % (NaN: the PID not running)
   uint8_t fault;     // ChannelFault (latched)
   char faultText[64];
   bool tuning;       // autotune running (drives the SSR instead of the PID)

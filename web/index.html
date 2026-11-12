@@ -1623,12 +1623,18 @@ async function tuneAction(i,a){
 const tuneAsked={};
 function tuneOffer(i,a){ const k=`${a.ku}/${a.pu}/${a.kp}`; if(tuneAsked[i]===k) return; if(page!=='status'||$('tuneDlg').open||document.querySelector('dialog[open]')) return;
   tuneAsked[i]=k; tuneDialog(i,a); }
-let tuneCh=-1, tuneEdit=false;
+let tuneCh=-1, tuneEdit=false, tuneModel=null;
+// the heater model of an autotune result (feed-forward, spec 9.23); l = the channel's current local settings
+function tuneModelText(a,l){ const m=a.model;
+  if(!m) return 'No heater model from this test (feed-forward keeps its current model).';
+  return `Heater model: ${(+m.k).toFixed(2)} °C per % output, time constant ${Math.round(m.tau)} s, dead time ${(+m.dead).toFixed(1)} s`+
+    (l?` (current ${(+l.ffK).toFixed(2)} / ${Math.round(l.ffTau)} s / ${(+l.ffDead).toFixed(1)} s). Accept takes it over; feed-forward stays ${l.ff?'on':'off'}.`:'.'); }
 async function tuneDialog(i,a){
   if(!CFG) await loadCfg();
   const l=CFG&&CFG.channels[i]?CFG.channels[i].local:null; tuneCh=i; tuneEdit=false;
   $('tdTitle').textContent=`${chName(i)}: autotune done`;
-  $('tdTxt').textContent=`Test at ${f1(a.sp)} °C: Ku ${(+a.ku).toFixed(2)}, Pu ${Math.round(a.pu)} s. Accept the proposed PID values, edit them first, or dismiss them (the current values stay).`;
+  $('tdTxt').textContent=`Test at ${f1(a.sp)} °C: Ku ${(+a.ku).toFixed(2)}, Pu ${Math.round(a.pu)} s. Accept the proposed PID values, edit them first, or dismiss them (the current values stay). ${tuneModelText(a,l)}`;
+  tuneModel=a.model||null;
   const cur=k=>l?(+l[k]):NaN, D={kp:3,ki:5,kd:2};
   $('tdBody').innerHTML=['kp','ki','kd'].map(k=>`<tr><td>${k[0].toUpperCase()+k.slice(1)}</td><td class="n">${isNaN(cur(k))?'–':cur(k).toFixed(D[k])}</td>
     <td class="n"><span id="tdv_${k}">${(+a[k]).toFixed(D[k])}</span><input type="number" id="tdi_${k}" step="any" value="${(+a[k]).toFixed(D[k])}" hidden aria-label="New ${k}"></td></tr>`).join('');
@@ -1638,8 +1644,9 @@ $('tdEdit').onclick=()=>{ tuneEdit=true; for(const k of ['kp','ki','kd']){ $('td
 $('tdAccept').onclick=async()=>{ const i=tuneCh; if(i<0) return;
   if(!tuneEdit){ const r=await api('/api/autotune',{ch:i,cmd:'accept'}); if(r.err) return setMsg('tdMsg',r.err,true); }
   else { const body={}, v={}; for(const k of ['kp','ki','kd']){ v[k]=parseFloat($('tdi_'+k).value); if(isNaN(v[k])||v[k]<0) return setMsg('tdMsg','Enter numbers (0 or more).',true); sp(body,`channels.${i}.local.${k}`,v[k]); }
+    if(tuneModel){ sp(body,`channels.${i}.local.ffK`,+tuneModel.k); sp(body,`channels.${i}.local.ffTau`,+tuneModel.tau); sp(body,`channels.${i}.local.ffDead`,+tuneModel.dead); }  // (as Accept does)
     const r=await postCfg(body); if(r.err) return setMsg('tdMsg',r.err,true); CFG=r; await api('/api/autotune',{ch:i,cmd:'discard'}); }
-  $('tuneDlg').close(); await loadCfg(); note(`${chName(i)}: new PID values saved.`); poll(); };
+  $('tuneDlg').close(); await loadCfg(); note(`${chName(i)}: new PID values${tuneModel?' and heater model':''} saved.`); poll(); };
 $('tdDismiss').onclick=async()=>{ const i=tuneCh; $('tuneDlg').close(); if(i>=0) await api('/api/autotune',{ch:i,cmd:'discard'}); poll(); };
 $('tdLater').onclick=()=>$('tuneDlg').close();
 $('chans').addEventListener('click',async e=>{
@@ -2634,6 +2641,10 @@ function chanGroups(i){ const P=`channels.${i}.`, ty=t=>g=>g(P+'type')===t;
      {k:P+'local.kp',l:'Kp',rl:'Kp · Ki · Kd',t:'num',min:0,max:1000,step:0.01,rh:'Kp in % / °C, Ki in % / (°C·s), Kd in %·s / °C. The PID autotune finds them.'},
      {k:P+'local.ki',l:'Ki',t:'num',min:0,max:100,step:0.0001,j:true},
      {k:P+'local.kd',l:'Kd',t:'num',min:0,max:10000,step:0.1,j:true},
+     {k:P+'local.ff',l:'Feed-forward',t:'sw',def:false,h:'Adds the output the heater model expects for the setpoint ahead (holding + ramp power); the PID corrects the rest. The autotune measures the model.'},
+     {k:P+'local.ffK',l:'°C per % output',rl:'Heater model',t:'num',min:0.1,max:20,step:0.01,rh:'°C per % output · time constant · dead time (the setpoint is looked at this far ahead). The autotune measures them.'},
+     {k:P+'local.ffTau',l:'Time constant',t:'num',min:5,max:3600,step:1,u:'s',j:true},
+     {k:P+'local.ffDead',l:'Dead time',t:'num',min:0,max:120,step:0.5,u:'s',j:true},
      {k:P+'local.windowSec',l:'SSR window',t:'num',min:0.2,max:10,step:0.1,u:'s',h:'The SSR is on for the output share of every window'},
      {k:P+'local.maxOut',l:'Max. output',t:'num',min:0,max:100,u:'%'},
      {k:P+'local.maxTemp',l:'Max. temperature (outputs off above)',t:'num',min:50,max:600,u:'°C'}]},
@@ -2692,7 +2703,7 @@ $('pg-channels').addEventListener('click',async e=>{
   if(d.at!=null){ const i=+d.ch, cmd=d.at;
     if(cmd==='start'){ const sp=parseFloat($('atSp'+i).value); if(isNaN(sp)) return; setMsg('atMsg'+i,'Starting…'); const r=await api('/api/autotune',{ch:i,cmd,sp}); setMsg('atMsg'+i,r.err||(r.ok?'':'Not started: see the message on the Dashboard.'),!!r.err||!r.ok); }
     else if(cmd==='stop'||cmd==='discard'){ const r=await api('/api/autotune',{ch:i,cmd}); setMsg('atMsg'+i,r.err||'',!!r.err); }
-    else if(cmd==='accept'){ const r=await api('/api/autotune',{ch:i,cmd}); if(r.err){ setMsg('atMsg'+i,r.err,true); return; } await loadCfg(); setMsg('atMsg'+i,'New PID values saved.'); }
+    else if(cmd==='accept'){ const r=await api('/api/autotune',{ch:i,cmd}); if(r.err){ setMsg('atMsg'+i,r.err,true); return; } await loadCfg(); setMsg('atMsg'+i,r.model?'New PID values and heater model saved.':'New PID values saved.'); }
     poll(); return; }
   if(d.pread!=null){ readParams(+d.pread); return; }
 });
@@ -2741,6 +2752,7 @@ function updChanPage(){
       if(a){ if(a.state==='running') h=`<p>Running at ${f1(a.sp)} °C (${a.fast?'faster':'slow, no overshoot'}): cycle ${a.cycle}, ${fmt(a.elapsed)} — ${esc(a.msg)}</p>`;
         else if(a.state==='done'){ const l=cc.local; h=`<p>${esc(a.msg)} (Ku ${(+a.ku).toFixed(2)}, Pu ${Math.round(a.pu)} s)</p><table class="t"><thead><tr><th></th><th>Kp</th><th>Ki</th><th>Kd</th></tr></thead><tbody>
           <tr><td>Proposed</td><td class="n">${(+a.kp).toFixed(3)}</td><td class="n">${(+a.ki).toFixed(5)}</td><td class="n">${(+a.kd).toFixed(2)}</td></tr><tr><td>Current</td><td class="n">${(+l.kp).toFixed(3)}</td><td class="n">${(+l.ki).toFixed(5)}</td><td class="n">${(+l.kd).toFixed(2)}</td></tr></tbody></table>
+          <p class="hint">${tuneModelText(a,l)}</p>
           <div class="row"><button class="pri" data-at="accept" data-ch="${i}">Accept</button><button data-at="discard" data-ch="${i}">Discard</button></div>`; }
         else if(a.state==='failed') h=`<p class="msg bad">Autotune failed: ${esc(a.msg)}</p><div class="row"><button data-at="discard" data-ch="${i}">Clear</button></div>`; }
       if($('atRes'+i).dataset.h!==h){ $('atRes'+i).innerHTML=h; $('atRes'+i).dataset.h=h; }

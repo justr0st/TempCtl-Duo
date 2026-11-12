@@ -449,6 +449,8 @@ static const char* const H_SETTINGS[] = {
     "  median=on|off  medianN=<n>   median filter over the last 3, 5, 7 or 9 readings",
     "  tuneMaxMin=<min>             autotune time limit, 10 ... 240",
     "  tuneFast=on|off              autotune rule: off = slow, no overshoot; on = faster (a little overshoot)",
+    "  ff=on|off                    feed-forward: adds the heater model's output for the setpoint ahead",
+    "  ffK=<C/%>  ffTau=<s>  ffDead=<s>  heater model: 0.1 ... 20 / 5 ... 3600 / 0 ... 120 (the autotune measures it)",
     "  e.g. set b.local.calOffset=-1.5 b.local.kp=2.5 b.local.ki=0.02 b.local.kd=40",
     "",
 #if HAS_MONITOR
@@ -1284,12 +1286,14 @@ static void cmdTune(const Args& a) {
     if (t.state != TuneState::Done) return err("no autotune result for %s", chWord(ch));
     {
       Guard g;
-      gSettings.ch[ch].loc.kp = t.res.kp;
-      gSettings.ch[ch].loc.ki = t.res.ki;
-      gSettings.ch[ch].loc.kd = t.res.kd;
+      settingsTakeTune(gSettings.ch[ch].loc, t.res);
     }
     saveSettingsAndNotify();
     localCtrlTuneClear(ch);
+    if (t.res.modelOk)
+      return say("%s: PID values and heater model taken over: kp %.3g ki %.3g kd %.3g, ffK %.2f ffTau %.0f ffDead %.1f "
+                 "(feed-forward %s)", chWord(ch), t.res.kp, t.res.ki, t.res.kd, t.res.ffK, t.res.ffTau, t.res.ffDead,
+                 gSettings.ch[ch].loc.ff ? "on" : "off");
     return say("%s: PID values taken over: kp %.3g ki %.3g kd %.3g", chWord(ch), t.res.kp, t.res.ki, t.res.kd);
   }
   if (!strcmp(what, "discard")) {
@@ -1299,7 +1303,11 @@ static void cmdTune(const Args& a) {
   }
   // no sub-command: the state
   if (t.state == TuneState::Running) say("%s: autotune at %.0f \xC2\xB0" "C, cycle %d", chWord(ch), t.sp, t.cycle);
-  else if (t.state == TuneState::Done) say("%s: autotune done: kp %.3g ki %.3g kd %.3g (accept / discard)", chWord(ch), t.res.kp, t.res.ki, t.res.kd);
+  else if (t.state == TuneState::Done) {
+    say("%s: autotune done: kp %.3g ki %.3g kd %.3g (accept / discard)", chWord(ch), t.res.kp, t.res.ki, t.res.kd);
+    if (t.res.modelOk) say("  heater model: ffK %.2f ffTau %.0f ffDead %.1f", t.res.ffK, t.res.ffTau, t.res.ffDead);
+    else say("  no heater model from this test");
+  }
   else if (t.state == TuneState::Failed) say("%s: autotune failed: %s", chWord(ch), t.msg);
   else say("%s: no autotune (tune %s start temp=<C>)", chWord(ch), a.word(1));
 }
@@ -1346,6 +1354,10 @@ static const SKey KEYS[] = {
     {KS_CH, K_INT, "local.medianN", 3, 9, nullptr},
     {KS_CH, K_INT, "local.tuneMaxMin", 10, 240, nullptr},
     {KS_CH, K_BOOL, "local.tuneFast", 0, 0, nullptr},
+    {KS_CH, K_BOOL, "local.ff", 0, 0, nullptr},
+    {KS_CH, K_NUM, "local.ffK", 0.1f, 20, nullptr},
+    {KS_CH, K_NUM, "local.ffTau", 5, 3600, nullptr},
+    {KS_CH, K_NUM, "local.ffDead", 0, 120, nullptr},
     RUNAWAY("local."),
     {KS_CH, K_INT, "modbus.addr", 1, 247, nullptr},
     {KS_CH, K_CHOICE, "modbus.profile", 0, 0, "pma|generic"},

@@ -147,7 +147,8 @@ saved at most every 30 s and before a requested restart).
 **Run logs (SD card)** (Log page), S3 only: one CSV file per program run on the display's micro-SD card
 (FAT32, folder `runs`, name = start time (local) + program, or start / run number when the clock is
 not set): a row every second — `time` (local, `2026-10-13 01:05:35`), `run_s, where` (phase / steps),
-per channel `pv, sp` (active setpoint), `prog` (program setpoint), `out` (%), `state`, then `monitor_pv`
+per channel `pv, sp` (active setpoint), `prog` (program setpoint), `out` (%), `ff` (its feed-forward share, local
+channels with feed-forward on), `i` (the PID's integral part, local channels), `state`, then `monitor_pv`
 (the monitor channel; empty while off) — and a row for
 each event during the run (`kind, event`). Written every 30 s and at the end of the run (a failed
 write is tried again every 5 s; nothing is lost while the rows fit into 192 kB); list with Download /

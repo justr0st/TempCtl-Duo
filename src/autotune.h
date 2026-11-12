@@ -31,7 +31,15 @@ struct TuneResult {
   float bias, d;        // relay centre and half swing %
   float kp, ki, kd;     // proposed PID (Tyreus-Luyben, or the faster rule)
   bool fast;            // the faster rule (set at the start)
+  // heater model for the feed-forward (spec 9.23), first order + dead time; modelOk false = no plausible fit
+  bool modelOk;
+  float ffK, ffTau, ffDead;  // degC per %, time constant s, dead time s
 };
+
+// First order + dead time from a relay test (spec 9.23): K = (sp - 25) / bias (the holding power at sp);
+// with w = 2 pi / Pu: w tau = sqrt((K Ku)^2 - 1), dead = (pi - atan(w tau)) / w. False when K Ku <= 1 or a
+// value falls outside the settings' ranges (K 0.1 ... 20, tau 5 ... 3600 s, dead 0 ... 120 s).
+bool fopdtFromRelay(float sp, float bias, float ku, float pu, float& k, float& tau, float& dead);
 
 class RelayAutotune {
  public:

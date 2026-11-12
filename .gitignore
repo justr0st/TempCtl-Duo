@@ -26,3 +26,6 @@ __pycache__/
 
 # old local files (not in the repo)
 .old/
+
+# Claude
+CLAUDE.md

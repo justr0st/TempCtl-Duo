@@ -1055,6 +1055,8 @@ int main(int argc, char** argv) {
   tap(SMALL ? 85 : 98, SMALL ? 18 : 22);  // first channel (local)
   scrollToLabel("PID control");
   shot("27-chan-pid");
+  scrollToLabel("Feed-forward");
+  shot("27b-chan-ff");
   scrollToLabel("Thermal protection");
   shot("28-chan-runaway");
   lv_obj_scroll_to_y(lv_obj_get_child(lv_screen_active(), 1), 3000, LV_ANIM_OFF);
