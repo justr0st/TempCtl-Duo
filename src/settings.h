@@ -5,6 +5,7 @@
 // validation here are pure C++ (no Arduino), so they are host-tested.
 #pragma once
 #include <ArduinoJson.h>
+#include "autotune.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -84,6 +85,12 @@ struct LocalChannelSettings {
   uint8_t medianN;      // ... over the last 3, 5, 7 or 9 readings
   uint16_t tuneMaxMin;  // autotune gives up after this many minutes (10 ... 240)
   uint8_t tuneFast;     // autotune rule: 0 slow / no overshoot (Tyreus-Luyben), 1 faster (integral time 0.7 Pu)
+  // feed-forward (spec 9.23): heater model first order + dead time; the autotune measures it, ff stays off
+  // until switched on
+  uint8_t ff;
+  float ffK;            // degC per % output, 0.1 ... 20
+  float ffTau;          // time constant s, 5 ... 3600
+  float ffDead;         // dead time s, 0 ... 120 (the setpoint preview looks this far ahead)
 };
 
 constexpr size_t CH_NAME_LEN = 17;  // 16 characters
@@ -184,6 +191,9 @@ void settingsDefaults(Settings& s, const BoardLimits& lim);
 // message if something had to be changed that the caller asked for explicitly
 // (used to reject a POST); the settings are corrected either way.
 bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n);
+// autotune Accept (web, touch, console): the proposed PID, and the heater model when the autotune found one;
+// the feed-forward switch stays as it is (spec 9.23)
+void settingsTakeTune(LocalChannelSettings& l, const TuneResult& r);
 // Lowest polling interval for these channels: 100 ms when every channel in use is local with a MAX31855,
 // else 250 ms (a MAX6675 converts in up to 220 ms; Modbus needs the bus time). settingsValidate raises pollMs.
 uint16_t pollMinMs(const Settings& s);

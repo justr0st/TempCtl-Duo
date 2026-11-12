@@ -85,8 +85,26 @@ void RelayAutotune::finishCycle() {
   const float ti = (c_.fast ? 0.7f : 2.2f) * pu, td = pu / 6.3f;
   res_.ki = res_.kp / ti;
   res_.kd = res_.kp * td;
+  res_.modelOk = fopdtFromRelay(c_.sp, bias_, ku, pu, res_.ffK, res_.ffTau, res_.ffDead);
   state_ = TuneState::Done;
-  snprintf(msg_, sizeof(msg_), "done: Ku %.2f, Pu %.0f s%s", ku, pu, c_.fast ? ", faster" : "");
+  snprintf(msg_, sizeof(msg_), "done: Ku %.2f, Pu %.0f s%s, %s", ku, pu, c_.fast ? ", faster" : "",
+           res_.modelOk ? "heater model" : "no heater model");
+}
+
+bool fopdtFromRelay(float sp, float bias, float ku, float pu, float& k, float& tau, float& dead) {
+  k = tau = dead = 0;
+  if (!(bias > 0) || !(ku > 0) || !(pu > 0)) return false;
+  const float K = (sp - 25.0f) / bias;
+  const float x = K * ku;
+  if (!(x > 1)) return false;
+  const float w = 2 * 3.14159265f / pu;
+  const float wt = sqrtf(x * x - 1);
+  const float T = wt / w, D = (3.14159265f - atanf(wt)) / w;
+  if (K < 0.1f || K > 20 || T < 5 || T > 3600 || D < 0 || D > 120) return false;
+  k = K;
+  tau = T;
+  dead = D;
+  return true;
 }
 
 float RelayAutotune::update(float pv, float dt) {

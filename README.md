@@ -8,7 +8,8 @@ USB cable. Version **1.0.66**.
 
 **Main features**
 
-- **Two channels**, bottom and top: each one **local** (thermocouple + SSR, PID with autotune on the ESP32),
+- **Two channels**, bottom and top: each one **local** (thermocouple + SSR, PID with autotune on the ESP32,
+  optional feed-forward for close ramp tracking),
   **Modbus RTU** (an RS485 controller such as a PMA KS 40-1; beta) or off. Optional third thermocouple to watch
   (S3).
 - **20 programs** that drive both channels: *Sequence* (phases one after another, "wait for the bottom", pauses

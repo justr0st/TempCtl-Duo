@@ -92,6 +92,10 @@ static void channelDefaults(ChannelSettings& c, int ch, uint8_t type) {
   c.loc.medianN = 3;
   c.loc.tuneMaxMin = 70;
   c.loc.tuneFast = 0;
+  c.loc.ff = 0;  // feed-forward off until switched on; model placeholders until an autotune
+  c.loc.ffK = 3;
+  c.loc.ffTau = 120;
+  c.loc.ffDead = 8;
 }
 
 void settingsDefaults(Settings& s, const BoardLimits& lim) {
@@ -216,6 +220,17 @@ uint16_t pollMinMs(const Settings& s) {
   return 100;
 }
 
+void settingsTakeTune(LocalChannelSettings& l, const TuneResult& r) {
+  l.kp = r.kp;
+  l.ki = r.ki;
+  l.kd = r.kd;
+  if (r.modelOk) {
+    l.ffK = r.ffK;
+    l.ffTau = r.ffTau;
+    l.ffDead = r.ffDead;
+  }
+}
+
 bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) {
   if (msg && n) msg[0] = 0;
   bool ok = true;
@@ -305,6 +320,10 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
     clampv(c.loc.kp, 0.0f, 1000.0f);
     clampv(c.loc.ki, 0.0f, 100.0f);
     clampv(c.loc.kd, 0.0f, 10000.0f);
+    c.loc.ff = c.loc.ff ? 1 : 0;
+    clampv(c.loc.ffK, 0.1f, 20.0f);
+    clampv(c.loc.ffTau, 5.0f, 3600.0f);
+    clampv(c.loc.ffDead, 0.0f, 120.0f);
     clampv(c.loc.windowSec, 0.2f, 10.0f);
     clampv(c.loc.maxOut, 0.0f, 100.0f);
     clampv(c.loc.maxTemp, 50.0f, 600.0f);
@@ -616,6 +635,10 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
     l["medianN"] = c.loc.medianN;
     l["tuneMaxMin"] = c.loc.tuneMaxMin;
     l["tuneFast"] = c.loc.tuneFast != 0;
+    l["ff"] = c.loc.ff != 0;
+    l["ffK"] = c.loc.ffK;
+    l["ffTau"] = c.loc.ffTau;
+    l["ffDead"] = c.loc.ffDead;
   }
   JsonObject mo = o["monitor"].to<JsonObject>();
   mo["on"] = s.mon.on != 0;
@@ -887,6 +910,10 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
         R.num(l, pl, "medianN", c.loc.medianN);
         R.num(l, pl, "tuneMaxMin", c.loc.tuneMaxMin);
         R.flag(l, pl, "tuneFast", c.loc.tuneFast);
+        R.flag(l, pl, "ff", c.loc.ff);
+        R.num(l, pl, "ffK", c.loc.ffK);
+        R.num(l, pl, "ffTau", c.loc.ffTau);
+        R.num(l, pl, "ffDead", c.loc.ffDead);
       }
     }
   }

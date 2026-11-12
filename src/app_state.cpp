@@ -1247,6 +1247,8 @@ static void sdRow(const float* pv, const bool* pvOk, const float* spNow, const C
     r.sp[i] = spNow[i];
     r.prog[i] = out[i].inProgram && !out[i].idle ? out[i].sp : NAN;
     r.out[i] = C.outValid ? C.out : NAN;
+    r.ff[i] = C.ff;
+    r.integ[i] = C.integ;
     const ChState cs = eng.chState(i);
     r.state[i] = cs != ChState::None ? chStateName(cs) : man[i].on ? "manual" : C.type == CH_OFF ? "" : "-";
   }
@@ -1797,6 +1799,7 @@ static void pollChannel(int i) {
   static ChannelLive v;  // value fields from the backend (static: keep it off the task stack)
   char err[80];
   memset(&v, 0, sizeof(v));
+  v.ff = v.integ = NAN;  // (only a local channel has them)
   Channel& c = *slots[i].active;
   const bool ok = c.poll(v, err, sizeof(err));
   bool changed;
@@ -1810,6 +1813,7 @@ static void pollChannel(int i) {
     L.pvValid = v.pvValid; L.pv = v.pv; L.pvFlag = v.pvFlag;
     L.spEffValid = v.spEffValid; L.spEff = v.spEff;
     L.outValid = v.outValid; L.out = v.out;
+    L.ff = v.ff; L.integ = v.integ;
     L.statusValid = v.statusValid; L.status = v.status;
     L.alarmValid = v.alarmValid; L.alarm = v.alarm;
     L.coldC = v.coldC;
@@ -1875,6 +1879,17 @@ static void pollChannels() {
       break;
     }
   }
+}
+
+// feed-forward of a local channel (spec 9.23): in a run the setpoint ffDead s ahead (and the ramp rate now),
+// else none (the local task then uses its own setpoint, without ramp power)
+static void feedPreview(int ch) {
+  if (s.ch[ch].type != CH_LOCAL || !s.ch[ch].loc.ff) return;
+  float spA, rateA, spN, rateN;
+  if (inRun(ch) && eng.preview(ch, s.ch[ch].loc.ffDead, spA, rateA) && eng.preview(ch, 0, spN, rateN))
+    localCtrlSetPreview(ch, spA, rateA, rateN, s.pollMs);
+  else
+    localCtrlSetPreview(ch, NAN, 0, 0, s.pollMs);
 }
 
 static void driveSetpoint(int ch) {
@@ -2134,6 +2149,7 @@ static void cycle(float dt) {
       if (commOk[i]) driveSetpoint(i);
   for (int i = 0; i < NUM_CHANNELS; ++i)
     if (commOk[i]) driveManual(i);
+  for (int i = 0; i < NUM_CHANNELS; ++i) feedPreview(i);
   if (eng.active()) runTrack(false);
   // interrupted run: its channels' outputs off; dismissed: controller gradient / front panel back
   for (int i = 0; i < NUM_CHANNELS; ++i) {
@@ -2539,7 +2555,7 @@ void appInit() {
     ChannelLive& L = gLive.ch[i];
     L.type = gSettings.ch[i].type;
     strlcpy(L.name, gSettings.ch[i].name, sizeof(L.name));
-    L.pv = L.spEff = L.out = NAN;
+    L.pv = L.spEff = L.out = L.ff = L.integ = NAN;
     L.manualSp = gSettings.ch[i].manualSp;
     LogSerial.printf("[settings] channel %d: %s, %s\n", i + 1, gSettings.ch[i].name, channelTypeName(gSettings.ch[i].type));
   }

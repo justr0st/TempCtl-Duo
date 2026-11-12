@@ -77,6 +77,32 @@ If a channel still overshoots, lower Kp a little; if it is slow to reach the set
 |---|---|
 | <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/27-chan-pid-dark.png"><img src="img/touch/27-chan-pid-light.png" alt="Touch: PID tab" width="360"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/01b-tune-toast-dark.png"><img src="img/touch/01b-tune-toast-light.png" alt="Touch: autotune progress in the tile" width="360"></picture> |
 
+### Feed-forward (ramp tracking)
+
+A PID only reacts to the difference between setpoint and reading: on a ramp the reading lags behind, and at the
+ramp's end it overshoots while the integral part unwinds. **Feed-forward** (local channels, off by default) adds
+the output a heater model expects for the setpoint a little **ahead** — the power that holds that temperature
+plus the extra power for the ramp — and the PID only corrects what the model gets wrong. Typical effect on a
+ramp: a lag of a few tenths of a degree instead of several degrees, and almost no overshoot at the ramp's end.
+
+| Setting | |
+|---|---|
+| Feed-forward | on / off per channel (touch *Channels › PID*, web *Channels › PID control*, serial `b.local.ff=on`) |
+| Heater model: °C per % output (`ffK`) | how many °C above 25 °C one % of output holds the heater at |
+| Time constant (`ffTau`) | how slowly the heater follows a change of output, s |
+| Dead time (`ffDead`) | how long before a change shows on the thermocouple, s — the program's setpoint is looked at this far ahead |
+
+**The autotune measures the model** (it shows it next to the proposed PID values; *Accept* takes both over,
+feed-forward itself stays as it is). Good practice: run the autotune near your working temperature, accept, then
+switch feed-forward on and compare a run with your usual program (the SD run log has the columns `_ff` = the
+feed-forward share of the output and `_i` = the PID's integral part). On a hold the integral part should stay
+small; if it settles far above 0, the model's °C per % is too high (the heater needs more power than the model
+expects), far below 0: too low. Switching feed-forward on or off during a run doesn't make the output jump.
+
+Feed-forward only adds to the PID's output: the output limit, the cut-off and every protection work as before.
+In manual mode it adds the holding power for the setpoint (no ramp). Modbus channels: the controller runs its own
+PID, so there is no feed-forward there.
+
 ### Protections
 
 Each local channel has the runaway checks, *heating while off*, *reading frozen* and *converter too hot*

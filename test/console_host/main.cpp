@@ -307,6 +307,9 @@ int main() {
   type("get display\r");
   type("set b.spMax=300 b.local.kp=2.5 display.accent=orange t.name=\"IR head 2\"\r");
   type("set b.spMax=2000\r");
+  type("set b.local.ff=on b.local.ffK=2.5 b.local.ffTau=300 b.local.ffDead=15\r");  // feed-forward (spec 9.23)
+  type("set b.local.ffK=50\r");                     // outside 0.1 ... 20: refused
+  type("get b.local\r");
   type("set b.local.maxTemp=200 b.spMax=300\r");   // spMax adjusted to maxTemp - 10
   type("set wifi.staticIp=on wifi.ip=192.168.1.60 wifi.subnet=255.255.255.0 wifi.gateway=192.168.1.1\r");
   type("set wifi.ip=300.1.1.1\r");

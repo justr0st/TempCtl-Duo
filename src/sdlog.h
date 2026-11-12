@@ -8,6 +8,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// Run log columns (host-tested: the gaps of an event row reach the header's kind column)
+#define SDLOG_HEADER                                                                                          \
+  "time,run_s,where,bottom_pv,bottom_sp,bottom_prog,bottom_out,bottom_ff,bottom_i,bottom_state,top_pv,top_sp," \
+  "top_prog,top_out,top_ff,top_i,top_state,monitor_pv,kind,event\n"
+#define SDLOG_GAP_TIME_KIND ",,,,,,,,,,,,,,,,,,"  // after time, up to kind
+#define SDLOG_GAP_RUN_KIND ",,,,,,,,,,,,,,,,,"    // after run_s, up to kind
+
 bool sdlogSlot();   // the board has an SD slot
 void sdlogBegin();  // starts the writer task (after the display)
 
@@ -17,6 +24,7 @@ struct SdRow {
   float runS;          // run time
   char where[40];      // "P3 ramp" / "B2 hold / T4 ramp"
   float pv[2], sp[2], prog[2], out[2];  // NAN = none
+  float ff[2], integ[2];  // local: feed-forward share and integrator of out (NAN = none, spec 9.23)
   const char* state[2];
   float mon;           // monitor channel PV (NAN = off / no reading)
 };

@@ -210,9 +210,7 @@ static size_t csvQuoted(char* b, size_t n, const char* s) {  // "text" with "" f
   return k;
 }
 
-static const char* const HEADER =
-    "time,run_s,where,bottom_pv,bottom_sp,bottom_prog,bottom_out,bottom_state,top_pv,top_sp,top_prog,top_out,"
-    "top_state,monitor_pv,kind,event\n";
+static const char* const HEADER = SDLOG_HEADER;
 
 // ------------------------------------------------------------ writing
 static bool nameUsed(const char* rel) {
@@ -238,7 +236,7 @@ static void flush(bool closing) {
   portEXIT_CRITICAL(&mux);
   if (lost) {  // a note row first
     char l[96];
-    const int k = snprintf(l, sizeof(l), ",,,,,,,,,,,,,warning,\"%lu rows lost (no room in the buffer)\"\n", (unsigned long)lost);
+    const int k = snprintf(l, sizeof(l), SDLOG_GAP_TIME_KIND "warning,\"%lu rows lost (no room in the buffer)\"\n", (unsigned long)lost);
     if (pendLen + k <= PEND) {
       memcpy(pend + pendLen, l, k);
       pendLen += k;
@@ -270,7 +268,7 @@ static void flush(bool closing) {
     good &= fwrite(pend, 1, pendLen, f) == pendLen;
     if (lostNow) {
       char l[112];
-      const int k = snprintf(l, sizeof(l), ",,,,,,,,,,,,,warning,\"about %lu kB of rows lost (the card could not be written for a while)\"\n",
+      const int k = snprintf(l, sizeof(l), SDLOG_GAP_TIME_KIND "warning,\"about %lu kB of rows lost (the card could not be written for a while)\"\n",
                              (unsigned long)(lostNow / 1024 + 1));
       good &= fwrite(l, 1, k, f) == (size_t)k;
     }
@@ -435,7 +433,7 @@ void sdlogRunStart(const char* prog, bool timeline, bool resumed) {
   char l[160];
   char tx[24];
   timeText(tx, sizeof(tx));
-  const int n = snprintf(l, sizeof(l), "%s,,,,,,,,,,,,,info,\"%s %s (%s)\"\n", tx, resumed ? "Resumed:" : "Program:", prog,
+  const int n = snprintf(l, sizeof(l), "%s" SDLOG_GAP_TIME_KIND "info,\"%s %s (%s)\"\n", tx, resumed ? "Resumed:" : "Program:", prog,
                          timeline ? "Timeline" : "Sequence");
   append(l, n);
   xSemaphoreGive(wmx);
@@ -459,6 +457,8 @@ void sdlogRow(const SdRow& r) {
     num(p, end, r.sp[c], 1);
     num(p, end, r.prog[c], 1);
     num(p, end, r.out[c], 0);
+    num(p, end, r.ff[c], 0);
+    num(p, end, r.integ[c], 0);
     p += snprintf(p, end - p, "%s,", r.state[c] ? r.state[c] : "");
   }
   num(p, end, r.mon, 1);
@@ -471,7 +471,7 @@ void sdlogEvent(uint8_t kind, const char* text) {
   if (!open_) return;
   char l[256];
   int k = timeText(l, sizeof(l));
-  k += snprintf(l + k, sizeof(l) - k, ",%.0f,,,,,,,,,,,,,%s,", lastRunS, logKindName((LogKind)kind));
+  k += snprintf(l + k, sizeof(l) - k, ",%.0f" SDLOG_GAP_RUN_KIND "%s,", lastRunS, logKindName((LogKind)kind));
   k += csvQuoted(l + k, sizeof(l) - k - 1, text);
   l[k++] = '\n';
   append(l, k);

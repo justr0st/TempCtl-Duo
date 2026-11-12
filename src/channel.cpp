@@ -170,6 +170,8 @@ bool LocalChannel::poll(ChannelLive& L, char* err, size_t n) {
   L.spEff = L.spEffValid ? st.sp : NAN;
   L.outValid = true;
   L.out = st.out;
+  L.ff = st.ff;
+  L.integ = st.integ;
   L.statusValid = L.alarmValid = false;
   L.coldC = st.coldC;
   L.outOn = st.on || st.tuning;

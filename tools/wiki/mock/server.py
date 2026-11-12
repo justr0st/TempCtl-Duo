@@ -82,8 +82,9 @@ def chan(i, d):
         if 'lane' in x: o['lane'] = x['lane']; o['steps'] = x['steps']
         if d['run']['state'] != 'running': o.update({'inProgram': False, 'state': 'none', 'outOn': False, 'out': 0.0})
     if name == 'tune' and i == 0:
-        o['autotune'] = {'state': 'done', 'sp': 200, 'cycle': 6, 'elapsed': 1830, 'msg': 'done: Ku 7.12, Pu 41 s',
-                         'kp': 2.84, 'ki': 0.0297, 'kd': 15.3, 'ku': 7.12, 'pu': 41}
+        o['autotune'] = {'state': 'done', 'sp': 200, 'cycle': 6, 'elapsed': 1830, 'msg': 'done: Ku 7.12, Pu 41 s, heater model',
+                         'kp': 2.84, 'ki': 0.0297, 'kd': 15.3, 'ku': 7.12, 'pu': 41,
+                         'model': {'k': 3.1, 'tau': 182, 'dead': 9.4}}
     if name == 'fault' and i == 1:
         o.update({'fault': 'Heating failed: output at least 80 % for 120 s, the reading rose less than 5 °C', 'pv': 31.2})
     return o
@@ -184,15 +185,15 @@ def run_csv():
     """an SD run log (sdlog.cpp columns) of the 'done' run, for the CSV replay picture"""
     d = demo(0, 600, 10); r = d['rows']; ev = sorted(d['chart']['ev'], key=lambda e: e[0])
     kinds = {1: 'Phase %d', 4: 'Hold of phase %d ended', 5: 'Program pause (phase %d)', 6: 'Continue', 7: 'Program finished'}
-    out = ['time,run_s,where,bottom_pv,bottom_sp,bottom_prog,bottom_out,bottom_state,top_pv,top_sp,top_prog,top_out,top_state,monitor_pv,kind,event']
+    out = ['time,run_s,where,bottom_pv,bottom_sp,bottom_prog,bottom_out,bottom_ff,bottom_i,bottom_state,top_pv,top_sp,top_prog,top_out,top_ff,top_i,top_state,monitor_pv,kind,event']
     f = lambda v: '' if v is None else '%.1f' % v
     k = 0
     for j in range(0, len(r), 7):
         t = r[j]; ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(EPOCH0 + 8130 + t))
-        out.append(','.join([ts, '%d' % t, '', f(r[j + 1]), f(r[j + 2]), f(r[j + 2]), f(r[j + 3]), '', f(r[j + 4]), f(r[j + 5]), f(r[j + 5]), f(r[j + 6]), '', f(mon_of(r[j + 1])), '', '']))
+        out.append(','.join([ts, '%d' % t, '', f(r[j + 1]), f(r[j + 2]), f(r[j + 2]), f(r[j + 3]), '', '', '', f(r[j + 4]), f(r[j + 5]), f(r[j + 5]), f(r[j + 6]), '', '', '', f(mon_of(r[j + 1])), '', '']))
         while k < len(ev) and ev[k][0] <= t:
             e = ev[k]; k += 1
-            if e[1] in kinds: out.append(','.join([ts, '%d' % t] + [''] * 12 + ['run', '"%s"' % (kinds[e[1]] % (e[3] + 1) if '%' in kinds[e[1]] else kinds[e[1]])]))
+            if e[1] in kinds: out.append(','.join([ts, '%d' % t] + [''] * 16 + ['run', '"%s"' % (kinds[e[1]] % (e[3] + 1) if '%' in kinds[e[1]] else kinds[e[1]])]))
     return '\n'.join(out) + '\n'
 
 

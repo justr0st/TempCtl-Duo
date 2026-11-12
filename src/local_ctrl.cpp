@@ -49,6 +49,12 @@ struct Local {
   RelayAutotune tune;
   bool tuning = false;
   float tuneSp = NAN;
+  // feed-forward (spec 9.23): setpoint preview from the control task, its age; FF on in the last PID step
+  float spAhead = NAN, rateAhead = 0, rateNow = 0;
+  uint32_t previewMs = 0;
+  uint32_t previewEveryMs = 0;  // the control cycle (bus.pollMs) the preview comes with
+  bool ffWas = false;
+  float ff = NAN, integ = NAN;  // shown / logged (NaN = not running)
 };
 
 static Local loc[NUM_CHANNELS];
@@ -305,9 +311,27 @@ static void step(int ch, float dt) {
         l.runaway.reset();
       }
       duty = (l.fault || !l.tuning) ? 0 : l.out / 100.0f;
+      l.ff = l.integ = NAN;
     } else if (!l.fault && l.on && fresh && !isnan(l.sp)) {
       const PidParams p{c.kp, c.ki, c.kd, c.maxOut};
-      l.out = l.pid.update(p, l.sp, l.pv, dt);
+      // feed-forward (spec 9.23): the heater model's output for the setpoint ahead, at most maxOut; the
+      // preview counts for 2.5 control cycles, at least 2 s (a stalled control task: the channel's own
+      // setpoint, no ramp power). Switching it on / off while the PID runs moves its share into / out of the
+      // integrator, so the output doesn't jump.
+      float ff = NAN, spRate = 0;
+      const uint32_t age = l.previewMs ? millis() - l.previewMs : UINT32_MAX;
+      const uint32_t maxAge = ffMaxAgeMs(l.previewEveryMs);
+      if (c.ff) {
+        ff = clampFf(ffInput(FfModel{c.ffK, c.ffTau, c.ffDead}, l.sp, l.spAhead, l.rateAhead, age, maxAge), c.maxOut);
+        if (age <= maxAge && !isnan(l.spAhead)) spRate = l.rateNow;
+        if (!l.ffWas && l.pid.running()) l.pid.shiftIntegral(-ff);
+      } else if (l.ffWas && l.pid.running()) {
+        l.pid.shiftIntegral(l.pid.lastFf());
+      }
+      l.ffWas = c.ff != 0;
+      l.out = l.pid.update(p, l.sp, l.pv, dt, ff, spRate);
+      l.ff = ff;
+      l.integ = l.pid.integral();
       const uint8_t rf = l.runaway.update(c.runaway, dt, true, l.sp, l.pv, l.out);
       if (rf) {
         snprintf(t, sizeof(t), "%s", faultName(rf));
@@ -320,8 +344,12 @@ static void step(int ch, float dt) {
         l.runaway.reset();
       }
       l.out = 0;
+      l.ff = l.integ = NAN;
     }
-    if (l.fault) l.out = 0;
+    if (l.fault) {
+      l.out = 0;
+      l.ff = l.integ = NAN;
+    }
   }
   ssrSet(ch, duty, window);
 }
@@ -550,6 +578,18 @@ void localCtrlSetSp(int ch, float sp) {
   loc[ch].sp = sp;
 }
 
+void localCtrlSetPreview(int ch, float spAhead, float rateAhead, float rateNow, uint32_t cycleMs) {
+  if (ch < 0 || ch >= NUM_CHANNELS || !mtx) return;
+  LockL g;
+  Local& l = loc[ch];
+  l.spAhead = spAhead;
+  l.rateAhead = isnan(spAhead) ? 0 : rateAhead;
+  l.rateNow = isnan(spAhead) ? 0 : rateNow;
+  l.previewEveryMs = cycleMs;
+  l.previewMs = millis();
+  if (!l.previewMs) l.previewMs = 1;
+}
+
 bool localCtrlSetOutputs(int ch, bool on) {
   if (ch < 0 || ch >= NUM_CHANNELS || !mtx) return !on;
   LockL g;
@@ -584,6 +624,8 @@ void localCtrlGet(int ch, LocalStatus& st) {
   st.sp = l.tuning ? l.tuneSp : l.sp;  // (autotune: its test temperature)
   st.on = l.on;
   st.out = l.out;
+  st.ff = l.ff;
+  st.integ = l.integ;
   st.fault = l.fault;
   snprintf(st.faultText, sizeof(st.faultText), "%s", l.faultText);
   st.tuning = l.tuning;

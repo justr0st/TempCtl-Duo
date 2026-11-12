@@ -43,48 +43,30 @@ TempCtl Duo is a copy of TempCtl (made 2026-09-28 from TempCtl commit `47995c9`,
 ## 1. Working with Rost (user preferences and environment)
 
 - User: Rost (GitHub `justr0st`, commit email `50486502+justr0st@users.noreply.github.com`).
-- **No computer use / screen control** ("stop using computer screen"). Rost flashes the board, runs the
-  LVGL Pro Editor ("Export C code") and pushes to GitHub himself. The in-app browser may be used for
-  looking at web pages (e.g. design references, datasheets).
-- **Serial port is not reachable** from Claude: ask Rost for the serial monitor output.
-  `platformio.ini` has `monitor_filters = esp32_exception_decoder`, so his monitor prints decoded
-  backtraces. His build ELF: `D:\Share\GitHub\TempCtl-Duo\.pio\build\<env>\firmware.elf`
-  (envs `s3`, `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485`). **Flashing and monitoring go through the
-  board's USB port labelled "UART"** (USB-to-UART bridge → UART0). The COM port changes with the new
-  board (ask Rost; `upload_port`/`monitor_port` are in `platformio.ini`).
-- **GitHub is not reachable** from the device VM (proxy 403) and the cloud container has no
-  credentials: never try to enter credentials; tell Rost to push.
-- Commit only when Rost asks. Commit messages: mention only the most significant changes. Leave
-  `.vscode/settings.json` (his local editor settings) out unless he says otherwise.
 - Answers short and direct; Rost usually tests on hardware and reports back ("works", a log, a photo).
-- This document lives in the Claude project (`claude/tempctl-duo-spec.md`); **the repo keeps a copy at the same path,
-  updated with every commit** (since 1.0.46; `docs/SPEC.md` only points to it). Old untracked files go to `.old/`
-  (ignored).
 - Ask before large design decisions (AskUserQuestion); otherwise make the reasonable choice and say so.
+- Commit only when Rost asks. Commit messages: mention only the most significant changes. Leave
+  `.vscode/settings.json` (his local editor settings) out unless he says otherwise. Rost pushes.
+- This document (`claude/tempctl-duo-spec.md` in the repo) is the source of truth, updated with every commit
+  (`docs/SPEC.md` only points to it). The claude.ai project copy is no longer updated (since 2026-11-02).
+  Old untracked files go to `.old/` (ignored).
+- Rost runs the LVGL Pro Editor and the GitHub side (secrets, Pages settings) himself.
 
-### Tools and file handling
-- Rost's clone is reached through the Cowork device VM (`device_bash`, folder `D:\Share` mounted at
-  `$HOME/mnt/Share`). Delete permission for `D:\Share` had to be granted per session.
-  2026-09-29 session: only `D:\Share\GitHub\TempCtl-Duo` was connected (`$HOME/mnt/TempCtl-Duo`);
-  files were staged directly (≤ 50 per `device_stage_files` call, no tgz) and written back one by one
-  with `device_commit_files` (CRLF copies, `expectedMtimeMs` from the staging), then md5-checked.
-- **Never run a git command in the VM without `GIT_OPTIONAL_LOCKS=0`** (read-only) — a plain
-  `git status` left an empty `.git/index.lock` that the VM could not delete without delete permission
-  (it would block Rost's next commit).
-- The working tree is **CRLF**, the repository stores LF. Git in the VM:
-  - read-only commands with `GIT_OPTIONAL_LOCKS=0`;
-  - everything else with
-    `git -c core.autocrlf=true -c user.name=justr0st -c user.email=50486502+justr0st@users.noreply.github.com`
-    (without autocrlf every file looks modified);
-  - commit trailer: `Co-Authored-By: Claude …` and `Claude-Session: …` as given by the session.
-- Small edits: python read-modify-write in `device_bash`, keeping CRLF (`open(p, newline='')`).
-- Bigger changes: work in the cloud container on an LF snapshot (tar on the device into `D:\Share`,
-  `device_stage_files`, extract, `sed -i 's/\r$//'`), then send back a tgz of CRLF files
-  (`sed 's/$/\r/'`) via `/mnt/user-data/outputs/<new dir>/` + `device_commit_files` to `D:\Share`,
-  extract in the VM, verify the md5 of the CR-stripped files, delete the tgz. Before overwriting,
-  check that the device files still have the md5 of the snapshot (Rost edits XML in the editor).
-- Don't `pkill -f`/`pgrep -f` with a pattern that also matches the running bash command (it kills the
-  shell, exit 144).
+### Tools and file handling (since 2026-11-02: Claude Code on Rost's PC)
+Until 1.0.66 Claude worked from claude.ai through the Cowork device VM and a cloud container (file transfer
+by tgz, `GIT_OPTIONAL_LOCKS=0`, no serial port, no `pio`). Since 2026-11-02 Claude Code runs directly on
+Rost's Windows PC in the clone `D:\Share\GitHub\TempCtl-Duo`; the project instructions are in `CLAUDE.md`.
+- Files are edited in place; `.gitattributes` (1.0.29) stores LF and checks out CRLF — no conversions.
+- Firmware: PlatformIO on Windows (`pio run -e <env>`, section 8). Linux-only tools run in WSL (Debian).
+- Serial ports on Rost's PC: S3 "UART" port (flash + log) COM4, S3 native "USB" port (serial console, `api`
+  mode) COM9, CYD COM11 (`upload_port` / `monitor_port` in `platformio.ini`). **Flashing and the log monitor go
+  through the board's USB port labelled "UART"** (USB-to-UART bridge → UART0). Claude may flash
+  (`pio run -e <env> -t upload`) after asking Rost each time (Rost, 2026-11-02).
+- Reading a log: not the interactive monitor, but a short pyserial script (PlatformIO's `penv`) with a time
+  limit, port opened with DTR and RTS off (no CYD reset). Rost's monitor has `esp32_exception_decoder`;
+  a backtrace from a script: `xtensa-*-elf-addr2line -pfiaC -e .pio/build/<env>/firmware.elf <addresses>`
+  (the ELF must be the flashed build).
+- The in-app browser may be used for web pages (design references, datasheets, the release page).
 
 ## 2. What the device is
 
@@ -693,34 +675,31 @@ needed.
   bring-up; if the CYD still resets on open, a hardware change (disable auto-reset during operation)
   is the fallback. In any case the device reports **"run interrupted by a reset"** (9.3.5).
 
-## 8. Verification approach (cloud container)
+## 8. Verification approach (Rost's PC: PlatformIO on Windows + WSL)
 
-Rebuild these in `/tmp` if the container was reset (they were not kept in the repo):
-- **Duo: `claude/tools/build-check.py <s3|cyd> <project>`** (2026-09-29) — setup commands in its header
-  (toolchains from GitHub releases, arduino-esp32 2.0.17 / LVGL 9.6 / ArduinoJson / XPT2046 via git
-  clone; PyPI and the PlatformIO registry are blocked, so no `pio`). It takes the flags from the core's
-  `tools/platformio-build-<mcu>.py`, compiles core + libraries + LVGL + `ui/` + `src/` (own files with
-  `-Wall`), links `firmware.elf` and prints section sizes. First full build ≈ 3 min per env on 2 cores,
-  then only changed files. Keep its env table in sync with `platformio.ini`.
-- ESP32 compile check (TempCtl, classic ESP32): xtensa-esp32-elf gcc 8.4 (esp-2021r2-patch5) +
-  arduino-esp32 2.0.17 + LVGL 9.6 (`git clone --depth 1 --branch v9.6.0 https://github.com/lvgl/lvgl`
-  worked; curl to GitHub/registries was blocked) + TFT_eSPI + ArduinoJson; compile the changed `.cpp`
-  with the project flags, C files with xtensa gcc directly; link everything for the flash size.
-  **Duo: needs the xtensa-esp32s3-elf toolchain and the esp32s3 SDK part of arduino-esp32 2.0.17**;
-  Keep the classic ESP32 toolchain too for the `cyd` env. If the container can't fetch them, rely on
-  Rost's PlatformIO build output.
-- Host simulator: LVGL 9.6 built for the host with the project's `lv_conf.h` and shims for Arduino,
-  Preferences etc.; compiles `ui/*.c`, `src/ui_gen.c`, `src/ui.cpp`, `program.cpp`, `settings.cpp` +
-  stubs; drives touches/tabs and writes PPM screenshots of all screens; ASan/UBSan build. Duo: 480×320,
-  display/touch shims instead of TFT_eSPI/XPT2046. For heap checks use
+Commands and the WSL setup: `docs/wiki/Development.md`. (Until 1.0.66 the checks ran in a cloud container
+without `pio`: own `build-check.py` with the toolchains from GitHub, all rebuilt in `/tmp` after a reset.)
+- **Firmware**: `pio run -e <env>` for `s3`, `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485` (all four
+  after changes in shared code). An incremental build only recompiles changed files: for a warning check of
+  everything, `pio run -e <env> -t clean` first. Report the CYD app slot use (`Flash:` line).
+- **Host tests** (WSL Debian): `test/host_test.cpp` with `-fsanitize=address,undefined` — programs, run
+  engine, settings, PID, autotune (first-order + dead-time heater model), runaway, thermocouple frames
+  (MAX31855 fault bits, MAX6675 open bit), calibration, Modbus framing, image check, release manifest.
+  New pure logic gets tests here.
+- **Serial console**: `test/console_host` (`conhost` CYD, `conhost_s3`), ASan/UBSan.
+- **Touch UI**: `test/ui_host` — LVGL 9.6 on the PC with the project's `lv_conf.h` and shims; screenshots of
+  every screen, 480×320 (`uihost`) and 320×240 (`uihost_cyd`), dark and light (`UIHOST_THEME=light`); modes
+  `monkey` (random taps, ASan), `stepper`, `chan`, `lowmem`; `MEM=1` heap per screen. For heap checks use
   `GLIBC_TUNABLES=glibc.malloc.tcache_count=0`. Lesson: host tests get zeroed stack memory —
   uninitialised-variable bugs only show on hardware.
-- Web UI: headless Chromium (Playwright) against a small Python mock of the JSON API (states running /
-  paused / manual / no link), desktop 1366×820 and phone 390×844, check for page errors, look at the
-  screenshots; `node --check` on the extracted script. Duo: mock with two channels.
-- Host tests: `test/host_test.cpp` (see 4). Duo: add PID, autotune (against a simple first-order +
-  dead-time heater model), calibration and thermocouple frame decoding (MAX31855 fault bits, MAX6675
-  open bit).
+- **Web page**: Playwright (headless Chromium) against the browser demo (`tools/build_site.py <dir> --web`,
+  :8790): `test/web_*.js`; desktop 1366×820 and phone 390×844, no page errors, look at the screenshots.
+- **Hardware**: Rost tests on the boards; say what was checked on the PC and what he needs to test.
+
+Baseline 2026-11-02 (1.0.66, first run on Rost's PC): all four envs build without any warning; flash S3
+33.8 %, CYD 93.6 % (`cyd-1xlocal-1x485`, `cyd-2xlocal`) / 94.1 % (`cyd-2xlocal-2x485`) of the app slot;
+host_test, both console hosts and the UI host (both sizes, both themes, monkey 2000, stepper, chan, lowmem)
+pass with ASan/UBSan. Playwright and the demo (wasi-sdk) are not set up in WSL yet.
 
 ## 9. TempCtl Duo — goals (agreed with Rost 2026-09-28)
 
@@ -2466,9 +2445,13 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   Alt+Up / Down), chart handles on a touch screen move after a short hold (a swipe scrolls the page).
 - **1.0.65** (2026-10-28, 352a605; after 1.0.64 = 41aadd2): see 9.20, 9.21 - README shortened (features, screenshots,
   wiring), its reference parts moved to the wiki (Web API, How it works inside), schematic PDFs linked, MIT License.
-- **1.0.66** (2026-10-28; after 1.0.65 = 352a605): see 9.22 - release page on GitHub Pages
+- **1.0.66** (2026-10-28, e058da2; after 1.0.65 = 352a605): see 9.22 - release page on GitHub Pages
   (https://justr0st.github.io/TempCtl-Duo/, relative paths), a GitHub release per new version, Cloudflare kept
   for the transition.
+- **1.0.67** (2026-11-03; after 1.0.66 = e058da2): see 9.23 - feed-forward on the local channels (phase A):
+  setpoint preview from the run engine, heater model (K, tau, dead time) from the autotune, settings
+  `local.ff/ffK/ffTau/ffDead` on touch / web / serial, `ff` / `i` in `/api/live` and the SD run log. First work
+  with Claude Code on Rost's PC (sections 1, 8: local PlatformIO + WSL; COM ports in platformio.ini).
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
@@ -2846,6 +2829,140 @@ version, as every commit here bumps it).
   manifest, licence links), wiki, demo: every request found, fonts loaded, 44 same-site links exist; at a root
   the same. web_reorder / web_chart_hold ok.
 - Rost, once: repository public, *Settings › Pages › Source: GitHub Actions*; later delete the Cloudflare secrets.
+
+### 9.23 Ramp tracking: feed-forward on the local channels (decided 2026-11-03, Rost; phase A in 1.0.67)
+Status: **phase A implemented in 1.0.67** (plan `claude/plans/2026-11-03-feed-forward-phase-a.md`), not tested on
+the station yet. Rost approved this section; his four decisions are at its end, the implementation notes after
+them. Phase B waits for the station logs.
+
+**Problem.** A local channel's PID only sees the error SP(t) − PV(t). During a ramp the PV lags behind
+(the integrator first has to build up the ramp power), and at the end of a ramp the PV overshoots (the
+integrator has to unwind the ramp power it built up, which it can't do quickly: it is clamped at 0). The
+heaters' dead time (θ, IR head + board + thermocouple) makes both worse. The PID gains from autotune are
+tuned for holds, not for ramps.
+
+**Idea.** The program already knows the setpoint course ahead. A model of the heater turns it into the
+output the heater needs, and the PID only corrects what the model gets wrong:
+`out = FF + P + I + D`, with
+- `FF = holdPower(SPa) + rampPower(SPa')`
+- `SPa` = the setpoint θ seconds ahead, SP(t + θ); `SPa'` = its slope (°C/s) at that moment
+- `holdPower(T) = (T − 25 °C) / K`: the output that holds T (K = °C per % at steady state)
+- `rampPower(r) = τ · r / K`: the extra output for a ramp of r °C/s (τ = the heater's time constant)
+
+Looking θ ahead means the ramp power starts θ before the ramp and drops θ before its end. That removes most
+of the lag and the overshoot. A first-order heater with dead time is what `test/host_test.cpp` already uses
+for autotune, so the maths can be tested there.
+
+**Scope.**
+- Local channels only. A Modbus controller runs its own PID, and we can't add to its output.
+- Phase A (proposed for 1.0.67):
+  - the setpoint preview;
+  - feed-forward (hold + ramp power);
+  - the integrator allowed below 0;
+  - the model from autotune;
+  - settings with full parity;
+  - FF and the integrator in the run log.
+- Phase B, **only after Rost's station logs from phase A** (the logs show whether it is needed):
+  - a bottom→top decoupling term (the top channel's holding power is lower while the bottom heats the board:
+    `holdPower_top = (SP_top − 25 − c · (PV_bottom − 25)) / K_top`, with c = coupling 0…1);
+  - a gain correction from the first settled hold of a run (the integrator's value there is the model's error
+    in holding power; K is corrected for the rest of the run, logged, not saved).
+- Not planned: MPC (2×2 model with constraints). Only if the phase A/B logs show that feed-forward is not
+  enough.
+
+**Phase A in detail**
+1. **Setpoint preview (run engine).** A new function `RunEngine::preview(ch, sec, sp, rate)` (const): a copy of
+   the engine without its event sink, ticked `sec` seconds forward with the PVs frozen. It gives that moment's
+   setpoint and slope.
+   - A "wait for bottom" is not satisfied in the preview, and a program pause stops it. So the preview never
+     runs ahead of what the real run will do.
+   - A ramp that begins within θ: its ramp power starts early, which is what we want.
+   - Manual mode and channels that are not in a program: the preview = SP and the slope is 0, so there is
+     only hold power. That also helps manual setpoints: the integrator no longer has to build the hold power.
+   - The control task calls it every cycle and hands SPa / SPa' to the local task next to SP
+     (`localCtrlSetSp(ch, sp, spAhead, rate)`).
+   - Pure C++, host-tested: preview across ramp → hold, hold → ramp, Wait, Pause, run edits, Timeline lanes.
+2. **Feed-forward (`local_ctrl.cpp` `step()`, `pid.*`).**
+   - `Pid::update()` gets a feed-forward input. The P, I and D terms stay on SP(t), so the PV is still
+     expected to follow the setpoint shown and charted.
+   - The integrator is clamped to −outMax…+outMax instead of 0…outMax, so it can take back an overestimated
+     FF. The total stays clamped to 0…maxOut.
+   - Anti-windup stays as it is, on the total.
+   - FF is used only where the PID runs today: outputs on, fresh reading, no fault, not autotuning.
+   - Switching FF on or off during a run is bumpless: the integrator is shifted by −FF (on) or +FF (off),
+     so the output doesn't jump; after that the FF follows the setpoint course as intended.
+3. **Model (K, τ, θ) from autotune.**
+   - The relay test already measures the holding power at the test temperature (the re-centred relay bias):
+     `K = (Ttest − 25) / bias`.
+   - From Ku and Pu, with ω = 2π / Pu and a first-order + dead-time model:
+     - `ωτ = sqrt((K · Ku)² − 1)`
+     - `θ = (π − atan(ωτ)) / ω`
+   - Autotune shows K, τ and θ next to the proposed PID, and **Accept** takes both.
+   - If K · Ku ≤ 1 (no first-order + dead-time fit), autotune proposes the PID only and says why.
+   - The values can also be typed in (range-checked in `settingsValidate`).
+4. **Settings** per local channel, in the `local` object:
+   - `ff` on / off;
+   - `ffK` (°C/%, 0.1…20);
+   - `ffTau` (s, 5…3600);
+   - `ffDead` (s, 0…120);
+   - stored in `/duo/settings.json`; missing keys = FF off.
+   - Shown as "Feed-forward" in the channel's PID section, with friendly labels: "°C per % output",
+     "time constant", "dead time".
+   - Parity: touch Channels (S3 and CYD), web Channels, serial `b.local.ff*` / `t.local.ff*`, `/api/config`.
+   - `/api/live` and the run log (SD, S3) get the FF part and the integrator of the output, so Rost's logs
+     show what the model does. API_VERSION unchanged (new keys only).
+5. **Safety unchanged.** FF only adds to the PID output. maxOut, the cut-off, runaway / heating failed, heating
+   while off, reading frozen, the E-stop and the SSR timeout all work on the total output, as today. FF off =
+   exactly today's behaviour.
+6. **Tests.**
+   - Host test on the heater model (gain 3 °C/%, τ 120 s, θ 8 s): a ramp from 25 to 200 °C at 0.5 °C/s, then a
+     5 min hold. Lag during the ramp and overshoot at its end, with and without FF, both recorded here.
+   - Targets with FF: lag below 3 °C after the first θ, overshoot below 2 °C.
+   - A wrong model (K ±30 %) still settles on the hold, without a fault.
+   - Model from autotune on the same heater: within ±20 % of the true K, τ, θ.
+   - Browser demo: `demo/sim.cpp` uses the same control code and has the bottom → top coupling, so the effect is
+     visible there.
+   - Rost tests on the station: a run with FF off, then on, with the same program, and the SD run logs of both.
+
+**Decided (Rost, 2026-11-03)**
+1. FF is **off** after the update until switched on per channel. Accepting an autotune result fills the model
+   but does not switch FF on.
+2. The model is entered as **K / τ / θ** (autotune fills them in; friendly labels in the UI).
+3. **Phase B only after the phase A logs** (FF off / on runs on the station, SD run logs).
+4. The ambient for the model is **fixed at 25 °C**.
+
+**Implementation notes (1.0.67, Claude's choices during the implementation)**
+- **Derivative with FF on**: the first host run showed the D term (on the measurement) braking every ramp
+  (kd 20 × 0.5 °C/s = −10 %); the integrator made up for it and overshot at the ramp's end (2.6 °C). With FF on,
+  D now acts on (PV rate − the setpoint's ramp rate at this moment): `Pid::update(p, sp, pv, dt, ff, spRate)`;
+  a setpoint jump still gives no kick (the rate is the ramp's slope, not the SP difference). The control task
+  hands the local task the preview **and** the current ramp rate:
+  `localCtrlSetPreview(ch, spAhead, rateAhead, rateNow)` (spAhead NaN = none: manual / no run).
+- Preview: `RunEngine::preview(ch, sec, sp, rate)` = a copy of the engine ticked ahead with the PVs frozen
+  (no events). Older than 2.5 control cycles (`bus.pollMs`, handed over with the preview; at least 2 s) → the
+  channel's own SP, no ramp power (`ffInput`, `ffMaxAgeMs`; a fixed 2 s dropped the preview between two updates
+  at a slow poll interval — found in the final review).
+- FF is used as at most maxOut (`clampFf`; a slow heater's ramp power can be several 100 %): the integrator
+  (−maxOut…+maxOut) can then always take it back — bumpless switching on during a ramp, a too-low K stays
+  correctable (final review).
+- SD log: header and the empty fields of event rows are `SDLOG_HEADER` / `SDLOG_GAP_*` in sdlog.h, host-tested
+  against each other (the first version left the event rows 4 columns short — final review).
+- Integrator −maxOut…+maxOut only while FF is on; FF off = the old PID exactly (`ff` NaN). On / off while the PID
+  runs: the integrator is shifted by ∓FF (`Pid::shiftIntegral`), not on the first step after a reset
+  (`Pid::running()`), so FF is there from the start.
+- Model from the relay test: `fopdtFromRelay()` (autotune.cpp); the autotune message ends with "heater model" /
+  "no heater model" (the values don't fit into its 64 characters; the UIs show them from the result).
+  Accept on touch, web and serial goes through one helper, `settingsTakeTune()`; the web "Edit…" path also
+  saves the model.
+- `/api/live` channels: `ff` (null = off / not running) and `i` (the integrator, whenever the PID runs: FF off
+  runs need it for the comparison); SD run log columns `bottom_ff, bottom_i` after `bottom_out`, the same for top
+  (the web CSV replay reads columns by name).
+- Touch: plain labels (the fonts have no Greek letters); the CYD Channels page needs ≈ 8.7 kB more heap in the
+  64-bit host build (less on the ESP32): check the `[mem]` line there.
+- Host results (heater gain 3 °C/%, tau 120 s, dead time 8 s; ramp 25 → 200 °C at 0.5 °C/s, then hold):
+  PID alone lag 8.9 °C / overshoot 3.4 °C; with FF (true model) 0.5 / 0.1 °C; with the model the autotune measured
+  (K 3.00, tau 97 s, dead 8.7 s) 1.3 / 1.0 °C. K ±30 % wrong: still settles. Demo model (autotune on demo/sim.cpp):
+  bottom K 3.05, tau 984 s, dead 25 s; top K 2.39, tau 273 s, dead 12.5 s (FF off in the demo).
 
 ## 10. Open items carried over from TempCtl
 

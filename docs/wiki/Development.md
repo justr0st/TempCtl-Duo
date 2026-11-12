@@ -10,11 +10,27 @@ Environments: `s3`, `cyd-1xlocal-1x485`, `cyd-2xlocal`, `cyd-2xlocal-2x485` (`pi
 `upload_port` / `monitor_port` in `platformio.ini`). `tools/web_embed.py` gzips the web page into
 `src/web_assets.h` before each build (PlatformIO runs it; by hand: `python tools/web_embed.py`).
 
+An incremental build only recompiles changed files; for a warning check of everything run
+`pio run -e <env> -t clean` first.
+
 ## Tests without a board
+
+They run on Linux; on Windows in WSL (Debian), once:
+
+```bash
+sudo apt-get install -y build-essential git curl ca-certificates python3 python3-pil
+mkdir -p ~/deps && cd ~/deps
+git clone --depth 1 --branch v9.6.0 https://github.com/lvgl/lvgl lvgl
+git clone --depth 1 --branch v7.4.3 https://github.com/bblanchon/ArduinoJson AJ743
+```
+
+The build scripts look for LVGL and ArduinoJson in `/tmp` (lost when WSL restarts); point them at `~/deps`:
+`export LVGL=~/deps/lvgl AJ=~/deps/AJ743/src`, then run the commands below from the repository
+(`/mnt/d/...`). Keep both versions the same as the firmware's (`.pio/libdeps/<env>/*/library.json`).
 
 | What | How |
 |---|---|
-| Programs, run engine, settings, PID, autotune, runaway, Modbus framing, image check, release manifest | `g++ -std=c++17 -Wall -Wextra -Isrc -I<ArduinoJson>/src test/host_test.cpp src/duo_program.cpp src/run_engine.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp src/ota_image.cpp src/release.cpp && ./a.out` |
+| Programs, run engine, settings, PID, autotune, runaway, Modbus framing, image check, release manifest | `g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -Isrc -I$AJ test/host_test.cpp src/duo_program.cpp src/run_engine.cpp src/settings.cpp src/tc_sensor.cpp src/pid.cpp src/runaway.cpp src/autotune.cpp src/ota_image.cpp src/release.cpp && ./a.out` |
 | Touch screens | `test/ui_host/build.sh` builds the screens for the PC and renders screenshots (`./uihost`; `BOARD=cyd` for the 320×240 set; `./uihost monkey` random taps under AddressSanitizer; more modes in [How it works inside](Internals.md#touch-ui)) |
 | Serial console | `test/console_host/build.sh` + `./conhost`: types a script of commands and prints the output |
 | Web page | Playwright against the browser demo (`tools/build_site.py <dir> --web`, served on :8790): `test/web_jumps.js` (layout jumps), `test/web_reorder.js` (reorder by drag), `test/web_chart_hold.js` (chart handles on touch) |

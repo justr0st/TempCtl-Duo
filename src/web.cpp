@@ -324,6 +324,12 @@ static void tuneJson(JsonObject o, int ch) {
     a["kd"] = t.res.kd;
     a["ku"] = t.res.ku;
     a["pu"] = t.res.pu;
+    if (t.res.modelOk) {  // heater model for the feed-forward (spec 9.23)
+      JsonObject m = a["model"].to<JsonObject>();
+      m["k"] = t.res.ffK;
+      m["tau"] = t.res.ffTau;
+      m["dead"] = t.res.ffDead;
+    }
   }
 }
 
@@ -773,15 +779,13 @@ static void handleAutotune() {
       if (t.state != TuneState::Done) return sendError("no autotune result to accept");
       {
         Guard g;
-        LocalChannelSettings& l = gSettings.ch[ch].loc;
-        l.kp = t.res.kp;
-        l.ki = t.res.ki;
-        l.kd = t.res.kd;
+        settingsTakeTune(gSettings.ch[ch].loc, t.res);
       }
       saveSettingsAndNotify();
       r["kp"] = t.res.kp;
       r["ki"] = t.res.ki;
       r["kd"] = t.res.kd;
+      r["model"] = t.res.modelOk;
     }
     localCtrlTuneClear(ch);
     r["ok"] = true;
@@ -1548,7 +1552,11 @@ static void handleLive() {
     setNum(c["out"], C.outValid ? C.out : NAN);
     c["outOn"] = C.outOn;
     if (C.statusValid && C.type == CH_MODBUS && cs.profile == PROFILE_PMA_KS4X) c["mode"] = pmaModeText(C.status);
-    if (C.type == CH_LOCAL) setNum(c["cold"], C.coldC);
+    if (C.type == CH_LOCAL) {
+      setNum(c["cold"], C.coldC);
+      setNum(c["ff"], C.ff);    // feed-forward share of out (spec 9.23), null = off / not running
+      setNum(c["i"], C.integ);  // the PID's integrator, null = not running
+    }
     c["fault"] = C.fault ? C.faultText : "";
     c["spMin"] = cs.spMin;
     c["spMax"] = cs.spMax;
