@@ -2458,7 +2458,8 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   the S3) with a cooling fan, buzzer tones / volume / key beep, fan option per phase and step, run report, QR
   codes on the touch Network page, tests and gates in GitHub Actions, the fastest read and poll intervals as
   fresh-install defaults; Wi-Fi off no longer crashes at boot, the access point closes after the station connects,
-  the touch QR button follows the connection; two files split (9.29). Rost tested on the S3: Wi-Fi, QR, optional
+  the touch QR button follows the connection; the web dashboard's event log has a fixed height (320 px, own
+  scroll: the page no longer grows while log lines arrive; found by web_jumps in CI); two files split (9.29). Rost tested on the S3: Wi-Fi, QR, optional
   pin functions, buzzer tones / volume, bad readings (a reattach spike still gets through: next version).
   Wiki: fan wiring diagram (s3-fan), optional-pin defaults marked in the relay / E-stop / buzzer diagrams,
   "Connect only what you need" in the S3 and CYD hardware pages.
