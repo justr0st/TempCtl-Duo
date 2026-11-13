@@ -2452,6 +2452,16 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   setpoint preview from the run engine, heater model (K, tau, dead time) from the autotune, settings
   `local.ff/ffK/ffTau/ffDead` on touch / web / serial, `ff` / `i` in `/api/live` and the SD run log. First work
   with Claude Code on Rost's PC (sections 1, 8: local PlatformIO + WSL; COM ports in platformio.ini).
+- **1.0.68** (2026-11-13; after 1.0.67 = 113d315): see 9.24 - 9.29 - review
+  findings fixed (fault badge, cut header texts, phone chart labels, one Start / Pause button on the web page),
+  bad-reading rules with one thermocouple filter class, control-task heartbeat, optional pins (GPIO 4 / 5 / 6 on
+  the S3) with a cooling fan, buzzer tones / volume / key beep, fan option per phase and step, run report, QR
+  codes on the touch Network page, tests and gates in GitHub Actions, the fastest read and poll intervals as
+  fresh-install defaults; Wi-Fi off no longer crashes at boot, the access point closes after the station connects,
+  the touch QR button follows the connection; two files split (9.29). Rost tested on the S3: Wi-Fi, QR, optional
+  pin functions, buzzer tones / volume, bad readings (a reattach spike still gets through: next version).
+  Wiki: fan wiring diagram (s3-fan), optional-pin defaults marked in the relay / E-stop / buzzer diagrams,
+  "Connect only what you need" in the S3 and CYD hardware pages.
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
@@ -2963,6 +2973,110 @@ for autotune, so the maths can be tested there.
   PID alone lag 8.9 °C / overshoot 3.4 °C; with FF (true model) 0.5 / 0.1 °C; with the model the autotune measured
   (K 3.00, tau 97 s, dead 8.7 s) 1.3 / 1.0 °C. K ±30 % wrong: still settles. Demo model (autotune on demo/sim.cpp):
   bottom K 3.05, tau 984 s, dead 25 s; top K 2.39, tau 273 s, dead 12.5 s (FF off in the demo).
+
+### 9.24 Review 2026-11-12: findings, bad readings, heartbeat (Rost; version 1.0.68)
+
+Rost asked for a review (UI, UX, performance, code quality) and picked from its lists.
+
+- **Fixed findings.** Touch: the fault badge sits in the tile's top left corner (it covered the status text
+  and the chart's time labels), the channel name moves right of it, a fault text scrolls when it is too long;
+  the header's program and subtitle labels take the room left of the badge (subtitle without the program type:
+  "7 phases · 7:00 + waits", stage "pause"); the Channels tabs share the header width, a long name gets the
+  small font; the backlight really goes off before a restart. Web: on a narrow chart the phase labels have
+  three short rows above the plot (no start times), the lane names are whole, the last time label and "End"
+  stay inside; the chart key (what the marks mean) folds away, closed on a phone; Start and Pause are one
+  button (as on the touch screen); the phone header's page links fit. `sendBody`: a connection without
+  progress is dropped after 2 s (was 5 s: the loop task waits that long).
+- **Not changed.** No label for the tile's stepper (no room), Save on the Channels page (it is in the fixed
+  header already), no access lock (Rost: not needed), no live-data stream (polling has no connection state to
+  lose: more robust on a weak network).
+- **Bad readings** (`src/tc_filter.h`, pure, host-tested; used by the local channels and the monitor). A bad
+  reading is a converter fault or a jump of more than `local.jumpMax` (default 25 degC, 0 = not checked) from
+  the last accepted reading. The first ones are held back and the output stays as it was: as many as the
+  median window, 2 without the median, at most 3 s worth of readings. After the hold a valid reading is the
+  new level (the median starts again, the PID's derivative starts from it). Bad readings for `local.badSec`
+  (default 3 s, 1 ... 30) while heating: sensor fault. A held-back reading above the cut-off switches the
+  power off for that step (the cut-off is not weakened by the hold).
+- **Heartbeat.** The control task reports to the local task every pass (and inside its long bus requests). A
+  heating local channel without a report for 10 s gets the fault "control task stopped" (`FAULT_CONTROL`):
+  before, it kept its last setpoint for good.
+- **Fresh-install defaults.** `local.readMs` 100 and `bus.pollMs` 100: the fastest; validation raises them
+  where a MAX6675 (250 ms) or Modbus needs more. `settingsLoad` validates the defaults too. Stored settings
+  keep their values.
+- **Wi-Fi fixes.** With `wifi.enabled` off the lwIP tcpip task never starts, so `server.begin()` asserted ("Invalid mbox") and
+  the device boot-looped. The web server now starts in `webLoop()` once Wi-Fi is on and the mode is not OFF (also
+  when Wi-Fi is switched on later). The access point closes 8 s after the station got an IP (`staIpAt` set by the
+  event task, acted on in `netLoop()`; the delay lets a phone on the AP load the page with the new address). The
+  20 s fallback now counts from the last moment the station was connected, so it can reopen the AP after a long loss.
+
+### 9.25 Optional pins and the cooling fan (Rost 2026-11-12; version 1.0.68)
+
+- **Optional pins** (`src/io_pins.*`, setting `io.fn`, one name per pin). S3: GPIO 4, 5, 6 with the functions
+  off, relay, estop, buzzer, fan, fanPwm, fanTach; defaults relay / estop / buzzer (the wiring until 1.0.67).
+  A function is on one pin at most (fan / fanPwm: one fan output); validation rejects the rest with a
+  message. The CYD has no free output pin: no optional pins, the buzzer stays on the speaker.
+  From boot until the settings are applied every optional pin is an input with pull-down. A pin that changes
+  its function gives the old one up first (output low, LEDC and interrupt detached). The "wired" checks
+  (E-stop, sound, relay) now mean "a pin has this function": the UIs show those settings accordingly.
+- **Fan** (`src/fan.*`, rule in `src/fan_rule.h`, pure, host-tested). On / off output (active high) or 25 kHz
+  PWM (LEDC channel 4, `fan.speed` 20 ... 100 %); optional speed input (2 pulses per turn, rpm once a second;
+  a warning when the fan is on for 5 s below 100 rpm). Rule: on while the running phase / step has the fan
+  option; after a run (`fan.afterRun`) until the hottest reading of all channels and the monitor is below
+  `fan.offBelow` (default 60 degC), at most `fan.maxMin` (30 min); it ends at once when a new run starts or
+  manual mode / an autotune heats. No manual fan switch (Rost may ask for one).
+  Wiring note: a 4-wire fan pulls its PWM wire up to 5 V itself; through a transistor the PWM is inverted
+  (not handled: an "invert" setting if Rost needs it).
+- **Fan option** of a phase / step: `"fan": true` in the program JSON (any phase kind, any step kind; in
+  padding bytes, the program's size is unchanged), `RunEngine::fanWanted()`. The editors show it only when a
+  fan output is configured and keep the flag otherwise.
+- Parity: touch System page (pins, fan), web Settings › Safety, console `io.fn0..2`, `fan.*`; fan state in
+  the chart's corner label, a chip on the dashboard, a status line; `/api/live` `fan {on, rpm}`, config
+  `limits.ioGpio`, `limits.fan`.
+
+### 9.26 Buzzer: tones, volume, key beep (Rost 2026-11-12; version 1.0.68)
+
+- Sounds are note lists (Hz, ms) on a 10 ms tick; the E-stop is sampled every 50 ms as before. Alarm 2700 Hz
+  (3 long, every 3 s), action required 2000 Hz (2 short, every 10 s), finished 2093 / 2637 / 3136 Hz, key
+  3000 Hz 20 ms, confirm 2349 → 3136 Hz, refused 440 Hz 160 ms, test 2700 Hz 200 ms.
+- `safety.volume` 1 ... 5 = PWM duty 2 / 6 / 16 / 48 / 128 of 255; the alarm always plays at 5.
+  `safety.keyBeep` (default on): a beep on a completed tap. One-shots never interrupt an alarm; the test beep
+  plays even with sound off (the settings page tests before it saves).
+- Touch: key beep from the touch input's release on the pressed widget; an error toast plays "refused", a
+  successful save "confirm".
+
+### 9.27 Run report, QR codes (Rost 2026-11-12; version 1.0.68)
+
+- **Run report** (`src/run_stats.h`, pure, host-tested): per channel the highest PV and its run time, the
+  largest deviation from the setpoint in holds (counted from 5 s into a hold), the steepest rise over 5 s;
+  the monitor's highest PV. No "time above" (Rost: not needed). Written to the event log at the end of a run
+  (so also into the SD run file as event rows), `/api/live` `report`, web "Last run" block, touch: tap the
+  Finished / Stopped badge, console `report`. A resumed run reports the part after the resume.
+- **QR codes** (LVGL's QR widget) on the touch Network page: the device address on Wi-Fi; in access-point
+  mode a Wi-Fi join code and the address (side by side on the S3, one at a time on the CYD). Built when the
+  popup opens, deleted when it closes.
+
+### 9.28 Tests and gates in GitHub Actions (Rost 2026-11-12; version 1.0.68)
+
+- `release.yml` has a `tests` job that the release needs; it also runs on pull requests, which never publish.
+  Steps: host tests (`tools/ci/host_tests.sh`), touch UI host self-checks and random taps
+  (`tools/ci/ui_tests.sh`), the wiki's touch pictures against the UI host (`tools/wiki/check_shots.py`: a UI
+  change without regenerated pictures fails, an unintended layout change shows as a diff picture), the web
+  page tests (Playwright against the browser demo, `tools/ci/web_tests.sh`).
+- Flash size gate (`tools/ci/size_gate.py`) after the firmware build: a CYD image above 97 % of its app slot
+  stops the release. 1.0.68 is at about 96 %: the next larger feature needs room first (candidates: QR codes
+  off on the CYD, the Modbus tools on the 2x-local wiring).
+
+### 9.29 Two files split (review 2026-11-12; version 1.0.68; the plans R1 and R5)
+
+No behaviour change.
+
+- `src/app_state.cpp` → `app_state.cpp` (run control, control cycle, public API), `app_hist.cpp` (live / run /
+  raw history, plan curves, chart JSON and CSV), `app_log.cpp` (event log); `app_internal.h` is private to
+  these three.
+- The web page's source is `web/src/` (`index.html` with include lines, `css/`, 25 script parts in one global
+  scope, joined in the order of the include lines; `web/src/README.md`). `tools/web_join.py` writes
+  `web/index.html`, which is now generated and ignored by git; `web_embed.py` (every firmware build),
+  `build_site.py` and the mock device join first. The first join was byte-identical to the page before.
 
 ## 10. Open items carried over from TempCtl
 

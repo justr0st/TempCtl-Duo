@@ -15,13 +15,14 @@ them on the web page's *Channels* page or on the touch screen (*Menu › Channel
 | Lowest / highest setpoint | programs, manual setpoints and run edits stay inside; a local channel's highest setpoint is at most its max. temperature minus the *setpoint margin below the cut-off* (all channels, default 10 °C) |
 
 The *All channels* tile holds the **polling interval** (how often PV, setpoint and output are taken over for
-the control, the displays and the logs; default 1 s), the **link-loss pause** (Modbus) and the **"bottom
-reached" band** (for "wait for the bottom", default ±5 °C).
+the control, the displays and the logs; default 100 ms on a new installation, 1 s in older settings), the
+**link-loss pause** (Modbus) and the **"bottom reached" band** (for "wait for the bottom", default ±5 °C).
 
 The shortest polling interval depends on the channels: **100 ms** when every channel in use is local with a
 MAX31855, **250 ms** as soon as one is a MAX6675 (it converts in up to 220 ms) or a Modbus controller (bus
 time). Switching a channel to one of those raises a shorter interval to 250 ms by itself (the page, the touch
-screen and the serial console say so). The web page itself refreshes at most every 250 ms.
+screen and the serial console say so). The web page itself refreshes at most every 250 ms. Settings you
+already have keep their values.
 
 ## Local channels
 
@@ -32,12 +33,23 @@ A thermocouple converter for the temperature and an SSR for the heater; the ESP3
 | Setting | Default | |
 |---|---|---|
 | Converter | MAX31855 | or MAX6675 (from 250 ms read interval) |
-| Read every | 250 ms | 100 … 1000 ms |
+| Read every | 100 ms | 100 … 1000 ms (MAX6675: from 250 ms; older settings keep their value) |
 | Median filter | on, 3 readings | 3 / 5 / 7 / 9: removes single spikes (noise from the heater wiring) |
+| Largest change per reading (`jumpMax`) | 25 °C | a bigger jump from the last accepted reading counts as a **bad reading**; 0 = not checked (0 … 500 °C) |
+| Sensor fault after (`badSec`) | 3 s | bad readings for this long while heating give a sensor fault (1 … 30 s) |
 | Calibration | gain 1, offset 0 | true = raw × gain + offset; the web page has a **two-point helper**: enter two reference temperatures and the readings at them |
 
 The PID, the protections and the autotune all use the **filtered, calibrated** value. The live chart and the
 web page's raw curve show every reading.
+
+**Bad readings.** A reading is bad when the converter reports a fault, or when it jumps by more than *Largest
+change per reading* from the last accepted one (a loose wire, a spark, interference). The first bad readings
+are **held back** and the output **stays as it was**: as many as the median window (2 without the median), but
+at most 3 s worth of readings. If a valid reading then arrives, it is the **new level** — a jump that lasts is
+real — and the median filter and the PID's derivative start again from it. If bad readings go on for *Sensor
+fault after* seconds while the channel heats, the channel gets a **sensor fault** (*reading jumps* when the
+cause was a jump). A held-back reading above the cut-off still switches the power off for that moment: the
+hold never weakens the cut-off. The monitor channel uses the same filter, but without the jump check.
 
 ### PID and SSR
 

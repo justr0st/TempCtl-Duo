@@ -11,6 +11,7 @@ const char* faultName(uint8_t f) {
     case FAULT_OFFHEAT: return "heating while the outputs are off";
     case FAULT_FROZEN: return "reading did not change";
     case FAULT_CJHOT: return "converter too hot";
+    case FAULT_CONTROL: return "control task stopped";
   }
   return "fault";
 }

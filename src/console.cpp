@@ -318,7 +318,8 @@ static const char* const H_RUN[] = {
     "PROGRAMS AND RUNS",
     "  programs                       list the stored programs (* = selected)",
     "  program n=<n>                  select a program for the next run",
-    "  show                           print the selected / running program",
+    "  show                           print the selected / running program (fan = the fan runs there)",
+    "  report                         peak, hold deviation and steepest rise of the last run",
     "  start | pause | resume | stop  run control",
     "  next | continue                next phase / continue after a program pause",
     "  extend b|t +<s>                extend the running hold",
@@ -411,9 +412,9 @@ static const char* const H_SETTINGS[] = {
     "SETTINGS - all settings, changed with set, shown with get",
     "  get                          all settings below as key=value (passwords never shown)",
 #if HAS_MONITOR
-    "  get <section>                one section: b, t, bus, run, wifi, display, safety, monitor",
+    "  get <section>                one section: b, t, bus, run, wifi, display, safety, monitor, io, fan",
 #else
-    "  get <section>                one section: b, t, bus, run, wifi, display, safety",
+    "  get <section>                one section: b, t, bus, run, wifi, display, safety, io, fan",
 #endif
     "  set <key>=<value> ...        change one or more settings; checked first, nothing is",
     "                               changed if one value is wrong; saved and used at once",
@@ -447,6 +448,9 @@ static const char* const H_SETTINGS[] = {
     "  cjEnable=on|off  cjMax=<C>   converter too hot: fault above cjMax (30 ... 125; MAX31855)",
     "  readMs=<ms>                  thermocouple read interval, 100 ... 1000 (MAX6675: from 250)",
     "  median=on|off  medianN=<n>   median filter over the last 3, 5, 7 or 9 readings",
+    "  jumpMax=<C>  badSec=<s>      bad readings: a jump bigger than jumpMax between two readings",
+    "                               (0 ... 500, 0 = not checked) or a converter fault; bad for badSec",
+    "                               (1 ... 30) seconds while heating = sensor fault",
     "  tuneMaxMin=<min>             autotune time limit, 10 ... 240",
     "  tuneFast=on|off              autotune rule: off = slow, no overshoot; on = faster (a little overshoot)",
     "  ff=on|off                    feed-forward: adds the heater model's output for the setpoint ahead",
@@ -536,14 +540,26 @@ static const char* const H_SETTINGS[] = {
     "SAFETY (safety.*)",
     "  manualIdle=on|off            manual mode ends after manualIdleMin (2 ... 1440) minutes",
     "  manualIdleMin=<min>          without activity (touch, web, serial); a beep 1 min before",
-    "  estop=on|off                 E-stop input (S3: GPIO 5, NC contact to GND): open = all",
-    "                               outputs off, run stopped",
-    "  sound=on|off                 alarm beeps (S3: GPIO 6, CYD: speaker connector)",
-    "  relay=on|off                 SSR supply relay (S3: GPIO 4, +5 V of the SSR inputs, on while",
-    "                               a local channel heats); off: no relay fitted, GPIO 4 stays low",
+    "  estop=on|off                 E-stop input (an optional pin set to estop, NC contact to GND):",
+    "                               open = all outputs off, run stopped",
+    "  sound=on|off                 alarm beeps (a pin set to buzzer; CYD: speaker connector)",
+    "  volume=<1-5>  keyBeep=on|off buzzer volume (alarms always play at 5) / a short beep on the",
+    "                               touch-screen buttons",
+    "  relay=on|off                 SSR supply relay (a pin set to relay, +5 V of the SSR inputs, on",
+    "                               while a local channel heats); off: no relay fitted, pin stays low",
     "  chipWarn=on|off              warning above chipMaxC (40 ... 120) chip temperature (S3)",
     "  chipMaxC=<C>",
     "  e.g. set safety.estop=on safety.manualIdle=on safety.manualIdleMin=60",
+    "",
+    "OPTIONAL PINS (io.*, S3) AND COOLING FAN (fan.*)",
+    "  fn0|fn1|fn2=<function>       what each spare pin does (GPIO 4, 5, 6 in this order):",
+    "                               off|relay|estop|buzzer|fan|fanPwm|fanTach (fan = on / off,",
+    "                               fanPwm = 25 kHz PWM, fanTach = speed input); one function per pin",
+    "  fan.afterRun=on|off          run the fan after a program ...",
+    "  fan.offBelow=<C>             ... until every channel is below this (30 ... 200)",
+    "  fan.maxMin=<min>             ... at most this long (1 ... 240)",
+    "  fan.speed=<%>                speed of a PWM fan, 20 ... 100",
+    "  e.g. set io.fn0=relay io.fn1=estop io.fn2=fanPwm fan.afterRun=on fan.offBelow=60",
 };
 
 struct HelpSec {
@@ -996,31 +1012,31 @@ static void cmdShow() {
       switch (f.kind) {
         case PH_B:
           seg(f.b, b, sizeof(b));
-          say("P%-3d %s: %s%s", i + 1, nb, b, f.wait ? ", wait" : "");
+          say("P%-3d %s: %s%s%s", i + 1, nb, b, f.wait ? ", wait" : "", f.fan ? ", fan" : "");
           break;
         case PH_T:
           seg(f.t, b, sizeof(b));
-          say("P%-3d %s: %s", i + 1, nt, b);
+          say("P%-3d %s: %s%s", i + 1, nt, b, f.fan ? ", fan" : "");
           break;
         case PH_BT:
           if (f.tIdle && f.bIdle) {
             fmtT(f.b.h, b, sizeof(b));
-            say("P%-3d both: %s off, %s off for %s", i + 1, nb, nt, b);
+            say("P%-3d both: %s off, %s off for %s%s", i + 1, nb, nt, b, f.fan ? ", fan" : "");
             break;
           }
           if (f.tIdle) {
             seg(f.b, b, sizeof(b));
-            say("P%-3d both: %s: %s%s; %s off", i + 1, nb, b, f.wait ? ", wait" : "", nt);
+            say("P%-3d both: %s: %s%s; %s off%s", i + 1, nb, b, f.wait ? ", wait" : "", nt, f.fan ? ", fan" : "");
             break;
           }
           seg(f.t, c, sizeof(c));
           if (f.bIdle) snprintf(b, sizeof(b), "%s off", nb);
           else snprintf(b, sizeof(b), "%s %.0f \xC2\xB0" "C", nb, f.b.t);
-          say("P%-3d both: %s; %s: %s%s", i + 1, b, nt, c, f.wait ? ", wait" : "");
+          say("P%-3d both: %s; %s: %s%s%s", i + 1, b, nt, c, f.wait ? ", wait" : "", f.fan ? ", fan" : "");
           break;
         default: {
           const char* t = progText(p, f.text);
-          say("P%-3d pause%s%s%s", i + 1, f.msg ? " (action required)" : "", *t ? ": " : "", t);
+          say("P%-3d pause%s%s%s%s", i + 1, f.msg ? " (action required)" : "", *t ? ": " : "", t, f.fan ? " [fan]" : "");
         }
       }
     }
@@ -1033,16 +1049,30 @@ static void cmdShow() {
       const TlStep& s = p.st[ch][i];
       if (s.kind == ST_TARGET) {
         seg(s.s, b, sizeof(b));
-        say("  S%-3d %s", i + 1, b);
+        say("  S%-3d %s%s", i + 1, b, s.fan ? ", fan" : "");
       } else if (s.kind == ST_IDLE) {
         fmtT(s.s.h, b, sizeof(b));
-        say("  S%-3d off for %s", i + 1, b);
+        say("  S%-3d off for %s%s", i + 1, b, s.fan ? ", fan" : "");
       } else {
         const char* t = progText(p, s.text);
-        say("  S%-3d pause%s%s%s", i + 1, s.msg ? " (action required)" : "", *t ? ": " : "", t);
+        say("  S%-3d pause%s%s%s%s", i + 1, s.msg ? " (action required)" : "", *t ? ": " : "", t, s.fan ? " [fan]" : "");
       }
     }
     if (!p.nSt[ch]) say("  (no steps)");
+  }
+}
+
+// report: the figures of the last run (since the start of the device)
+static void cmdReport() {
+  RunReport r;
+  if (!runReportGet(r)) return say("no run since the start");
+  char b[440];
+  reportText(b, sizeof(b), r, S.ch[0].name, S.ch[1].name, HAS_MONITOR && S.mon.on ? S.mon.name : nullptr);
+  for (char* l = b; l;) {
+    char* e = strchr(l, '\n');
+    if (e) *e = 0;
+    say("%s", l);
+    l = e ? e + 1 : nullptr;
   }
 }
 
@@ -1210,6 +1240,11 @@ static void cmdInfo() {
     if (safetyChipTempWired() && !isnan(L.chipC)) snprintf(c, sizeof(c), ", chip %.0f C%s", L.chipC, L.chipHot ? " (HOT)" : "");
     say("safety    sound %s%s%s%s%s", !safetySoundWired() ? "-" : S.sound ? "on" : "off", r, e, c,
         S.manualIdle ? ", manual idle timeout on" : "");
+    if (L.fanWired) {
+      char rp[24] = "";
+      if (L.fanRpm >= 0) snprintf(rp, sizeof(rp), ", %d rpm", (int)L.fanRpm);
+      say("fan       %s%s", L.fanOn ? "on" : "off", rp);
+    }
   }
   ProgSummary* sums = (ProgSummary*)malloc(sizeof(ProgSummary) * PROG_MAX);
   if (sums) {
@@ -1315,9 +1350,9 @@ static void cmdTune(const Args& a) {
 // ------------------------------------------------------------ settings: get / set
 // One table: the keys of the settings API (channels[i]. -> b. / t.), what values they take (checked
 // before anything is changed) and how get shows them.
-enum KType : uint8_t { K_NUM, K_INT, K_BOOL, K_CHOICE, K_SET, K_STR, K_IP, K_ADDR, K_ACCENT, K_PARITY, K_HOST, K_TZ };
-enum KSec : uint8_t { KS_CH, KS_BUS, KS_RUN, KS_WIFI, KS_DISP, KS_TIME, KS_SAFETY, KS_MON };
-static const char* const KSEC_NAME[] = {"", "bus", "run", "wifi", "display", "time", "safety", "monitor"};
+enum KType : uint8_t { K_NUM, K_INT, K_BOOL, K_CHOICE, K_SET, K_STR, K_IP, K_ADDR, K_ACCENT, K_PARITY, K_HOST, K_TZ, K_IOFN };
+enum KSec : uint8_t { KS_CH, KS_BUS, KS_RUN, KS_WIFI, KS_DISP, KS_TIME, KS_SAFETY, KS_MON, KS_IO, KS_FAN };
+static const char* const KSEC_NAME[] = {"", "bus", "run", "wifi", "display", "time", "safety", "monitor", "io", "fan"};
 struct SKey {
   uint8_t sec, t;
   const char* key;  // path below the section (channels: below channels[i])
@@ -1331,6 +1366,7 @@ struct SKey {
       {KS_CH, K_BOOL, p "runaway.offEnable", 0, 0, nullptr}, {KS_CH, K_NUM, p "runaway.offRise", 2, 100, nullptr},   \
       {KS_CH, K_INT, p "runaway.offSec", 10, 3600, nullptr}, {KS_CH, K_BOOL, p "runaway.frozenEnable", 0, 0, nullptr}, \
       {KS_CH, K_INT, p "runaway.frozenSec", 10, 3600, nullptr}
+#define IO_FN_OPTS "off|relay|estop|buzzer|fan|fanPwm|fanTach"
 static const SKey KEYS[] = {
     {KS_CH, K_STR, "name", 1, 31, nullptr},
     {KS_CH, K_CHOICE, "type", 0, 0, "off|local|modbus"},
@@ -1352,6 +1388,8 @@ static const SKey KEYS[] = {
     {KS_CH, K_INT, "local.readMs", 100, 1000, nullptr},
     {KS_CH, K_BOOL, "local.median", 0, 0, nullptr},
     {KS_CH, K_INT, "local.medianN", 3, 9, nullptr},
+    {KS_CH, K_NUM, "local.jumpMax", 0, 500, nullptr},
+    {KS_CH, K_INT, "local.badSec", 1, 30, nullptr},
     {KS_CH, K_INT, "local.tuneMaxMin", 10, 240, nullptr},
     {KS_CH, K_BOOL, "local.tuneFast", 0, 0, nullptr},
     {KS_CH, K_BOOL, "local.ff", 0, 0, nullptr},
@@ -1409,9 +1447,18 @@ static const SKey KEYS[] = {
     {KS_SAFETY, K_INT, "manualIdleMin", 2, 1440, nullptr},
     {KS_SAFETY, K_BOOL, "estop", 0, 0, nullptr},
     {KS_SAFETY, K_BOOL, "sound", 0, 0, nullptr},
+    {KS_SAFETY, K_INT, "volume", 1, 5, nullptr},
+    {KS_SAFETY, K_BOOL, "keyBeep", 0, 0, nullptr},
     {KS_SAFETY, K_BOOL, "relay", 0, 0, nullptr},
     {KS_SAFETY, K_BOOL, "chipWarn", 0, 0, nullptr},
     {KS_SAFETY, K_NUM, "chipMaxC", 40, 120, nullptr},
+    {KS_IO, K_IOFN, "fn0", 0, 0, IO_FN_OPTS},
+    {KS_IO, K_IOFN, "fn1", 0, 0, IO_FN_OPTS},
+    {KS_IO, K_IOFN, "fn2", 0, 0, IO_FN_OPTS},
+    {KS_FAN, K_BOOL, "afterRun", 0, 0, nullptr},
+    {KS_FAN, K_NUM, "offBelow", 30, 200, nullptr},
+    {KS_FAN, K_INT, "maxMin", 1, 240, nullptr},
+    {KS_FAN, K_INT, "speed", 20, 100, nullptr},
     {KS_MON, K_BOOL, "on", 0, 0, nullptr},
     {KS_MON, K_STR, "name", 1, 16, nullptr},
     {KS_MON, K_CHOICE, "sensor", 0, 0, "max31855|max6675"},
@@ -1445,6 +1492,7 @@ static int optIndex(const char* opts, const char* v) {
 
 // the JSON value of key k (channel ch) in a settings document
 static JsonVariantConst kValue(JsonObjectConst root, const SKey& k, int ch) {
+  if (k.t == K_IOFN) return root["io"]["fn"][k.key[2] - '0'];  // (io.fn is an array of names)
   JsonVariantConst v = k.sec == KS_CH ? root["channels"][ch] : root[KSEC_NAME[k.sec]];
   char seg[24];
   for (const char* p = k.key; *p;) {
@@ -1494,6 +1542,8 @@ static void keyName(const SKey& k, int ch, char* b, size_t n) {
 
 static bool keyShown(const SKey& k) {  // Modbus keys only where the board has RS485; monitor.* where it has one
   if (k.sec == KS_MON) return boardLimits().monitor;
+  if (k.sec == KS_IO) return k.key[2] - '0' < boardLimits().ioN;  // the board's optional pins
+  if (k.sec == KS_FAN) return boardLimits().ioN > 0;
   if (boardLimits().rs485) return true;
   return !(k.sec == KS_BUS && strcmp(k.key, "pollMs")) && !(k.sec == KS_CH && !strncmp(k.key, "modbus.", 7));
 }
@@ -1519,7 +1569,8 @@ static void cmdGet(const Args& a) {
       ++shown;
     }
   }
-  if (!shown) err("no settings \"%s\" (b, t, bus, run, wifi, display, safety%s; help settings)", f, boardLimits().monitor ? ", monitor" : "");
+  if (!shown) err("no settings \"%s\" (b, t, bus, run, wifi, display, safety%s%s; help settings)", f, boardLimits().monitor ? ", monitor" : "",
+         boardLimits().ioN ? ", io, fan" : "");
 }
 
 static bool validHost(const char* h) {
@@ -1573,6 +1624,19 @@ static void cmdSet(const Args& a) {
     // the value: check and convert
     float f;
     char o[24];
+    if (k->t == K_IOFN) {  // io.fnN: the whole list goes in (the model takes one name per pin), the others as they are
+      const int x = optIndex(k->opts, v);
+      if (x < 0) return err("%s=%s: one of %s", m.name, v, k->opts);
+      JsonObject io = root["io"].is<JsonObject>() ? root["io"].as<JsonObject>() : root["io"].to<JsonObject>();
+      JsonArray arr;
+      if (io["fn"].is<JsonArray>()) arr = io["fn"].as<JsonArray>();
+      else {
+        arr = io["fn"].to<JsonArray>();
+        for (int j = 0; j < IO_PINS_MAX; ++j) arr.add(JsonString(ioFnName(S.ioFn[j])));
+      }
+      arr[k->key[2] - '0'] = JsonString(ioFnName((uint8_t)x));
+      continue;
+    }
     // the object the key lives in (created as needed) and the key in it; assigned through the object
     // (a JsonVariant taken from obj[key] does not create the member). Keys are char arrays: copied.
     JsonObject dobj;
@@ -1998,6 +2062,7 @@ static void dispatch(const Args& a) {
   if (!strcmp(c, "programs")) return cmdPrograms();
   if (!strcmp(c, "program")) return cmdProgram(a);
   if (!strcmp(c, "show")) return cmdShow();
+  if (!strcmp(c, "report")) return cmdReport();
   if (!strcmp(c, "watch")) {
     watching = true;
     watchAt = millis();

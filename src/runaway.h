@@ -18,6 +18,7 @@ enum ChannelFault : uint8_t {
   FAULT_OFFHEAT,    // guard: the PV rises while the outputs are off (stuck SSR / controller)
   FAULT_FROZEN,     // guard: the reading did not change while the outputs are on
   FAULT_CJHOT,      // converter (cold junction) too hot (local)
+  FAULT_CONTROL,    // the control task stopped reporting to the local task (local)
 };
 const char* faultName(uint8_t f);
 

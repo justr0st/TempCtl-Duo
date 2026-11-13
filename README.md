@@ -2,7 +2,7 @@
 
 Firmware for a two-channel temperature controller, made for the **bottom and top heater of a BGA rework
 station**: reflow and desolder profiles that drive both heaters together, from a touch screen, a web page or a
-USB cable. Version **1.0.66**.
+USB cable. Version **1.0.68**.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/wiki/img/touch/03-running-dark.png"><img src="docs/wiki/img/touch/03-running-light.png" alt="Touch screen of the ESP32-S3 build during a run" width="480"></picture>
 
@@ -19,8 +19,13 @@ USB cable. Version **1.0.66**.
 - **Web page** with the same functions: live chart, program editor (tables, drag points on the chart, drag rows
   to reorder), channel setup, logs, CSV export and replay. Works on a phone, without internet.
 - **Over USB** in a desktop app or the hosted page (Chrome / Edge), and a **serial console**.
-- **Protections**: runaway, heating while off, frozen reading, converter too hot, E-stop input, SSR supply relay,
-  alarm sound.
+- **Protections**: runaway, heating while off, frozen reading, converter too hot, bad-reading filter, control task
+  watchdog, E-stop input, SSR supply relay, alarm sound with its own tones, volume and key beep.
+- **Optional pins and a cooling fan** (S3): GPIO 4 / 5 / 6 are set to relay, E-stop, buzzer or a fan (on / off or
+  PWM, with speed input); phases and steps can switch the fan, and it cools down after a run.
+- **Run report**: highest temperatures, hold deviation and steepest rise of each run, on the touch screen, the web
+  page and the console.
+- **QR codes** on the touch screen to open the web page or join the access point from a phone.
 - **Updates** from the release page (every board through the web page, the S3 also by itself), SD card logs and
   backups (S3).
 

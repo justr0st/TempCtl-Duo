@@ -15,6 +15,7 @@ serial console (`log`, `info`, `status`). The S3's UART port prints the technica
 | Problem | What to do |
 |---|---|
 | *no reading* / sensor fault | open thermocouple, loose wire, converter not powered or wrong CS pin; MAX6675 selected for a MAX31855 or the other way round |
+| Sensor fault *reading jumps (… °C)* | the reading kept jumping by more than *Largest change per reading* (25 °C) for *Sensor fault after* (3 s) while heating: a loose thermocouple wire or connector, interference from the heater wiring or the SSR. Check the wire and its screen first; only then raise the two values (*Channels › Thermocouple*). Single bad readings are held back and cause no fault ([Channels](Channels.md#thermocouple)) |
 | The reading falls while heating | T+ and T− swapped |
 | Noisy reading, single spikes | screened thermocouple wire with the screen to GND at one end; route it away from mains wires; switch on the median filter (5 or 7) |
 | The reading is a few degrees off | two-point calibration on the web *Channels* page |
@@ -28,6 +29,16 @@ serial console (`log`, `info`, `status`). The S3's UART port prints the technica
 | Overshoot or slow settling | run the PID autotune at the working temperature ([Channels](Channels.md)) |
 | A heater does not switch on | E-stop open (S3, the sidebar and the touch screen say so), a fault waiting for *Acknowledge*, the converter too hot, or the program does not use that channel |
 | *Heating while off* | a stuck SSR (shorted output) or a controller that ignores "outputs off": switch the heater supply off and check the SSR |
+| Fault *control task stopped* | the control task did not report for 10 s, so the channel's outputs were switched off. Restart the device; if it comes back, look in the log (UART) for a crash or "loop" message just before, and report it |
+
+## Cooling fan (S3)
+
+| Problem | What to do |
+|---|---|
+| The fan does not turn | no pin has a fan function (*Settings › Safety › Optional pins*: *Fan (on / off)* or *Fan (PWM)*; the *Cooling fan* settings only show then); the phase / step has no *Fan* mark and the run is not in its cool-down (after a run: until every channel is below the set temperature, 60 °C); a new run, manual mode or an autotune ended the cool-down; the wiring: the pin gives 3.3 V and a few mA, so the fan needs a transistor / MOSFET or relay, and its own supply |
+| The PWM fan runs full speed or not at all | a 4-wire fan pulls its PWM wire up to 5 V itself: through a transistor the signal is inverted (high duty = slow) and no setting inverts it yet; check the wiring and the *Fan speed* (20 … 100 %) |
+| *Fan runs below 100 rpm* warning, or no rpm shown | the fan is blocked or the tach wire is not on a pin set to *Fan speed input* (open-collector tach wire to the pin and GND, 2 pulses per turn) |
+| The sound / E-stop / relay setting is gone | those settings show only when a pin has that function: set the pin again (*Optional pins*; defaults GPIO4 relay, GPIO5 E-stop, GPIO6 buzzer) |
 
 ## Display and touch
 

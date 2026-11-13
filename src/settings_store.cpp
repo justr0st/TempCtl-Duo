@@ -9,11 +9,34 @@ static const char* const PATH = "/duo/settings.json";
 static const char* const TMP = "/duo/settings.tmp";
 static const char* const BAD = "/duo/settings.bad";
 
-BoardLimits boardLimits() { return BoardLimits{HAS_RS485 != 0, (uint8_t)LOCAL_CHANNELS_MAX, HAS_MONITOR != 0}; }
+BoardLimits boardLimits() {
+  BoardLimits l = {};
+  l.rs485 = HAS_RS485 != 0;
+  l.localMax = (uint8_t)LOCAL_CHANNELS_MAX;
+  l.monitor = HAS_MONITOR != 0;
+#if defined(IO_PINS_N)  // optional pins (board header, io_pins.h)
+  static_assert(IO_PINS_N <= IO_PINS_MAX, "more optional pins than Settings::ioFn holds");
+  static const uint8_t gpio[IO_PINS_N] = IO_PINS_GPIO, def[IO_PINS_N] = IO_PINS_DEF;
+  l.ioN = IO_PINS_N;
+  for (int i = 0; i < IO_PINS_N; ++i) {
+    l.ioGpio[i] = gpio[i];
+    l.ioDef[i] = def[i];
+  }
+#endif
+  return l;
+}
+
+// the defaults, validated: some are the fastest a part allows (bus.pollMs 100 ms), raised to what the
+// channels need (a Modbus channel: 250 ms)
+static void defaults(Settings& s, const BoardLimits& lim) {
+  char msg[160];
+  settingsDefaults(s, lim);
+  settingsValidate(s, lim, msg, sizeof(msg));
+}
 
 bool settingsLoad(Settings& s) {
   const BoardLimits lim = boardLimits();
-  settingsDefaults(s, lim);
+  defaults(s, lim);
   if (storageBegin()) fsRecoverTmp(PATH, TMP);
   if (!storageBegin() || !fsExists(PATH)) {
     LogSerial.println("[settings] no /duo/settings.json - defaults");
@@ -29,7 +52,7 @@ bool settingsLoad(Settings& s) {
                   e ? e.c_str() : msg, BAD);
     LittleFS.remove(BAD);
     LittleFS.rename(PATH, BAD);
-    settingsDefaults(s, lim);
+    defaults(s, lim);
     return false;
   }
   if (!settingsValidate(s, lim, msg, sizeof(msg))) LogSerial.printf("[settings] %s\n", msg);

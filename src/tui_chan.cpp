@@ -4,6 +4,7 @@
 // are on the web page.
 #include "tui.h"
 #include "psram.h"
+#include "safety.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -71,6 +72,10 @@ static float gMedian(const Settings& s, int c) { return s.ch[c].loc.median; }
 static void sMedian(Settings& s, int c, float v) { s.ch[c].loc.median = v != 0; }
 static float gMedianN(const Settings& s, int c) { return (s.ch[c].loc.medianN - 3) / 2; }  // 3, 5, 7, 9 -> 0 ... 3
 static void sMedianN(Settings& s, int c, float v) { s.ch[c].loc.medianN = (uint8_t)(3 + 2 * (int)v); }
+static float gJumpMax(const Settings& s, int c) { return s.ch[c].loc.jumpMax; }
+static void sJumpMax(Settings& s, int c, float v) { s.ch[c].loc.jumpMax = v; }
+static float gBadSec(const Settings& s, int c) { return s.ch[c].loc.badSec; }
+static void sBadSec(Settings& s, int c, float v) { s.ch[c].loc.badSec = (uint16_t)v; }
 static float gTuneMax(const Settings& s, int c) { return s.ch[c].loc.tuneMaxMin; }
 static void sTuneMax(Settings& s, int c, float v) { s.ch[c].loc.tuneMaxMin = (uint16_t)v; }
 static float gTuneFast(const Settings& s, int c) { return s.ch[c].loc.tuneFast; }
@@ -434,6 +439,10 @@ static const Field CH_FIELDS[] = {
      nullptr, nullptr, gMedian, sMedian, isLoc},
     {F_SEL, "\xE2\x80\xA6 over the last", nullptr, 0, 0, 0, nullptr, "3 readings\n5 readings\n7 readings\n9 readings", gMedianN,
      sMedianN, isLoc, L_JOIN | L_BEFORE, 150, nullptr, nullptr, "", medOn},
+    {F_NUM, "Largest change per reading", "A bigger jump counts as a bad reading; 0 = not checked", 0, 500, 0, "\xC2\xB0" "C",
+     nullptr, gJumpMax, sJumpMax, isLoc, 0, 80},
+    {F_NUM, "Sensor fault after", "Bad readings for this long while heating give a sensor fault", 1, 30, 0, "s", nullptr,
+     gBadSec, sBadSec, isLoc, 0, 80},
     {F_HEAD, "PID control", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, isLoc},
     {F_NUM, "Autotune time limit", "The autotune gives up after this time", 10, 240, 0, "min", nullptr, gTuneMax, sTuneMax,
      isLoc},
@@ -773,6 +782,16 @@ static void build() {
   if (cTabs[0]) tButtonText(cTabs[0], E.ch[0].name);
   if (cTabs[1]) tButtonText(cTabs[1], E.ch[1].name);
   if (cTabs[TAB_MON]) tButtonText(cTabs[TAB_MON], E.mon.name);
+  // a name too long for its tab: the small font (the tabs share the header's room)
+  lv_obj_update_layout(cScr);
+  for (int i = 0; i < 4; ++i) {
+    if (!cTabs[i]) continue;
+    lv_obj_t* l = lv_obj_get_child(cTabs[i], 0);
+    lv_point_t sz;
+    lv_text_get_size(&sz, lv_label_get_text(l), &tfont_14, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    lv_obj_set_style_text_font(l, sz.x > lv_obj_get_content_width(cTabs[i]) ? &tfont_12 : &tfont_14, 0);
+    tOneLine(l);
+  }
   tSetEnabled(cSave, eDirty);
   if (eDirty) lv_obj_add_style(cSave, &S_.btnPri, 0);
   else lv_obj_remove_style(cSave, &S_.btnPri, 0);
@@ -919,6 +938,7 @@ static void onSave(lv_event_t*) {
   } else {
     tToast("Settings saved.");
   }
+  safetyFx(FX_OK);
 }
 
 static void onLeave(int b, int) {
@@ -956,13 +976,17 @@ lv_obj_t* chanCreate() {
     if ((i == TAB_BUS && !bus) || (i == TAB_MON && !mon)) continue;
     cTabs[i] = tButton(p.header, i == TAB_BUS ? (TUI_SMALL || HAS_MONITOR ? "RS485" : "RS485 (beta)") : "", onTab, (void*)(intptr_t)i,
                        TAB_W, T_HDR - 8);
+    lv_obj_set_flex_grow(cTabs[i], 1);  // the tabs share the room between Back and Save (a hidden tab: more each)
+    lv_obj_set_style_max_width(cTabs[i], TAB_W * 2, 0);
+    lv_obj_set_style_pad_hor(cTabs[i], 3, 0);
     lv_obj_t* l = lv_obj_get_child(cTabs[i], 0);
-    lv_obj_set_width(l, TAB_W - 8);
+    lv_obj_set_width(l, LV_PCT(100));
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
     tOneLine(l);
   }
   lv_obj_t* sp = lv_obj_create(p.header);
   lv_obj_remove_style_all(sp);
-  lv_obj_set_flex_grow(sp, 1);
+  lv_obj_set_size(sp, 2, 2);
   cSave = tButton(p.header, "Save", onSave, nullptr, TUI_SMALL ? 52 : 64, T_HDR - 8);
   return p.scr;
 }

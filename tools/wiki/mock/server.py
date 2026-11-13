@@ -1,19 +1,32 @@
 #!/usr/bin/env python3
-"""Demo device for the wiki screenshots (tools/wiki/make_shots.sh): serves web/index.html and answers the
-web API like a TempCtl Duo (S3) would. Settings, example programs and time zones come from the firmware's
+"""Demo device for the wiki screenshots (tools/wiki/make_shots.sh): serves the web page (web/index.html, joined from
+web/src/ at the start and again when a part changed: tools/web_join.py) and answers the web API like a
+TempCtl Duo (S3) would. Settings, example programs and time zones come from the firmware's
 own code, runs from its run engine (tools/wiki/demo_run.cpp: DEMO_RUN = the built program).
   DEMO_RUN=/tmp/demo_run python3 tools/wiki/mock/server.py [port]       (default 8770)
 POST /demo/scene {"name": ...} switches what the device shows (SCENES below); no X-TempCtl header needed.
 Not a test mock: it accepts what the page sends and changes little (enough for the pictures)."""
-import copy, http.server, json, math, os, re, subprocess, sys, time, urllib.parse
+import copy, http.server, json, math, os, re, subprocess, sys, threading, time, urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
 WEB = os.path.join(ROOT, 'web')
+sys.path.insert(0, os.path.join(ROOT, 'tools'))
+import web_join  # noqa: E402  (web/index.html is generated from web/src/)
 DEMO = os.environ.get('DEMO_RUN', '/tmp/demo_run')
 FW = re.search(r'#define FW_VERSION "([^"]+)"', open(os.path.join(ROOT, 'src', 'version.h')).read()).group(1)
 T0 = time.time()
 EPOCH0 = 1792483200  # 2026-10-20 08:00 UTC: the device clock in the pictures (fixed, so they don't change)
+
+
+PAGE_LOCK = threading.Lock()
+
+
+def page():
+    """web/index.html, joined again first when a file in web/src/ is newer (edit a part, reload the page)"""
+    with PAGE_LOCK:
+        if web_join.stale(): web_join.join()
+        return open(os.path.join(WEB, 'index.html'), 'rb').read()
 
 
 def demo(*args):
@@ -21,7 +34,32 @@ def demo(*args):
 
 
 CFG = demo('config')
-CFG['limits'] = {'rs485': True, 'localMax': 2, 'monitor': True, 'relay': True, 'estop': True, 'sound': True, 'chipTemp': True}
+# optional pins (S3: GPIO 4, 5, 6): what is wired follows the functions in io.fn, as in the firmware (settings.cpp)
+CFG.setdefault('io', {'fn': ['relay', 'estop', 'buzzer']})
+CFG.setdefault('fan', {'afterRun': False, 'offBelow': 60, 'maxMin': 30, 'speed': 100})
+CFG['safety'].setdefault('volume', 3)
+CFG['safety'].setdefault('keyBeep', True)
+IO_NAMES = ['off', 'relay', 'estop', 'buzzer', 'fan', 'fanPwm', 'fanTach']
+
+
+def limits():
+    fn = CFG['io']['fn']
+    return {'rs485': True, 'localMax': 2, 'monitor': True, 'chipTemp': True, 'ioGpio': [4, 5, 6],
+            'relay': 'relay' in fn, 'estop': 'estop' in fn, 'sound': 'buzzer' in fn, 'fan': 'fan' in fn or 'fanPwm' in fn}
+
+
+def io_error(fn):  # settings.cpp settingsValidate: a function on one pin at most (fan and fanPwm: one fan output)
+    seen = {}
+    for i, f in enumerate(fn):
+        if f not in IO_NAMES: return 'io.fn: off, relay, estop, buzzer, fan, fanPwm or fanTach expected'
+        k = 'fan' if f == 'fanPwm' else f
+        if f != 'off' and k in seen:
+            return 'GPIO %d: "%s" is already on another pin' % ([4, 5, 6][i], 'fan output' if k == 'fan' else f)
+        seen[k] = i
+    return ''
+
+
+CFG['limits'] = limits()
 CFG['monitor'].update({'on': True, 'name': 'Board edge'})  # the monitor channel (1.0.60): a third thermocouple
 
 
@@ -102,10 +140,17 @@ def live():
     if d:
         L['run'] = copy.deepcopy(d['run'])
         if L['run']['state'] == 'finished': L['run']['msg'] = 'Program "Lead-free BGA" finished (7:28)'
+        if L['run']['state'] in ('finished', 'stopped'):  # report of the last run (values not measured are left out)
+            L['report'] = {'name': L['run'].get('name', PROGS[0]['name']), 'finished': L['run']['state'] == 'finished', 'dur': 448.0,
+                           'ch': [{'peak': 161.3, 'peakT': 296.0, 'dev': 1.1, 'rate': 2.4},
+                                  {'peak': 246.1, 'peakT': 462.0, 'dev': 1.8, 'rate': 1.9}],
+                           'mon': {'peak': 98.7, 'peakT': 470.0}}
     if SCENE['name'] == 'intr':
         L['run'].update({'prog': 0, 'name': PROGS[0]['name'], 'type': 'seq', 'phases': 7,
                          'msg': 'Run interrupted by a reset (power loss)',
                          'intr': {'reason': 'power loss', 'exact': False, 'el': 262, 'i': [3, 0], 'st': ['hold', 'none'], 'left': [0, 0]}})
+    if CFG['limits']['fan']:  # only with a fan output; the rpm only with a speed input
+        L['fan'] = {'on': SCENE['name'] in ('finished', 'run-end'), **({'rpm': 1200} if 'fanTach' in CFG['io']['fn'] else {})}
     L['ch'] = [chan(i, d) for i in range(2)]
     L['mon'] = {'name': CFG['monitor']['name'], 'pv': mon_of(L['ch'][0]['pv']), 'raw': mon_of(L['ch'][0]['pv']), 'cold': 30.9, 'err': ''}
     return L
@@ -218,9 +263,9 @@ class H(http.server.BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path); q = urllib.parse.parse_qs(u.query); p = u.path
         g = lambda k, d='': q.get(k, [d])[0]
         if p == '/':  # the device's own copy of the page (marked as tools/web_embed.py does)
-            return self.send(200, open(os.path.join(WEB, 'index.html'), 'rb').read().replace(b'<html lang="en">', b'<html lang="en" data-device>', 1), 'text/html')
+            return self.send(200, page().replace(b'<html lang="en">', b'<html lang="en" data-device>', 1), 'text/html')
         if p == '/hosted':  # the hosted page's copy (no device mark: connect screen)
-            return self.send(200, open(os.path.join(WEB, 'index.html'), 'rb').read(), 'text/html')
+            return self.send(200, page(), 'text/html')
         if p == '/demo/run.csv': return self.send(200, run_csv(), 'text/csv')
         if p in ('/favicon.svg', '/favicon.ico', '/apple-touch-icon.png'):
             f = {'/favicon.svg': 'logo.svg'}.get(p, p[1:])
@@ -285,14 +330,23 @@ class H(http.server.BaseHTTPRequestHandler):
             return self.send(200, {'ok': True})
         if p == '/demo/config': merge(CFG, body); GEN['cfg'] += 1; return self.send(200, {'ok': True})
         if p == '/api/config':
+            if isinstance(body.get('io', {}).get('fn'), list):
+                e = io_error(body['io']['fn'])
+                if e: return self.send(200, {'err': e + ' - nothing changed'})
             merge(CFG, body); GEN['cfg'] += 1
+            CFG['limits'] = limits()
             lo = 100 if all(c['type'] == 'off' or (c['type'] == 'local' and c['local']['sensor'] == 'max31855') for c in CFG['channels']) else 250
             CFG['bus']['pollMs'] = max(lo, min(10000, CFG['bus']['pollMs']))  # (as settings.cpp pollMinMs)
             return self.send(200, CFG)
+        if p == '/api/program' and isinstance(body.get('program'), dict) and 0 <= body.get('i', -1) < len(PROGS):
+            PROGS[body['i']] = body['program']  # stored as posted (the "fan" flags of phases / steps stay)
+            GEN['prog'] += 1
+            return self.send(200, {'i': body['i'], 'used': True, 'program': PROGS[body['i']]})
         if p == '/api/select': CFG['selProgram'] = body.get('i', 0); return self.send(200, {'ok': True, 'sel': CFG['selProgram']})
         if p == '/api/time': return self.send(200, {'ok': True, 'time': EPOCH0 + uptime(), 'zone': CFG['time']['zone']})
         self.send(200, {'ok': True})
 
 
 if __name__ == '__main__':
+    web_join.join()
     http.server.ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1]) if len(sys.argv) > 1 else 8770), H).serve_forever()

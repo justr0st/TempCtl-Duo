@@ -3,82 +3,161 @@
 #include <esp_timer.h>
 #include <math.h>
 #include "config.h"
+#include "io_pins.h"
+#include "settings.h"
 
-static constexpr uint32_t TICK_MS = 50;
-static constexpr int BUZZ_CH = 6;  // LEDC channel 6 (timer 3; 0 = backlight, 1..3 = status LED)
+static constexpr uint32_t TICK_MS = 10;       // the sound engine's tick
+static constexpr uint8_t ESTOP_EVERY = 5;     // E-stop sampled every 5th tick (50 ms, as before 1.0.68)
+static constexpr uint8_t BUZZ_CH = IO_LEDC_BUZZER;  // LEDC channel 6 (timer 3, its own: 7 stays unused)
 static constexpr uint32_t BUZZ_HZ = 2700;
+// volume 1 ... 5 = PWM duty of the 8-bit channel (128 = a square wave, the loudest); about 3x per step
+static const uint8_t DUTY[6] = {0, 2, 6, 16, 48, 128};
 
 static volatile bool estopOn = false, estopRaw = false, estopEnabled = false;
-static volatile bool soundEnabled = true;
+static volatile bool soundEnabled = true, keyBeepOn = true;
+static volatile uint8_t volume = 3;
 static volatile uint8_t soundLevel = SOUND_NONE, mutedLevel = SOUND_NONE;
-static volatile bool finishedReq = false, testReq = false;
 static volatile uint32_t lastActivity = 0;
 static volatile float chipC = NAN;
 
-// patterns: on/off times in ticks (50 ms), 0 = end of the list, then the pattern repeats
-static const uint8_t PAT_ALARM[] = {8, 4, 8, 4, 8, 28, 0};          // 3 long, ~3 s
-static const uint8_t PAT_ACTION[] = {3, 3, 3, 191, 0};              // 2 short, ~10 s
-static const uint8_t PAT_FINISHED[] = {3, 3, 3, 3, 3, 1, 0};        // 3 short, once
-static const uint8_t PAT_TEST[] = {4, 1, 0};
+// ------------------------------------------------------------------ sounds
+// A sound is a list of notes (Hz, ms; 0 Hz = silence), played once or repeated. Lengths are rounded up to
+// the 10 ms tick.
+struct Note {
+  uint16_t hz, ms;
+};
+struct Sound {
+  const Note* n;
+  uint8_t len;
+  bool repeat;
+  bool loud;     // always at volume 5 (the alarm)
+  uint8_t prio;  // one-shots: a higher or equal one replaces the one that plays
+};
+#define SOUND(notes, rep, loud, prio) {notes, (uint8_t)(sizeof(notes) / sizeof(notes[0])), rep, loud, prio}
 
-#if defined(PIN_BUZZER)
-static void buzz(bool on) {
-  static bool cur = false;
-  if (on == cur) return;
-  cur = on;
-  ledcWrite(BUZZ_CH, on ? 128 : 0);
+// fault / E-stop: 3 long beeps, again after 3 s
+static const Note N_ALARM[] = {{2700, 400}, {0, 200}, {2700, 400}, {0, 200}, {2700, 400}, {0, 1400}};
+// action required (pause with a message, manual mode about to end): 2 short beeps, again after 10 s
+static const Note N_ACTION[] = {{2000, 150}, {0, 150}, {2000, 150}, {0, 9550}};
+// run finished: C, E, G rising (7th octave: where small piezos are loud)
+static const Note N_FINISHED[] = {{2093, 120}, {0, 40}, {2637, 120}, {0, 40}, {3136, 240}};
+static const Note N_KEY[] = {{3000, 20}};
+static const Note N_OK[] = {{2349, 60}, {0, 30}, {3136, 90}};  // D, G: a fourth up
+static const Note N_REFUSED[] = {{440, 160}};
+static const Note N_TEST[] = {{2700, 200}};  // the alarm's tone, at the set volume
+
+static const Sound S_ALARM = SOUND(N_ALARM, true, true, 0);
+static const Sound S_ACTION = SOUND(N_ACTION, true, false, 0);
+// one-shots, by SoundFx; FX_FINISHED (internal) after them
+static constexpr int FX_FINISHED = FX_TEST + 1, FX_N = FX_FINISHED + 1;
+static const Sound S_FX[FX_N] = {
+    SOUND(N_KEY, false, false, 1), SOUND(N_OK, false, false, 2), SOUND(N_REFUSED, false, false, 2),
+    SOUND(N_TEST, false, false, 4), SOUND(N_FINISHED, false, false, 3),
+};
+// requests from any task; the tick takes them (a request that comes in while the tick clears it is lost: a
+// click, not a safety matter)
+static volatile bool fxReq[FX_N];
+
+// the buzzer's tone: frequency and duty only written when they change
+static void buzzOut(uint16_t hz, uint8_t duty) {
+  static uint16_t curHz = BUZZ_HZ;
+  static uint8_t curDuty = 0;
+  if (!hz) duty = 0;
+  if (hz && hz != curHz) {
+    ledcChangeFrequency(BUZZ_CH, hz, 8);
+    curHz = hz;
+  }
+  if (duty != curDuty) {
+    ledcWrite(BUZZ_CH, duty);
+    curDuty = duty;
+  }
 }
-#else
-static void buzz(bool) {}
-#endif
 
-static void tick(void*) {
-#if defined(PIN_ESTOP)
-  static uint8_t hi = 0, lo = 0;
-  const bool open = digitalRead(PIN_ESTOP) == HIGH;
-  if (open) { lo = 0; if (hi < 255) ++hi; }
-  else { hi = 0; if (lo < 255) ++lo; }
-  if (hi >= 2) estopRaw = true;
-  if (lo >= 10) estopRaw = false;
-  estopOn = estopEnabled && estopRaw;
-#endif
-  // sound
-  static const uint8_t* pat = nullptr;
-  static uint8_t idx = 0, left = 0;
-  static bool once = false;
+static const Sound* play = nullptr;  // what plays now (timer only)
+static uint8_t noteIdx = 0;
+static uint16_t noteLeft = 0;        // ticks of the current note still to go
+
+static void startSound(const Sound* s) {
+  play = s;
+  noteIdx = 0;
+  noteLeft = 0;
+  if (!s) buzzOut(0, 0);
+}
+
+static void soundTick() {
   const uint8_t lvl = soundLevel;
   if (mutedLevel && lvl < mutedLevel) mutedLevel = lvl;  // condition gone (or lower): mute ends
   const uint8_t eff = soundEnabled && lvl > mutedLevel ? lvl : SOUND_NONE;
-  const uint8_t* want = eff == SOUND_ALARM ? PAT_ALARM : eff == SOUND_ACTION ? PAT_ACTION : nullptr;
-  if (finishedReq && want) finishedReq = false;  // an alarm is louder news
-  if (testReq) { testReq = false; pat = PAT_TEST; once = true; idx = 0; left = 0; }
-  else if (finishedReq && !want && (!pat || !once)) {
-    finishedReq = false;
-    if (soundEnabled) { pat = PAT_FINISHED; once = true; idx = 0; left = 0; }
-  }
-  if (!once && pat != want) { pat = want; idx = 0; left = 0; }
-  if (!pat) { buzz(false); return; }
-  if (left == 0) {
-    if (pat[idx] == 0) {
-      if (once) { pat = nullptr; once = false; buzz(false); return; }
-      idx = 0;
+  const Sound* want = eff == SOUND_ALARM ? &S_ALARM : eff == SOUND_ACTION ? &S_ACTION : nullptr;
+  // the most important one-shot asked for since the last tick
+  const Sound* fx = nullptr;
+  for (int i = 0; i < FX_N; ++i)
+    if (fxReq[i]) {
+      fxReq[i] = false;
+      if (!fx || S_FX[i].prio > fx->prio) fx = &S_FX[i];
     }
-    left = pat[idx++];
+  if (want) {  // an alarm / action level replaces anything lower; one-shots are dropped meanwhile
+    if (play != want) startSound(want);
+  } else {
+    if (play && play->repeat) startSound(nullptr);  // the level ended (or was muted)
+    if (fx && (!play || fx->prio >= play->prio)) startSound(fx);
   }
-  buzz((idx & 1) == 1);  // odd index: an "on" time is running
-  --left;
+  if (!play) return;
+  if (noteLeft == 0) {
+    if (noteIdx >= play->len) {
+      if (!play->repeat) {
+        startSound(nullptr);
+        return;
+      }
+      noteIdx = 0;
+    }
+    const Note& n = play->n[noteIdx++];
+    noteLeft = (uint16_t)((n.ms + TICK_MS - 1) / TICK_MS);
+    if (!noteLeft) noteLeft = 1;
+    const uint8_t v = volume >= 1 && volume <= 5 ? volume : 3;
+    buzzOut(n.hz, DUTY[play->loud ? 5 : v]);
+  }
+  --noteLeft;
+}
+
+// ------------------------------------------------------------------ E-stop
+
+static void estopSample() {
+  static uint8_t hi = 0, lo = 0;
+  static int lastPin = -1;
+  const int pin = ioPin(IO_ESTOP);
+  if (pin != lastPin) {  // function moved / added / removed: count again on the new pin (the state stays)
+    lastPin = pin;
+    hi = lo = 0;
+    if (pin < 0) estopRaw = false;  // (no contact any more)
+  }
+  if (pin >= 0) {
+    const bool open = digitalRead(pin) == HIGH;
+    if (open) { lo = 0; if (hi < 255) ++hi; }
+    else { hi = 0; if (lo < 255) ++lo; }
+    if (hi >= 2) estopRaw = true;
+    if (lo >= 10) estopRaw = false;
+  }
+  estopOn = estopEnabled && estopRaw && pin >= 0;
+}
+
+static void tick(void*) {
+  static uint8_t n = 0;
+  if (++n >= ESTOP_EVERY) {
+    n = 0;
+    estopSample();
+  }
+  soundTick();
 }
 
 void safetyBegin() {
   static bool started = false;
   if (started) return;
   started = true;
-#if defined(PIN_ESTOP)
-  pinMode(PIN_ESTOP, INPUT_PULLUP);
-#endif
-#if defined(PIN_BUZZER)
+  // the buzzer's channel; its pin is attached by ioConfigure (S3: an optional pin) or here (fixed pin)
   ledcSetup(BUZZ_CH, BUZZ_HZ, 8);
   ledcWrite(BUZZ_CH, 0);
+#if !defined(IO_PINS_N) && defined(PIN_BUZZER)
   ledcAttachPin(PIN_BUZZER, BUZZ_CH);
 #endif
   lastActivity = millis();
@@ -89,29 +168,31 @@ void safetyBegin() {
   if (esp_timer_create(&a, &h) == ESP_OK) esp_timer_start_periodic(h, TICK_MS * 1000);
 }
 
-void safetyConfigure(bool estop, bool sound) {
+void safetyConfigure(bool estop, bool sound, uint8_t vol, bool keyBeep) {
   estopEnabled = estop && safetyEstopWired();
   estopOn = estopEnabled && estopRaw;
   soundEnabled = sound;
+  volume = vol >= 1 && vol <= 5 ? vol : 3;
+  keyBeepOn = keyBeep;
 }
 
-#if defined(PIN_ESTOP)
-bool safetyEstopWired() { return true; }
-#else
-bool safetyEstopWired() { return false; }
-#endif
+bool safetyEstopWired() { return ioPin(IO_ESTOP) >= 0; }
 bool safetyEstop() { return estopOn; }
 bool safetyEstopRaw() { return estopRaw; }
 
-#if defined(PIN_BUZZER)
-bool safetySoundWired() { return true; }
-#else
-bool safetySoundWired() { return false; }
-#endif
+bool safetySoundWired() { return ioPin(IO_BUZZER) >= 0; }
 void safetySound(SoundLevel level) { soundLevel = level; }
-void safetySoundFinished() { finishedReq = true; }
+void safetySoundFinished() {
+  if (soundEnabled) fxReq[FX_FINISHED] = true;
+}
 bool safetySoundMuted() { return mutedLevel != SOUND_NONE && soundLevel <= mutedLevel; }
-void safetyBeepTest() { testReq = true; }
+void safetyFx(SoundFx fx) {
+  if (fx > FX_TEST) return;
+  if (fx != FX_TEST && !soundEnabled) return;
+  if (fx == FX_KEY && !keyBeepOn) return;
+  fxReq[fx] = true;
+}
+void safetyBeepTest() { safetyFx(FX_TEST); }
 
 void safetyActivity() {
   lastActivity = millis();

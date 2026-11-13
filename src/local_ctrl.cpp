@@ -4,9 +4,11 @@
 #include <math.h>
 #include "app_state.h"
 #include "config.h"
+#include "io_pins.h"
 #include "pid.h"
 #include "runaway.h"
 #include "safety.h"
+#include "tc_filter.h"
 #include "tc_sensor.h"
 
 #if defined(PIN_TC_SCK) && (defined(PIN_TC_CS_LOCAL) || defined(PIN_TC_CS_BOTTOM))
@@ -16,9 +18,11 @@
 #endif
 
 static constexpr uint32_t TICK_MS = 50;  // the task's tick; each channel reads every cfg.readMs (100 ... 1000 ms)
-static constexpr uint32_t FRESH_MS = 1000;  // a reading counts as current this long (longer read intervals: freshMs())
-static constexpr uint8_t BAD_READS_FAULT = 3;
 static constexpr uint32_t SSR_TIMEOUT_MS = 1500;
+// the control task (setpoints, run engine, end of a run) reports every pass; without a report for this long
+// a heating channel is switched off with a fault (its setpoint would never change again)
+static constexpr uint32_t CONTROL_TIMEOUT_MS = 10000;
+static volatile uint32_t controlBeatMs = 0;  // millis of the last report, 0 = none yet (task not started)
 
 struct LocalPins {
   int cs = -1, ssr = -1;
@@ -34,12 +38,8 @@ struct Local {
   // state (local task)
   float pv = NAN, rawC = NAN, coldC = NAN, out = 0;
   uint8_t tcFault = TC_NO_DEVICE;
-  uint8_t badReads = 0;
-  float med[9] = {};         // last good raw readings, oldest first (median filter)
-  uint8_t medN = 0;
+  TcFilter flt;              // median, bad readings, "current" (tc_filter.h)
   uint32_t lastStepMs = 0;   // the channel's last reading (millis; 0 = none yet)
-  uint32_t lastGoodMs = 0;
-  bool everGood = false;
   uint8_t fault = FAULT_NONE;
   char faultText[64] = "";
   Pid pid;
@@ -58,11 +58,10 @@ struct Local {
 };
 
 static Local loc[NUM_CHANNELS];
-// a reading counts as current for 1 s, at long read intervals for two intervals and a half
-static uint32_t freshMs(const LocalChannelSettings& c) {
-  const uint32_t f = c.readMs * 5u / 2u;
-  return f > FRESH_MS ? f : FRESH_MS;
+static TcFilterCfg fltCfg(const LocalChannelSettings& c) {
+  return TcFilterCfg{c.median != 0, c.medianN, c.readMs, c.jumpMax, (float)c.badSec};
 }
+static bool freshNow(const Local& l) { return l.flt.fresh(fltCfg(l.cfg), millis()); }
 static SemaphoreHandle_t mtx = nullptr;
 
 struct LockL {
@@ -117,10 +116,7 @@ void localCtrlEarlyInit() {
   digitalWrite(PIN_TC_CS_MON, HIGH);  // monitor converter deselected
   pinMode(PIN_TC_CS_MON, OUTPUT);
 #endif
-#if defined(PIN_SSR_RELAY)
-  digitalWrite(PIN_SSR_RELAY, LOW);  // SSR supply relay off (active high, driven directly by the pin)
-  pinMode(PIN_SSR_RELAY, OUTPUT);
-#endif
+  // (the SSR supply relay is an optional pin: off from ioEarlyInit, io_pins.h)
   pinMode(PIN_TC_SCK, OUTPUT);
   digitalWrite(PIN_TC_SCK, LOW);
   pinMode(PIN_TC_SO, INPUT_PULLUP);  // no converter: all ones = "no device"
@@ -201,18 +197,6 @@ static void latch(Local& l, uint8_t f, const char* text) {
   }
 }
 
-// median of n values (n odd, <= 9)
-static float medianOf(const float* v, int n) {
-  float a[9];
-  for (int i = 0; i < n; ++i) {  // insertion sort (at most 9)
-    float x = v[i];
-    int j = i;
-    for (; j > 0 && a[j - 1] > x; --j) a[j] = a[j - 1];
-    a[j] = x;
-  }
-  return a[n / 2];
-}
-
 static void step(int ch, float dt) {
   Local& l = loc[ch];
   // read outside the lock (a few hundred microseconds)
@@ -234,32 +218,20 @@ static void step(int ch, float dt) {
   {
     LockL g;
     const LocalChannelSettings& c = l.cfg;
+    const TcFilterCfg fc = fltCfg(c);
+    const uint32_t now = millis();
     window = c.windowSec;
     l.tcFault = r.fault;
     l.coldC = r.coldC;
-    if (r.fault == TC_OK) {
-      l.badReads = 0;
-      // median of the last medianN readings (setting): single-reading spikes (thermocouple wires picking
-      // up noise) don't reach the PID or the display; delays a change by about half the window
-      float t = r.tempC;
-      if (c.median) {
-        const uint8_t w = c.medianN >= 3 && c.medianN <= 9 ? c.medianN : 3;
-        for (int k = 0; k < 8; ++k) l.med[k] = l.med[k + 1];
-        l.med[8] = r.tempC;
-        if (l.medN < 9) ++l.medN;
-        if (l.medN >= w) t = medianOf(l.med + 9 - w, w);
-      } else {
-        l.medN = 0;
-      }
-      l.rawC = t;
-      l.pv = t * c.calGain + c.calOffset;
-      l.lastGoodMs = millis();
-      l.everGood = true;
-    } else {
-      if (l.badReads < 255) ++l.badReads;
-      l.medN = 0;
+    // bad readings (converter fault, implausible jump): the first ones are held back and the output stays
+    // (tc_filter.h); a jump that lasts is the new level
+    const TcIn in = l.flt.update(fc, r.fault == TC_OK, r.tempC, now);
+    if (in == TcIn::Good) {
+      l.rawC = l.flt.value();
+      l.pv = l.rawC * c.calGain + c.calOffset;
+      if (l.flt.newLevel()) l.pid.rebase(l.pv);  // (no derivative kick from the step)
     }
-    const bool fresh = l.everGood && millis() - l.lastGoodMs < freshMs(c) && l.badReads == 0;
+    const bool fresh = l.flt.fresh(fc, now);
     char t[64];
     if (safetyEstop() && (l.on || l.tuning)) {  // E-stop: outputs off (not a fault; the control task tells)
       l.on = false;
@@ -272,10 +244,9 @@ static void step(int ch, float dt) {
     }
     // faults are latched only while the outputs are on; when off the channel just shows "no reading"
     const bool heating = l.on || l.tuning;
-    // (at least 3 bad readings, and at least 750 ms of them at a short read interval)
-    const uint8_t badLimit = c.readMs >= 250 ? BAD_READS_FAULT : (uint8_t)((750 + c.readMs - 1) / (c.readMs ? c.readMs : 250));
-    if (l.badReads >= badLimit && heating) {
-      snprintf(t, sizeof(t), "%s", tcFaultName(r.fault));
+    if (heating && l.flt.badTooLong(fc, now)) {  // bad readings for longer than the setting
+      if (r.fault != TC_OK) snprintf(t, sizeof(t), "%s", tcFaultName(r.fault));
+      else snprintf(t, sizeof(t), "reading jumps (%.1f C)", r.tempC);
       latch(l, FAULT_SENSOR, t);
     }
     if (fresh && heating && l.pv > c.maxTemp) {
@@ -286,6 +257,10 @@ static void step(int ch, float dt) {
       snprintf(t, sizeof(t), "converter %.1f C (max %.0f C)", r.coldC, c.cjMax);
       latch(l, FAULT_CJHOT, t);
     }
+    // the control task stopped: nothing would change the setpoint or end the run any more
+    const uint32_t beat = controlBeatMs;
+    if (heating && beat && (int32_t)(now - beat) > (int32_t)CONTROL_TIMEOUT_MS)
+      latch(l, FAULT_CONTROL, "control task stopped");
     if (!l.fault) {  // heating while off / reading frozen
       const Local& o = loc[ch ^ 1];
       const bool other = l.otherHeat || (o.enabled && (o.on || o.tuning));
@@ -296,6 +271,9 @@ static void step(int ch, float dt) {
         latch(l, gf, t);
       }
     }
+    // a held-back reading above the cut-off: no power until it is clear which reading is right
+    const float pend = l.flt.pending();
+    const bool pendHot = !isnan(pend) && pend * c.calGain + c.calOffset > c.maxTemp;
     if (!l.fault && l.tuning) {
       // autotune drives the output; runaway: "heating failed" only (the PV swings around the test SP)
       l.out = l.tune.update(fresh ? l.pv : NAN, dt);
@@ -310,7 +288,7 @@ static void step(int ch, float dt) {
         l.out = 0;
         l.runaway.reset();
       }
-      duty = (l.fault || !l.tuning) ? 0 : l.out / 100.0f;
+      duty = (l.fault || !l.tuning || pendHot) ? 0 : l.out / 100.0f;
       l.ff = l.integ = NAN;
     } else if (!l.fault && l.on && fresh && !isnan(l.sp)) {
       const PidParams p{c.kp, c.ki, c.kd, c.maxOut};
@@ -319,7 +297,7 @@ static void step(int ch, float dt) {
       // setpoint, no ramp power). Switching it on / off while the PID runs moves its share into / out of the
       // integrator, so the output doesn't jump.
       float ff = NAN, spRate = 0;
-      const uint32_t age = l.previewMs ? millis() - l.previewMs : UINT32_MAX;
+      const uint32_t age = l.previewMs ? now - l.previewMs : UINT32_MAX;
       const uint32_t maxAge = ffMaxAgeMs(l.previewEveryMs);
       if (c.ff) {
         ff = clampFf(ffInput(FfModel{c.ffK, c.ffTau, c.ffDead}, l.sp, l.spAhead, l.rateAhead, age, maxAge), c.maxOut);
@@ -338,6 +316,9 @@ static void step(int ch, float dt) {
         latch(l, rf, t);
       }
       duty = l.fault ? 0 : l.out / 100.0f;
+    } else if (!l.fault && l.on && in == TcIn::Hold && l.pid.running() && !isnan(l.sp)) {
+      // a bad reading within the hold: the PID waits and the output stays as it was
+      duty = pendHot ? 0 : l.out / 100.0f;
     } else {
       if (!l.on || l.fault) {
         l.pid.reset();
@@ -360,17 +341,11 @@ struct Mon {
   MonitorSettings cfg{};
   float pv = NAN, rawC = NAN, coldC = NAN;
   uint8_t tcFault = TC_NO_DEVICE;
-  uint8_t badReads = 0;
-  float med[9] = {};
-  uint8_t medN = 0;
-  uint32_t lastStepMs = 0, lastGoodMs = 0;
-  bool everGood = false;
+  TcFilter flt;  // (as the channels; no jump check: nothing depends on this reading)
+  uint32_t lastStepMs = 0;
 };
 static Mon mon;
-static uint32_t monFreshMs(const MonitorSettings& c) {
-  const uint32_t f = c.readMs * 5u / 2u;
-  return f > FRESH_MS ? f : FRESH_MS;
-}
+static TcFilterCfg monCfg(const MonitorSettings& c) { return TcFilterCfg{c.median != 0, c.medianN, c.readMs, 0, 1}; }
 
 #if defined(PIN_TC_CS_MON) && HAVE_LOCAL
 static void monStep() {
@@ -385,26 +360,9 @@ static void monStep() {
   const MonitorSettings& c = mon.cfg;
   mon.tcFault = r.fault;
   mon.coldC = r.coldC;
-  if (r.fault != TC_OK) {
-    if (mon.badReads < 255) ++mon.badReads;
-    mon.medN = 0;
-    return;
-  }
-  mon.badReads = 0;
-  float t = r.tempC;
-  if (c.median) {  // (as the channels: single-reading spikes filtered out)
-    const uint8_t w = c.medianN >= 3 && c.medianN <= 9 ? c.medianN : 3;
-    for (int k = 0; k < 8; ++k) mon.med[k] = mon.med[k + 1];
-    mon.med[8] = r.tempC;
-    if (mon.medN < 9) ++mon.medN;
-    if (mon.medN >= w) t = medianOf(mon.med + 9 - w, w);
-  } else {
-    mon.medN = 0;
-  }
-  mon.rawC = t;
-  mon.pv = t * c.calGain + c.calOffset;
-  mon.lastGoodMs = millis();
-  mon.everGood = true;
+  if (mon.flt.update(monCfg(c), r.fault == TC_OK, r.tempC, millis()) != TcIn::Good) return;
+  mon.rawC = mon.flt.value();
+  mon.pv = mon.rawC * c.calGain + c.calOffset;
 }
 #else
 static void monStep() {}
@@ -415,9 +373,7 @@ void localCtrlMonConfigure(bool on, const MonitorSettings& m) {
   LockL g;
 #if defined(PIN_TC_CS_MON)
   if (on && !mon.enabled) {
-    mon.badReads = 0;
-    mon.medN = 0;
-    mon.everGood = false;
+    mon.flt.reset();
     mon.lastStepMs = 0;
   }
   mon.enabled = on;
@@ -435,25 +391,34 @@ void localCtrlMonGet(MonStatus& st) {
   if (!mtx) return;
   LockL g;
   st.enabled = mon.enabled;
-  st.fresh = mon.enabled && mon.everGood && millis() - mon.lastGoodMs < monFreshMs(mon.cfg) && mon.badReads == 0;
+  st.fresh = mon.enabled && mon.flt.fresh(monCfg(mon.cfg), millis());
   st.pv = mon.pv;
   st.rawC = mon.rawC;
   st.coldC = mon.coldC;
   st.tcFault = mon.tcFault;
-  st.lastGoodMs = mon.lastGoodMs;
+  st.lastGoodMs = mon.flt.lastGoodMs();
 }
 
 // ------------------------------------------------------------------ SSR supply relay
-#if defined(PIN_SSR_RELAY) && HAVE_LOCAL
+#if HAVE_LOCAL
+// The relay is the optional pin with the function "relay" (io_pins.h; S3 default GPIO4), active high.
 static volatile bool relayOn = false, relayEnabled = true;
-static void relayWrite(bool on) { digitalWrite(PIN_SSR_RELAY, on ? HIGH : LOW); }  // active high
-bool localCtrlRelayWired() { return true; }
-bool localCtrlRelayUsed() { return relayEnabled; }
+static int relayPin = -1;  // the pin relayOn refers to (local task)
+bool localCtrlRelayWired() { return ioPin(IO_RELAY) >= 0; }
+bool localCtrlRelayUsed() { return relayEnabled && localCtrlRelayWired(); }
 bool localCtrlRelayOn() { return relayOn; }
 void localCtrlRelayEnable(bool on) { relayEnabled = on; }  // off: the next step switches it off for good
 
 // after each control step: on while outputs are wanted, off at once on any local fault
 static void relayUpdate() {
+  // the function moved to another pin or was removed: ioConfigure left the old pin and the new one off
+  // (low); switched again below
+  const int pin = ioPin(IO_RELAY);
+  if (pin != relayPin) {
+    relayPin = pin;
+    relayOn = false;
+  }
+  if (pin < 0) return;
   bool want = false, fault = false;
   const char* why = nullptr;
   {
@@ -473,7 +438,7 @@ static void relayUpdate() {
   const bool on = used && want && !fault && !estop;
   if (on == relayOn) return;
   relayOn = on;
-  relayWrite(on);
+  ioWrite(IO_RELAY, on);  // (the pin the function has now: never a pin that just got another job)
   if (!on && used && (fault || estop)) logError("SSR supply relay off: %s", estop ? "E-stop" : why && *why ? why : "fault");
 }
 #else
@@ -554,8 +519,7 @@ void localCtrlConfigure(int ch, bool enabled, const LocalChannelSettings& c) {
   LocalPins p;
   const bool wired = pinsFor(ch, p);
   if (enabled && !l.enabled) {  // (re)enabled: start clean
-    l.badReads = 0;
-    l.everGood = false;
+    l.flt.reset();
     l.pid.reset();
     l.runaway.reset();
     l.guard.reset();
@@ -595,8 +559,8 @@ bool localCtrlSetOutputs(int ch, bool on) {
   LockL g;
   Local& l = loc[ch];
   if (on && (!l.enabled || l.fault || safetyEstop())) return false;
-  if (on && l.cfg.cjEnable && l.everGood && !isnan(l.coldC) && l.coldC > l.cfg.cjMax) return false;
-  if (on && l.everGood && l.pv > l.cfg.maxTemp) return false;  // already above the cut-off
+  if (on && l.cfg.cjEnable && l.flt.everGood() && !isnan(l.coldC) && l.coldC > l.cfg.cjMax) return false;
+  if (on && l.flt.everGood() && l.pv > l.cfg.maxTemp) return false;  // already above the cut-off
   if (on && l.tuning) return false;
   if (!on && l.tuning) {  // "outputs off" also ends an autotune
     l.tune.stop();
@@ -616,7 +580,7 @@ void localCtrlGet(int ch, LocalStatus& st) {
   LockL g;
   const Local& l = loc[ch];
   st.enabled = l.enabled;
-  st.fresh = l.enabled && l.everGood && millis() - l.lastGoodMs < freshMs(l.cfg) && l.badReads == 0;
+  st.fresh = l.enabled && freshNow(l);
   st.pv = l.pv;
   st.rawC = l.rawC;
   st.coldC = l.coldC;
@@ -637,7 +601,7 @@ bool localCtrlAck(int ch, char* err, size_t n) {
   LockL g;
   Local& l = loc[ch];
   if (!l.fault) return true;
-  const bool fresh = l.everGood && millis() - l.lastGoodMs < freshMs(l.cfg) && l.badReads == 0;
+  const bool fresh = freshNow(l);
   if (!fresh) {
     snprintf(err, n, "still no valid reading (%s)", tcFaultName(l.tcFault));
     return false;
@@ -659,6 +623,12 @@ bool localCtrlAck(int ch, char* err, size_t n) {
   return true;
 }
 
+void localCtrlHeartbeat() {
+  uint32_t t = millis();
+  if (!t) t = 1;  // (0 = no report yet)
+  controlBeatMs = t;
+}
+
 void localCtrlOtherHeating(int ch, bool on) {
   if (ch < 0 || ch >= NUM_CHANNELS) return;
   loc[ch].otherHeat = on;
@@ -670,7 +640,7 @@ bool localCtrlTuneStart(int ch, float sp, char* err, size_t n) {
   if (ch < 0 || ch >= NUM_CHANNELS || !mtx) return false;
   LockL g;
   Local& l = loc[ch];
-  const bool fresh = l.everGood && millis() - l.lastGoodMs < freshMs(l.cfg) && l.badReads == 0;
+  const bool fresh = freshNow(l);
   if (!l.enabled) return snprintf(err, n, "not a local channel"), false;
   if (safetyEstop()) return snprintf(err, n, "E-stop active"), false;
   if (l.fault) return snprintf(err, n, "acknowledge the fault first (%s)", l.faultText), false;

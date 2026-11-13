@@ -64,7 +64,7 @@ On the first start there is no network configured: the device opens its own acce
 - or over the USB serial console: `wifi scan`, then `wifi connect n=2` ([Serial console](Serial-console.md)).
 
 Afterwards open **`http://tempctl-duo.local`** or the IP address shown under *Menu › System* (info).
-Without a network the device keeps its access point; everything works there too.
+Without a network the device keeps its access point; everything works there too. Once the device has joined a network, the access point closes after a few seconds (reopens after 20 s without a connection).
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/13-network-dark.png"><img src="img/touch/13-network-light.png" alt="Touch screen: Network settings" width="480"></picture>
 

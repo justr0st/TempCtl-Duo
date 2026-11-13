@@ -99,6 +99,39 @@ is seen at once — no added delay). Every 25th read (~0.75 s) is done anyway: a
 high (3 times) switches back to reading every time (`[touch] INT line stays high while touched ...`);
 `[touch] INT line works` after the first touch it saw.
 
+### QR codes
+
+The Network page's QR windows use LVGL's QR widget: the device address on Wi-Fi; in access point mode a Wi-Fi
+join code (`WIFI:T:WPA;S:…;P:…;;`, with `\ ; , : "` escaped) and the address. The code is built when the
+window opens and deleted when it closes (RAM on the CYD: one code at a time there).
+
+## Control
+
+- **Thermocouple filter** (`src/tc_filter.h`, pure, host-tested; the local channels and the monitor use it):
+  the median, "is the reading current" and the bad-reading rules. A bad reading is a converter fault or a jump of
+  more than `local.jumpMax` from the last accepted one. `update()` returns *Good*, *Hold* (a bad reading held
+  back, `value()` is the last accepted one) or *Lost*. The first bad readings are held: as many as the median
+  window (2 without the median), at most 3 s worth; then a valid reading is the new level (the median
+  starts again, the PID rebases its derivative) and without one the input is lost. `badTooLong()` (bad for
+  `local.badSec`) is the sensor fault. A held reading above the cut-off still switches the power off for that
+  step.
+- **Heartbeat**: the control task reports to the local task on every pass and inside its long bus requests. A
+  heating local channel without a report for 10 s gets the fault *control task stopped* (`FAULT_CONTROL` in
+  `runaway.h`); before, it kept its last setpoint for good.
+- **Optional pins** (`src/io_pins.*`): GPIO 4 / 5 / 6 (`IO_PINS_*` in `board_s3.h`) get their function from
+  `io.fn`. `ioEarlyInit()` makes every one an input with pull-down at the start; `ioConfigure()` only touches
+  pins whose function changes (the old function is given up first: output low, LEDC and interrupt detached).
+  `ioPin(fn)` says which GPIO has a function; "E-stop / relay / sound wired" mean `ioPin(fn) >= 0`.
+- **Fan** (`src/fan.*`, rule in `src/fan_rule.h`, pure, host-tested): an on / off output or 25 kHz PWM (LEDC
+  channel 4), an optional tach input (2 pulses per turn, rpm once a second). The rule: on while the running
+  phase / step has the fan option; after a run until the hottest reading of all channels and the monitor is below
+  `fan.offBelow`, at most `fan.maxMin`; ends at once on a new run, manual mode or an autotune that heats.
+- **Buzzer** (`src/safety.cpp`): sounds are note lists (Hz, ms) on a 10 ms tick (the E-stop is read every 50
+  ms); `safety.volume` 1 … 5 is the PWM duty (2 / 6 / 16 / 48 / 128 of 255), alarms always play at 5.
+- **Run report** (`src/run_stats.h`, pure, host-tested): per channel the highest PV and its run time, the
+  largest deviation from the setpoint in holds (from 5 s into a hold), the steepest rise over 5 s; the
+  monitor's highest PV. It is written to the event log when a run ends, and is in `/api/live` (`report`).
+
 ## Web page
 
 - Look (1.0.40): frosted glass — an accent-tinted gradient backdrop, translucent blurred sidebar and cards,
@@ -190,13 +223,13 @@ SD card backup file (S3, folder `backup`):
   (2 × 1.875 MB firmware + 192 kB file system, instead of `huge_app.csv`). The first USB upload with this
   table **erases the file system**: back up settings and programs before (web page, *Tools › Backup*),
   restore them afterwards. Wi-Fi settings are in that backup too, so the device starts as an access point
-  until they are restored. The CYD firmware is about 1.85 MB (94 % of a slot); the page and icons are
+  until they are restored. The CYD firmware is about 96 % of a slot (a release is stopped above 97 %, [For developers](Development.md#tests-and-gates-in-github-actions)); the page and icons are
   embedded without the web fonts on the CYD (the S3 only gets those), which keeps it in the slot.
 
-## Status (1.0.64)
+## Status (1.0.68)
 
-The program engine, settings, PID / autotune, runaway check, Modbus framing, image check and release
-manifest pass host unit tests (`test/host_test.cpp`); the touch UI and the console have PC hosts
+The program engine, settings, PID / autotune, runaway check, thermocouple filter, fan rule, run report,
+Modbus framing, image check and release manifest pass host unit tests (`test/host_test.cpp`); the touch UI and the console have PC hosts
 (`test/ui_host`, `test/console_host`). The firmware (Arduino-ESP32 2.0.17, `espressif32@6.9.0`, LVGL 9.6)
 runs on the S3 and the CYD with local channels. S3 while running: about 145–158 kB of internal RAM free
 (large tables, LVGL's memory, the histories and logs are in PSRAM, `src/psram.h`). The Modbus channel is

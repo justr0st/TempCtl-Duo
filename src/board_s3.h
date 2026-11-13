@@ -76,6 +76,11 @@
 // Alarm buzzer (safety.sound): LEDC square wave 2.7 kHz; a passive piezo directly or a buzzer / small
 // speaker through a transistor (claude/wiring/s3-wiring.png)
 #define PIN_BUZZER 6
+// Optional pins (spec 9.25, io_pins.h): GPIO 4, 5, 6 get their function from the settings (io.fn). The three
+// macros above are their default wiring (a fresh installation; tools/wiki/wiring.py shows it).
+#define IO_PINS_N 3
+#define IO_PINS_GPIO {PIN_SSR_RELAY, PIN_ESTOP, PIN_BUZZER}
+#define IO_PINS_DEF {IO_RELAY, IO_ESTOP, IO_BUZZER}
 
 // ---- Status LED: on-board WS2812 (v1.0: GPIO48, v1.1: GPIO38) ----
 #define STATUS_LED_WS2812 1

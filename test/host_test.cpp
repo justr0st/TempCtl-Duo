@@ -23,9 +23,25 @@
 #include <algorithm>
 #include "settings.h"
 #include "tc_sensor.h"
+#include "tc_filter.h"
+#include "fan_rule.h"
 #include "sdlog.h"
+#include "run_stats.h"
 
 static int fails = 0;
+// board limits for the tests; io: the S3's optional pins (GPIO 4, 5, 6 = relay, E-stop, buzzer)
+static BoardLimits lims(bool rs485, uint8_t localMax, bool monitor, bool io = false) {
+  BoardLimits l = {};
+  l.rs485 = rs485;
+  l.localMax = localMax;
+  l.monitor = monitor;
+  if (io) {
+    const uint8_t g[3] = {4, 5, 6}, f[3] = {IO_RELAY, IO_ESTOP, IO_BUZZER};
+    l.ioN = 3;
+    for (int i = 0; i < 3; ++i) l.ioGpio[i] = g[i], l.ioDef[i] = f[i];
+  }
+  return l;
+}
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++fails; } } while (0)
 static bool near(float a, float b, float e = 0.01f) { return fabsf(a - b) <= e; }
 
@@ -269,7 +285,7 @@ static void testSdlogColumns() {
 // feed-forward settings (spec 9.23): defaults off, JSON, limits, the autotune result taken over
 static void testFfSettings() {
   Settings st;
-  settingsDefaults(st, BoardLimits{true, 2, false});
+  settingsDefaults(st, lims(true, 2, false));
   for (int c = 0; c < 2; ++c)
     CHECK(st.ch[c].loc.ff == 0 && st.ch[c].loc.ffK == 3 && st.ch[c].loc.ffTau == 120 && st.ch[c].loc.ffDead == 8);
   char msg[96];
@@ -294,7 +310,7 @@ static void testFfSettings() {
     for (int c = 0; c < 2; ++c)
       for (const char* k : {"ff", "ffK", "ffTau", "ffDead"}) d["channels"][c]["local"].remove(k);
     Settings b;
-    settingsDefaults(b, BoardLimits{true, 2, false});
+    settingsDefaults(b, lims(true, 2, false));
     CHECK(settingsFromJson(d.as<JsonObjectConst>(), b, msg, sizeof(msg)));
     CHECK(b.ch[0].loc.ff == 0 && b.ch[1].loc.ffK == 3 && b.ch[1].loc.ffTau == 120 && b.ch[1].loc.ffDead == 8);
   }
@@ -307,7 +323,7 @@ static void testFfSettings() {
   v.ch[1].loc.ffTau = 9000;
   v.ch[1].loc.ffDead = 500;
   v.ch[1].loc.ff = 7;
-  settingsValidate(v, BoardLimits{true, 2, false}, msg, sizeof(msg));
+  settingsValidate(v, lims(true, 2, false), msg, sizeof(msg));
   CHECK(v.ch[0].loc.ffK == 20 && v.ch[0].loc.ffTau == 5 && v.ch[0].loc.ffDead == 0);
   CHECK(v.ch[1].loc.ffK == 0.1f && v.ch[1].loc.ffTau == 3600 && v.ch[1].loc.ffDead == 120 && v.ch[1].loc.ff == 1);
   // autotune Accept: PID always, the model only when there is one, the switch never
@@ -434,7 +450,7 @@ static void testTimelineRun() {
   CHECK(s.e.state() == RunState::Finished && near(s.e.elapsed(), 450));
   // a pause step on the top pauses both channels
   progExample(2, p);
-  TlStep ps = {ST_PAUSE, 1, NO_TEXT, {0, 0, 0}};
+  TlStep ps = {ST_PAUSE, 1, NO_TEXT, 0, {0, 0, 0}};
   progAddText(p, "Check flux", ps.text);
   memmove(&p.st[1][3], &p.st[1][2], sizeof(TlStep) * 4);
   p.st[1][2] = ps;  // after 150/40/20: reached at 180
@@ -666,7 +682,8 @@ static void testTimelineEdits() {
 
 // ------------------------------------------------------------------ settings (JSON, validation)
 
-static const BoardLimits S3{true, 2, true}, CYD_1L485{true, 1, false}, CYD_2L{false, 2, false};
+// S3: the optional pins GPIO 4, 5, 6 (board_s3.h)
+static const BoardLimits S3 = lims(true, 2, true, true), CYD_1L485 = lims(true, 1, false), CYD_2L = lims(false, 2, false);
 
 static void roundTrip(const Settings& in, Settings& out, bool forApi) {
   JsonDocument d;
@@ -1161,7 +1178,7 @@ static void testRunaway() {
 
 static void testGuard() {
   Settings st;
-  settingsDefaults(st, BoardLimits{true, 2, false});
+  settingsDefaults(st, lims(true, 2, false));
   const Runaway c = st.ch[0].loc.runaway;
   CHECK(c.offEnable && c.offRise == 10 && c.offSec == 60 && c.frozenEnable && c.frozenSec == 120);
   CHECK(st.ch[0].loc.cjEnable && st.ch[0].loc.cjMax == 70);
@@ -1244,10 +1261,11 @@ static void testGuard() {
   b.manualIdleMin = 0;
   b.ch[0].loc.runaway.offSec = 1;
   b.ch[0].loc.cjMax = 500;
-  settingsValidate(b, BoardLimits{true, 2, false}, msg, sizeof(msg));
+  settingsValidate(b, lims(true, 2, false), msg, sizeof(msg));
   CHECK(b.manualIdleMin == 2 && b.ch[0].loc.runaway.offSec == 10 && b.ch[0].loc.cjMax == 125);
   // read interval, median filter, autotune limit (1.0.51): defaults = the behaviour before the settings
-  CHECK(st.ch[0].loc.readMs == 250 && st.ch[0].loc.median == 1 && st.ch[0].loc.medianN == 3 && st.ch[0].loc.tuneMaxMin == 70);
+  // (1.0.68: 100 ms, the fastest a MAX31855 allows)
+  CHECK(st.ch[0].loc.readMs == 100 && st.ch[0].loc.median == 1 && st.ch[0].loc.medianN == 3 && st.ch[0].loc.tuneMaxMin == 70);
   CHECK(st.ch[0].loc.tuneFast == 0 && st.ch[1].loc.tuneFast == 0);
   Settings m = st;
   m.ch[0].loc.readMs = 100;
@@ -1266,7 +1284,7 @@ static void testGuard() {
   mb.ch[0].loc.tuneMaxMin = 5;
   mb.ch[1].loc.sensor = SENSOR_MAX6675;  // MAX6675: from 250 ms
   mb.ch[1].loc.readMs = 100;
-  settingsValidate(mb, BoardLimits{true, 2, false}, msg, sizeof(msg));
+  settingsValidate(mb, lims(true, 2, false), msg, sizeof(msg));
   CHECK(mb.ch[0].loc.medianN == 5 && mb.ch[1].loc.medianN == 9 && mb.ch[0].loc.tuneMaxMin == 10);
   CHECK(mb.ch[1].loc.readMs == 250 && mb.ch[0].loc.readMs == 100);
   // display SPI clock (1.0.54): default 40, JSON round trip, snapped to 20 / 40 / 80
@@ -1279,7 +1297,7 @@ static void testGuard() {
   CHECK(settingsFromJson(ds.as<JsonObjectConst>(), sb, msg, sizeof(msg)) && sb.spiMhz == 80);
   for (int v : {0, 25, 29, 30, 59, 60, 200}) {
     sb.spiMhz = (uint8_t)v;
-    settingsValidate(sb, BoardLimits{true, 2, false}, msg, sizeof(msg));
+    settingsValidate(sb, lims(true, 2, false), msg, sizeof(msg));
     CHECK(sb.spiMhz == (v < 30 ? 20 : v < 60 ? 40 : 80));
   }
 }
@@ -1730,6 +1748,407 @@ static void testBothIdle() {
   CHECK(s.e.state() == RunState::Finished && near(s.e.elapsed(), 80, 1.01f));
 }
 
+// ------------------------------------------------------------------ thermocouple input filter (tc_filter.h, 1.0.68)
+
+static void testTcFilter() {
+  // hold count: the median's window, 2 without the median, at most 3 s worth of readings, at least 1
+  CHECK(TcFilter::holdReads(TcFilterCfg{true, 5, 100, 25, 3}) == 5);
+  CHECK(TcFilter::holdReads(TcFilterCfg{true, 9, 100, 25, 3}) == 9);
+  CHECK(TcFilter::holdReads(TcFilterCfg{false, 5, 100, 25, 3}) == 2);
+  CHECK(TcFilter::holdReads(TcFilterCfg{true, 9, 500, 25, 3}) == 6);   // 3 s / 500 ms
+  CHECK(TcFilter::holdReads(TcFilterCfg{true, 9, 1000, 25, 3}) == 3);  // 3 s / 1000 ms
+  CHECK(TcFilter::holdReads(TcFilterCfg{true, 2, 100, 25, 3}) == 3);   // (a window out of range: 3)
+  CHECK(TcFilter::freshMs(TcFilterCfg{true, 3, 100, 25, 3}) == 1000 && TcFilter::freshMs(TcFilterCfg{true, 3, 1000, 25, 3}) == 2500);
+  const float five[5] = {5, 1, 4, 2, 3};
+  CHECK(near(TcFilter::medianOf(five, 5), 3));
+
+  // median of 5: the first readings as they are, then the median; a single spike within jumpMax is filtered
+  {
+    const TcFilterCfg c{true, 5, 100, 25, 3};
+    TcFilter f;
+    uint32_t t = 1000;
+    CHECK(isnan(f.value()) && !f.everGood() && !f.fresh(c, t));
+    CHECK(f.update(c, true, 100, t) == TcIn::Good && near(f.value(), 100) && f.fresh(c, t) && !f.newLevel());
+    for (float v : {101.f, 99.f, 100.f}) CHECK(f.update(c, true, v, t += 100) == TcIn::Good);
+    CHECK(near(f.value(), 100));  // (4 readings: still the last one)
+    CHECK(f.update(c, true, 120, t += 100) == TcIn::Good && near(f.value(), 100));  // spike of 20: median
+    CHECK(f.update(c, true, 100, t += 100) == TcIn::Good && near(f.value(), 100));
+    // fresh: for 1 s after an accepted reading
+    CHECK(f.fresh(c, t + 999) && !f.fresh(c, t + 1000));
+  }
+  // a jump larger than jumpMax: held back for the hold count (the value stays), then the new level
+  {
+    const TcFilterCfg c{true, 5, 100, 25, 3};
+    TcFilter f;
+    uint32_t t = 0;
+    for (int i = 0; i < 6; ++i) f.update(c, true, 100, t += 100);
+    for (int i = 0; i < 5; ++i) {
+      CHECK(f.update(c, true, 200, t += 100) == TcIn::Hold);
+      CHECK(near(f.value(), 100) && near(f.pending(), 200) && !f.fresh(c, t) && !f.newLevel());
+    }
+    CHECK(f.bad() == 5);
+    CHECK(f.update(c, true, 200, t += 100) == TcIn::Good && f.newLevel() && near(f.value(), 200) && isnan(f.pending()));
+    CHECK(f.bad() == 0 && f.fresh(c, t));
+    CHECK(f.update(c, true, 201, t += 100) == TcIn::Good && !f.newLevel() && near(f.value(), 201));  // (median restarted)
+    // a single jump and back: held once, then the old level goes on (no new level)
+    for (int i = 0; i < 5; ++i) f.update(c, true, 200, t += 100);
+    CHECK(f.update(c, true, 400, t += 100) == TcIn::Hold);
+    CHECK(f.update(c, true, 200, t += 100) == TcIn::Good && !f.newLevel() && near(f.value(), 200) && f.fresh(c, t));
+    // jumpMax 0: not checked
+    const TcFilterCfg n{false, 3, 100, 0, 3};
+    TcFilter g;
+    g.update(n, true, 20, 100);
+    CHECK(g.update(n, true, 400, 200) == TcIn::Good && near(g.value(), 400) && !g.newLevel());
+  }
+  // invalid readings: Hold for the hold count (2 without the median), then Lost; back after the gap = new level
+  {
+    const TcFilterCfg c{false, 3, 100, 25, 3};
+    TcFilter f;
+    CHECK(f.update(c, false, NAN, 100) == TcIn::Lost);  // never a good one: lost at once
+    CHECK(f.update(c, true, 50, 200) == TcIn::Good && !f.newLevel());
+    CHECK(f.update(c, false, NAN, 300) == TcIn::Hold && near(f.value(), 50) && !f.fresh(c, 300));
+    CHECK(f.update(c, true, NAN, 400) == TcIn::Hold);  // (NaN from a "good" frame counts as invalid)
+    CHECK(f.update(c, false, NAN, 500) == TcIn::Lost && near(f.value(), 50));
+    CHECK(f.update(c, false, NAN, 600) == TcIn::Lost);
+    CHECK(f.update(c, true, 52, 700) == TcIn::Good && f.newLevel() && near(f.value(), 52));
+    // within the hold and back: not a new level
+    CHECK(f.update(c, false, NAN, 800) == TcIn::Hold);
+    CHECK(f.update(c, true, 53, 900) == TcIn::Good && !f.newLevel());
+  }
+  // badTooLong: bad readings without a break for badSec
+  {
+    const TcFilterCfg c{true, 3, 100, 25, 3};
+    TcFilter f;
+    f.update(c, true, 100, 900);
+    CHECK(!f.badTooLong(c, 900));
+    uint32_t t = 1000;
+    for (; t < 4000; t += 100) {
+      f.update(c, false, NAN, t);
+      CHECK(!f.badTooLong(c, t));
+    }
+    f.update(c, false, NAN, t);
+    CHECK(f.badTooLong(c, t));  // 3 s after the first bad one
+    f.update(c, true, 100, t += 100);
+    CHECK(!f.badTooLong(c, t));
+    // held-back jumps count as bad readings too
+    const TcFilterCfg j{true, 9, 100, 25, 1};
+    TcFilter g;
+    for (int i = 0; i < 3; ++i) g.update(j, true, 100, 100 * i);
+    g.update(j, true, 300, 1000);
+    g.update(j, true, 300, 1500);
+    CHECK(!g.badTooLong(j, 1500) && g.update(j, true, 300, 2000) == TcIn::Hold && g.badTooLong(j, 2000));
+    // reset: as new
+    g.reset();
+    CHECK(!g.everGood() && g.bad() == 0 && isnan(g.value()));
+  }
+}
+
+// ------------------------------------------------------------------ optional pins, sound, fan, input settings (1.0.68)
+
+static void testIoFanSettings() {
+  Settings s;
+  char msg[200];
+  settingsDefaults(s, S3);
+  CHECK(s.volume == 3 && s.keyBeep == 1);
+  CHECK(s.ioFn[0] == IO_RELAY && s.ioFn[1] == IO_ESTOP && s.ioFn[2] == IO_BUZZER);
+  CHECK(s.fanAfterRun == 1 && near(s.fanOffBelow, 60) && s.fanMaxMin == 30 && s.fanSpeed == 100);
+  CHECK(near(s.ch[0].loc.jumpMax, 25) && s.ch[0].loc.badSec == 3 && s.ch[1].loc.readMs == 100);
+  // polling: default 100 ms, raised to what the channels allow (bottom = Modbus: 250)
+  CHECK(s.pollMs == 100);
+  CHECK(settingsValidate(s, S3, msg, sizeof(msg)) && msg[0] == 0 && s.pollMs == 250);
+  settingsDefaults(s, CYD_2L);
+  CHECK(s.pollMs == 100 && settingsValidate(s, CYD_2L, msg, sizeof(msg)) && s.pollMs == 100);  // two MAX31855
+  CHECK(s.ioFn[0] == IO_NONE && s.ioFn[1] == IO_NONE && s.ioFn[2] == IO_NONE);  // (no optional pins)
+  CHECK(!strcmp(ioFnName(IO_FAN_PWM), "fanPwm") && !strcmp(ioFnName(IO_NONE), "off") && !strcmp(ioFnName(99), "off"));
+
+  // ranges
+  settingsDefaults(s, S3);
+  s.volume = 0;
+  s.keyBeep = 7;
+  s.fanOffBelow = 10;
+  s.fanMaxMin = 0;
+  s.fanSpeed = 5;
+  s.ch[0].loc.jumpMax = 900;
+  s.ch[1].loc.jumpMax = NAN;
+  s.ch[0].loc.badSec = 0;
+  s.ch[1].loc.badSec = 99;
+  settingsValidate(s, S3, msg, sizeof(msg));
+  CHECK(s.volume == 1 && s.keyBeep == 1 && near(s.fanOffBelow, 30) && s.fanMaxMin == 1 && s.fanSpeed == 20);
+  CHECK(near(s.ch[0].loc.jumpMax, 500) && near(s.ch[1].loc.jumpMax, 25) && s.ch[0].loc.badSec == 1 && s.ch[1].loc.badSec == 30);
+  s.volume = 9;
+  s.fanOffBelow = 500;
+  s.fanMaxMin = 999;
+  s.fanSpeed = 200;
+  s.ch[0].loc.jumpMax = 0;  // 0 = jumps not checked
+  settingsValidate(s, S3, msg, sizeof(msg));
+  CHECK(s.volume == 5 && near(s.fanOffBelow, 200) && s.fanMaxMin == 240 && s.fanSpeed == 100 && s.ch[0].loc.jumpMax == 0);
+  s.fanOffBelow = NAN;
+  settingsValidate(s, S3, msg, sizeof(msg));
+  CHECK(near(s.fanOffBelow, 60));
+
+  // a function on two pins: refused, the second pin off; fan and fanPwm are the same output
+  settingsDefaults(s, S3);
+  s.ioFn[2] = IO_RELAY;
+  CHECK(!settingsValidate(s, S3, msg, sizeof(msg)) && strstr(msg, "already on another pin") && strstr(msg, "GPIO 6"));
+  CHECK(s.ioFn[0] == IO_RELAY && s.ioFn[2] == IO_NONE);
+  s.ioFn[0] = IO_FAN;
+  s.ioFn[1] = IO_FAN_PWM;
+  CHECK(!settingsValidate(s, S3, msg, sizeof(msg)) && strstr(msg, "fan output"));
+  CHECK(s.ioFn[0] == IO_FAN && s.ioFn[1] == IO_NONE);
+  s.ioFn[0] = IO_FAN_PWM;
+  s.ioFn[1] = IO_FAN_TACH;
+  s.ioFn[2] = IO_ESTOP;
+  CHECK(settingsValidate(s, S3, msg, sizeof(msg)) && msg[0] == 0);
+  // pins the board does not have: off (no message)
+  settingsDefaults(s, CYD_2L);
+  s.ioFn[0] = IO_RELAY;
+  s.ioFn[1] = 42;  // (not a function: off)
+  s.ioFn[2] = IO_BUZZER;
+  CHECK(settingsValidate(s, CYD_2L, msg, sizeof(msg)) && msg[0] == 0);
+  CHECK(s.ioFn[0] == IO_NONE && s.ioFn[1] == IO_NONE && s.ioFn[2] == IO_NONE);
+  BoardLimits two = S3;
+  two.ioN = 2;
+  s.ioFn[0] = IO_RELAY;
+  s.ioFn[2] = IO_BUZZER;
+  CHECK(settingsValidate(s, two, msg, sizeof(msg)) && s.ioFn[0] == IO_RELAY && s.ioFn[2] == IO_NONE);
+
+  // JSON round trip
+  Settings a, b;
+  settingsDefaults(a, S3);
+  a.volume = 5;
+  a.keyBeep = 0;
+  a.ioFn[0] = IO_FAN_PWM;
+  a.ioFn[1] = IO_ESTOP;
+  a.ioFn[2] = IO_FAN_TACH;
+  a.fanAfterRun = 0;
+  a.fanOffBelow = 45.5f;
+  a.fanMaxMin = 90;
+  a.fanSpeed = 60;
+  a.ch[0].loc.jumpMax = 0;
+  a.ch[1].loc.jumpMax = 40;
+  a.ch[1].loc.badSec = 10;
+  JsonDocument d;
+  settingsToJson(a, d.to<JsonObject>(), false);
+  CHECK(!strcmp(d["io"]["fn"][0] | "", "fanPwm") && !strcmp(d["io"]["fn"][2] | "", "fanTach") && d["io"]["fn"].size() == 3);
+  CHECK(d["safety"]["volume"] == 5 && d["safety"]["keyBeep"] == false && d["fan"]["maxMin"] == 90);
+  roundTrip(a, b, false);
+  CHECK(b.volume == 5 && b.keyBeep == 0 && b.ioFn[0] == IO_FAN_PWM && b.ioFn[1] == IO_ESTOP && b.ioFn[2] == IO_FAN_TACH);
+  CHECK(b.fanAfterRun == 0 && near(b.fanOffBelow, 45.5f) && b.fanMaxMin == 90 && b.fanSpeed == 60);
+  CHECK(b.ch[0].loc.jumpMax == 0 && near(b.ch[1].loc.jumpMax, 40) && b.ch[1].loc.badSec == 10 && b.ch[0].loc.badSec == 3);
+  CHECK(settingsValidate(b, S3, msg, sizeof(msg)) && msg[0] == 0);
+
+  // missing keys = defaults; a shorter list sets the first pins only
+  JsonDocument e;
+  CHECK(deserializeJson(e, R"({"safety":{"sound":true},"io":{"fn":["fan"]}})") == DeserializationError::Ok);
+  Settings c;
+  settingsDefaults(c, S3);
+  CHECK(settingsFromJson(e.as<JsonObjectConst>(), c, msg, sizeof(msg)));
+  CHECK(c.volume == 3 && c.keyBeep == 1 && c.fanMaxMin == 30 && c.ch[0].loc.badSec == 3);
+  CHECK(c.ioFn[0] == IO_FAN && c.ioFn[1] == IO_ESTOP && c.ioFn[2] == IO_BUZZER);
+  // unknown function names and too long lists are refused
+  JsonDocument f;
+  CHECK(deserializeJson(f, R"({"io":{"fn":["relay","laser"]}})") == DeserializationError::Ok);
+  settingsDefaults(c, S3);
+  CHECK(!settingsFromJson(f.as<JsonObjectConst>(), c, msg, sizeof(msg)) && strstr(msg, "io.fn"));
+  JsonDocument g;
+  CHECK(deserializeJson(g, R"({"io":{"fn":["off","off","off","off"]}})") == DeserializationError::Ok);
+  settingsDefaults(c, S3);
+  CHECK(!settingsFromJson(g.as<JsonObjectConst>(), c, msg, sizeof(msg)));
+}
+
+// ------------------------------------------------------------------ cooling fan rule (fan_rule.h, 1.0.68)
+
+static void testFanRule() {
+  const FanCfg c{true, 60, 30};
+  FanRule r;
+  // during a run: only while the phase asks for it
+  CHECK(!r.update(c, true, false, false, 200, 1));
+  CHECK(r.update(c, true, true, false, 200, 1) && !r.cooling());
+  CHECK(!r.update(c, true, false, false, 200, 1));
+  // the run ends: cooling until the hottest reading is below 60
+  CHECK(r.update(c, false, false, false, 180, 1) && r.cooling());
+  for (int i = 0; i < 100; ++i) r.update(c, false, false, false, 100, 1);
+  CHECK(r.on() && near(r.coolSec(), 101));
+  CHECK(r.update(c, false, false, false, 60, 1));  // (not below yet)
+  CHECK(!r.update(c, false, false, false, 59.9f, 1) && !r.cooling() && r.lastEnd() == FanEnd::Cool);
+  CHECK(!r.update(c, false, false, false, 100, 1));  // stays off (no run ended)
+  // at most maxMin minutes
+  r.update(c, true, false, false, 200, 1);
+  CHECK(r.update(c, false, false, false, 200, 1));
+  for (int i = 0; i < 30 * 60 - 2; ++i) r.update(c, false, false, false, 150, 1);
+  CHECK(r.on());
+  CHECK(!r.update(c, false, false, false, 150, 1) && r.lastEnd() == FanEnd::Time);
+  // no valid reading: maxMin
+  r.update(c, true, false, false, NAN, 1);
+  for (int i = 0; i < 179; ++i) CHECK(r.update(c, false, false, false, NAN, 10));
+  CHECK(!r.update(c, false, false, false, NAN, 10) && r.lastEnd() == FanEnd::Time);
+  // a channel heats outside a run: cooling ends at once
+  r.update(c, true, false, false, 200, 1);
+  CHECK(r.update(c, false, false, false, 200, 1));
+  CHECK(!r.update(c, false, false, true, 200, 1) && r.lastEnd() == FanEnd::Heating);
+  CHECK(!r.update(c, false, false, false, 200, 1));  // (not again after the heating)
+  // ... also when it already heats at the end of the run (an end action keeps the setpoint)
+  r.update(c, true, false, false, 200, 1);
+  CHECK(!r.update(c, false, false, true, 200, 1) && !r.cooling());
+  // a new run ends the cooling; its phases decide
+  r.update(c, true, false, false, 200, 1);
+  CHECK(r.update(c, false, false, false, 200, 1));
+  CHECK(!r.update(c, true, false, false, 200, 1) && r.lastEnd() == FanEnd::Run);
+  CHECK(r.update(c, true, true, false, 200, 1) && !r.cooling());
+  // already cool at the end of the run: no cooling
+  CHECK(!r.update(c, false, false, false, 40, 1) && !r.cooling());
+  // afterRun off: nothing after the run
+  const FanCfg off{false, 60, 30};
+  r.reset();
+  r.update(off, true, true, false, 200, 1);
+  CHECK(!r.update(off, false, false, false, 200, 1) && !r.cooling() && r.lastEnd() == FanEnd::None);
+}
+
+// "fan" on a phase / step: JSON and RunEngine::fanWanted()
+static void testFanFlag() {
+  char err[120];
+  // JSON: any kind of phase / step, written only when set
+  for (int i = 0; i < PROG_EXAMPLES; ++i) {
+    progExample(i, P1);
+    CHECK(progJson(P1).find("fan") == std::string::npos);
+  }
+  CHECK(progParse(R"({"type":"seq","name":"f","phases":[
+    {"kind":"B","fan":true,"b":{"t":100,"r":10,"h":10}},
+    {"kind":"P","fan":true},
+    {"kind":"T","fan":false,"t":{"t":100,"r":10,"h":10}},
+    {"kind":"BT","fan":true,"b":{"idle":true,"h":5},"t":{"idle":true}}]})", P1, err, sizeof(err)));
+  CHECK(P1.nPh == 4 && P1.ph[0].fan && P1.ph[1].fan && !P1.ph[2].fan && P1.ph[3].fan);
+  std::string j = progJson(P1);
+  CHECK(progParse(j.c_str(), P2, err, sizeof(err)) && progJson(P2) == j);
+  CHECK(P2.ph[0].fan && P2.ph[1].fan && !P2.ph[2].fan && P2.ph[3].fan);
+  {
+    size_t n = 0;
+    for (size_t k = j.find("\"fan\":true"); k != std::string::npos; k = j.find("\"fan\":true", k + 1)) ++n;
+    CHECK(n == 3 && j.find("\"fan\":false") == std::string::npos);
+  }
+  CHECK(progParse(R"({"type":"tl","name":"f","B":[{"t":100,"r":10,"h":10},{"idle":true,"h":10,"fan":true}],
+    "T":[{"idle":true,"h":5},{"t":100,"r":5,"h":5,"fan":true},{"pause":true,"fan":true}]})", P1, err, sizeof(err)));
+  CHECK(!P1.st[0][0].fan && P1.st[0][1].fan && !P1.st[1][0].fan && P1.st[1][1].fan && P1.st[1][2].fan);
+  j = progJson(P1);
+  CHECK(progParse(j.c_str(), P2, err, sizeof(err)) && progJson(P2) == j && P2.st[1][2].fan && P2.st[0][1].fan);
+  // wrong type
+  CHECK(!progParse(R"({"type":"seq","phases":[{"kind":"P","fan":1}]})", P1, err, sizeof(err)) &&
+        strstr(err, "Phase 1: fan"));
+  CHECK(!progParse(R"({"type":"tl","T":[{"t":100,"fan":"yes"}]})", P1, err, sizeof(err)) && strstr(err, "Top step 1: fan"));
+
+  // Sequence: B (fan) 0..20, Pause (fan), T 10 + 10, B jump + 5 s hold (fan)
+  static DuoProgram p, q;
+  CHECK(progParse(R"({"type":"seq","name":"f","phases":[
+    {"kind":"B","fan":true,"b":{"t":100,"r":10,"h":10}},
+    {"kind":"P","fan":true},
+    {"kind":"T","t":{"t":100,"r":10,"h":10}},
+    {"kind":"B","fan":true,"b":{"t":50,"r":0,"h":5}}]})", p, err, sizeof(err)));
+  Sim s;
+  CHECK(!s.e.fanWanted());  // no run yet
+  CHECK(s.start(p) && s.e.fanWanted());
+  s.runTo(15);
+  CHECK(s.e.fanWanted());
+  s.e.pause();  // a user pause: still the same phase
+  CHECK(s.e.fanWanted());
+  s.e.resume();
+  s.runTo(22);
+  CHECK(s.e.progPaused() && s.e.seq().idx == 1 && s.e.fanWanted());
+  CHECK(s.e.cont() && s.e.seq().idx == 2 && !s.e.fanWanted());
+  const RunPos pos2 = s.e.position();
+  s.runTo(s.t + 20.5f);
+  CHECK(s.e.seq().idx == 3 && s.e.fanWanted());
+  const RunPos pos3 = s.e.position();
+  char e2[80];
+  CHECK(s.e.extendHold(CH_BOTTOM, 10, e2, sizeof(e2)) && s.e.fanWanted());  // a run edit
+  s.runTo(s.t + 30);
+  CHECK(s.e.state() == RunState::Finished && !s.e.fanWanted());
+  // resumed after a reset: from the position
+  q = p;
+  Sim r;
+  CHECK(r.e.resumeAt(&q, pos3, r.pv, r.ok, 5, false) && r.e.fanWanted());
+  r.e.stop();
+  CHECK(r.e.state() == RunState::Aborted && !r.e.fanWanted());
+  Sim r2;
+  CHECK(r2.e.resumeAt(&q, pos2, r2.pv, r2.ok, 5, false) && r2.e.seq().idx == 2 && !r2.e.fanWanted());
+
+  // Timeline: bottom 100/10/10 then idle 10 s (fan); top idle 5 s, then 100/5/5 (fan)
+  CHECK(progParse(R"({"type":"tl","name":"f","B":[{"t":100,"r":10,"h":10},{"idle":true,"h":10,"fan":true}],
+    "T":[{"idle":true,"h":5},{"t":100,"r":5,"h":5,"fan":true}]})", p, err, sizeof(err)));
+  Sim t;
+  CHECK(t.start(p) && !t.e.fanWanted());
+  t.runTo(3);
+  CHECK(!t.e.fanWanted());
+  t.runTo(7);
+  CHECK(t.e.lane(1).idx == 1 && t.e.fanWanted());
+  const RunPos tp = t.e.position();
+  t.runTo(17);  // top done (keeps 100), bottom holding
+  CHECK(t.e.lane(1).st == Stage::Done && t.e.lane(0).idx == 0 && !t.e.fanWanted());
+  t.runTo(22);
+  CHECK(t.e.lane(0).idx == 1 && t.e.fanWanted());
+  t.runTo(40);
+  CHECK(t.e.state() == RunState::Finished && !t.e.fanWanted());
+  q = p;
+  Sim u;
+  CHECK(u.e.resumeAt(&q, tp, u.pv, u.ok, 5, false) && u.e.lane(1).idx == 1 && u.e.fanWanted());
+}
+
+// run report figures (run_stats.h)
+static void testRunStats() {
+  RunStats r;
+  for (int i = 0; i < RS_N; ++i) CHECK(std::isnan(r.peak[i]) && std::isnan(r.peakT[i]));
+  for (int c = 0; c < NUM_CHANNELS; ++c) CHECK(std::isnan(r.dev[c]) && std::isnan(r.rate[c]));
+  // rise: bottom 2 degC/s for 20 s, then flat; top 4 degC/s for 8 s with an invalid reading at 3..4 s (the
+  // windows over it do not count: the steepest left is 4..9 s = 16 degC / 5 s)
+  const ChState ramp[2] = {ChState::Ramp, ChState::Ramp};
+  const float noSp[2] = {NAN, NAN};
+  for (float t = 0; t <= 40 + 1e-4f; t += 0.25f) {
+    const float pv[2] = {t < 20 ? 25 + 2 * t : 65, t < 8 ? 25 + 4 * t : 57};
+    const bool ok[2] = {true, !(t >= 3 && t < 4)};
+    r.update(t, pv, ok, noSp, ramp, NAN, false);
+  }
+  CHECK(near(r.rate[0], 2, 0.01f) && near(r.rate[1], 3.2f, 0.01f));
+  CHECK(near(r.peak[0], 65) && near(r.peakT[0], 20) && near(r.peak[1], 57) && near(r.peakT[1], 8));
+  CHECK(std::isnan(r.dev[0]) && std::isnan(r.dev[1]) && std::isnan(r.peak[RS_MON]));  // no hold, no monitor
+  // a gap (user pause, no updates) inside a window: that window is skipped
+  r.reset();
+  for (float t = 0; t <= 4; t += 1) {
+    const float pv[2] = {25 + t, NAN};
+    const bool ok[2] = {true, false};
+    r.update(t, pv, ok, noSp, ramp, NAN, false);
+  }
+  {
+    const float pv[2] = {200, NAN};
+    const bool ok[2] = {true, false};
+    r.update(60, pv, ok, noSp, ramp, NAN, false);  // 0 .. 60 s: stretched, not a 5 s window
+  }
+  CHECK(std::isnan(r.rate[0]) && std::isnan(r.peak[1]) && std::isnan(r.rate[1]) && near(r.peak[0], 200));
+
+  // holds: the first 5 s of each hold do not count, a moved setpoint starts the count again
+  r.reset();
+  for (float t = 0; t < 60; t += 0.25f) {
+    float sp = 100, pv;
+    ChState st = ChState::Hold;
+    if (t < 10) { st = ChState::Ramp; sp = 50 + 5 * t; pv = sp - 20; }  // far off while ramping: not counted
+    else if (t < 15) pv = 103;   // overshoot right after the ramp: not counted
+    else if (t < 20) pv = 101.5f;
+    else if (t < 25) pv = 99.2f;
+    else if (t < 30) { sp = 110; pv = 104; }  // target edit during the hold: 5 s not counted
+    else if (t < 35) { sp = 110; pv = 110.4f; }
+    else if (t < 40) { st = ChState::Halt; pv = 80; }  // program pause: not a hold
+    else if (t < 45) { sp = 120; pv = 126; }  // the next hold
+    else { sp = 120; pv = 120.7f; }
+    const float pvs[2] = {pv, 30}, sps[2] = {sp, NAN};
+    const bool ok[2] = {true, true};
+    const ChState sts[2] = {st, ChState::Hold};  // top: holding without a setpoint (idle) -> not counted
+    r.update(t, pvs, ok, sps, sts, t < 30 ? 40 + t : 50, true);
+  }
+  CHECK(near(r.dev[0], 1.5f, 0.001f) && std::isnan(r.dev[1]));
+  CHECK(near(r.peak[0], 126) && near(r.peakT[0], 40));
+  CHECK(near(r.peak[RS_MON], 69.75f) && near(r.peakT[RS_MON], 29.75f));
+  r.reset();
+  CHECK(std::isnan(r.dev[0]) && std::isnan(r.peak[RS_MON]) && std::isnan(r.rate[0]));
+}
+
 int main() {
   testCrc();
   testParse();
@@ -1768,6 +2187,11 @@ int main() {
   testJsonCopies();
   testAutotune();
   testTimeZones();
+  testTcFilter();
+  testIoFanSettings();
+  testFanRule();
+  testFanFlag();
+  testRunStats();
   printf(fails ? "%d FAILED\n" : "all tests passed\n", fails);
   return fails ? 1 : 0;
 }

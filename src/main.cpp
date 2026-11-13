@@ -12,10 +12,12 @@
 #include "app_state.h"
 #include "config.h"
 #include "local_ctrl.h"
+#include "io_pins.h"
 #include "safety.h"
 #include "ota.h"
 #include "net.h"
 #include "ui.h"
+#include "lcd.h"
 #include "web.h"
 #include "console.h"
 
@@ -42,6 +44,7 @@ static void memLog(const char* where) {
 
 void setup() {
   localCtrlEarlyInit();  // SSR outputs low (off) before anything else
+  ioEarlyInit();         // optional pins (relay, E-stop, buzzer, fan): inputs with pull-down until the settings
 #ifdef BOARD_HAS_PSRAM
   // malloc() of 256 bytes or more: PSRAM first (the core's limit is 4 kB). Web answers, JSON documents, strings,
   // lists, the update buffers go there; the internal RAM stays for the display's DMA buffers, task stacks,
@@ -115,7 +118,7 @@ void loop() {
     if (!at) {
       at = millis();
       if (!at) at = 1;  // (0 = not yet; "| 1" could be ahead of millis())
-      uiSetBrightness(0);
+      lcdSetBrightness(0);  // (uiSetBrightness keeps a readable minimum)
     }
     if (millis() - at > 400) {
       syslogFlush();  // the last events to flash

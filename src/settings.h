@@ -20,6 +20,22 @@ enum EndAction : uint8_t { END_KEEP = 0, END_SET_SP = 1, END_OUTPUTS_OFF = 2 };
 enum ChannelType : uint8_t { CH_OFF = 0, CH_MODBUS = 1, CH_LOCAL = 2 };
 enum SensorType : uint8_t { SENSOR_MAX31855 = 0, SENSOR_MAX6675 = 1 };
 
+// Optional pins (spec 9.25): pins of the board that are not tied to one job (S3: GPIO 4, 5, 6); each one
+// gets a function in the settings ("io.fn"). A function is on one pin at most; "fan" and "fanPwm" are the
+// two kinds of fan output (one of them).
+constexpr int IO_PINS_MAX = 3;
+enum IoFn : uint8_t {
+  IO_NONE = 0,   // not used (an input with pull-down)
+  IO_RELAY,      // SSR supply relay (active high)
+  IO_ESTOP,      // E-stop input (NC contact to GND, pull-up)
+  IO_BUZZER,     // buzzer / piezo (LEDC tone)
+  IO_FAN,        // cooling fan, on / off (active high)
+  IO_FAN_PWM,    // cooling fan, 25 kHz PWM (4-wire fan: its control wire)
+  IO_FAN_TACH,   // fan speed input (open collector tach wire, pull-up; 2 pulses per turn)
+  IO_FN_COUNT
+};
+const char* ioFnName(uint8_t f);  // "off" "relay" "estop" "buzzer" "fan" "fanPwm" "fanTach"
+
 // Register map. All "analog" registers (pv, spEff, out, sp, rampRate) are
 // int16 divided by `scale`. status/alarm/ctrlOff/remote are raw integers.
 struct RegMap {
@@ -91,6 +107,11 @@ struct LocalChannelSettings {
   float ffK;            // degC per % output, 0.1 ... 20
   float ffTau;          // time constant s, 5 ... 3600
   float ffDead;         // dead time s, 0 ... 120 (the setpoint preview looks this far ahead)
+  // bad readings (spec 9.24, tc_filter.h): a converter fault, or a jump of more than jumpMax degC from one
+  // reading to the next (0 = jumps not checked). The first ones are held back and the output stays; bad
+  // readings for badSec seconds while heating are a sensor fault.
+  float jumpMax;        // 0 ... 500 degC
+  uint16_t badSec;      // 1 ... 30 s
 };
 
 constexpr size_t CH_NAME_LEN = 17;  // 16 characters
@@ -164,6 +185,15 @@ struct Settings {
   uint8_t relay;          // 1: SSR supply relay switched by PIN_SSR_RELAY (S3); 0: the pin stays low (no relay)
   uint8_t chipWarn;       // 1: warning above chipMaxC (S3 chip temperature)
   float chipMaxC;
+  uint8_t volume;         // buzzer volume 1 ... 5 (alarms always play at 5)
+  uint8_t keyBeep;        // 1: a short beep on every touch-screen button
+
+  // Optional pins and the cooling fan (spec 9.25)
+  uint8_t ioFn[IO_PINS_MAX];  // IoFn of each optional pin of the board (BoardLimits::ioGpio)
+  uint8_t fanAfterRun;    // 1: the fan runs after a program run until every channel is below fanOffBelow
+  float fanOffBelow;      // degC, 30 ... 200
+  uint16_t fanMaxMin;     // ... and for at most this many minutes (1 ... 240)
+  uint8_t fanSpeed;       // PWM fan: speed %, 20 ... 100
 
   // Tools: setpoint-address finder range
   uint16_t scanFrom, scanTo;
@@ -181,6 +211,11 @@ struct BoardLimits {
   bool rs485;
   uint8_t localMax;
   bool monitor;  // (missing in an initializer: false) the monitor channel's converter can be wired (HAS_MONITOR)
+  // optional pins (missing in an initializer: none): how many, their GPIO numbers, their functions on a
+  // fresh installation
+  uint8_t ioN;
+  uint8_t ioGpio[IO_PINS_MAX];
+  uint8_t ioDef[IO_PINS_MAX];
 };
 
 void regMapDefaults(RegMap& r, uint8_t profile);

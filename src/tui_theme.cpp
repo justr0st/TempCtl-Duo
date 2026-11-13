@@ -59,7 +59,7 @@ static Rgb fitC(float h, float s, float& l, const Rgb& bg, float minC, bool dark
 }
 
 static void computePalette(uint32_t accent, bool dark) {
-  // neutrals: web/index.html :root (light) and [data-theme=dark]
+  // neutrals: web/src/css/10-base.css :root (light) and [data-theme=dark]
   static const uint32_t L[] = {0xEDF0F1, 0xFFFFFF, 0xF4F6F7, 0xD3DADD, 0x172024, 0x5B6970, 0, 0, 0xA87400, 0xFFF3D1, 0xB3261E, 0x2E7D32, 0xB85C00};
   static const uint32_t D[] = {0x11161A, 0x192024, 0x141A1E, 0x2B353B, 0xE3E9EB, 0x8D9BA2, 0, 0, 0xF3C335, 0x3A3217, 0xF2867E, 0x7BC47F, 0xF0A050};
   const uint32_t* N = dark ? D : L;
@@ -89,7 +89,7 @@ static void initStyles() {
   lv_style_t* all[] = {&S_.scr, &S_.panel, &S_.sunk, &S_.btn, &S_.btnPressed, &S_.btnPri, &S_.btnDanger, &S_.btnDis,
                        &S_.btnChecked, &S_.muted, &S_.small, &S_.title, &S_.danger, &S_.amber, &S_.ok, &S_.acc, &S_.ring, &S_.cell, &S_.btnOn[0], &S_.btnOn[1], &S_.tileOn[0], &S_.tileOn[1],
                        &S_.pv[0], &S_.pv[1], &S_.sp[0], &S_.sp[1], &S_.barBg, &S_.bar[0], &S_.bar[1], &S_.overlay,
-                       &S_.dialog, &S_.listRow, &S_.sep};
+                       &S_.dialog, &S_.listRow, &S_.sep, &S_.qr};
   for (lv_style_t* st : all) lv_style_init(st);
   // geometry and fonts (colours: recolour())
   lv_style_set_text_font(&S_.scr, &tfont_14);
@@ -145,6 +145,13 @@ static void initStyles() {
   lv_style_set_border_width(&S_.dialog, 1);
   lv_style_set_radius(&S_.dialog, 12);
   lv_style_set_pad_all(&S_.dialog, TUI_SMALL ? 10 : 14);
+
+  // QR code backing: always white, dark-on-light with a quiet zone in both themes (a scanner needs it)
+  lv_style_set_bg_opa(&S_.qr, LV_OPA_COVER);
+  lv_style_set_bg_color(&S_.qr, lv_color_white());
+  lv_style_set_border_width(&S_.qr, 0);
+  lv_style_set_radius(&S_.qr, 6);
+  lv_style_set_pad_all(&S_.qr, TUI_SMALL ? 8 : 10);
 
   lv_style_set_bg_opa(&S_.listRow, LV_OPA_COVER);
   lv_style_set_border_width(&S_.listRow, 1);

@@ -59,5 +59,6 @@
 /*---- objects ----*/
 #define LV_USE_OBJ_NAME 1
 #define LV_USE_TRANSLATION 1
+#define LV_USE_QRCODE 1  /* the touch Network page: QR codes of the web address and the access point */
 
 #endif /*LV_CONF_H*/

@@ -4,6 +4,9 @@
 #include "net.h"
 #include <WiFi.h>
 #include "local_ctrl.h"
+#include "fan.h"
+#include "io_pins.h"
+#include "safety.h"
 #include "settings_store.h"
 #include "touch.h"
 #include "ui.h"
@@ -26,8 +29,25 @@ void saveSettingsQuiet() { printf("<saved: ssid %s>", gSettings.ssid); }
 static ProgSummary sums[PROG_MAX];
 void programSummaries(ProgSummary* out) { memcpy(out, sums, sizeof(sums)); }
 bool programSummary(int i, ProgSummary& o) { if (i < 0 || i >= PROG_MAX) return false; o = sums[i]; return o.used; }
-bool programLoad(int i, DuoProgram& p, char* e, size_t n) { if (i > 2) { snprintf(e, n, "Program %d is empty", i + 1); return false; } progExample(i, p); return true; }
+bool programLoad(int i, DuoProgram& p, char* e, size_t n) {
+  if (i > 2) { snprintf(e, n, "Program %d is empty", i + 1); return false; }
+  progExample(i, p);
+  if (i == 0 && p.nPh >= 3) p.ph[1].fan = p.ph[2].fan = p.ph[p.nPh - 1].fan = 1;  // cooling phases: the fan runs
+  if (i == 2) for (int ch = 0; ch < NUM_CHANNELS; ++ch) if (p.nSt[ch]) p.st[ch][p.nSt[ch] - 1].fan = 1;
+  return true;
+}
 bool runProgramCopy(DuoProgram& p) { progExample(0, p); return true; }
+static bool hostReport = false;  // a run has ended since the start
+bool runReportGet(RunReport& o) {
+  memset(&o, 0, sizeof(o));
+  if (!hostReport) return false;
+  o.valid = true; o.finished = false; strcpy(o.name, "Lead-free BGA"); o.dur = 361.5f;
+  for (int i = 0; i < 3; ++i) o.peak[i] = o.peakT[i] = NAN;
+  o.dev[0] = o.dev[1] = o.rate[0] = o.rate[1] = NAN;
+  o.peak[0] = 163.4f; o.peakT[0] = 301; o.dev[0] = 1.2f; o.rate[0] = 2.1f;
+  o.peak[1] = 246.1f; o.peakT[1] = 462; o.dev[1] = 1.8f;  // (no steepest rise measured)
+  return true;
+}
 static uint32_t lseq = 0;
 static LogEntry lg[8];
 uint32_t logSeq() { return lseq; }
@@ -52,7 +72,18 @@ void netStartAp() {}
 void appRequestRestart(const char* from) { printf("<restart %s>", from); }
 // stubs for the settings / autotune / touch commands
 void saveSettingsAndNotify() { printf("<saved + notify>"); }
-BoardLimits boardLimits() { return BoardLimits{true, 2, HAS_MONITOR != 0}; }
+BoardLimits boardLimits() {
+  BoardLimits l = {};
+  l.rs485 = true;
+  l.localMax = 2;
+  l.monitor = HAS_MONITOR != 0;
+#if defined(IO_PINS_N)  // the S3's optional pins (board_s3.h)
+  const uint8_t g[IO_PINS_N] = IO_PINS_GPIO, d[IO_PINS_N] = IO_PINS_DEF;
+  l.ioN = IO_PINS_N;
+  for (int i = 0; i < IO_PINS_N; ++i) l.ioGpio[i] = g[i], l.ioDef[i] = d[i];
+#endif
+  return l;
+}
 uint32_t liveHistSec() { return 30 * 60; }
 static LocalTune tune[2];
 void localCtrlTuneGet(int ch, LocalTune& t) { t = tune[ch]; }
@@ -74,6 +105,7 @@ static int simdOn = HAS_NET_OTA ? 1 : -1;  // (S3 build: built in)
 void uiSimd(bool on) { if (simdOn >= 0) simdOn = on; }
 int uiSimdOn() { return simdOn; }
 String netApName() { return String("TempCtl-Duo-1A2B"); }
+String netApIp() { return String("192.168.4.1"); }
 void syslogTee(const uint8_t*, size_t) {}
 void safetyActivity() {}
 #include "ota.h"
@@ -127,9 +159,25 @@ bool backupRestore(const char* name, uint8_t what, char* msg, size_t n) {
   return true;
 }
 #endif
-bool safetyEstopWired() { return false; }
-bool safetySoundWired() { return true; }
-bool localCtrlRelayWired() { return true; }
+// optional pins (io_pins.h): the pin with that function in the settings (CYD: the fixed buzzer)
+int ioPin(uint8_t fn) {
+  const BoardLimits l = boardLimits();
+  for (int i = 0; fn != IO_NONE && i < l.ioN; ++i)
+    if (gSettings.ioFn[i] == fn) return l.ioGpio[i];
+#if !defined(IO_PINS_N) && defined(PIN_BUZZER)
+  if (fn == IO_BUZZER) return PIN_BUZZER;
+#endif
+  return -1;
+}
+bool safetyEstopWired() { return ioPin(IO_ESTOP) >= 0; }
+bool safetySoundWired() { return ioPin(IO_BUZZER) >= 0; }
+void safetyFx(SoundFx) {}
+void safetyBeepTest() {}
+bool fanWired() { return ioPin(IO_FAN) >= 0 || ioPin(IO_FAN_PWM) >= 0; }
+bool fanOn() { return false; }
+int fanRpm() { return -1; }
+void localCtrlHeartbeat() {}
+bool localCtrlRelayWired() { return ioPin(IO_RELAY) >= 0; }
 bool localCtrlRelayOn() { return false; }
 bool safetyChipTempWired() { return false; }
 // web API stand-in for the api mode: echoes the request, "/big" answers 20 kB in pieces
@@ -232,6 +280,11 @@ int main() {
   type("program n=3\r");
   type("show\r");
   type("program n=1\r");
+  type("show\r");                  // phases with the fan
+  type("report\r");                // no run yet
+  hostReport = true;
+  type("report\r");
+  type("help programs\r");
   type("statxs\b\bus\r");          // backspace
   type("wifi scan\r");
   scanState = 0; run(300);
@@ -309,6 +362,21 @@ int main() {
   type("set b.spMax=2000\r");
   type("set b.local.ff=on b.local.ffK=2.5 b.local.ffTau=300 b.local.ffDead=15\r");  // feed-forward (spec 9.23)
   type("set b.local.ffK=50\r");                     // outside 0.1 ... 20: refused
+  type("set b.local.jumpMax=40 t.local.badSec=10\r");  // bad readings (spec 9.24)
+  type("set b.local.jumpMax=900\r");                   // outside 0 ... 500: refused
+  type("set safety.volume=5 safety.keyBeep=off\r");
+  type("set safety.volume=9\r");
+  type("get safety\r");
+  type("get io\r");
+  type("set io.fn0=relay io.fn1=estop io.fn2=fanPwm\r");
+  type("set io.fn0=estop\r");                          // estop twice: refused with the pin number
+  type("set io.fn1=fan\r");                            // fan and fanPwm together: refused
+  type("set io.fn2=laser\r");
+  type("set fan.afterRun=on fan.offBelow=55 fan.maxMin=20 fan.speed=60\r");
+  type("set fan.speed=10\r");
+  type("get fan\r");
+  type("get io\r");
+  type("status\r");
   type("get b.local\r");
   type("set b.local.maxTemp=200 b.spMax=300\r");   // spMax adjusted to maxTemp - 10
   type("set wifi.staticIp=on wifi.ip=192.168.1.60 wifi.subnet=255.255.255.0 wifi.gateway=192.168.1.1\r");

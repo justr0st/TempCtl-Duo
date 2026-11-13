@@ -25,10 +25,13 @@ bar.
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/web/dashboard-run-dark.webp"><img src="img/web/dashboard-run-light.webp" alt="Dashboard during a run" width="900"></picture>
 
 - **Run panel**: the program, **Start / Pause / Continue / Stop / Next phase**, the state, run time and
-  remaining time.
+  remaining time. **Start, Pause and Continue share one button** (as on the touch screen): it shows what a press
+  does now. While the cooling fan runs, a chip *Fan on* (with the rpm) sits by the state.
 - **Chart** (program view): both channels' temperatures (solid) and setpoints, the **state lanes** above
   (ramp, wait, hold, keeps, pause), phase lines with their times, and the **forecast** of the rest of the run
   (dashed). Zoom with − / + / Fit, Ctrl + wheel, pinch; drag to move. Hover (or touch) shows the values.
+  The **chart key** under it (what the marks mean) folds away: open on a wide page, closed on a phone. On a
+  narrow chart the phase labels use three short rows above the plot.
 - **Channel cards**: PV, SP, output, what the channel does; during a run the target buttons (−5 / −1 / +1 /
   +5 / Set) and *Extend hold*; outside a run the manual switch and setpoint. While the outputs are on the card
   has a border and a tint in the channel colour.
@@ -55,6 +58,11 @@ line in the accent colour, and its legend entry shows the name and the current r
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/web/dashboard-done-dark.webp"><img src="img/web/dashboard-done-light.webp" alt="Dashboard after a run" width="900"></picture>
 
+**Last run** — under the chart a block with the run's report: the program, finished or stopped, the duration and
+per channel the highest temperature (with its time), the largest deviation in the holds and the steepest rise;
+the monitor channel's highest temperature. The *Last run* button by *Export CSV* shows the run's chart; the block
+stays until the device restarts or another run starts ([Programs](Programs.md#run-report)).
+
 **Run interrupted by a reset** — *Resume* or *Dismiss* ([Programs](Programs.md#run-interrupted-by-a-reset)):
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/web/dashboard-interrupted-dark.webp"><img src="img/web/dashboard-interrupted-light.webp" alt="Run interrupted by a reset" width="900"></picture>
@@ -74,6 +82,8 @@ Under the channel cards: the selected program as tables and as handles on the ch
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/web/editor-seq-dark.webp"><img src="img/web/editor-seq-light.webp" alt="Sequence editor" width="900"></picture>
 
 - **Sequence**: one row per phase (cards on narrow screens). **Timeline**: two tables side by side.
+- With a cooling fan configured every phase / step has a **Fan** checkbox (a *Fan* column in the Timeline); it
+  is not shown otherwise ([Programs](Programs.md#fan)).
 - The **step / phase type** is a dropdown; every value you can change is a darker field (targets in °C, ramp
   and hold as m:ss — plain seconds work too). *Ends* shows when each step or phase finishes (without waits and
   pauses).
@@ -113,7 +123,8 @@ cut-off), then one tab per channel
 (S3: a third tab for the [monitor channel](Channels.md#monitor-channel-s3), in the accent colour).
 A channel's tab holds one card per section — *General*, *Thermocouple*, *PID control*, *PID autotune* and
 *Protection* (a Modbus channel: *Modbus controller*, *RS485 bus*, *Register addresses*) — with one line per
-setting; **ⓘ** shows the explanation. The protection checks read as sentences ("outputs off, but the PV rises by
+setting (a local channel's *Thermocouple* card also has *Largest change per reading* and *Sensor fault after*,
+[Channels](Channels.md#thermocouple)); **ⓘ** shows the explanation. The protection checks read as sentences ("outputs off, but the PV rises by
 10 °C within 60 s"). Changed values are marked amber; *Save* sends only them and lists any value the device had
 to adjust. *Two-point…* opens the calibration helper.
 See [Channels, PID and autotune](Channels.md).
@@ -149,8 +160,10 @@ moves, Shift + drag zooms to a range, double click shows all; *Crop to view* + *
 - **Wi-Fi**: on / off (off: no network, no access point, no scan — the page loses its connection unless it runs
   over USB; switch it on again on the touch screen or with `wifi on`), network (with scan), password, access point
   password, host name, fixed IP.
-- **Safety**: manual mode timeout, E-stop, SSR supply relay, alarm sound (with a test beep), chip
-  temperature ([Safety](Safety.md)).
+- **Safety**: manual mode timeout, E-stop, SSR supply relay, alarm sound (with **sound volume**, **key beep**
+  and a test beep), chip temperature ([Safety](Safety.md)); on the S3 the **optional pins** (what GPIO 4, 5, 6
+  do) and the **cooling fan** (run after a program, until every channel is below, at most, PWM speed). E-stop,
+  relay and sound appear only when a pin has that function. A line shows the fan's state and rpm.
 - **Display** (applied at once): accent colour, theme, brightness, rotation, screen check, SPI clock.
 - **Clock**: the time zone for local times (SD run logs, backups).
 

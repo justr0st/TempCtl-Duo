@@ -87,7 +87,7 @@ static void channelDefaults(ChannelSettings& c, int ch, uint8_t type) {
   c.loc.cjEnable = 1;
   c.loc.cjMax = 70;
   runawayDefaults(c.loc.runaway, ch);
-  c.loc.readMs = 250;
+  c.loc.readMs = 100;  // the fastest (a MAX6675: settingsValidate makes it 250)
   c.loc.median = 1;  // (median of 3: what the firmware always did before the setting)
   c.loc.medianN = 3;
   c.loc.tuneMaxMin = 70;
@@ -96,6 +96,8 @@ static void channelDefaults(ChannelSettings& c, int ch, uint8_t type) {
   c.loc.ffK = 3;
   c.loc.ffTau = 120;
   c.loc.ffDead = 8;
+  c.loc.jumpMax = 25;
+  c.loc.badSec = 3;
 }
 
 void settingsDefaults(Settings& s, const BoardLimits& lim) {
@@ -105,7 +107,7 @@ void settingsDefaults(Settings& s, const BoardLimits& lim) {
   s.parity = 1;
   s.stopBits = 1;
   s.timeoutMs = 300;
-  s.pollMs = 1000;
+  s.pollMs = 100;  // the fastest (settingsValidate raises it to what the channels allow)
   s.commLossSec = 30;
   s.bottomBand = 5;
   s.spMargin = 10;
@@ -136,6 +138,13 @@ void settingsDefaults(Settings& s, const BoardLimits& lim) {
   s.relay = 1;
   s.chipWarn = 1;
   s.chipMaxC = 80;
+  s.volume = 3;
+  s.keyBeep = 1;
+  for (int i = 0; i < IO_PINS_MAX; ++i) s.ioFn[i] = i < lim.ioN ? lim.ioDef[i] : (uint8_t)IO_NONE;
+  s.fanAfterRun = 1;
+  s.fanOffBelow = 60;
+  s.fanMaxMin = 30;
+  s.fanSpeed = 100;
   // bottom = Modbus, top = Off; without RS485 both local (as many as the board wires)
   const uint8_t t0 = lim.rs485 ? CH_MODBUS : (lim.localMax >= 1 ? CH_LOCAL : CH_OFF);
   const uint8_t t1 = lim.rs485 ? CH_OFF : (lim.localMax >= 2 ? CH_LOCAL : CH_OFF);
@@ -151,6 +160,9 @@ void settingsDefaults(Settings& s, const BoardLimits& lim) {
   m.median = 1;
   m.medianN = 3;
 }
+
+static const char* const IO_NAMES[] = {"off", "relay", "estop", "buzzer", "fan", "fanPwm", "fanTach"};
+const char* ioFnName(uint8_t f) { return IO_NAMES[f < IO_FN_COUNT ? f : 0]; }
 
 const char* channelTypeName(uint8_t t) {
   switch (t) {
@@ -335,6 +347,9 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
     clampv<uint8_t>(c.loc.medianN, 3, 9);
     if (!(c.loc.medianN & 1)) ++c.loc.medianN;  // odd: 3, 5, 7, 9
     clampv<uint16_t>(c.loc.tuneMaxMin, 10, 240);
+    if (!(c.loc.jumpMax >= 0)) c.loc.jumpMax = 25;  // (NaN)
+    clampv(c.loc.jumpMax, 0.0f, 500.0f);
+    clampv<uint16_t>(c.loc.badSec, 1, 30);
     // the setpoint limit stays run.spMargin (default 10 degC) below the local cut-off (spec 9.2, 9.18)
     if (c.type == CH_LOCAL && c.spMax > c.loc.maxTemp - s.spMargin) c.spMax = c.loc.maxTemp - s.spMargin;
     if (c.spMax < c.spMin) c.spMax = c.spMin;
@@ -365,6 +380,33 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
   // polling: not faster than the slowest channel allows (raised without a message; the page and the console
   // report the adjusted value)
   if (s.pollMs < pollMinMs(s)) s.pollMs = pollMinMs(s);
+  clampv<uint8_t>(s.volume, 1, 5);
+  s.keyBeep = s.keyBeep ? 1 : 0;
+  // optional pins: only the board's, every function on one pin at most (fan / fanPwm: one fan output)
+  {
+    bool used[IO_FN_COUNT] = {};
+    for (int i = 0; i < IO_PINS_MAX; ++i) {
+      uint8_t& f = s.ioFn[i];
+      if (i >= lim.ioN || f >= IO_FN_COUNT) f = IO_NONE;
+      if (f == IO_NONE) continue;
+      const uint8_t key = f == IO_FAN_PWM ? (uint8_t)IO_FAN : f;
+      if (used[key]) {
+        char t[96];
+        snprintf(t, sizeof(t), "GPIO %u: \"%s\" is already on another pin", (unsigned)lim.ioGpio[i],
+                 key == IO_FAN ? "fan output" : ioFnName(f));
+        addMsg(msg, n, t);
+        ok = false;
+        f = IO_NONE;
+        continue;
+      }
+      used[key] = true;
+    }
+  }
+  s.fanAfterRun = s.fanAfterRun ? 1 : 0;
+  if (!(s.fanOffBelow >= 0)) s.fanOffBelow = 60;  // (NaN)
+  clampv(s.fanOffBelow, 30.0f, 200.0f);
+  clampv<uint16_t>(s.fanMaxMin, 1, 240);
+  clampv<uint8_t>(s.fanSpeed, 20, 100);
   if (s.selProgram >= PROG_MAX) s.selProgram = 0;
   s.tzName[sizeof(s.tzName) - 1] = 0;
   char rule[48];
@@ -593,6 +635,15 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
   sf["relay"] = s.relay != 0;
   sf["chipWarn"] = s.chipWarn != 0;
   sf["chipMaxC"] = s.chipMaxC;
+  sf["volume"] = s.volume;
+  sf["keyBeep"] = s.keyBeep != 0;
+  JsonArray iof = o["io"]["fn"].to<JsonArray>();
+  for (int i = 0; i < IO_PINS_MAX; ++i) iof.add(ioFnName(s.ioFn[i]));
+  JsonObject fn = o["fan"].to<JsonObject>();
+  fn["afterRun"] = s.fanAfterRun != 0;
+  fn["offBelow"] = s.fanOffBelow;
+  fn["maxMin"] = s.fanMaxMin;
+  fn["speed"] = s.fanSpeed;
   JsonObject t = o["tools"].to<JsonObject>();
   t["scanFrom"] = s.scanFrom;
   t["scanTo"] = s.scanTo;
@@ -639,6 +690,8 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
     l["ffK"] = c.loc.ffK;
     l["ffTau"] = c.loc.ffTau;
     l["ffDead"] = c.loc.ffDead;
+    l["jumpMax"] = c.loc.jumpMax;
+    l["badSec"] = c.loc.badSec;
   }
   JsonObject mo = o["monitor"].to<JsonObject>();
   mo["on"] = s.mon.on != 0;
@@ -827,6 +880,32 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
     R.flag(sf, "safety.", "relay", s.relay);
     R.flag(sf, "safety.", "chipWarn", s.chipWarn);
     R.num(sf, "safety.", "chipMaxC", s.chipMaxC);
+    R.num(sf, "safety.", "volume", s.volume);
+    R.flag(sf, "safety.", "keyBeep", s.keyBeep);
+  }
+  JsonObjectConst io = R.obj(o, "", "io");
+  if (!io.isNull() && !io["fn"].isNull()) {  // {"fn":["relay","estop","fanPwm"]}: one name per optional pin
+    JsonArrayConst a = io["fn"].as<JsonArrayConst>();
+    if (a.isNull() || a.size() > (size_t)IO_PINS_MAX) R.fail("io.", "fn", "a list of pin functions expected");
+    else {
+      int i = 0;
+      for (JsonVariantConst v : a) {
+        const char* name = v.as<const char*>();
+        int f = -1;
+        for (int k = 0; name && k < IO_FN_COUNT; ++k)
+          if (!strcmp(name, IO_NAMES[k])) f = k;
+        if (f < 0) R.fail("io.", "fn", "off, relay, estop, buzzer, fan, fanPwm or fanTach expected");
+        else s.ioFn[i] = (uint8_t)f;
+        ++i;
+      }
+    }
+  }
+  JsonObjectConst fan = R.obj(o, "", "fan");
+  if (!fan.isNull()) {
+    R.flag(fan, "fan.", "afterRun", s.fanAfterRun);
+    R.num(fan, "fan.", "offBelow", s.fanOffBelow);
+    R.num(fan, "fan.", "maxMin", s.fanMaxMin);
+    R.num(fan, "fan.", "speed", s.fanSpeed);
   }
   JsonObjectConst t = R.obj(o, "", "tools");
   if (!t.isNull()) {
@@ -914,6 +993,8 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
         R.num(l, pl, "ffK", c.loc.ffK);
         R.num(l, pl, "ffTau", c.loc.ffTau);
         R.num(l, pl, "ffDead", c.loc.ffDead);
+        R.num(l, pl, "jumpMax", c.loc.jumpMax);
+        R.num(l, pl, "badSec", c.loc.badSec);
       }
     }
   }

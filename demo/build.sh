@@ -27,8 +27,8 @@ else
   fi
   TGT="--target=wasm32-wasi --sysroot=$WASI_SYSROOT -resource-dir=$RD"
 fi
-SRCS="app_state web local_ctrl settings settings_store run_engine duo_program program_store channel controller pid autotune
-      runaway safety tc_sensor crumbs syslog modbus_rtu"
+SRCS="app_state app_hist app_log web local_ctrl settings settings_store run_engine duo_program program_store channel controller pid autotune
+      runaway safety io_pins fan tc_sensor crumbs syslog modbus_rtu"
 DEF="-DBOARD_DEMO -DBOARD_HAS_PSRAM -DARDUINO=10819 -DARDUINOJSON_ENABLE_ARDUINO_STRING=1 -DARDUINOJSON_ENABLE_ARDUINO_STREAM=1
      -DARDUINOJSON_ENABLE_ARDUINO_PRINT=1 -DARDUINOJSON_ENABLE_PROGMEM=0"
 FL="$TGT -O2 -std=gnu++17 -fno-exceptions -Wall -Wno-unused-function -Wno-unused-variable -Wno-bitwise-instead-of-logical -include demo/shim/demo_pre.h

@@ -1,7 +1,7 @@
 // Demo data for the wiki screenshots (tools/wiki/make_shots.sh): runs one of the example programs with
 // the firmware's own run engine (src/run_engine.cpp) against a simple heater model and prints what the
 // device would answer at that moment: the run chart (/api/chart?v=run: history, lanes, events,
-// forecast, as app_state.cpp chartJson) and the run / channel fields of /api/live (as web.cpp
+// forecast, as app_hist.cpp chartJson) and the run / channel fields of /api/live (as web.cpp
 // handleLive). tools/wiki/mock/server.py serves them.
 //   g++ -std=c++17 -O1 -Isrc -I<ArduinoJson>/src tools/wiki/demo_run.cpp src/run_engine.cpp
 //       src/duo_program.cpp src/settings.cpp -o demo_run
@@ -46,7 +46,7 @@ struct Rec {
 };
 static void onEv(const PlanEv& e, void* u) { ((Rec*)u)->ev.push_back(e); }
 
-struct Fc {  // forecast pieces merged as app_state.cpp fcSeg
+struct Fc {  // forecast pieces merged as app_hist.cpp fcSeg
   std::vector<PlanSeg> seg[2];
   std::vector<PlanEv> ev;
 };
@@ -93,7 +93,12 @@ int main(int argc, char** argv) {
     JsonDocument d;
     if (argv[1][0] == 'c') {
       static Settings s;
-      const BoardLimits lim{true, 2};
+      BoardLimits lim = {};  // the S3: RS485, two local channels, the optional pins GPIO 4, 5, 6 (board_s3.h)
+      lim.rs485 = true;
+      lim.localMax = 2;
+      lim.ioN = 3;
+      const uint8_t gpio[3] = {4, 5, 6}, fn[3] = {IO_RELAY, IO_ESTOP, IO_BUZZER};
+      for (int i = 0; i < 3; ++i) lim.ioGpio[i] = gpio[i], lim.ioDef[i] = fn[i];
       settingsDefaults(s, lim);
       settingsToJson(s, d.to<JsonObject>(), true);
     } else if (argv[1][0] == 'e') {
