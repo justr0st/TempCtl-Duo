@@ -38,7 +38,8 @@ struct SeqPhase {
                   // both Idle (1.0.61): both outputs off for b.h seconds (b.t, b.r unused)
   uint8_t msg;    // P: show "Action required"
   uint8_t text;   // P: index into DuoProgram::text, NO_TEXT = none
-  Seg b;          // B, BT with tIdle: target/ramp/hold; BT: b.t = jump target (r, h unused); both Idle: b.h
+  uint8_t fan;    // any kind: the cooling fan runs during this phase (spec 9.25)
+  Seg b;         // B, BT with tIdle: target/ramp/hold; BT: b.t = jump target (r, h unused); both Idle: b.h
   Seg t;          // T, BT: target/ramp/hold (unused with tIdle)
 };
 
@@ -46,7 +47,8 @@ struct TlStep {
   uint8_t kind;   // StepKind
   uint8_t msg;    // pause: show "Action required"
   uint8_t text;   // pause: text index, NO_TEXT = none
-  Seg s;          // target: t/r/h; idle: h only
+  uint8_t fan;    // any kind: the cooling fan runs during this step (spec 9.25)
+  Seg s;         // target: t/r/h; idle: h only
 };
 
 struct DuoProgram {
@@ -61,6 +63,9 @@ struct DuoProgram {
     TlStep st[NUM_CHANNELS][PROG_MAX_STEPS];
   };
 };
+// The fan flags use padding bytes: the struct must not grow (it lives in RTC / heap buffers of a fixed size)
+static_assert(sizeof(SeqPhase) == 32 && sizeof(TlStep) == 16, "SeqPhase / TlStep size changed");
+static_assert(sizeof(DuoProgram) == 3896, "DuoProgram size changed");
 
 void progClear(DuoProgram& p, uint8_t type, const char* name);
 const char* progTypeName(uint8_t type);   // "seq" / "tl"

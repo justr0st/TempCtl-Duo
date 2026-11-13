@@ -17,7 +17,8 @@ the port never resets the board. The help is printed at the start and with `help
 | `status` · `watch` · `info` · `log [n]` | both channels (and the monitor channel, `mon`) and the run · the same as one line per second (any key stops) · firmware, uptime, memory, network · the last n events |
 | `manual b on sp=150` · `manual t sp=180` · `manual b off` | manual setpoint (b = bottom, t = top); not for a channel of the running program |
 | `ack b` | acknowledge a channel fault |
-| `programs` · `program n=2` · `show` | list, select for the next run, print the program |
+| `programs` · `program n=2` · `show` | list, select for the next run, print the program (`fan` marks the phases / steps with the Fan option) |
+| `report` | the last run's report: highest temperatures with their time, largest hold deviation, steepest rise (since the start of the device) |
 | `start` `pause` `resume` `stop` `next` `continue` | run control |
 | `extend b +30` · `target t 230` | extend the running hold (s), change the current / kept target |
 | `resume run` · `dismiss run` | after "Run interrupted by a reset" |
@@ -26,7 +27,7 @@ the port never resets the board. The help is printed at the start and with `help
 | `wifi scan` · `wifi connect n=2` · `wifi connect s="My Net"` | join a network; without `pw=` the password is asked for (hidden) |
 | `wifi ap [pw=…]` · `wifi status` · `wifi forget` | access point, state, forget the network |
 | `wifi off` · `wifi on` | Wi-Fi completely off (no network, no access point, no scan) / on again (`wifi.enabled`) |
-| `get [b\|t\|bus\|run\|wifi\|display\|safety\|monitor\|<prefix>]` | settings as `key=value` lines (`monitor.*`: S3) |
+| `get [b\|t\|bus\|run\|wifi\|display\|safety\|monitor\|io\|fan\|<prefix>]` | settings as `key=value` lines (`monitor.*`, `io.*`: S3) |
 | `set <key>=<value> …` | up to 8 settings at once (the web API's keys; `b.` / `t.` = the channels); a value out of range is an error and nothing is changed |
 | `fw` · `fw sd` · `fw sd install yes` · `fw net` · `fw net install yes` | firmware: version and slot · update from the SD card (S3) · from the release page (S3) |
 | `backup sd` · `backup sd list` · `backup sd restore n=1 [settings\|programs] yes` · `backup sd delete n=1 yes` | backups on the SD card (S3) |
@@ -44,8 +45,20 @@ set display.spiMhz=40
 set b.local.median=on b.local.medianN=5
 set monitor.on=on monitor.name="Board edge"
 set time.zone=Europe/Berlin
+set b.local.jumpMax=15 b.local.badSec=5
+set io.fn0=relay io.fn1=estop io.fn2=fanPwm fan.afterRun=on fan.offBelow=60
+set safety.volume=2 safety.keyBeep=off
 get b.local
 ```
+
+New in 1.0.68 (the `help settings` text lists the ranges):
+
+| Key | |
+|---|---|
+| `b.local.jumpMax`, `b.local.badSec` | bad readings: the largest change between two readings (0 … 500 °C, 0 = not checked) and how long bad readings may last while heating before the sensor fault (1 … 30 s); same for `t.` |
+| `io.fn0`, `io.fn1`, `io.fn2` | S3: what GPIO 4, 5, 6 do: `off`, `relay`, `estop`, `buzzer`, `fan`, `fanPwm`, `fanTach`; one function per pin |
+| `fan.afterRun`, `fan.offBelow`, `fan.maxMin`, `fan.speed` | cooling fan: run after a program, until every channel is below (30 … 200 °C), at most (1 … 240 min), PWM speed (20 … 100 %) |
+| `safety.volume`, `safety.keyBeep` | buzzer volume 1 … 5 (alarms always play at 5), a short beep on the touch-screen buttons |
 
 ## API mode
 

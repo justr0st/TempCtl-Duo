@@ -28,6 +28,7 @@
 #include "net.h"
 #include "settings_store.h"
 #include "host_check.h"
+#include "fan.h"
 #ifdef BOARD_DEMO
 #include "demo_assets.h"  // the browser demo: the page is not served by the firmware (demo/)
 #else
@@ -183,7 +184,9 @@ static void serialAnswer(int code, const char* type, const uint8_t* data, size_t
 // ------------------------------------------------------------ helpers
 // Every response (status line, headers and body) is written straight on the socket, non-blocking,
 // in TCP-sized pieces. WiFiClient::write retries a stuck connection for 10 s per call and blocks the
-// loop (touch UI, watchdog); here a connection without progress for 5 s is dropped and logged.
+// loop (touch UI, watchdog); here a connection without progress for SEND_STALL_MS is dropped and logged
+// (the loop task waits that long: kept short).
+static constexpr uint32_t SEND_STALL_MS = 2000;
 static String extraHeaders;  // set before sendBody(): "Name: value\r\n" lines
 
 static bool sendRaw(int fd, const uint8_t* data, size_t len, size_t& sent, uint32_t& last) {
@@ -199,7 +202,7 @@ static bool sendRaw(int fd, const uint8_t* data, size_t len, size_t& sent, uint3
       continue;
     }
     if (w < 0 && errno != EAGAIN && errno != EWOULDBLOCK) return false;  // closed / reset by the browser
-    if (millis() - last > 5000) return false;
+    if (millis() - last > SEND_STALL_MS) return false;
     delay(2);
   }
   return true;
@@ -229,10 +232,10 @@ static void sendBody(int code, const char* type, const uint8_t* data, size_t len
   uint32_t last = millis();
   const bool ok = fd >= 0 && sendRaw(fd, (const uint8_t*)head.c_str(), head.length(), sent, last) &&
                   sendRaw(fd, data, len, sent, last);
-  if (!ok && fd >= 0 && millis() - last > 5000)
-    LogSerial.printf("[web] %s: no progress for 5 s after %u of %u bytes - dropped (DRAM %u free, %u min, "
+  if (!ok && fd >= 0 && millis() - last > SEND_STALL_MS)
+    LogSerial.printf("[web] %s: no progress for %u ms after %u of %u bytes - dropped (DRAM %u free, %u min, "
                   "%u largest)\n",
-                  what, (unsigned)sent, (unsigned)(head.length() + len),
+                  what, (unsigned)SEND_STALL_MS, (unsigned)sent, (unsigned)(head.length() + len),
                   (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
                   (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
@@ -835,6 +838,9 @@ static void handleGetConfig() {
   l["localMax"] = lim.localMax;
   l["monitor"] = lim.monitor;  // the monitor channel (a third thermocouple) can be wired
   l["relay"] = localCtrlRelayWired();
+  JsonArray io = l["ioGpio"].to<JsonArray>();  // the board's optional pins (settings ioFn: their functions)
+  for (int i = 0; i < lim.ioN && i < IO_PINS_MAX; ++i) io.add(lim.ioGpio[i]);
+  l["fan"] = fanWired();
   l["estop"] = safetyEstopWired();
   l["sound"] = safetySoundWired();
   l["chipTemp"] = safetyChipTempWired();
@@ -1587,6 +1593,36 @@ static void handleLive() {
     setNum(m["cold"], L.mon.coldC);
     m["err"] = L.mon.valid ? "" : L.mon.tcFault == TC_OK ? "no reading" : tcFaultName(L.mon.tcFault);
   }
+  if (L.fanWired) {  // cooling fan (an optional pin is its output); rpm only with a tach pin
+    JsonObject f = d["fan"].to<JsonObject>();
+    f["on"] = L.fanOn;
+    if (L.fanRpm >= 0) f["rpm"] = L.fanRpm;
+  }
+  {  // report of the last run (since the boot; gone while a new run runs). Values not measured are left out
+    RunReport rp;
+    if (runReportGet(rp)) {
+      auto put = [](JsonObject o, const char* k, float x, float scale) {
+        if (!isnan(x)) o[k] = roundf(x * scale) / scale;
+      };
+      JsonObject o = d["report"].to<JsonObject>();
+      o["name"] = JsonString(rp.name);
+      o["finished"] = rp.finished;
+      o["dur"] = roundf(rp.dur * 10) / 10;
+      JsonArray ra = o["ch"].to<JsonArray>();
+      for (int i = 0; i < NUM_CHANNELS; ++i) {
+        JsonObject c = ra.add<JsonObject>();
+        put(c, "peak", rp.peak[i], 10);
+        put(c, "peakT", rp.peakT[i], 10);
+        put(c, "dev", rp.dev[i], 10);
+        put(c, "rate", rp.rate[i], 100);
+      }
+      if (HAS_MONITOR && !isnan(rp.peak[2])) {
+        JsonObject m = o["mon"].to<JsonObject>();
+        put(m, "peak", rp.peak[2], 10);
+        put(m, "peakT", rp.peakT[2], 10);
+      }
+    }
+  }
   liveRaw(d);
   sendJson(d);
 }
@@ -1985,11 +2021,18 @@ void webBegin() {
     crumb(CR_LOOP, L_WEB);
   }, handleOtaUpload);
   server.onNotFound([] { sendBody(404, "text/plain", (const uint8_t*)"Not found", 9, "404"); });
-  server.begin();
+  // server.begin() waits until the network stack is up (webLoop): with Wi-Fi off lwIP's tcpip task never
+  // starts and opening a socket asserts ("Invalid mbox")
 }
 
+static bool serverUp = false;
+
 void webLoop() {
-  server.handleClient();
+  if (!serverUp && netEnabled() && WiFi.getMode() != WIFI_OFF) {
+    server.begin();
+    serverUp = true;
+  }
+  if (serverUp) server.handleClient();
   jobStep();
   if (restartAt && (int32_t)(millis() - restartAt) >= 0) {
     restartAt = 0;

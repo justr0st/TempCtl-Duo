@@ -126,6 +126,16 @@ bool readPause(Parser& P, JsonVariantConst v, DuoProgram& p, uint8_t& msg, uint8
   return true;
 }
 
+// "fan": true / false (missing = false); false if it is something else
+bool readFan(JsonVariantConst v, uint8_t& fan) {
+  JsonVariantConst f = v["fan"];
+  fan = 0;
+  if (f.isNull()) return true;
+  if (!f.is<bool>()) return false;
+  fan = f.as<bool>() ? 1 : 0;
+  return true;
+}
+
 }  // namespace
 
 bool progFromJson(JsonObjectConst o, DuoProgram& p, char* err, size_t n, const char* const* names) {
@@ -195,6 +205,7 @@ bool progFromJson(JsonObjectConst o, DuoProgram& p, char* err, size_t n, const c
       } else {
         return P.fail("Phase %d: kind must be B, T, BT or P", i);
       }
+      if (!readFan(v, f.fan)) return P.fail("Phase %d: fan must be true or false", i);
       ++p.nPh;
     }
     return true;
@@ -227,6 +238,7 @@ bool progFromJson(JsonObjectConst o, DuoProgram& p, char* err, size_t n, const c
         const char* e = readSeg(v, s.s, true);
         if (e) return P.fail("%s %d: %s", where, i, e);
       }
+      if (!readFan(v, s.fan)) return P.fail("%s %d: fan must be true or false", where, i);
       ++p.nSt[ch];
     }
   }
@@ -276,6 +288,7 @@ void progToJson(const DuoProgram& p, JsonObject o) {
           if (f.text != NO_TEXT) v["text"] = progText(p, f.text);
           break;
       }
+      if (f.fan) v["fan"] = true;
     }
     return;
   }
@@ -295,6 +308,7 @@ void progToJson(const DuoProgram& p, JsonObject o) {
       } else {
         segOut(v, s.s, true);
       }
+      if (s.fan) v["fan"] = true;
     }
   }
 }

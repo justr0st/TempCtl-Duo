@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Builds the static page site (spec 7b) from web/: the same files at the same URLs as the device serves
-them (tools/web_embed.py ASSETS), plus shell.html (the local app's tabs), for the local launcher
-(tools/launcher) and the hosted page (GitHub Pages, a project page under /TempCtl-Duo/: every path in the page,
-the wiki and the demo is relative; the same files on Cloudflare during the transition, wrangler.jsonc).
+them (tools/web_embed.py ASSETS; the page joined from web/src/ first, tools/web_join.py), plus shell.html (the
+local app's tabs), for the local launcher (tools/launcher) and the hosted page (GitHub Pages, a project page under
+/TempCtl-Duo/: every path in the page, the wiki and the demo is relative; the same files on Cloudflare during the
+transition, wrangler.jsonc).
   python3 tools/build_site.py [out_dir]          (default: tools/launcher/site)
   python3 tools/build_site.py dist --web         the hosted page: without the launcher's shell.html, with _headers
                                                  and the wiki (docs/wiki -> /wiki/, tools/wiki_site.py) and the
@@ -12,6 +13,7 @@ import os, shutil, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ["WEB_EMBED_NO_BUILD"] = "1"
 from web_embed import ASSETS, WEB, ROOT  # noqa: E402
+from web_join import join  # noqa: E402
 
 # hosted page on Cloudflare (transition; GitHub Pages ignores this file): headers per path. HTML and icons are checked on every visit (the
 # default); the fonts never change under their name. /dl/ = the release files (tools/release.py): the device's
@@ -62,6 +64,7 @@ def build_demo(out):
     return True
 
 def build(out, web=False):
+    join()  # web/index.html from web/src/
     if os.path.isdir(out):
         shutil.rmtree(out)
     for url, rel, _ctype, _gz, _imm in ASSETS:

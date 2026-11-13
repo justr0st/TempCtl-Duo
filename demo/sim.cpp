@@ -16,6 +16,7 @@
 #include "config.h"
 #include "console.h"
 #include "local_ctrl.h"
+#include "io_pins.h"
 #include "program_store.h"
 #include "safety.h"
 #include "syslog.h"
@@ -352,9 +353,16 @@ void ledcSetup(int, uint32_t, int) {}
 void ledcAttachPin(int pin, int ch) {
   if (pin == PIN_BUZZER) buzzerCh = ch;
 }
+void ledcDetachPin(int pin) {
+  if (pin == PIN_BUZZER) buzzerCh = -1;
+}
 void ledcWrite(int ch, uint32_t duty) {
   if (ch >= 0 && ch < 16) ledcDuty[ch] = (int)duty;
 }
+uint32_t ledcChangeFrequency(int, uint32_t hz, int) { return hz; }
+// (no fan tach in the demo)
+void attachInterrupt(int, void (*)(void), int) {}
+void detachInterrupt(int) {}
 float temperatureRead() { return 38.0f + (heat.cj - 26.0f) * 0.5f; }
 
 // ================================================================== the device: boot and steps
@@ -391,6 +399,7 @@ EXPORT("demo_boot") int demo_boot(double wallNow, int restarted) {
   wasRestart = restarted != 0;
   rng ^= (uint32_t)wallNow;
   localCtrlEarlyInit();
+  ioEarlyInit();
   safetyBegin();
   syslogBegin();
   LogSerial.printf("\n[boot] " PRODUCT_NAME " %s - browser demo (simulated hardware)\n", FW_VERSION);

@@ -3,6 +3,7 @@
 #include "psram.h"
 #include "tui.h"
 #include "safety.h"
+#include "fan.h"
 #include "ota.h"
 #include "ota_net.h"
 #include "ui.h"
@@ -511,7 +512,7 @@ void displayUpdate() {
 
 // ------------------------------------------------------------ network
 static lv_obj_t *nStatus, *nSsid, *nPass, *nAp, *nHost, *nStatic, *nIpBox, *nIp[5];
-static lv_obj_t *nOn, *nRest, *nSave;  // Wi-Fi on / off (applied at once), the other rows and Save (hidden while off)
+static lv_obj_t *nOn, *nRest, *nSave, *nQr;  // Wi-Fi on / off (applied at once), the other rows and Save (hidden while off)
 static PSRAM_VAR(Settings, nEdit);  // edited copy, saved with "Save and connect"
 static bool nPassChanged, nApChanged;
 static bool scanning = false, scanShown = false;
@@ -630,7 +631,7 @@ static void onWifiOn(lv_event_t*) {
   netApplyWifi();
   scanning = scanShown = false;
   networkFill();
-  tSetText(nStatus, netInfo().c_str());
+  networkUpdate(true);
   tToast(on ? "Wi-Fi on" : "Wi-Fi off: no network, no access point");
 }
 
@@ -682,7 +683,133 @@ static void onNetSave(lv_event_t*) {
   saveSettingsQuiet();
   netApplyWifi();
   nPassChanged = nApChanged = false;
-  tToast("Saved. Connecting \xE2\x80\xA6");
+  safetyFx(FX_OK);
+  tToast("Saved. Connecting\xE2\x80\xA6");
+}
+
+// ---- QR codes (spec 9.25): the web address, or (access point) the Wi-Fi login and the address.
+// The popup builds the code objects when it opens; closing it deletes them (a canvas of ~2 kB each: little RAM on the CYD).
+static int qrPage = 0;  // CYD: 0 = Wi-Fi login, 1 = web address (one code at a time)
+
+static void qrEscape(char* out, size_t n, const char* in) {  // Wi-Fi QR format: \ ; , : " get a backslash
+  size_t k = 0;
+  for (; *in && k + 2 < n; ++in) {
+    if (strchr("\\;,:\"", *in)) out[k++] = '\\';
+    out[k++] = *in;
+  }
+  out[k] = 0;
+}
+// canvas size: a whole number of pixels per module (QR version from the data length, error correction M), at most maxPx
+static int qrSize(size_t len, int maxPx) {
+  static const uint8_t cap[] = {14, 26, 42, 62, 84, 106, 122, 152, 180, 213};  // bytes per version 1 ... 10
+  int v = 1;
+  while (v <= 10 && len > cap[v - 1]) ++v;
+  const int modules = 17 + 4 * v;
+  int sc = maxPx / modules;
+  if (sc < 1) sc = 1;
+  return modules * sc;
+}
+// one code on a white backing; the captions next to it (CYD) or under it (S3)
+static lv_obj_t* qrAdd(lv_obj_t* parent, const char* data, int maxPx, const char* cap1, const char* cap2) {
+  lv_obj_t* back = lv_obj_create(parent);
+  lv_obj_remove_style_all(back);
+  lv_obj_add_style(back, &S_.qr, 0);
+  const int pad = TUI_SMALL ? 8 : 10;  // (S_.qr) a fixed backing: the captions line up whatever the code size
+  lv_obj_set_size(back, maxPx + 2 * pad, maxPx + 2 * pad);
+  lv_obj_set_scrollable(back, false);
+  lv_obj_t* q = lv_qrcode_create(back);
+  lv_obj_center(q);
+  lv_qrcode_set_size(q, qrSize(strlen(data), maxPx));
+  lv_qrcode_set_dark_color(q, lv_color_black());
+  lv_qrcode_set_light_color(q, lv_color_white());
+  lv_qrcode_update(q, data, strlen(data));
+  return back;
+}
+static lv_obj_t* qrCaption(lv_obj_t* parent, const char* t1, const char* t2, int w) {
+  lv_obj_t* c = tCol(parent, 1);
+  lv_obj_set_width(c, w);
+  lv_obj_t* a = tLabel(c, TUI_SMALL ? &tfont_14 : &tfont_16b, t1);
+  lv_obj_set_width(a, LV_PCT(100));
+  lv_label_set_long_mode(a, LV_LABEL_LONG_MODE_WRAP);
+  if (t2 && *t2) {
+    lv_obj_t* b = tLabel(c, &tfont_12, t2);
+    lv_obj_add_style(b, &S_.muted, 0);
+    lv_obj_set_width(b, LV_PCT(100));
+    lv_label_set_long_mode(b, LV_LABEL_LONG_MODE_WRAP);
+  }
+  return c;
+}
+static void qrOpen();
+static void onQrClose(lv_event_t*) { tModalClose(); }
+static void onQrToggle(lv_event_t*) {
+  qrPage ^= 1;
+  qrOpen();
+}
+static void qrOpen() {
+  const String sta = netStaIp();
+  const bool ap = sta.length() == 0 && netApActive();
+  if (!sta.length() && !ap) return tToast("No network to join: the Wi-Fi is off or not connected.", true);
+  char url[48], wifi[256], ssid[80], pass[140];
+  if (ap) {
+    snprintf(url, sizeof(url), "http://%s/", netApIp().c_str());
+    Settings s;
+    settingsCopy(s);
+    qrEscape(ssid, sizeof(ssid), netApName().c_str());
+    qrEscape(pass, sizeof(pass), s.apPass);
+    if (s.apPass[0]) snprintf(wifi, sizeof(wifi), "WIFI:T:WPA;S:%s;P:%s;;", ssid, pass);
+    else snprintf(wifi, sizeof(wifi), "WIFI:T:nopass;S:%s;;", ssid);
+    memset(&s, 0, sizeof(s));  // (the password is not kept)
+    memset(pass, 0, sizeof(pass));
+  } else {
+    snprintf(url, sizeof(url), "http://%s/", sta.c_str());
+  }
+  char cap[64];
+  lv_obj_t* box = tPopup(TUI_SMALL ? SCREEN_W - 12 : 456, LV_SIZE_CONTENT);
+  lv_obj_set_style_pad_all(box, TUI_SMALL ? 8 : 12, 0);
+  lv_obj_set_style_pad_gap(box, TUI_SMALL ? 6 : 8, 0);
+  lv_obj_t* head = tRow(box, 6);
+  lv_obj_t* t = tLabel(head, TUI_SMALL ? &tfont_16b : &tfont_20c, ap ? "Join and open" : "Open the web page");
+  lv_obj_set_flex_grow(t, 1);
+  tOneLine(t);
+  tIconButton(head, LV_SYMBOL_CLOSE, onQrClose, nullptr, TUI_SMALL ? 36 : 44, TUI_SMALL ? 32 : 36);
+  lv_obj_t* row = tRow(box, TUI_SMALL ? 8 : 14);
+  lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+#if TUI_SMALL
+  // 320x240: one code at a time (QR on the left, text and the switch on the right)
+  const bool wifiPage = ap && qrPage == 0;
+  qrAdd(row, wifiPage ? wifi : url, 156, nullptr, nullptr);
+  lv_obj_t* col = tCol(row, 6);
+  lv_obj_set_flex_grow(col, 1);
+  if (!ap) {
+    qrCaption(col, "Scan to open", url, LV_PCT(100));
+  } else if (wifiPage) {
+    snprintf(cap, sizeof(cap), "Network %s", netApName().c_str());
+    qrCaption(col, "1. Join the Wi-Fi", cap, LV_PCT(100));
+    tButton(col, "Next: 2", onQrToggle, nullptr, LV_PCT(100), 32);
+  } else {
+    qrCaption(col, "2. Open the page", url, LV_PCT(100));
+    tButton(col, "Back: 1", onQrToggle, nullptr, LV_PCT(100), 32);
+  }
+#else
+  if (!ap) {
+    qrAdd(row, url, 200, nullptr, nullptr);
+    lv_obj_t* col = tCol(row, 6);
+    lv_obj_set_width(col, 190);
+    qrCaption(col, "Scan to open the page", url, LV_PCT(100));
+  } else {
+    for (int i = 0; i < 2; ++i) {
+      lv_obj_t* col = tCol(row, 6);
+      lv_obj_set_flex_align(col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+      qrAdd(col, i == 0 ? wifi : url, 168, nullptr, nullptr);
+      snprintf(cap, sizeof(cap), "Network %s", netApName().c_str());
+      qrCaption(col, i == 0 ? "1. Join the Wi-Fi" : "2. Open the page", i == 0 ? cap : url, 196);
+    }
+  }
+#endif
+}
+static void onQr(lv_event_t*) {
+  qrPage = 0;
+  qrOpen();
 }
 
 lv_obj_t* networkCreate() {
@@ -692,6 +819,8 @@ lv_obj_t* networkCreate() {
   lv_label_set_long_mode(nStatus, LV_LABEL_LONG_MODE_WRAP);
   lv_obj_t* r = settingRow(p.body, "Wi-Fi", "Off: no network, no access point, no scan");
   nOn = tSwitch(r, onWifiOn);
+  r = settingRow(p.body, "Phone access", "A QR code to join the access point or open the web page");
+  nQr = tButton(r, "QR code", onQr, nullptr, CW2, BH);
   nRest = tCol(p.body, 2);  // (the body's own gap)
   lv_obj_set_width(nRest, LV_PCT(100));
   r = settingRow(nRest, "Network name", nullptr);
@@ -728,14 +857,16 @@ void networkShow() {
     if (s.pass[0]) strlcpy(nEdit.pass, "x", sizeof(nEdit.pass));  // "set" marker for the button
   }
   networkFill();
-  networkUpdate();
+  networkUpdate(true);
 }
 
-void networkUpdate() {
+// status text and the QR button follow the connection (station IP or access point), every 2 s
+void networkUpdate(bool now) {
   static uint32_t at = 0;
-  if (at && lv_tick_elaps(at) < 2000) return;
+  if (!now && at && lv_tick_elaps(at) < 2000) return;
   at = tTickNow();
   tSetText(nStatus, netInfo().c_str());
+  tSetEnabled(nQr, netStaIp().length() > 0 || netApActive());
 }
 
 // ------------------------------------------------------------ system
@@ -943,6 +1074,70 @@ static void onChip(lv_event_t*) {
   tChoice("Chip temperature warning above", "Off\n60 \xC2\xB0" "C\n70 \xC2\xB0" "C\n80 \xC2\xB0" "C\n90 \xC2\xB0" "C\n100 \xC2\xB0" "C", sel,
           onChipPick, 0);
 }
+// sound volume, key beep, optional pins and the cooling fan (spec 9.25)
+static lv_obj_t *sVol, *sKey, *sFanAfter, *sFanBelow, *sFanMax, *sFanSpeed, *sIo[IO_PINS_MAX];
+static lv_obj_t *rEstop, *rRelay, *rSound, *rVol, *rKey, *rPins, *rIo[IO_PINS_MAX], *rFan[5];
+static bool applyChecked(const Settings& in) {  // validate (a message on a refusal), store, save
+  Settings s = in;
+  char msg[160];
+  if (!settingsValidate(s, boardLimits(), msg, sizeof(msg))) {
+    tToast(msg, true);
+    return false;
+  }
+  {
+    Guard g;
+    gSettings = s;
+  }
+  saveSettingsAndNotify();
+  return true;
+}
+static void onVolPick(int i, int) {
+  if (i < 0) return;
+  Settings s;
+  settingsCopy(s);
+  s.volume = (uint8_t)(i + 1);
+  if (applyChecked(s)) safetyBeepTest();
+  systemShow();
+}
+static void onVol(lv_event_t*) {
+  Settings s;
+  settingsCopy(s);
+  tChoice("Alarm sound volume", "1 (quietest)\n2\n3\n4\n5 (loudest)", s.volume - 1, onVolPick, 0);
+}
+static void onIoPick(int i, int pin) {
+  if (i < 0) return;
+  Settings s;
+  settingsCopy(s);
+  s.ioFn[pin] = (uint8_t)i;
+  applyChecked(s);
+  systemShow();
+}
+static void onIo(lv_event_t* e) {
+  const int pin = (int)(intptr_t)lv_event_get_user_data(e);
+  Settings s;
+  settingsCopy(s);
+  char t[24];
+  snprintf(t, sizeof(t), "GPIO %u", boardLimits().ioGpio[pin]);
+  tChoice(t, "Not used\nSSR supply relay\nE-stop input\nBuzzer\nFan (on / off)\nFan (PWM)\nFan speed input", s.ioFn[pin],
+          onIoPick, pin);
+}
+static void onFanNum(float v, int k) {
+  Settings s;
+  settingsCopy(s);
+  if (k == 0) s.fanOffBelow = v;
+  if (k == 1) s.fanMaxMin = (uint16_t)v;
+  if (k == 2) s.fanSpeed = (uint8_t)v;
+  applyChecked(s);
+  systemShow();
+}
+static void onFanBtn(lv_event_t* e) {
+  const int k = (int)(intptr_t)lv_event_get_user_data(e);
+  Settings s;
+  settingsCopy(s);
+  if (k == 0) tNumPad("Fan runs until every channel is below", s.fanOffBelow, 30, 200, 0, "\xC2\xB0" "C", onFanNum, 0);
+  if (k == 1) tNumPad("Fan runs at most", s.fanMaxMin, 1, 240, 0, "min", onFanNum, 1);
+  if (k == 2) tNumPad("Fan speed", s.fanSpeed, 20, 100, 0, "%", onFanNum, 2);
+}
 static void onSafetySw(lv_event_t* e) {
   lv_obj_t* o = (lv_obj_t*)lv_event_get_target(e);
   const bool on = lv_obj_has_state(o, LV_STATE_CHECKED);
@@ -951,6 +1146,8 @@ static void onSafetySw(lv_event_t* e) {
     if (o == sEstop) gSettings.estop = on;
     if (o == sSound) gSettings.sound = on;
     if (o == sRelay) gSettings.relay = on;
+    if (o == sKey) gSettings.keyBeep = on;
+    if (o == sFanAfter) gSettings.fanAfterRun = on;
   }
   saveSettingsAndNotify();
   if (o == sSound && on) safetyBeepTest();
@@ -1157,22 +1354,48 @@ lv_obj_t* systemCreate() {
   r = settingRow(p.body, "Manual mode timeout", "Manual mode ends after this long without a touch, web or serial action (a beep 1 min before)");
   lv_obj_set_style_pad_top(r, G, 0);
   sIdle = tButton(r, "", onIdle, nullptr, CW2, BH);
-  sEstop = sSound = sRelay = sChip = nullptr;
-  if (safetyEstopWired()) {
-    r = settingRow(p.body, "E-stop input", "GPIO 5, NC contact to GND. Open: all outputs off, run stopped");
+  sEstop = sSound = sRelay = sChip = sVol = sKey = nullptr;
+  // (on the S3 the pins decide: the rows of a function that has no pin are hidden, see systemShow)
+  const BoardLimits lim = boardLimits();
+  if (lim.ioN || safetyEstopWired()) {
+    r = rEstop = settingRow(p.body, "E-stop input", "NC contact to GND. Open: all outputs off, run stopped");
     sEstop = tSwitch(r, onSafetySw);
   }
-  if (localCtrlRelayWired()) {
-    r = settingRow(p.body, "SSR supply relay", "GPIO 4, +5 V of the SSR inputs. Switch off only if no relay is fitted");
+  if (lim.ioN || localCtrlRelayWired()) {
+    r = rRelay = settingRow(p.body, "SSR supply relay", "+5 V of the SSR inputs. Switch off only if no relay is fitted");
     sRelay = tSwitch(r, onSafetySw);
   }
-  if (safetySoundWired()) {
-    r = settingRow(p.body, "Alarm sound", "Faults, E-stop, \"Action required\", run finished. A touch silences it");
+  if (lim.ioN || safetySoundWired()) {
+    r = rSound = settingRow(p.body, "Alarm sound", "Faults, E-stop, \"Action required\", run finished. A touch silences it");
     sSound = tSwitch(r, onSafetySw);
+    r = rVol = settingRow(p.body, "Sound volume", "Alarms always play at full volume");
+    sVol = tButton(r, "", onVol, nullptr, CW2, BH);
+    r = rKey = settingRow(p.body, "Key beep", "A short beep on the touch-screen buttons");
+    sKey = tSwitch(r, onSafetySw);
   }
   if (safetyChipTempWired()) {
     r = settingRow(p.body, "Chip temperature warning", "ESP32-S3 internal sensor");
     sChip = tButton(r, "", onChip, nullptr, CW2, BH);
+  }
+  rPins = nullptr;
+  if (lim.ioN) {  // optional pins and the fan
+    rPins = settingRow(p.body, "Optional pins", "What each spare pin of the board does");
+    lv_obj_set_style_pad_top(rPins, G, 0);
+    for (int i = 0; i < lim.ioN && i < IO_PINS_MAX; ++i) {
+      char t[16];
+      snprintf(t, sizeof(t), "GPIO %u", lim.ioGpio[i]);
+      rIo[i] = settingRow(p.body, t, nullptr);
+      sIo[i] = tButton(rIo[i], "", onIo, (void*)(intptr_t)i, CW + 20, BH);
+    }
+    rFan[0] = settingRow(p.body, "Run the fan after a program", "Until the channels are cool");
+    lv_obj_set_style_pad_top(rFan[0], G, 0);
+    sFanAfter = tSwitch(rFan[0], onSafetySw);
+    rFan[1] = settingRow(p.body, "\xE2\x80\xA6 until every channel is below", nullptr);
+    sFanBelow = tButton(rFan[1], "", onFanBtn, (void*)(intptr_t)0, CW2, BH);
+    rFan[2] = settingRow(p.body, "\xE2\x80\xA6 at most", nullptr);
+    sFanMax = tButton(rFan[2], "", onFanBtn, (void*)(intptr_t)1, CW2, BH);
+    rFan[3] = settingRow(p.body, "Fan speed (PWM fan)", nullptr);
+    sFanSpeed = tButton(rFan[3], "", onFanBtn, (void*)(intptr_t)2, CW2, BH);
   }
   lv_obj_t* info = tPanel(p.body);
   lv_obj_set_size(info, LV_PCT(100), LV_SIZE_CONTENT);
@@ -1210,6 +1433,34 @@ void systemShow() {
   if (sEstop) tSetChecked(sEstop, s.estop != 0);
   if (sSound) tSetChecked(sSound, s.sound != 0);
   if (sRelay) tSetChecked(sRelay, s.relay != 0);
+  if (sKey) tSetChecked(sKey, s.keyBeep != 0);
+  if (sVol) {
+    snprintf(b, sizeof(b), "%u / 5", s.volume);
+    tButtonText(sVol, b);
+  }
+  if (boardLimits().ioN) {
+    static const char* const FN[] = {"Not used", "SSR relay", "E-stop", "Buzzer", "Fan", "Fan (PWM)", "Fan speed"};
+    if (rEstop) tSetHidden(rEstop, !safetyEstopWired());
+    if (rRelay) tSetHidden(rRelay, !localCtrlRelayWired());
+    if (rSound) tSetHidden(rSound, !safetySoundWired());
+    if (rVol) tSetHidden(rVol, !safetySoundWired());
+    if (rKey) tSetHidden(rKey, !safetySoundWired());
+    for (int i = 0; i < boardLimits().ioN && i < IO_PINS_MAX; ++i)
+      if (sIo[i]) tButtonText(sIo[i], FN[s.ioFn[i] < IO_FN_COUNT ? s.ioFn[i] : 0]);
+    const bool fan = fanWired();
+    bool pwm = false;
+    for (int i = 0; i < IO_PINS_MAX; ++i) pwm = pwm || s.ioFn[i] == IO_FAN_PWM;
+    for (int i = 0; i < 4; ++i) tSetHidden(rFan[i], !fan || (i == 3 && !pwm));
+    tSetChecked(sFanAfter, s.fanAfterRun != 0);
+    tSetHidden(rFan[1], !fan || !s.fanAfterRun);
+    tSetHidden(rFan[2], !fan || !s.fanAfterRun);
+    snprintf(b, sizeof(b), "%.0f \xC2\xB0" "C", s.fanOffBelow);
+    tButtonText(sFanBelow, b);
+    snprintf(b, sizeof(b), "%u min", s.fanMaxMin);
+    tButtonText(sFanMax, b);
+    snprintf(b, sizeof(b), "%u %%", s.fanSpeed);
+    tButtonText(sFanSpeed, b);
+  }
   if (sChip) {
     if (s.chipWarn) snprintf(b, sizeof(b), "%.0f \xC2\xB0" "C", s.chipMaxC);
     else strlcpy(b, "Off", sizeof(b));

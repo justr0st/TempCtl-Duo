@@ -203,7 +203,13 @@ void digitalWrite(int pin, int v);
 int digitalRead(int pin);
 void ledcSetup(int ch, uint32_t hz, int bits);
 void ledcAttachPin(int pin, int ch);
+void ledcDetachPin(int pin);
 void ledcWrite(int ch, uint32_t duty);
+uint32_t ledcChangeFrequency(int ch, uint32_t hz, int bits);
+#define FALLING 0x02
+#define digitalPinToInterrupt(p) (p)
+void attachInterrupt(int pin, void (*fn)(void), int mode);
+void detachInterrupt(int pin);
 float temperatureRead();
 long random(long n);
 long random(long a, long b);

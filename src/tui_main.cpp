@@ -185,22 +185,23 @@ static void onExtend(lv_event_t* e) {
 
 static void onAck(lv_event_t* e) { sendCmd(CMD_ACK_FAULT, (int)(intptr_t)lv_event_get_user_data(e)); }
 
-// a round badge with a red warning triangle, centred on the tile's top edge (over the tile, blinks)
-static lv_obj_t* warnBadge(lv_obj_t* parent, int x, int y, int w) {
-  const int d = TUI_SMALL ? 26 : 32;
-  lv_obj_t* b = lv_obj_create(parent);
+// a round badge with a red warning triangle in the tile's top left corner (blinks); the channel name
+// moves right of it while it shows, so it covers neither the status text nor the chart's time labels
+constexpr int WARN_D = TUI_SMALL ? 20 : 22;
+static lv_obj_t* warnBadge(lv_obj_t* tile) {
+  lv_obj_t* b = lv_obj_create(tile);
   lv_obj_remove_style_all(b);
   lv_obj_add_style(b, &S_.panel, 0);
   lv_obj_set_style_pad_all(b, 0, 0);
   lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_border_width(b, 2, 0);
   lv_obj_set_style_border_color(b, tc(C_DANGER), 0);
-  lv_obj_set_size(b, d, d);
-  lv_obj_set_pos(b, x + w / 2 - d / 2, y - d / 2 + 2);
+  lv_obj_set_size(b, WARN_D, WARN_D);
+  lv_obj_set_pos(b, -2, -4);
   lv_obj_set_scrollable(b, false);
   lv_obj_t* l = lv_label_create(b);
   lv_label_set_text(l, LV_SYMBOL_WARNING);
-  lv_obj_set_style_text_font(l, TUI_SMALL ? &lv_font_montserrat_14 : &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
   lv_obj_add_style(l, &S_.danger, 0);
   lv_obj_center(l);
   tSetHidden(b, true);
@@ -280,7 +281,7 @@ static void tileCreate(int ch, lv_obj_t* parent, int x, int y, int w, int h) {
   t.ack = tButton(t.box, "Acknowledge", onAck, (void*)(intptr_t)ch, iw, 38);
   lv_obj_add_style(t.ack, &S_.btnDanger, 0);
   lv_obj_set_pos(t.ack, 0, by);
-  t.warn = warnBadge(parent, x, y, w);
+  t.warn = warnBadge(t.box);
 }
 #endif
 
@@ -344,7 +345,7 @@ static void tileCreateSmall(int ch, lv_obj_t* parent, int x, int y, int w, int h
   t.ack = tButton(t.box, "Acknowledge", onAck, (void*)(intptr_t)ch, iw, 30);
   lv_obj_add_style(t.ack, &S_.btnDanger, 0);
   lv_obj_align(t.ack, LV_ALIGN_TOP_LEFT, 0, 16);
-  t.warn = warnBadge(parent, x, y, w);
+  t.warn = warnBadge(t.box);
 }
 #endif
 
@@ -408,6 +409,8 @@ static void tileUpdate(int ch) {
     t.faultStyled = C.fault != 0;
     if (t.faultStyled) lv_obj_add_style(t.status, &S_.danger, 0);
     else lv_obj_remove_style(t.status, &S_.danger, 0);
+    // (a fault text is read to the end: it scrolls when it is longer than its room)
+    lv_label_set_long_mode(t.status, t.faultStyled ? LV_LABEL_LONG_MODE_SCROLL_CIRCULAR : LV_LABEL_LONG_MODE_DOTS);
   }
   if (C.pvValid) snprintf(b, sizeof(b), "%.1f", C.pv);
   else strlcpy(b, "\xE2\x80\x94", sizeof(b));
@@ -465,6 +468,13 @@ static void tileUpdate(int ch) {
 
   // right-hand control: acknowledge (fault) / extend hold (run) / manual switch
   const bool fault = C.fault != 0;
+  {  // the name starts right of the badge while there is one
+    const int nx = fault || L.estop ? WARN_D + 2 : 0;
+    if (lv_obj_get_x_aligned(t.name) != nx) {
+      lv_obj_set_x(t.name, nx);
+      lv_obj_set_width(t.name, (TUI_SMALL ? 64 : 110) - nx);
+    }
+  }
   tSetHidden(t.warn, !(fault || L.estop) || ((lv_tick_get() / 500) & 1));  // blinks (the UI updates every 250 ms)
   tSetHidden(t.ack, !fault);
   tSetHidden(t.minus, fault);
@@ -569,8 +579,18 @@ static void intrOpen() {
   intrDlg = tModalId();
 }
 
+// "Run report" dialog (the badge of a finished / stopped run)
+static void reportOpen() {
+  RunReport r;
+  if (!runReportGet(r)) return;
+  static char txt[440];
+  reportText(txt, sizeof(txt), r, S.ch[0].name, S.ch[1].name, HAS_MONITOR && S.mon.on ? S.mon.name : nullptr);
+  tDialog("Run report", txt, "Close", "", "", nullptr, 0);
+}
+
 static void onBadge(lv_event_t*) {
-  if (L.intrValid) intrOpen();
+  if (L.intrValid) return intrOpen();
+  if ((L.state == RunState::Finished || L.state == RunState::Aborted) && L.runProg == S.selProgram) reportOpen();
 }
 
 static uint32_t saveDlg = 0;  // the "Run changed" dialog (closed when answered elsewhere)
@@ -610,7 +630,7 @@ static void headerUpdate() {
   }
   if (act) {
     if (L.progType == PROG_SEQ) {
-      static const char* const ST[] = {"", "ramp", "waiting for bottom", "hold", "off", "program pause", "done"};
+      static const char* const ST[] = {"", "ramp", "waiting for bottom", "hold", "off", "pause", "done"};
       const uint8_t st = (uint8_t)L.seq.st;
       snprintf(b, sizeof(b), "Phase %d / %d \xC2\xB7 %s", L.seq.idx + 1, L.phases, st < 7 ? ST[st] : "");
       if (L.state == RunState::Paused) strlcat(b, " (paused)", sizeof(b));
@@ -623,8 +643,9 @@ static void headerUpdate() {
     snprintf(b, sizeof(b), "%s after %s \xC2\xB7 tap for the next program", L.state == RunState::Finished ? "Finished" : "Stopped", t);
   } else if (haveSel) {
     fmtTime(sel.total, t, sizeof(t));
-    snprintf(b, sizeof(b), "%s \xC2\xB7 %u %s \xC2\xB7 %s%s", sel.type == PROG_TL ? "Timeline" : "Sequence", sel.items,
-             sel.type == PROG_TL ? "steps" : "phases", t, sel.waits ? " + waits" : "");
+    // (the type is in the word: phases = Sequence, steps = Timeline; the line has to fit beside the badge)
+    snprintf(b, sizeof(b), "%u %s \xC2\xB7 %s%s", sel.items, sel.type == PROG_TL ? "steps" : "phases", t,
+             sel.waits ? " + waits" : "");
   } else {
     strlcpy(b, "Tap to choose a program", sizeof(b));
   }
@@ -675,12 +696,22 @@ static void monLabelCreate() {
 
 static void monLabelUpdate() {
   if (!lblMon) return;
-  tSetHidden(lblMon, !L.mon.on);
-  if (!L.mon.on) return;
-  char v[16], b[48];
-  if (L.mon.valid) fmtTemp(L.mon.pv, v, sizeof(v));
-  else strlcpy(v, "--", sizeof(v));
-  snprintf(b, sizeof(b), "%s %s", L.mon.name, v);
+  const bool fan = L.fanWired && L.fanOn;  // "Fan" / "Fan 1200 rpm" while the fan runs (spec 9.25)
+  tSetHidden(lblMon, !L.mon.on && !fan);
+  if (!L.mon.on && !fan) return;
+  char v[16], b[64] = "";
+  if (L.mon.on) {
+    if (L.mon.valid) fmtTemp(L.mon.pv, v, sizeof(v));
+    else strlcpy(v, "--", sizeof(v));
+    snprintf(b, sizeof(b), "%s %s", L.mon.name, v);
+  }
+  if (fan) {
+    char f[24];
+    if (L.fanRpm >= 0) snprintf(f, sizeof(f), "Fan %d rpm", (int)L.fanRpm);
+    else strlcpy(f, "Fan", sizeof(f));
+    if (b[0]) strlcat(b, " \xC2\xB7 ", sizeof(b));
+    strlcat(b, f, sizeof(b));
+  }
   tSetText(lblMon, b);
   if (lv_color_to_u32(lv_obj_get_style_bg_color(lblMon, LV_PART_MAIN)) != lv_color_to_u32(tc(C_BG)))
     lv_obj_set_style_bg_color(lblMon, tc(C_BG), 0);  // (the theme changed)
@@ -702,11 +733,11 @@ lv_obj_t* mainCreate() {
   lv_obj_set_clickable(titleBox, true);
   lv_obj_add_event_cb(titleBox, onTitle, LV_EVENT_CLICKED, nullptr);
   lblProg = tLabel(titleBox, &tfont_14, "");
-  lv_obj_set_width(lblProg, 170);
+  lv_obj_set_width(lblProg, LV_PCT(100));  // (the room left of the badge)
   tOneLine(lblProg);
   lblSub = tLabel(titleBox, &tfont_12, "");
   lv_obj_add_style(lblSub, &S_.muted, 0);
-  lv_obj_set_width(lblSub, 170);
+  lv_obj_set_width(lblSub, LV_PCT(100));
   tOneLine(lblSub);
   badge = tLabel(hdr, &tfont_12, "");
   lv_obj_set_style_border_width(badge, 1, 0);
@@ -761,11 +792,11 @@ lv_obj_t* mainCreate() {
   lv_obj_set_clickable(titleBox, true);
   lv_obj_add_event_cb(titleBox, onTitle, LV_EVENT_CLICKED, nullptr);
   lblProg = tLabel(titleBox, &tfont_16b, "");
-  lv_obj_set_width(lblProg, 190);
+  lv_obj_set_width(lblProg, LV_PCT(100));  // (the room left of the badge)
   tOneLine(lblProg);
   lblSub = tLabel(titleBox, &tfont_12, "");
   lv_obj_add_style(lblSub, &S_.muted, 0);
-  lv_obj_set_width(lblSub, 190);
+  lv_obj_set_width(lblSub, LV_PCT(100));
   tOneLine(lblSub);
   badge = tLabel(hdr, &tfont_12, "");
   lv_obj_set_style_border_width(badge, 1, 0);

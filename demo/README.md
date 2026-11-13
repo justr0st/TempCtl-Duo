@@ -21,7 +21,7 @@ web/index.html (data-demo)  --request lines-->  demo.js  --demo_request()-->  we
 | `demo.js` | in the page: loads the module (a small WASI layer: log output, clocks), steps it (speed 1–10×), passes the page's request lines, keeps the file system and the heat state in local storage, the demo panel |
 | `build.sh` | builds `out/tempctl-demo.wasm` |
 
-Compiled firmware sources: `app_state web local_ctrl settings settings_store run_engine duo_program
+Compiled firmware sources: `app_state app_hist app_log web local_ctrl settings settings_store run_engine duo_program
 program_store channel controller pid autotune runaway safety tc_sensor crumbs syslog modbus_rtu`. The firmware
 needs three hooks for this, with no effect on the boards: `controlTaskBegin()` / `controlTaskStep()` (the control
 task's loop body), `localCtrlTick()` (the local task's), and `BOARD_DEMO` in `src/config.h` and for

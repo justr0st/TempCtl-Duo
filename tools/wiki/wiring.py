@@ -163,11 +163,12 @@ def s3_diagrams():
             ('J3-21  GND', '', 'emitter', 'gnd')],
         ('SSR, top', 'DC input 3–32 V, zero-cross'), [('collector', '− input', 'ssr', ''), (None, '+ input', '5v', '5 V relay')]).module(
         'SSR supply relay', 'DC solid-state relay, active high', [
-            ('J1-4  GPIO4', 'RELAY', 'IN +', 'safe'), ('J1-22  GND', '', 'IN −', 'gnd')],
+            ('J1-4  GPIO4', 'RELAY (default)', 'IN +', 'safe'), ('J1-22  GND', '', 'IN −', 'gnd')],
         ('both SSR + inputs', '"5 V relay"'), [('OUT +', '', '5v', '5 V (J1-21)'), ('OUT −', '+ inputs', '5v', '5 V relay')]).note(
         'The 10 kΩ base pull-downs keep the SSRs off during reset and flashing. Relay: input ≤ 20 mA at 3.3 V, output ≥ 0.5 A DC.',
         'The relay is on only while a local channel heats; off at once on a fault or E-stop. A shorted SSR output still needs a contactor.',
-        'Load side (mains, not drawn): L – fuse – SSR 1/2 – heater – N. Setting safety.relay off only when no relay is fitted.')
+        'Load side (mains, not drawn): L – fuse – SSR 1/2 – heater – N. Setting safety.relay off only when no relay is fitted.',
+        'GPIO 4 is an optional pin; the relay is its default function (Settings › Safety › Optional pins). Without a relay set the pin to Not used.')
     d['s3-rs485'] = Diagram('S3: RS485 transceiver (Modbus channels, beta)', S3,
                             'Only a 3.3 V module (MAX3485 / SP3485): a 5 V MAX485 drives 5 V into the ESP32').module(
         'RS485 module (3.3 V)', 'MAX3485 / SP3485, DE and RE bridged', [
@@ -181,11 +182,29 @@ def s3_diagrams():
         'Auto-direction module: leave DE / RE open and set PIN_RS485_DE to -1 in src/board_s3.h.')
     d['s3-safety'] = Diagram('S3: E-stop input and alarm buzzer', S3).module(
         'E-stop button', 'normally closed (NC) contact', [
-            ('J1-5  GPIO5', 'E-STOP', '1', 'safe'), ('J1-22  GND', '', '2', 'gnd')]).module(
+            ('J1-5  GPIO5', 'E-STOP (default)', '1', 'safe'), ('J1-22  GND', '', '2', 'gnd')]).module(
         'Piezo buzzer', 'passive, via 100 Ω', [
-            ('J1-6  GPIO6', 'BUZZER (2.7 kHz)', '+ (via 100 Ω)', 'safe'), ('J3-22  GND', '', '−', 'gnd')]).note(
+            ('J1-6  GPIO6', 'BUZZER (default)', '+ (via 100 Ω)', 'safe'), ('J3-22  GND', '', '−', 'gnd')]).note(
+        'GPIO 5 and 6 are optional pins: E-stop and buzzer (2.7 kHz) are their default functions (Settings › Safety › Optional pins).',
         'E-stop: internal pull-up; an open contact or a broken wire switches every output off and stops the run (setting safety.estop, off by default).',
         'A magnetic buzzer or small speaker needs an NPN driver like the SSR drivers, with a 1N4148 across it.')
+    d['s3-fan'] = Diagram('S3: cooling fan (optional)', S3,
+                          'Example: GPIO6 = Fan (PWM), GPIO5 = Fan speed input, both set in Settings › Safety › Optional pins').module(
+        '4-wire PWM fan: driver', 'NPN, open collector', [
+            ('J1-6  GPIO6', 'FAN PWM (25 kHz)', 'base ← 1 kΩ', 'safe'), ('J3-22  GND', '', 'base → 10 kΩ → GND', 'gnd'),
+            ('J3-22  GND', '', 'emitter', 'gnd')],
+        ('Fan, 4-wire', '12 V, own supply'), [('collector', 'pin 4 control (blue)', 'ssr', ''), (None, 'pin 1 GND (black)', 'gnd', 'common GND'),
+                                              (None, 'pin 2 +12 V (yellow)', '5v', '12 V supply')]).module(
+        'Fan speed input', 'tach wire, open collector', [
+            ('J1-5  GPIO5', 'FAN TACH (pull-up)', 'pin 3 tach (green)', 'safe')],
+        ('Fan, 4-wire', 'same fan'), [(None, 'pin 3 tach', 'safe', 'tach')]).module(
+        'On / off fan: driver', 'logic-level N-MOSFET or NPN', [
+            ('J1-4  GPIO4', 'FAN (on / off)', 'gate / base', 'safe'), ('J3-22  GND', '', '10 kΩ → GND', 'gnd'),
+            ('J3-22  GND', '', 'source', 'gnd')],
+        ('Fan, 2-wire', '12 V, own supply'), [('drain', 'fan −', 'ssr', ''), (None, 'fan + (1N4007 across)', '5v', '12 V supply')]).note(
+        'Either the PWM fan or the on / off fan. The pins need a fan function instead of their defaults (relay / E-stop / buzzer).',
+        'A transistor inverts the PWM (higher duty = slower fan); no setting inverts it back yet. NPN: base 1 kΩ to the pin, 10 kΩ to GND.',
+        'The fan supply and the ESP32 share only GND. Never connect a fan to a GPIO directly (3.3 V, a few mA).')
     return d
 
 

@@ -4,6 +4,9 @@
 # and the S3 itself read the list to offer updates. A new version (FW_VERSION in src/version.h without a tag
 # v<version> yet) also becomes a GitHub release with the same files; a push without a version change only updates
 # the page.
+# Tests (before anything is published, also on pull requests, which never publish): host tests, touch UI host
+# (self-checks, random taps), the wiki's touch pictures against the UI host, the web page (Playwright against the
+# browser demo); after the firmware build the flash size gate (a CYD image over 97 % of its slot fails).
 # Setup: Settings > Pages > Source: GitHub Actions (a public repository).
 # Transition (devices with 1.0.65 or older ask the Cloudflare page): while the secrets CLOUDFLARE_API_TOKEN (a
 # token with the template "Edit Cloudflare Workers") and CLOUDFLARE_ACCOUNT_ID exist, the same files also go to
@@ -15,20 +18,98 @@ on:
     branches: [main]
     # (the wiki, docs/wiki, is part of the hosted page: its changes deploy too)
     paths-ignore: ["claude/**", "hardware/**", "logo/**", "README.md", "docs/SPEC.md", ".vscode/**"]
+  pull_request:
+    branches: [main]
+    paths-ignore: ["claude/**", "hardware/**", "logo/**", "README.md", "docs/SPEC.md", ".vscode/**"]
   workflow_dispatch:
 
 concurrency:
-  group: release
+  group: release-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
-  contents: write   # the GitHub release (tag + files)
-  pages: write      # GitHub Pages
-  id-token: write   # (deploy-pages)
+  contents: read
 
 jobs:
-  release:
+  tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      LVGL: ${{ github.workspace }}/deps/lvgl
+      AJ: ${{ github.workspace }}/deps/AJ743/src
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: LVGL 9.6.0 and ArduinoJson 7.4.3 (same versions as the firmware)
+        uses: actions/cache@v4
+        id: deps
+        with:
+          path: deps
+          key: deps-lvgl-9.6.0-aj-7.4.3
+      - name: Fetch LVGL and ArduinoJson
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p deps
+          git clone --depth 1 --branch v9.6.0 https://github.com/lvgl/lvgl deps/lvgl
+          git clone --depth 1 --branch v7.4.3 https://github.com/bblanchon/ArduinoJson deps/AJ743
+
+      - name: Host tests (g++, AddressSanitizer / UBSan)
+        run: bash tools/ci/host_tests.sh
+
+      - name: LVGL objects for the UI host (cache)
+        uses: actions/cache@v4
+        with:
+          path: test/ui_host/obj/liblvgl.a
+          key: uihost-lvgl-9.6.0-${{ hashFiles('test/ui_host/shim/**', 'test/ui_host/build.sh') }}
+
+      - name: Touch UI host (self-checks, random taps, both boards)
+        if: ${{ !cancelled() }}
+        run: bash tools/ci/ui_tests.sh
+
+      - name: Wiki touch pictures match the UI host
+        if: ${{ !cancelled() }}
+        run: |
+          pip install pillow
+          python3 tools/wiki/check_shots.py --no-build --write "$RUNNER_TEMP/shot-diff"
+      - name: Keep the picture differences
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: touch-picture-diff
+          path: ${{ runner.temp }}/shot-diff
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Browser demo (WebAssembly) for the web page tests
+        if: ${{ !cancelled() }}
+        run: |
+          curl -sSL -o /tmp/wasi-sdk.tgz https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-24/wasi-sdk-24.0-x86_64-linux.tar.gz
+          tar -xzf /tmp/wasi-sdk.tgz -C /tmp
+          WASI_SDK=/tmp/wasi-sdk-24.0-x86_64-linux AJ="$AJ" bash demo/build.sh
+
+      - name: Web page tests (Playwright)
+        if: ${{ !cancelled() }}
+        run: |
+          npm install -g playwright@1.49.1
+          npx playwright install --with-deps chromium
+          bash tools/ci/web_tests.sh
+
+  release:
+    needs: tests
+    if: ${{ github.event_name != 'pull_request' }}   # a pull request only runs the tests, it never publishes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # the GitHub release (tag + files)
+      pages: write      # GitHub Pages
+      id-token: write   # (deploy-pages)
     timeout-minutes: 60
     environment:
       name: github-pages
@@ -66,6 +147,9 @@ jobs:
         run: |
           args=""; for e in $ENVS; do args="$args -e $e"; done
           pio run $args
+
+      - name: Flash size gate (a CYD image over 97 % of its app slot stops the release)
+        run: python3 tools/ci/size_gate.py
 
       - name: Firmware files (update image + full image for the first USB flash)
         run: |

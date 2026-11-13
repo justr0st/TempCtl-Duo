@@ -6,7 +6,8 @@
 A Modbus channel leaves the PID control to an RS485 temperature controller; the ESP32 writes its setpoints,
 reads PV, setpoint and output, and can switch its outputs off. Wiring: [ESP32-S3](Hardware-S3.md#rs485-modbus-channels-beta),
 [CYD](Hardware-CYD.md) (wirings A and C). One RS485 bus serves both channels (one or two controllers with their
-own addresses).
+own addresses). The RS485 module is only needed while a channel is *Modbus*; with local or *Off* channels
+only, leave it out.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/web/channels-modbus-dark.webp"><img src="img/web/channels-modbus-light.webp" alt="Channels page: a Modbus channel" width="900"></picture>
 

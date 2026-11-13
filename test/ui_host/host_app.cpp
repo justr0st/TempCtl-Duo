@@ -32,8 +32,9 @@ LiveData gLive;
 History* gHist = nullptr;
 SemaphoreHandle_t gLock = nullptr;
 
-// SSR supply relay (local_ctrl.h): the S3 has one, on while the bottom is in manual
-bool localCtrlRelayWired() { return SCREEN_W > 400; }
+// SSR supply relay (local_ctrl.h): the S3 has one (an optional pin, io_pins.h), on while the bottom is in manual
+#include "io_pins.h"
+bool localCtrlRelayWired() { return ioPin(IO_RELAY) >= 0; }
 bool localCtrlRelayOn() { return gLive.ch[1].outOn; }
 bool localCtrlRelayUsed() { return localCtrlRelayWired() && gSettings.relay; }
 void localCtrlRelayEnable(bool) {}
@@ -62,7 +63,36 @@ void saveSettingsQuiet() {}
 void saveSettingsAndNotify() {}
 static uint32_t hostGen = 1;
 uint32_t settingsGen() { return hostGen; }
-BoardLimits boardLimits() { return BoardLimits{true, 2, HAS_MONITOR != 0}; }
+BoardLimits boardLimits() {
+  BoardLimits l = {};
+  l.rs485 = true;
+  l.localMax = 2;
+  l.monitor = HAS_MONITOR != 0;
+#if defined(IO_PINS_N)  // the S3's optional pins (board_s3.h)
+  const uint8_t g[IO_PINS_N] = IO_PINS_GPIO, d[IO_PINS_N] = IO_PINS_DEF;
+  l.ioN = IO_PINS_N;
+  for (int i = 0; i < IO_PINS_N; ++i) l.ioGpio[i] = g[i], l.ioDef[i] = d[i];
+#endif
+  return l;
+}
+// optional pins (io_pins.h): the pin with that function in the settings (CYD: the fixed buzzer)
+int ioPin(uint8_t fn) {
+  const BoardLimits l = boardLimits();
+  for (int i = 0; fn != IO_NONE && i < l.ioN; ++i)
+    if (gSettings.ioFn[i] == fn) return l.ioGpio[i];
+#if !defined(IO_PINS_N) && defined(PIN_BUZZER)
+  if (fn == IO_BUZZER) return PIN_BUZZER;
+#endif
+  return -1;
+}
+void ioConfigure(const uint8_t*) {}
+// cooling fan (fan.h): on / off from gLive (the control task's view)
+#include "fan.h"
+static bool hostFan = false;  // pretend a fan is configured (the CYD has no optional pins)
+bool fanWired() { return hostFan || ioPin(IO_FAN) >= 0 || ioPin(IO_FAN_PWM) >= 0; }
+bool fanOn() { return gLive.fanOn; }
+int fanRpm() { return gLive.fanRpm; }
+void localCtrlHeartbeat() {}
 uint32_t liveHistSec() { return 86400; }
 const uint16_t LIVE_PERIODS[LIVE_PERIODS_N] = {1, 5, 10, 15, 30, 60, 120, 240, 480, 720, 1440};
 uint32_t liveMinEff() { return gSettings.liveMin ? gSettings.liveMin : 5; }
@@ -109,7 +139,15 @@ bool busRequest(BusRequest& r, uint32_t) { r.values[0] = 1234; return true; }
 static uint32_t storeGen = 1;
 uint32_t programStoreGen() { return storeGen; }
 bool programLoad(int idx, DuoProgram& p, char* err, size_t n) {
-  if (idx < 3) { progExample(idx, p); return true; }
+  if (idx < 3) {
+    progExample(idx, p);
+    // the cooling phases / steps ask for the fan (shown only while a fan pin is configured)
+    if (idx == 0 && p.nPh >= 2) p.ph[1].fan = p.ph[2].fan = p.ph[p.nPh - 1].fan = 1;
+    if (idx == 2)
+      for (int ch = 0; ch < NUM_CHANNELS; ++ch)
+        if (p.nSt[ch]) p.st[ch][p.nSt[ch] - 1].fan = 1;
+    return true;
+  }
   snprintf(err, n, "empty");
   return false;
 }
@@ -117,6 +155,24 @@ bool programSave(int idx, const DuoProgram& p, char* err, size_t n) { ++storeGen
 bool programDelete(int idx) { ++storeGen; return true; }
 bool startDraft(int idx, const DuoProgram& p) { printf("[host] start draft %d\n", idx); return true; }
 bool runProgramCopy(DuoProgram& out) { progExample(0, out); return true; }
+
+// report of the last run: the host fakes one after a "finished" run (hostReport)
+static bool hostReport = false;
+bool runReportGet(RunReport& out) {
+  memset(&out, 0, sizeof(out));
+  if (!hostReport) return false;
+  out.valid = true;
+  out.finished = true;
+  strcpy(out.name, "Lead-free BGA");
+  out.dur = 542;
+  for (int i = 0; i < 3; ++i) out.peak[i] = out.peakT[i] = out.dev[i % 2] = out.rate[i % 2] = NAN;
+  out.peak[0] = 163.4f, out.peakT[0] = 301;
+  out.dev[0] = 1.2f, out.rate[0] = 2.1f;
+  out.peak[1] = 246.1f, out.peakT[1] = 462;
+  out.dev[1] = 1.8f, out.rate[1] = 1.9f;
+  out.peak[2] = 98.7f, out.peakT[2] = 470;
+  return true;
+}
 
 // chart: a run of example 1 (Lead-free BGA), 540 s, now at 400 s
 static bool runMode = false;
@@ -189,7 +245,18 @@ void chartSnapshot(ChartData& d, bool live) {
 }
 
 // net
-String netInfo() { return String("Wi-Fi \"Workshop\" \xC2\xB7 192.168.1.50 \xC2\xB7 -58 dBm"); }
+static int fxCount[4];  // sounds asked for (key beep, ok, refused, test)
+// network state of the scenarios: 0 = station connected, 1 = access point only, 2 = nothing
+static int hostNetMode = 0;
+String netInfo() {
+  if (hostNetMode == 1) return String("AP TempCtl-Duo-A1B2  192.168.4.1");
+  if (hostNetMode == 2) return String("Wi-Fi connecting...");
+  return String("Wi-Fi \"Workshop\" \xC2\xB7 192.168.1.50 \xC2\xB7 -58 dBm");
+}
+String netStaIp() { return hostNetMode == 0 ? String("192.168.1.50") : String(""); }
+bool netApActive() { return hostNetMode == 1; }
+String netApName() { return hostNetMode == 1 ? String("TempCtl-Duo-A1B2") : String(""); }
+String netApIp() { return hostNetMode == 1 ? String("192.168.4.1") : String(""); }
 void netApplyWifi() {}
 void netScanStart() {}
 bool netEnabled() { return gSettings.wifiOn != 0; }
@@ -930,6 +997,40 @@ int main(int argc, char** argv) {
   }
   tShow(SCR_NETWORK);
   shot("13-network");
+  {  // QR codes: station, access point (the password has characters that need an escape), neither
+    int x, y;
+    strcpy(gSettings.apPass, "pa;ss:w,rd12");
+    for (int mode = 0; mode < 3; ++mode) {
+      hostNetMode = mode;
+      tShow(SCR_NETWORK);
+      run(2100);
+      if (mode == 2) {
+        shot("13e-qr-disabled");
+        if (findText(lv_screen_active(), "QR code", x, y)) tap(x, y);
+        run(300);
+        printf("[host] QR button without a network: %s\n", tModalOpen() ? "FAIL (popup opened)" : "ok (no popup)");
+        tModalClose();
+        break;
+      }
+      if (!findText(lv_screen_active(), "QR code", x, y)) {
+        printf("[host] FAIL: no QR code button\n");
+        break;
+      }
+      tap(x, y);
+      run(300);
+      shot(mode == 0 ? "13b-qr-station" : "13c-qr-ap");
+      if (SMALL && mode == 1 && findText(lv_layer_top(), "Next: 2", x, y)) {
+        tap(x, y);
+        run(300);
+        shot("13d-qr-ap-2");
+      }
+      tModalClose();
+      run(300);
+    }
+    hostNetMode = 0;
+    strcpy(gSettings.apPass, "");
+  }
+  tShow(SCR_NETWORK);
   strcpy(gSettings.tzName, "Europe/Berlin");
   tShow(SCR_SYSTEM);
   shot("14-system");
@@ -953,6 +1054,33 @@ int main(int argc, char** argv) {
   scrollToLabel("Manual mode timeout", 4);
   shot("14d-system-safety");
   gLive.estopRaw = false;
+  if (!SMALL) {  // optional pins and the fan (S3)
+    gSettings.ioFn[0] = IO_FAN_PWM;
+    gSettings.ioFn[1] = IO_BUZZER;
+    gSettings.ioFn[2] = IO_FAN_TACH;
+    gSettings.fanAfterRun = 1;
+    gSettings.keyBeep = 1;
+    gLive.fanWired = true;
+    gLive.fanOn = true;
+    gLive.fanRpm = 1200;
+    tShow(SCR_SYSTEM);
+    run(2100);
+    scrollToLabel("Alarm sound", 4);
+    shot("14k-system-sound-pins");
+    scrollToLabel("Run the fan after a program", 4);
+    shot("14l-system-fan");
+    tShow(SCR_MAIN);
+    run(600);
+    shot("14m-main-fan");
+    gSettings.ioFn[0] = IO_NONE;
+    gSettings.ioFn[2] = IO_NONE;
+    tShow(SCR_SYSTEM);
+    run(2100);
+    scrollToLabel("Optional pins", 4);
+    shot("14n-system-pins-nofan");
+    gLive.fanWired = gLive.fanOn = false;
+    gLive.fanRpm = -1;
+  }
   if (!SMALL) {  // SD card backup (S3)
     int x, y;
     scrollToLabel("OTA update", 24);
@@ -1031,6 +1159,37 @@ int main(int argc, char** argv) {
     shot("21b-phase-menu");
     tModalClose();
   }
+  // the Fan option of phases / steps (a fan is configured)
+  hostFan = true;
+  progEditOpen(0);
+  shot("20c-edit-seq-fan");
+  tap(SMALL ? 150 : 60, SMALL ? 121 : 175);  // a Both phase -> row menu with the Fan entry
+  shot("21c-rowmenu-fan");
+  tModalClose();
+  progEditOpen(2);
+  shot("22d-edit-tl-fan");
+  tap(SMALL ? 20 : 20, SMALL ? 100 : 160);  // a step -> row menu
+  shot("22e-step-menu-fan");
+  tModalClose();
+  hostFan = false;
+  // the run report: the badge of a finished run opens it
+  hostReport = true;
+  baseState();
+  gSettings.selProgram = 0;
+  gSettings.mon.on = 1;
+  gLive.state = RunState::Finished;
+  gLive.runProg = 0;
+  strcpy(gLive.runName, "Lead-free BGA");
+  gLive.progType = PROG_SEQ;
+  gLive.elapsed = 542;
+  tShow(SCR_MAIN);
+  run(800);
+  shot("31-finished");
+  tap(SMALL ? 244 : 260, SMALL ? 14 : 22);  // the badge
+  shot("31b-run-report");
+  tModalClose();
+  hostReport = false;
+  baseState();
   progEditOpen(5);
   shot("23-edit-empty");
   tShow(SCR_CHANNELS);
@@ -1088,16 +1247,18 @@ int main(int argc, char** argv) {
     printf("[host] touch cal: %d -> x %u ... %u, y %u ... %u\n", st, a, b, c, d);
   }
 #endif
+  printf("[host] sounds: key %d, ok %d, refused %d, test %d\n", fxCount[0], fxCount[1], fxCount[2], fxCount[3]);
   return 0;
 }
 
 // safety (spec 9.2a)
 #include "safety.h"
 void safetyActivity() {}
-bool safetyEstopWired() { return SCREEN_W > 400; }
-bool safetySoundWired() { return true; }
+bool safetyEstopWired() { return ioPin(IO_ESTOP) >= 0; }
+bool safetySoundWired() { return ioPin(IO_BUZZER) >= 0; }
 bool safetyChipTempWired() { return SCREEN_W > 400; }
-void safetyBeepTest() {}
+void safetyFx(SoundFx f) { ++fxCount[f]; }
+void safetyBeepTest() { safetyFx(FX_TEST); }
 
 // firmware update (ota.h, sdlog.h)
 #include "ota.h"

@@ -95,15 +95,21 @@ static void slideOffCancels(lv_event_t* e) {
   lv_indev_t* in = (lv_indev_t*)lv_event_get_current_target(e);
   lv_obj_t* obj = (lv_obj_t*)lv_event_get_param(e);
   if (!in || !obj || lv_indev_get_scroll_obj(in)) return;
-  if (lv_obj_check_type(obj, &lv_slider_class) || lv_obj_check_type(obj, &lv_buttonmatrix_class) ||
-      lv_obj_check_type(obj, &lv_keyboard_class) || lv_obj_check_type(obj, &lv_textarea_class))
+  // key beep (settings.keyBeep): a tap that ends on the widget it began on (not a scroll, not a slide-off).
+  // The keyboard and its keys: one beep per release. Sliders and text fields: none.
+  if (lv_obj_check_type(obj, &lv_slider_class) || lv_obj_check_type(obj, &lv_textarea_class)) return;
+  if (lv_obj_check_type(obj, &lv_buttonmatrix_class) || lv_obj_check_type(obj, &lv_keyboard_class)) {
+    if (code == LV_EVENT_RELEASED) safetyFx(FX_KEY);
     return;
+  }
   lv_point_t p;
   lv_indev_get_point(in, &p);
   lv_area_t a;
   lv_obj_get_coords(obj, &a);
-  if (p.x >= a.x1 - SLIDE_MARGIN && p.x <= a.x2 + SLIDE_MARGIN && p.y >= a.y1 - SLIDE_MARGIN && p.y <= a.y2 + SLIDE_MARGIN)
+  if (p.x >= a.x1 - SLIDE_MARGIN && p.x <= a.x2 + SLIDE_MARGIN && p.y >= a.y1 - SLIDE_MARGIN && p.y <= a.y2 + SLIDE_MARGIN) {
+    if (code == LV_EVENT_RELEASED && lv_obj_get_parent(obj) != lv_layer_top()) safetyFx(FX_KEY);  // (not the popups' dark overlay)
     return;
+  }
   if (code == LV_EVENT_RELEASED) lv_indev_reset(in, obj);
   else lv_indev_stop_processing(in);  // (this repeat only; it goes on when the finger is back)
 }

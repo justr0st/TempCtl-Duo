@@ -6,10 +6,12 @@
 // An esp_timer (10 ms) switches the SSR pins inside each window and switches
 // them off if the task stops refreshing the duty (1.5 s).
 //
-// Safety (spec 9.2): SSR off during boot (localCtrlEarlyInit), on a sensor
-// fault or no fresh reading (3 bad reads in a row), above the cut-off
-// temperature, on a runaway fault; faults are latched until acknowledged
-// (localCtrlAck), which is refused while the cause is still there.
+// Safety (spec 9.2): SSR off during boot (localCtrlEarlyInit), on bad readings
+// for longer than local.badSec (tc_filter.h: the first ones are held back and
+// the output stays), above the cut-off temperature, on a runaway fault, when
+// the control task stops reporting (localCtrlHeartbeat); faults are latched
+// until acknowledged (localCtrlAck), which is refused while the cause is
+// still there.
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
@@ -51,6 +53,9 @@ struct LocalStatus {
 };
 void localCtrlGet(int ch, LocalStatus& st);
 bool localCtrlAck(int ch, char* err, size_t n);
+// The control task is alive (every pass, and inside its long bus requests). Once it has reported, a heating
+// local channel without a report for 10 s gets the fault "control task stopped".
+void localCtrlHeartbeat();
 // another channel (local or Modbus) has its outputs on: no "heating while off" check on ch (control task)
 void localCtrlOtherHeating(int ch, bool on);
 
@@ -85,12 +90,14 @@ struct LocalTune {
 void localCtrlTuneGet(int ch, LocalTune& t);
 void localCtrlTuneClear(int ch);  // after accept / discard: back to Idle
 
-// SSR supply relay (PIN_SSR_RELAY, S3): on while a local channel's outputs are on (or autotune runs) and
-// no local channel has a fault; off otherwise, switched by the local task every 250 ms (a fault: in the
-// same step; E-stop too). Active high: the pin drives the input of a DC solid-state relay directly; it is
-// low (off) from localCtrlEarlyInit(). Setting safety.relay off (no relay fitted, the SSR inputs on +5 V
-// directly): the pin stays low.
-bool localCtrlRelayWired();             // the board has the relay pin
+// SSR supply relay (the optional pin with the function "relay", io_pins.h; S3 default GPIO4): on while a
+// local channel's outputs are on (or autotune runs) and no local channel has a fault; off otherwise,
+// switched by the local task every 50 ms (a fault: in the same step; E-stop too). Active high: the pin
+// drives the input of a DC solid-state relay directly; it is an input with pull-down from ioEarlyInit()
+// until the settings make it an output (low). Setting safety.relay off (no relay fitted, the SSR inputs on
+// +5 V directly): the pin stays low. The function moved to another pin or removed: off, switched again by
+// the next step.
+bool localCtrlRelayWired();             // an optional pin has the relay function now
 bool localCtrlRelayUsed();              // wired and switched on in the settings
 bool localCtrlRelayOn();
 void localCtrlRelayEnable(bool on);     // from the settings (safety.relay)

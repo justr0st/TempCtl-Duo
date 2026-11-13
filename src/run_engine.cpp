@@ -650,6 +650,16 @@ const char* RunEngine::pauseText() const {
 
 bool RunEngine::waiting() const { return active() && p_->type == PROG_SEQ && seq_.st == Stage::Wait; }
 
+bool RunEngine::fanWanted() const {
+  if (!active() || !p_) return false;
+  if (p_->type == PROG_SEQ) return seq_.i >= 0 && seq_.i < p_->nPh && p_->ph[seq_.i].fan;
+  for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+    const Lane& L = lane_[ch];
+    if (L.st != Stage::Done && L.i >= 0 && L.i < p_->nSt[ch] && p_->st[ch][L.i].fan) return true;
+  }
+  return false;
+}
+
 StageInfo RunEngine::seq() const {
   StageInfo s = {seq_.i, seq_.st, 0, 0};
   if (!p_ || p_->type != PROG_SEQ || seq_.i >= p_->nPh) return s;

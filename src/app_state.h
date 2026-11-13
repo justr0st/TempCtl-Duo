@@ -68,7 +68,58 @@ struct LiveData {
   float chipC;        // S3 chip temperature, NAN unknown
   bool chipHot;       // above the warning limit
   bool soundMuted;    // the current alarm was silenced
+
+  // cooling fan (spec 9.25, fan.h)
+  bool fanWired;      // an optional pin is the fan output (on / off or PWM)
+  bool fanOn;         // switched on (a phase asks for it, cooling after a run)
+  int16_t fanRpm;     // speed, -1 = no tach pin
 };
+
+// Report of the last program run (run_stats.h): index 0 bottom, 1 top, 2 the monitor channel. NaN = not
+// measured. A resumed run's report covers only the part after the resume.
+struct RunReport {
+  bool valid;      // a run has ended since the boot (cleared when a new run starts)
+  bool finished;   // true: to its end; false: stopped (user, fault)
+  char name[PROG_NAME_LEN];
+  float dur;       // run time at the end (s)
+  float peak[3], peakT[3];  // highest PV (degC) and the run time it happened (s)
+  float dev[2];    // largest |PV - SP| in the holds (from 5 s into each hold), degC
+  float rate[2];   // steepest rise over 5 s, degC/s
+};
+bool runReportGet(RunReport& out);  // copy under gLock (takes it itself); false (out.valid false) if none
+
+// m:ss of a run time
+inline void reportMmss(char* b, size_t n, float t) {
+  const int s = t > 0 ? (int)t : 0;
+  snprintf(b, n, "%d:%02d", s / 60, s % 60);
+}
+
+// "<name> peak 162.3 °C at 3:10, hold ±1.8 °C, max 1.9 °C/s" (parts that were not measured left out; i = 0, 1 the
+// channels, 2 the monitor channel which has only the peak); "" if the channel measured nothing
+inline void reportPart(char* b, size_t n, const char* name, const RunReport& r, int i) {
+  b[0] = 0;
+  if (isnan(r.peak[i])) return;
+  char tm[12];
+  reportMmss(tm, sizeof(tm), r.peakT[i]);
+  int k = snprintf(b, n, "%s peak %.1f \xC2\xB0" "C at %s", name, r.peak[i], tm);
+  if (i < NUM_CHANNELS && !isnan(r.dev[i]) && k > 0 && (size_t)k < n)
+    k += snprintf(b + k, n - k, ", hold \xC2\xB1%.1f \xC2\xB0" "C", r.dev[i]);
+  if (i < NUM_CHANNELS && !isnan(r.rate[i]) && k > 0 && (size_t)k < n)
+    snprintf(b + k, n - k, ", max %.1f \xC2\xB0" "C/s", r.rate[i]);
+}
+
+// The report as lines separated by '\n' (touch dialog, serial console): the run, then a line per channel that
+// measured something; mon = the monitor channel's name or nullptr
+inline void reportText(char* b, size_t n, const RunReport& r, const char* n0, const char* n1, const char* mon) {
+  char tm[12];
+  reportMmss(tm, sizeof(tm), r.dur);
+  int k = snprintf(b, n, "\"%s\" %s after %s", r.name, r.finished ? "finished" : "stopped", tm);
+  for (int i = 0; i < (mon ? 3 : 2); ++i) {
+    char p[128];
+    reportPart(p, sizeof(p), i == 0 ? n0 : i == 1 ? n1 : mon, r, i);
+    if (p[0] && k > 0 && (size_t)k < n) k += snprintf(b + k, n - k, "\n%s", p);
+  }
+}
 
 constexpr float START_WARN_BAND = 10;  // start warning: PV within this of (or above) the first target
 
@@ -127,7 +178,7 @@ typedef Tenth TenthRow[CHART_N];
 // Chart history, both channels.
 struct History {
   // Live history: a ring of liveCap slots (one per LIVE_SAMPLE_SEC, 3 words each, see
-  // app_state.cpp); slot s (counted since boot) is at s % liveCap.
+  // SLOT_W in app_internal.h); slot s (counted since boot) is at s % liveCap.
   uint32_t* liveRing;
   uint32_t liveCap, liveTotal;
   // The live view: CHART_N bins of the ring (rebuilt on demand, liveView()), newest at the end.

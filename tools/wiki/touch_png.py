@@ -17,7 +17,8 @@ PICK = ['01-idle', '01b-tune-toast', '02-picker', '03-running', '04-stepper', '0
         '14-system', '14b-tz-regions', '14d-system-safety', '14e0-system-backup', '14f-restore-list', '14j-online-update',
         '15-log', '16-keyboard', '19-programs', '20-edit-seq', '21-rowmenu', '21b-phase-menu', '22-edit-tl', '22c-step-menu',
         '24-chan-local', '25-chan-modbus', '26-chan-bus', '27-chan-pid', '28-chan-runaway', '30-ota',
-        '29-touch-cal', '14e0-system-online']
+        '29-touch-cal', '14e0-system-online', '13b-qr-station', '13c-qr-ap', '14k-system-sound-pins', '14l-system-fan',
+        '14m-main-fan', '20c-edit-seq-fan', '21c-rowmenu-fan', '31b-run-report']
 
 
 def load(path, w, h):

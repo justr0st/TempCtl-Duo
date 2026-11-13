@@ -13,6 +13,20 @@ KiCad projects are in `hardware/cyd-schematic/`.
 
 > **Note:** the ST7789 variant of the board with two USB ports is not supported yet.
 
+## Connect only what you need
+
+The wiring is fixed at build time (the three envs above), but you can leave parts out:
+
+- **A local channel you do not use:** leave out its converter and SSR driver and set the channel to *Off*
+  (*Channels*). Settings that do not fit the build are turned to *Off* by themselves with a message (a Modbus
+  channel on wiring B, more local channels than the wiring has).
+- **RS485 (wirings A, C):** only needed while a channel is *Modbus*. With no Modbus channel, leave the module
+  out.
+- **Wiring A** has one local channel: either channel can be it, the other one is *Modbus* or *Off*.
+- **Status LED** and **speaker:** optional.
+- A channel still set to *Local* without its converter shows *no reading: no thermocouple converter* and gives a
+  sensor fault as soon as its output is switched on.
+
 ## Connectors
 
 | Connector | Pins |
@@ -51,11 +65,12 @@ SSR (G, IO16) and the data line of an external WS2812 status LED (B, IO17).
 - **RS485:** only a 3.3 V module (MAX3485 / SP3485); a 5 V MAX485 would drive 5 V into IO35.
 - **No E-stop input, no SSR supply relay and no chip temperature** on the CYD: there are no free pins. The
   alarm sound uses a small 8 Ω speaker (0.5–2 W) or a passive piezo on P4.
+- **No optional pins and no cooling fan** on the CYD (those are an S3 feature, [Hardware: ESP32-S3](Hardware-S3.md#optional-pins-and-the-cooling-fan)).
 - **Status LED:** the on-board RGB LED (wiring A, B) or the external WS2812 (C), with the same colours as the
   S3: green idle, blue running, amber blinking paused, red blinking fault, purple access point.
 - **Touch calibration:** the defaults (200…3700 / 240…3800) suit most CYDs. If touches land off, type
   `touch cal` in the [serial console](Serial-console.md) and tap the four crosses.
-- **Firmware size:** the CYD's two firmware slots are 1.875 MB each; the firmware uses about 93 %. The web
+- **Firmware size:** the CYD's two firmware slots are 1.875 MB each; the firmware uses about 96 %. The web
   page is served without the web fonts there (system fonts), and the online update goes through the
   browser ([Updates](Updates-and-backups.md)).
 

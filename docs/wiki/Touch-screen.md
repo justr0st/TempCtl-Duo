@@ -23,6 +23,12 @@ and nothing happens — a safe way to cancel a press.
   channel colour.
 - **Target stepper** `− value +`: during a run it changes the current (or kept) target of that channel;
   outside a run it is the **manual setpoint**. Hold + / − to repeat; tap the value for the number pad.
+- A **fault badge** sits in the tile's top left corner (the channel name next to it; a long fault text
+  scrolls). While the [cooling fan](Hardware-S3.md#optional-pins-and-the-cooling-fan) runs, *Fan* (with the rpm
+  when there is a speed input) shows at the bottom right of the chart, where the monitor reading is.
+- **Finished / Stopped badge**: tap it for the **run report** ([Programs](Programs.md#run-report)).
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/31b-run-report-dark.png"><img src="img/touch/31b-run-report-light.png" alt="Run report" width="480"></picture>
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/01-idle-dark.png"><img src="img/touch/01-idle-light.png" alt="Main screen, idle" width="480"></picture>
 
@@ -61,7 +67,10 @@ Timeline.
   target of **0** switches that channel **off** for the phase / step; tap *off* and enter a temperature to switch it
   on again.
 - Tap **#** or **Type** for the row menu: phase type (Bottom, Top, Both, Pause), *wait for bottom*, the pause
-  text, insert, move, delete.
+  text, *Fan*, insert, move, delete. The **Option** column shows *Wait*, *Action* and *Fan*; *Fan* (the cooling
+  fan runs in this phase, [Programs](Programs.md#fan)) appears only when a fan output is configured.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/20c-edit-seq-fan-dark.png"><img src="img/touch/20c-edit-seq-fan-light.png" alt="Sequence editor with the Fan option" width="480"></picture>
 - The ☰ menu: Undo, Save, Start, Rename, Discard, Delete.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/21-rowmenu-dark.png"><img src="img/touch/21-rowmenu-light.png" alt="Row menu of a phase" width="480"></picture>
@@ -79,7 +88,9 @@ One tab per channel, on the S3 one for the monitor channel (*Monitor*: on / off,
 read interval, filter) and one for the RS485 bus (beta, only with a Modbus channel). *Save* stores the changes,
 with the same checks as the web page. On the 480 × 320 screen related values share a row (setpoint range,
 calibration offset and gain, Kp / Ki / Kd, the protection values with their time); the 320 × 240 screen has one
-value per row. With the median filter off its reading count stays in place, greyed out.
+value per row. With the median filter off its reading count stays in place, greyed out. A local channel's
+thermocouple part also has *Largest change per reading* and *Sensor fault after*
+([Channels](Channels.md#thermocouple)); the channel tabs share the header's width.
 
 | | |
 |---|---|
@@ -95,7 +106,17 @@ Register addresses and the two-point calibration are on the web page.
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/13-network-dark.png"><img src="img/touch/13-network-light.png" alt="Network settings" width="480"></picture>
 
 **Wi-Fi** on / off (off: no network, no access point, no scan; applied at once), network name (tap: scan and
-pick), password, access point password, host name (`http://<name>.local`), fixed IP address. The on-screen keyboard:
+pick), password, access point password, host name (`http://<name>.local`), fixed IP address, and **Phone
+access › QR code**: on a Wi-Fi network a code with the device's address; in access point mode a code that joins
+the Wi-Fi and one with the address (side by side on the S3, one after the other on the CYD: *Next*). Scan it
+with a phone's camera. The code is made when the window opens; without a network the button does nothing.
+
+| | |
+|---|---|
+| <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/13b-qr-station-dark.png"><img src="img/touch/13b-qr-station-light.png" alt="QR code of the device address" width="360"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/13c-qr-ap-dark.png"><img src="img/touch/13c-qr-ap-light.png" alt="QR codes in access point mode" width="360"></picture> |
+| On a Wi-Fi network: the address of the page | Access point mode: join the Wi-Fi, then open the page |
+
+The on-screen keyboard:
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/16-keyboard-dark.png"><img src="img/touch/16-keyboard-light.png" alt="Keyboard" width="480"></picture>
 
@@ -115,8 +136,15 @@ web page too), upside down, live chart period, the automatic **screen check**, t
 
 In groups: polling interval, "bottom reached" band and the setpoint margin below the cut-off; **OTA update** (S3: the newest release over Wi-Fi) and
 **Firmware update** from the SD card; **Backup to SD card** and **Restore from SD card**; time zone; the safety
-settings (manual mode timeout, E-stop input, SSR supply relay, alarm sound, chip temperature warning); device
-info and restart.
+settings (manual mode timeout, E-stop input, SSR supply relay, alarm sound with **sound volume** 1 … 5 and
+**key beep**, chip temperature warning); on the S3 the **optional pins** (what GPIO 4, 5, 6 do) and the
+**cooling fan** (run after a program, until every channel is below, at most, PWM speed; shown when a fan output is
+set); device info and restart. E-stop, relay and sound rows appear only when a pin has that function.
+
+| | |
+|---|---|
+| <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/14k-system-sound-pins-dark.png"><img src="img/touch/14k-system-sound-pins-light.png" alt="Sound volume and optional pins" width="360"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/14l-system-fan-dark.png"><img src="img/touch/14l-system-fan-light.png" alt="Cooling fan settings" width="360"></picture> |
+| Sound volume, key beep, optional pins | Cooling fan |
 
 | | |
 |---|---|

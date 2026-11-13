@@ -36,6 +36,28 @@ The build scripts look for LVGL and ArduinoJson in `/tmp` (lost when WSL restart
 | Web page | Playwright against the browser demo (`tools/build_site.py <dir> --web`, served on :8790): `test/web_jumps.js` (layout jumps), `test/web_reorder.js` (reorder by drag), `test/web_chart_hold.js` (chart handles on touch) |
 | Browser demo | `demo/build.sh` (wasi-sdk): the firmware's control code as WebAssembly, `demo/README.md` |
 
+## Tests and gates in GitHub Actions
+
+`.github/workflows/release.yml` has a **`tests`** job that the release job needs: nothing is published when it
+fails. It also runs on pull requests, which never publish. Its steps, in order:
+
+| Step | Runs | Fails when |
+|---|---|---|
+| Host tests | `tools/ci/host_tests.sh`: `test/host_test.cpp` with the pure sources, AddressSanitizer / UBSan | a test or a sanitizer reports |
+| Touch UI host | `tools/ci/ui_tests.sh`: builds both boards' UI host, then `stepper`, `chan`, `lowmem` and 4000 random taps (`monkey`) per board | a self-check fails or the sanitizer reports |
+| Wiki touch pictures | `python3 tools/wiki/check_shots.py`: renders the UI host's screens and compares them pixel by pixel with `docs/wiki/img/touch/*.png` | a picture differs, is missing or is not made any more; the differences are kept as a run artifact (`touch-picture-diff`) |
+| Web page tests | `tools/ci/web_tests.sh`: Playwright against the browser demo: `web_jumps`, `web_reorder`, `web_chart_hold` | a `FAIL` line, a layout jump or a page error |
+
+After the firmware build of the release job, the **flash size gate** (`tools/ci/size_gate.py`) stops the release
+when a CYD image fills **more than 97 %** of its app slot (a table is in the run's summary; the S3's slot is
+not gated). The CYD is at about 96 % in 1.0.68: before the next larger feature, make room.
+
+**Wiki touch pictures must be regenerated after every UI change**, otherwise the check fails: run
+`tools/wiki/make_shots.sh touch` (WSL, with `LVGL` and `AJ` set as above) and commit the changed
+`docs/wiki/img/touch/*.png`. A new screen's picture is added to `PICK` in `tools/wiki/touch_png.py`.
+`python3 tools/wiki/check_shots.py --write <dir>` (same environment) saves `.new.png` and `.diff.png`
+(differences in red) of every differing picture; an unintended layout change shows up there.
+
 ## Releases (GitHub Actions → GitHub Pages and Releases)
 
 Every push to `main` (pushes that change only `README.md`, `claude/`, `hardware/`, `logo/` are skipped; *Actions ›
@@ -54,7 +76,7 @@ Release › Run workflow* starts one by hand) runs `.github/workflows/release.ym
 4. **GitHub Pages**: `dist/` becomes the release page <https://justr0st.github.io/TempCtl-Duo/> (a project page:
    every path in the page, the wiki and the demo is relative, so the same files work under `/TempCtl-Duo/` and
    at a site's root). The device's page and the S3 read `/TempCtl-Duo/dl/manifest.json` there (`REL_BASE` in
-   `web/index.html`, `RELEASE_HOST` / `RELEASE_BASE` in `src/release.h`; a manifest url `/dl/…` is under that
+   `web/src/js/64-system-page.js`, `RELEASE_HOST` / `RELEASE_BASE` in `src/release.h`; a manifest url `/dl/…` is under that
    base). GitHub Pages lets any site read the files (CORS), as the device's own page needs; it caches them for
    10 min.
 5. **GitHub release**: a version that has no tag `v<version>` yet (FW_VERSION in `src/version.h`) becomes a
@@ -100,7 +122,11 @@ src/channel.*             channel interface: Modbus backend (+ runaway check), l
 src/local_ctrl.*          local channels: task reading the thermocouples, PID, SSR time proportioning, safety
 src/tc_sensor.*, pid.*, runaway.*, autotune.*  MAX31855/MAX6675 decoding, PID, runaway check, relay autotune
                           (pure C++, unit-tested)
-src/app_state.*           control task: polling both channels, run engine, manual setpoint per channel, chart history
+src/app_state.*           control task: polling both channels, run engine, manual setpoint per channel (public API:
+                          app_state.h, also for the two files below)
+src/app_hist.cpp          chart history: live ring, run rows, every reading, plan preview, /api/chart, live CSV
+src/app_log.cpp           event log (logEvent, logRun, logWarn, ...)
+src/app_internal.h        what these three files share (private to them)
 src/raw_hist.h            every PV reading for the web chart (pure C++, unit-tested)
 src/syslog.*              system log (RAM ring) + events saved to flash
 src/crumbs.*              breadcrumbs for watchdog resets and crashes
@@ -118,6 +144,8 @@ src/backup.*              backup of settings + programs on the SD card (S3), res
 hardware/s3-schematic/    KiCad schematic of the S3 device (+ PDF / PNG)
 hardware/cyd-schematic/   KiCad schematics of the three CYD wirings (+ PDF / PNG)
 hardware/gen/             generator of both (Python 3: python3 make.py ..)
+web/src/, tools/web_join.py  web page sources (HTML with include lines, css/, js/; web/src/README.md) → web/index.html
+                          (generated, not in git: every tool below that needs the page joins it first)
 web/, tools/web_embed.py  web page + fonts → src/web_assets.h (generated before each build)
 tools/build_site.py       the same page as static files (device URL layout), for the launcher / the hosted page
 wrangler.jsonc            the hosted page on Cloudflare (transition; dist/, built by build_site.py --web)

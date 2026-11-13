@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TempCtl Duo</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+<!-- include: css/10-base.css -->
+<!-- include: css/20-glass.css -->
+</style>
+</head>
+<body>
+<div class="conn" id="conn" hidden>
+  <div class="card">
+    <div class="head"><img src="favicon.svg" alt=""><div><h1>TempCtl Duo</h1><small id="cVer"></small></div></div>
+    <section class="panel"><h3><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14"/><path d="M9 6l3-3 3 3"/><path d="M12 13l-4-2.5V8"/><circle cx="8" cy="7" r="1.2"/><path d="M12 11l4-2V6.5"/><rect x="14.8" y="4.5" width="2.4" height="2.2"/><circle cx="12" cy="19" r="2"/></svg>USB cable</h3>
+      <p>The device's page over its USB port: S3 the port marked "USB", CYD its only port. Needs Chrome or Edge.</p>
+      <div class="row"><button class="pri" id="cUsb">Connect…</button></div></section>
+    <section class="panel"><h3><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0"/><path d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.7 15.8a5 5 0 0 1 6.6 0"/><circle cx="12" cy="19" r="1.1"/></svg>Wi-Fi</h3>
+      <p>Opens the page the device itself serves.</p>
+      <div class="devs" id="cDevs" hidden></div>
+      <div class="row"><input type="text" id="cAddr" placeholder="tempctl-duo.local or 192.168.1.50" autocomplete="off" aria-label="Device address"><button id="cOpen">Open</button></div></section>
+    <div class="msg" id="cMsg" role="status"></div>
+    <section class="panel wk"><h3><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/><path d="M10.2 7.6l4 2.4-4 2.4z"/></svg>Try the demo</h3>
+      <p>This page with a simulated device: an 1100 W bottom and a 450 W top heater warming a GPU board. Start programs, edit them, change channels, colours and settings — no hardware needed. It runs in your browser and keeps your changes there.</p>
+      <div class="row"><a class="btn" href="https://justr0st.github.io/TempCtl-Duo/demo/" target="_blank" rel="noopener">Open the demo ↗</a></div></section>
+    <section class="panel wk"><h3><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/><path d="M8 7h8M8 11h6"/></svg>Manual and wiring</h3>
+      <p>How to build, wire, flash and use the device: wiring diagrams for both boards and pictures of every screen.</p>
+      <div class="links"><a href="https://justr0st.github.io/TempCtl-Duo/wiki/Getting-started.html" target="_blank" rel="noopener">Getting started</a><a href="https://justr0st.github.io/TempCtl-Duo/wiki/Hardware-S3.html" target="_blank" rel="noopener">Wiring S3</a><a href="https://justr0st.github.io/TempCtl-Duo/wiki/Hardware-CYD.html" target="_blank" rel="noopener">Wiring CYD</a><a href="https://justr0st.github.io/TempCtl-Duo/wiki/Troubleshooting.html" target="_blank" rel="noopener">Troubleshooting</a></div>
+      <div class="row"><a class="btn" href="https://justr0st.github.io/TempCtl-Duo/wiki/" target="_blank" rel="noopener">Open the wiki ↗</a></div></section>
+    <section class="panel" id="cDl" hidden><h3><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/></svg>Downloads</h3>
+      <p id="cDlV"></p>
+      <div class="dl" id="cDlApp"></div>
+      <details><summary>Firmware for the boards</summary><div class="dlfw" id="cDlFw"></div>
+        <p class="hint">Update: the device’s web page installs it by itself (Settings › Firmware update › Check for updates), or upload the file there. Full image: the first install of a new board over USB, written at address 0x0 (esptool or the ESP web flasher).</p></details>
+      <p class="hint">The desktop app is not signed: Windows asks once (More info › Run anyway); macOS: unzip, then right-click › Open.</p>
+      <p class="hint">Open source, <a href="LICENSE.txt" target="_blank" rel="noopener">MIT licence</a> · <a href="THIRD-PARTY-NOTICES.txt" target="_blank" rel="noopener">third-party notices</a></p></section>
+  </div>
+</div>
+<div class="app">
+<aside id="side" aria-label="Pages">
+  <div class="brand"><img src="favicon.svg" alt=""><span><b>TempCtl Duo</b><small id="fw"></small></span></div>
+  <nav>
+    <a href="#/" data-pg="status" class="on" aria-current="page"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 4-7 5 9"/><path d="M3 21h18"/></svg>Dashboard</a>
+    <a href="#/programs" data-pg="programs"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Programs</a>
+    <a href="#/replay" data-pg="replay"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v4h4"/><path d="M10 8.5v7l5.5-3.5z"/></svg>CSV replay</a>
+    <a href="#/channels" data-pg="channels"><svg viewBox="0 0 24 24"><path d="M10 13.5V5a2 2 0 0 1 4 0v8.5a4 4 0 1 1-4 0z"/><path d="M12 9v6"/></svg>Channels</a>
+    <a href="#/log" data-pg="log"><svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>Log</a>
+    <a href="#/settings" data-pg="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</a>
+    <a href="#/tools" data-pg="tools"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 17.8V21h3.2l6.3-6.3a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg>Tools</a>
+    <a href="https://justr0st.github.io/TempCtl-Duo/wiki/" target="_blank" rel="noopener" title="Manual, wiring and help on the release page (needs internet)"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/><path d="M8 7h8M8 11h6"/></svg>Help (wiki)<small>↗</small></a>
+  </nav>
+  <div class="sctl" id="sCtl" aria-label="Run and channels" hidden>
+    <div class="srun"><div class="st"><b id="sRunName"></b><small id="sRunSt"></small></div>
+      <span class="sbtn"><button class="ib" id="sPlay" title="Start" aria-label="Start"><svg viewBox="0 0 24 24"><path class="pl" d="M8 5v14l11-7z"/><path class="pa" d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button><button class="ib" id="sStop" title="Stop" aria-label="Stop"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg></button></span></div>
+    <div id="sChs"></div>
+    <small id="sRelay" hidden></small>
+  </div>
+  <div class="foot">
+    <span class="lk"><i class="dot" id="linkDot"></i><span id="linkTxt">Connecting…</span></span>
+    <button class="serb" id="bSerOff" hidden title="Ends the USB connection (the device keeps running)">Disconnect USB</button>
+    <button class="serb" id="bNetOff" hidden title="Closes this device's page in this tab (the device keeps running)">Disconnect</button>
+    <span id="net"></span>
+    <span id="clk"></span>
+    <label class="f tswl">Dark mode <span class="tsw"><input type="checkbox" id="theme" role="switch" aria-label="Dark mode"><span class="tr" aria-hidden="true"><span class="kn"><svg class="su" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg><svg class="mo" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></span></span></span></label>
+  </div>
+</aside>
+<main>
+<div class="top">
+  <button id="menu" aria-label="Menu" aria-expanded="false">☰</button>
+  <h1 id="title">Dashboard</h1>
+  <span class="jump" id="jump"><a class="btn" href="#runP">Run</a><a class="btn" href="#chans">Channels</a><a class="btn" href="#edP">Program</a><a class="btn" href="#logP">Log</a></span>
+  <span class="jump" id="jumpS" hidden><a class="btn" href="#setDev" data-jump="setDev">Device</a><a class="btn" href="#setWifi" data-jump="setWifi">Wi-Fi</a><a class="btn" href="#sSafe" data-jump="sSafe">Safety</a><a class="btn" href="#sDisp" data-jump="sDisp">Display</a><a class="btn" href="#sTime" data-jump="sTime">Clock</a></span>
+</div>
+
+<div class="pg" id="pg-status">
+<section class="panel" id="runP" aria-label="Run">
+  <div class="bar">
+    <label class="f" style="min-width:0;max-width:100%">Program <select id="prog" style="min-width:0"></select></label>
+    <span class="sep"></span>
+    <button id="bStart" class="pri">Start</button>
+    <button id="bPause" hidden>Pause</button>
+    <button id="bStop">Stop</button>
+    <button id="bNext" title="Sequence: ramp → hold → next phase; a wait for the bottom is skipped">Next phase</button>
+    <span class="clock"><span id="badge" class="state">Ready</span><span id="fanChip" class="state" hidden></span><span id="clock">0:00</span><small id="remain"></small></span>
+  </div>
+  <div class="intr" id="estopBar" hidden role="alert"><div class="t"><b>E-stop</b> All outputs are off and a running program was stopped.<small>Close the E-stop contact, then switch the outputs on again (manual or a new run).</small></div></div>
+  <div class="intr" id="intr" hidden role="alert"><div class="t"><b>Run interrupted by a reset</b> <span id="intrTxt"></span><small id="intrNote"></small></div>
+    <span class="btns"><button class="pri" id="bRecover">Resume</button><button id="bDismiss">Dismiss</button></span></div>
+  <div class="bar" style="margin-bottom:6px">
+    <span class="seg" role="group" aria-label="Chart"><button id="vProg" aria-pressed="false">Program</button><button id="vLive" aria-pressed="true">Live</button></span>
+    <label class="f" id="lmWrap" hidden>Period <select id="liveMin" aria-label="Live chart period"></select></label>
+    <span class="zr" id="chartCap"></span>
+    <a class="btn" id="histCsv" href="/api/history.csv" download hidden title="Everything the device keeps in memory, one row per second">Export CSV</a>
+    <a class="btn" id="runCsv" href="/api/log.csv" download hidden title="The last run: PV, setpoint and plan of both channels">Export CSV</a>
+    <button id="bPreview" hidden title="Back to the preview of the selected program">Back to preview</button>
+    <button id="bLastRun" hidden title="The last run of this program (kept until the device restarts or another run starts)">Last run</button>
+  </div>
+  <div class="chartbox" id="chartbox"></div>
+  <div class="zbar" id="zbar"><button id="zout" aria-label="Zoom out">−</button><button id="zin" aria-label="Zoom in">+</button><button id="zfit">Fit</button>
+    <input type="range" id="zscroll" min="0" max="0" value="0" aria-label="Scroll the time axis" hidden><span id="zrange" class="zr"></span></div>
+  <div class="legend" id="legend"></div>
+  <div class="rep" id="runRep" hidden aria-label="Last run"></div>
+  <div class="msg" id="msg"></div>
+</section>
+
+<div class="grid2" id="chans"></div>
+
+<section class="panel mt" id="edP" aria-label="Program editor">
+  <div class="edhead"><h2 id="edTitle">Program</h2><span class="unsaved" id="unsaved">Unsaved changes</span>
+    <span class="tools"><button data-act="undo" title="Ctrl+Z">Undo</button><button data-act="redo" title="Ctrl+Y">Redo</button><button data-act="save" class="pri">Save program</button><button data-act="discard">Discard changes</button></span></div>
+  <div class="bar"><label class="f">Name <input type="text" id="pName" maxlength="31" style="width:260px"></label><button id="toTl" hidden title="Make a Timeline with the same temperatures and times">Convert to Timeline</button></div>
+  <p class="edhint" id="edHint"></p>
+  <div id="editor"></div>
+  <div class="msg" id="edMsg"></div>
+</section>
+
+<section class="panel mt" id="logP" aria-label="Event log"><h2>Event log</h2><ul class="log" id="log"></ul></section>
+</div>
+
+<div class="pg" id="pg-programs" hidden>
+<section class="panel" aria-label="Programs">
+  <p class="hint" id="plHint"></p>
+  <div class="plist" id="plist"></div>
+  <div class="msg" id="plMsg"></div>
+</section>
+</div>
+
+<div class="pg" id="pg-replay" hidden>
+<section class="panel" aria-label="CSV replay">
+  <div class="bar"><button id="rpOpen" class="pri">Open CSV file…</button><button id="rpHist" title="Everything the device keeps in memory (live history)">Device history</button><button id="rpRun" title="The last program run (since the device started)">Last run</button>
+    <span class="zr" id="rpName"></span></div>
+  <p class="hint" id="rpHint">Open a CSV file made by TempCtl Duo (Export CSV on the Dashboard, the SD card's run logs) or drop one here. The wheel or two fingers zoom, dragging moves the time axis, Shift + drag zooms to a range, a double click shows all.</p>
+  <div class="chartbox" id="rpBox"></div>
+  <div class="zbar" id="rpBar" hidden><button id="rpOut" aria-label="Zoom out">−</button><button id="rpIn" aria-label="Zoom in">+</button><button id="rpFit">Fit</button><span class="zr" id="rpRange"></span>
+    <span class="sep"></span><button id="rpCrop" title="Keep only the time range shown">Crop to view</button><button id="rpUncrop" hidden>Undo crop</button><button id="rpSave" title="The rows of the time range kept (the whole file without a crop)">Save CSV</button></div>
+  <div class="legend" id="rpLeg"></div>
+  <div class="msg" id="rpMsg"></div>
+</section>
+<input type="file" id="rpFile" accept=".csv,text/csv" hidden>
+</div>
+
+<div class="pg" id="pg-channels" hidden>
+<section class="panel seps" id="cCommon" data-form="common"></section>
+<div class="ctabs" role="tablist" aria-label="Channel" id="chTabs"></div>
+<div id="cChan"><div data-chp="0"><section class="panel ctab-panel seps" id="cf0" role="tabpanel"></section><div class="cards mt" id="cx0"></div></div>
+<div data-chp="1" hidden><section class="panel ctab-panel seps" id="cf1" role="tabpanel"></section><div class="cards mt" id="cx1"></div></div>
+<div data-chp="2" hidden><section class="panel ctab-panel seps" id="cf2" role="tabpanel"></section></div></div>
+</div>
+
+<div class="pg" id="pg-settings" hidden>
+<div class="cards">
+<section class="panel" id="setDev" aria-label="Device"><h2>Device</h2><dl class="kv" id="devInfo"></dl>
+  <div class="fbar"><button id="bRestart">Restart device</button><button id="bScrRst" title="Sets the display and the touch controller up again (when the screen hangs or shows rubbish); the device keeps running">Restart screen</button><span class="msg" id="rsMsg"></span></div>
+  <h3 id="setFw">Firmware update</h3>
+  <p class="hint" id="fwHint">…</p>
+  <div class="fbar fw" id="fwNet"><button id="fwNetCheck">Check for updates</button><span class="fwn" id="fwNetName"></span><button class="pri" id="fwNetGo" hidden>Install</button></div>
+  <div class="fwdrop fw" id="fwUp"><input type="file" id="fwFile" accept=".bin,application/octet-stream" hidden>
+    <div class="dz"><span><b>Drop firmware.bin here</b> or</span><button id="fwPick">Choose firmware file…</button></div>
+    <div class="sel"><span class="fwn" id="fwName"></span><button class="pri" id="fwGo" disabled>Install</button></div></div>
+  <div class="fbar fw" id="fwSd" hidden><button id="fwSdCheck">Check the SD card</button><span class="fwn" id="fwSdName"></span><button class="pri" id="fwSdGo" hidden>Install from the SD card</button></div>
+  <div class="fwp" id="fwProg" hidden><div class="meter"><i id="fwBarI"></i></div><span id="fwPct"></span></div>
+  <div class="msg" id="fwMsg"></div></section>
+<section class="panel" id="setWifi" aria-label="Wi-Fi"><h2>Wi-Fi</h2>
+  <div class="form"><label class="fld wide swf"><span>Wi-Fi</span><span class="in"><input type="checkbox" class="switch acc" id="wOn"></span><small id="wOnH">Off: no network connection, no access point, no scan (the touch screen and USB keep working).</small></label></div>
+  <div id="wBody">
+  <p class="hint">Leave the network name empty to run as an access point only. If the device cannot join the network within 20 s it also opens its own access point. A new host name takes effect after a restart.</p>
+  <div class="form">
+    <label class="fld wide"><span>Network name</span><span class="in"><input type="text" id="wSsid" maxlength="32" autocomplete="off"><button id="bScan" type="button">Scan</button></span></label>
+    <div class="nets wide" id="nets" hidden></div>
+    <label class="fld"><span>Password</span><span class="in"><span class="pw"><input type="password" id="wPass" maxlength="64" autocomplete="new-password"><button type="button" class="eye" data-eye="wPass" aria-label="Show password" aria-pressed="false" title="Show password"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path class="off" d="M4 4l16 16"/></svg></button></span></span><small id="wPassH"></small></label>
+    <label class="fld"><span>Access point password</span><span class="in"><span class="pw"><input type="password" id="wAp" maxlength="32" autocomplete="new-password"><button type="button" class="eye" data-eye="wAp" aria-label="Show password" aria-pressed="false" title="Show password"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path class="off" d="M4 4l16 16"/></svg></button></span></span><small>8 or more characters, empty = keep</small></label>
+    <label class="fld"><span>Host name</span><span class="in"><input type="text" id="wHost" maxlength="23"></span><small id="wHostH"></small></label>
+    <label class="fld wide swf"><span>Fixed IP address (no DHCP)</span><span class="in"><input type="checkbox" class="switch acc" id="wStatic"></span><small>Use an address outside the router’s DHCP range. The touch screen (Setup › System) shows the address in use.</small></label>
+    <div class="form wide" id="wIpBox" hidden>
+      <label class="fld"><span>IP address</span><span class="in"><input type="text" id="wIp" inputmode="decimal" maxlength="15" placeholder="192.168.1.50" autocomplete="off"></span></label>
+      <label class="fld"><span>Subnet mask</span><span class="in"><input type="text" id="wMask" inputmode="decimal" maxlength="15" placeholder="255.255.255.0" autocomplete="off"></span></label>
+      <label class="fld"><span>Gateway (router)</span><span class="in"><input type="text" id="wGw" inputmode="decimal" maxlength="15" placeholder="192.168.1.1" autocomplete="off"></span></label>
+      <label class="fld"><span>DNS server</span><span class="in"><input type="text" id="wDns1" inputmode="decimal" maxlength="15" autocomplete="off"></span><small>Empty = the gateway</small></label>
+      <label class="fld"><span>Second DNS server</span><span class="in"><input type="text" id="wDns2" inputmode="decimal" maxlength="15" autocomplete="off"></span><small>Optional</small></label>
+    </div>
+  </div>
+  <div class="fbar"><button class="pri" id="bWifi">Save and connect</button><span class="msg" id="wMsg"></span></div></div>
+  <div class="msg" id="wOnMsg"></div></section>
+<section class="panel" id="sSafe" data-form="safe"></section>
+<section class="panel" id="sDisp" data-form="disp"></section>
+<section class="panel" id="sTime" data-form="time"></section>
+</div>
+</div>
+
+<div class="pg" id="pg-log" hidden>
+<section class="panel" id="sdP" aria-label="Run logs on the SD card" hidden>
+  <div class="edhead"><h2>Run logs (SD card)</h2><span class="tools"><button id="sdRef">Refresh</button></span></div>
+  <p class="hint" id="sdSt"></p><div class="plist" id="sdList"></div><div class="msg" id="sdMsg"></div></section>
+<section class="panel mt" id="sLogP" aria-label="System log"><h2>System log</h2>
+  <div class="slbar" id="slBar"><input type="search" id="slFind" placeholder="Search" aria-label="Search the log">
+    <button id="slDl" title="All lines as a text file">Download</button><span class="msg" id="slMsg"></span></div>
+  <div class="slog" id="slog" role="log" aria-live="off"><div class="none">Loading…</div></div>
+</section>
+</div>
+
+<div class="pg" id="pg-tools" hidden>
+<section class="panel" aria-label="Modbus tools">
+  <div class="edhead"><h2>Modbus tools <span class="beta">beta</span></h2><label class="f">Controller <select id="tCh"></select></label></div>
+  <p class="hint" id="tNone" hidden>No channel is set to Modbus (Channels page).</p>
+  <div class="cards" id="tBox">
+    <div class="sub"><h3>Find the setpoint address</h3>
+      <p class="hint">Not needed for the PMA KS 4x-1 (preset). For other controllers: reads every register in the range and lists those whose value equals the controller's effective setpoint. Make sure no ramp is active and the setpoint is an unusual value (e.g. 123.4) so the match is unique, then change the setpoint on the front panel and read the candidate again to confirm.</p>
+      <div class="row"><label class="f">From <input type="number" id="scFrom" min="0" max="65534"></label><label class="f">To <input type="number" id="scTo" min="0" max="65534"></label><button id="bFind">Scan</button></div>
+      <div class="msg" id="scOut"></div></div>
+    <div class="sub"><h3>Read registers</h3>
+      <div class="row"><label class="f">Address <input type="number" id="rdA" min="0" max="65534"></label><label class="f">Count <input type="number" id="rdN" value="1" min="1" max="60"></label>
+        <label class="f">Function <select id="rdFn"><option value="0">default</option><option>3</option><option>4</option></select></label><button id="bRd">Read</button></div>
+      <div class="msg" id="rdOut"></div></div>
+    <div class="sub"><h3>Write one register</h3>
+      <p class="hint">Writes the raw 16-bit value. Wrong addresses can change the controller's configuration.</p>
+      <div class="row"><label class="f">Address <input type="number" id="wrA" min="0" max="65534"></label><label class="f">Raw value <input type="number" id="wrV" min="-32768" max="65535"></label><button id="bWr" class="danger">Write</button></div>
+      <div class="msg" id="wrOut"></div></div>
+  </div>
+</section>
+<section class="panel mt" aria-label="Backup"><h2>Backup</h2>
+  <div class="cards">
+    <div class="sub"><h3>Settings</h3><p class="hint">All settings as one JSON file. Wi-Fi passwords are not included; restoring keeps the stored ones.</p>
+      <div class="row"><button id="bCfgDl">Download settings</button><button id="bCfgUp">Restore settings…</button></div><div class="msg" id="cfgMsg"></div></div>
+    <div class="sub"><h3>Programs</h3><p class="hint">All programs in one file. Restoring replaces the programs in the slots that the file contains; the other slots stay as they are.</p>
+      <div class="row"><button id="bPrDl">Download all programs</button><button id="bPrUp">Restore programs…</button></div><div class="msg" id="prMsg"></div></div>
+  </div>
+  <div class="sub mt" id="bkSd" hidden><div class="edhead"><h3>SD card</h3><span class="tools"><button id="bkRef">Refresh</button></span></div>
+    <p class="hint">Settings and all programs in one file in the card's backup folder, named by the device's date and time. Restore all of it or a part. Wi-Fi passwords are not in the backup; restoring keeps the stored ones.</p>
+    <div class="row"><button id="bkNew" class="pri">Back up to SD card</button></div>
+    <p class="hint" id="bkSt"></p><div class="plist" id="bkList"></div><div class="msg" id="bkMsg"></div></div>
+</section>
+</div>
+</main>
+</div>
+
+<div class="halt" id="halt" hidden role="alertdialog" aria-labelledby="haltTitle">
+  <div><h2 id="haltTitle">Action required</h2><p class="txt" id="haltText"></p><p id="haltWhere"></p>
+  <div class="btns"><button id="hCont" class="pri">Continue program</button><button id="hStop">Stop program</button></div></div>
+</div>
+<dialog id="saveDlg">
+  <h2>Save the run's changes?</h2>
+  <p>This run changed the program (targets, ramps or holds). Save them into the stored program, or keep the program as it was.</p>
+  <div class="btns"><button id="dSave" class="pri">Save to program</button><button id="dDiscard">Keep the stored program</button></div>
+</dialog>
+<dialog id="tuneDlg" aria-labelledby="tdTitle">
+  <h2 id="tdTitle">Autotune done</h2>
+  <p id="tdTxt"></p>
+  <table class="t"><thead><tr><th></th><th>Current</th><th>New</th></tr></thead><tbody id="tdBody"></tbody></table>
+  <div class="msg" id="tdMsg"></div>
+  <div class="btns"><button id="tdAccept" class="pri">Accept</button><button id="tdEdit">Edit…</button><button id="tdDismiss">Dismiss</button><button id="tdLater">Later</button></div>
+</dialog>
+<dialog id="chDlg"><p id="chTxt" style="white-space:pre-line"></p><div class="btns" id="chBtns"></div></dialog>
+<input type="file" id="fileIn" accept=".json,application/json" hidden>
+<dialog id="askDlg"><p id="askTxt"></p><div class="btns"><button id="askOk" class="pri">OK</button><button id="askNo">Cancel</button></div></dialog>
+
+<script>
+<!-- include: js/00-core.js -->
+<!-- include: js/05-usb-connect.js -->
+<!-- include: js/10-theme.js -->
+<!-- include: js/15-programs.js -->
+<!-- include: js/20-chart-model.js -->
+<!-- include: js/21-chart-raw.js -->
+<!-- include: js/22-chart-draw.js -->
+<!-- include: js/23-chart-hover.js -->
+<!-- include: js/30-cards.js -->
+<!-- include: js/31-autotune.js -->
+<!-- include: js/32-sidebar.js -->
+<!-- include: js/40-editor.js -->
+<!-- include: js/41-reorder.js -->
+<!-- include: js/45-runbar.js -->
+<!-- include: js/50-eventlog.js -->
+<!-- include: js/55-replay.js -->
+<!-- include: js/60-pages.js -->
+<!-- include: js/61-forms.js -->
+<!-- include: js/62-programs-page.js -->
+<!-- include: js/63-channels-page.js -->
+<!-- include: js/64-system-page.js -->
+<!-- include: js/65-firmware.js -->
+<!-- include: js/66-tools.js -->
+<!-- include: js/67-logs.js -->
+<!-- include: js/90-poll.js -->
+</script>
+</body>
+</html>

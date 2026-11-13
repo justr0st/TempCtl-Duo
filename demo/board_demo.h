@@ -20,6 +20,10 @@
 #define PIN_SSR_RELAY 4
 #define PIN_ESTOP 5
 #define PIN_BUZZER 6
+// optional pins as on the S3 (board_s3.h, io_pins.h)
+#define IO_PINS_N 3
+#define IO_PINS_GPIO {PIN_SSR_RELAY, PIN_ESTOP, PIN_BUZZER}
+#define IO_PINS_DEF {IO_RELAY, IO_ESTOP, IO_BUZZER}
 
 #define SCREEN_W 480
 #define SCREEN_H 320

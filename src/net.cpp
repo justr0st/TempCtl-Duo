@@ -35,6 +35,10 @@ static void ipConfig(const Settings& s) {
 }
 
 static volatile bool ntpWanted = false;  // connected: get the time (NTP) for the log, once
+// station got an IP address (set by the event task, 0 = nothing pending): netLoop() closes the access
+// point AP_OFF_DELAY_MS later - the phone on the AP can still load the page with the new address
+static volatile uint32_t staIpAt = 0;
+static constexpr uint32_t AP_OFF_DELAY_MS = 8000;
 
 static void staBegin() {
   Settings s;
@@ -85,6 +89,8 @@ void netBegin() {
     switch (e) {
       case ARDUINO_EVENT_WIFI_STA_GOT_IP:
         ntpWanted = true;
+        staIpAt = millis();
+        if (!staIpAt) staIpAt = 1;
         LogSerial.printf("[wifi] connected to %s, IP %s, RSSI %d dBm\n", WiFi.SSID().c_str(),
                       WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
         break;
@@ -160,6 +166,18 @@ void netLoop() {
   if (ntpWanted && !ntpStarted) {
     ntpStarted = true;
     syslogStartNtp();
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    t0 = millis();  // the AP fallback below counts from the last moment the station was connected
+    if (staIpAt && millis() - staIpAt >= AP_OFF_DELAY_MS && !scanBusyNow()) {
+      staIpAt = 0;
+      if (apStarted) {  // connected to the network: the access point is no longer needed
+        apStarted = false;
+        WiFi.softAPdisconnect(true);
+        WiFi.mode(WIFI_STA);
+        LogSerial.println("[wifi] station connected - access point closed");
+      }
+    }
   }
   if (beginAt && (int32_t)(millis() - beginAt) >= 0 && !scanBusyNow()) staBegin();
   if (haveSta && !beginAt && !scanBusyNow() && WiFi.status() != WL_CONNECTED && millis() - lastBegin > STA_RETRY_MS) {
@@ -385,6 +403,7 @@ void netStartAp() {
 }
 
 String netApName() { return apStarted ? apName : String(""); }
+String netApIp() { return apStarted ? WiFi.softAPIP().toString() : String(""); }
 
 bool netConnectedSinceApply() { return gotIpSinceApply && WiFi.status() == WL_CONNECTED; }
 

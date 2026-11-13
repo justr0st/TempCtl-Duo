@@ -6,6 +6,8 @@
 // Start asks to save first. During a run the running program is shown with its run edits;
 // targets and times can be changed there (run edits, spec 9.3.4), the structure is locked.
 #include "tui.h"
+#include "safety.h"
+#include "fan.h"
 #include "psram.h"
 #include <esp_heap_caps.h>
 #include <math.h>
@@ -109,6 +111,7 @@ static struct {
     char name[CH_NAME_LEN];
     float spMin, spMax;
   } ch[NUM_CHANNELS];
+  bool fan;  // a cooling fan is configured: the phases / steps get the "Fan" option
 } ES;
 
 static DuoProgram* allocProg() {
@@ -154,19 +157,28 @@ static void onUndo(lv_event_t*) {
 // ------------------------------------------------------------ cells
 static constexpr int SEQ_COLS = 9;
 static const int SEQ_W[SEQ_COLS] = {30, 58, 50, 52, 52, 50, 52, 52, 66};
-static const int TL_W[4] = {28, 62, 66, 66};
+static const int TL_W[4] = {42, 52, 64, 64};
 #if TUI_SMALL
 // 320x240: Sequence = one line per phase (# | type | values | option), a tap opens the phase menu;
 // Timeline = one table for the channel chosen with the switch above it
 static constexpr int SEQ_COLS_S = 4;
-static const int SEQ_W_S[SEQ_COLS_S] = {24, 50, 190, 46};
-static const int TL_W_S[4] = {30, 84, 98, 98};
+static const int SEQ_W_S[SEQ_COLS_S] = {24, 50, 176, 60};
+static const int TL_W_S[4] = {44, 76, 95, 95};
 static int tlCh = 0;  // Timeline: the channel shown
 #endif
 static constexpr uint32_t MUTED = LV_TABLE_CELL_CTRL_CUSTOM_1, CURRENT = LV_TABLE_CELL_CTRL_CUSTOM_2,
                           ACCENT = LV_TABLE_CELL_CTRL_CUSTOM_3, LEFT = LV_TABLE_CELL_CTRL_CUSTOM_4;
 
 static void fmtSec(uint32_t s, char* b, size_t n) { fmtTime((float)s, b, n); }
+
+// the option column of a phase: "Wait" / "Action" and "Fan" (only with a fan configured: the flag stays in the
+// program either way)
+static const char* optText(char* o, size_t n, const char* what, uint8_t fan) {
+  const bool f = fan && ES.fan;
+  if (f && *what == 'A') what = "Act.";  // ("Action Fan" does not fit the column)
+  snprintf(o, n, "%s%s%s", what, *what && f ? " " : "", f ? "Fan" : "");
+  return o;
+}
 
 static void cell(lv_obj_t* t, int r, int c, const char* v, uint32_t ctrl = 0) {
   lv_table_set_cell_value(t, r, c, v);
@@ -251,8 +263,8 @@ static void fillSeq() {
       }
     }
     cell(t, i, 2, b, (f.kind == PH_P ? MUTED : 0) | LEFT | c);
-    const char* opt = (f.kind == PH_B || f.kind == PH_BT) && f.wait ? "Wait" : f.kind == PH_P && f.msg ? "Action" : "";
-    cell(t, i, 3, opt, ACCENT | c);
+    char o[16];
+    cell(t, i, 3, optText(o, sizeof(o), (f.kind == PH_B || f.kind == PH_BT) && f.wait ? "Wait" : f.kind == PH_P && f.msg ? "Action" : "", f.fan), ACCENT | c);
   }
   if (!n)
     for (int k = 0; k < SEQ_COLS_S; ++k) cell(t, 0, k, k == 2 ? "no phases - tap to add" : "", MUTED | LEFT);
@@ -307,8 +319,8 @@ static void fillSeq() {
     }
     if (f.kind != PH_P)
       for (int k = 2; k < 8; ++k) lv_table_clear_cell_ctrl(t, i, k, LV_TABLE_CELL_CTRL_MERGE_RIGHT);
-    const char* opt = (f.kind == PH_B || f.kind == PH_BT) && f.wait ? "Wait" : f.kind == PH_P && f.msg ? "Action" : "";
-    cell(t, i, 8, opt, ACCENT | c);
+    char o[16];
+    cell(t, i, 8, optText(o, sizeof(o), (f.kind == PH_B || f.kind == PH_BT) && f.wait ? "Wait" : f.kind == PH_P && f.msg ? "Action" : "", f.fan), ACCENT | c);
   }
   if (!n) {
     for (int k = 0; k < SEQ_COLS; ++k) cell(t, 0, k, k == 1 ? "no phases" : "", MUTED);
@@ -325,8 +337,8 @@ static void fillTl(int ch) {
     const TlStep& s = ed->st[ch][i];
     const uint32_t c = i == cur ? CURRENT : 0;
     char b[24];
-    snprintf(b, sizeof(b), "%d", i + 1);
-    cell(t, i, 0, b, MUTED | c);
+    snprintf(b, sizeof(b), s.fan && ES.fan ? "%d Fan" : "%d", i + 1);  // (a step with the fan on: marked in the # cell)
+    cell(t, i, 0, b, s.fan && ES.fan ? ACCENT | c : MUTED | c);
     for (int k = 1; k < 4; ++k) lv_table_clear_cell_ctrl(t, i, k, LV_TABLE_CELL_CTRL_MERGE_RIGHT);
     if (s.kind == ST_TARGET) {
       seg(t, i, 1, s.s, true, c);
@@ -467,7 +479,7 @@ static float offStart(const Seg& g) { return g.t > 0 ? g.t : 0; }
 
 // --- row menu
 enum RowAct : uint8_t {
-  A_KIND_B, A_KIND_T, A_KIND_BT, A_KIND_P, A_KIND_TARGET, A_KIND_IDLE, A_KIND_PAUSE, A_WAIT, A_BIDLE, A_TIDLE, A_MSG, A_TEXT,
+  A_KIND_B, A_KIND_T, A_KIND_BT, A_KIND_P, A_KIND_TARGET, A_KIND_IDLE, A_KIND_PAUSE, A_WAIT, A_BIDLE, A_TIDLE, A_MSG, A_TEXT, A_FAN,
   A_INS_ABOVE, A_INS_BELOW, A_UP, A_DOWN, A_DEL,
   A_FB_T, A_FB_R, A_FB_H, A_FT_T, A_FT_R, A_FT_H  // 320x240: edit a value (bottom / top: target, ramp, hold)
 };
@@ -551,6 +563,10 @@ static void onRowAct(int i, int) {
       if (f) f->msg = !f->msg;
       else s->msg = !s->msg;
       break;
+    case A_FAN:
+      if (f) f->fan = !f->fan;
+      else s->fan = !s->fan;
+      break;
     case A_TEXT: {
       const char* cur = progText(*ed, f ? f->text : s->text);
       tKeyboard("Pause text (shown with the pause)", cur, PROG_TEXT_LEN - 1, false, false, onPauseText, 0);
@@ -591,7 +607,7 @@ static void rowMenu(int ch, int idx) {
   rowCh = ch;
   rowIdx = idx;
   rowN = 0;
-  static PSRAM_VAR(char[900], items);
+  static PSRAM_VAR(char[960], items);
   items[0] = 0;
   auto add = [&](uint8_t a, const char* t) {
     if (rowN) strlcat(items, "\n", sizeof(items));
@@ -687,6 +703,10 @@ static void rowMenu(int ch, int idx) {
       add(A_TEXT, "Pause text \xE2\x80\xA6");
     }
   }
+  if (ES.fan) {
+    const bool on = ed->type == PROG_SEQ ? ed->ph[idx].fan : ed->st[ch][idx].fan;
+    add(A_FAN, on ? "Fan: on \xE2\x80\x94 turn off" : "Fan: off \xE2\x80\x94 turn on");
+  }
   add(A_INS_ABOVE, "Insert above");
   add(A_INS_BELOW, "Insert below");
   if (idx > 0) add(A_UP, "Move up");
@@ -779,7 +799,10 @@ static bool edSaveNow() {
 
 static void onSave(lv_event_t*) {
   if (edRun || edEmpty) return;
-  if (edSaveNow()) tToast("Program saved.");
+  if (edSaveNow()) {
+    tToast("Program saved.");
+    safetyFx(FX_OK);
+  }
   edRefresh();
 }
 
@@ -1093,6 +1116,7 @@ static void edLoad() {
       ES.ch[c].spMax = gSettings.ch[c].spMax;
     }
   }
+  ES.fan = fanWired();
   LiveData L;
   liveCopy(L);
   const bool active = L.state == RunState::Running || L.state == RunState::Paused;

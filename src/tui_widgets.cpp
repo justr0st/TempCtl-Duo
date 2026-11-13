@@ -1,6 +1,7 @@
 // Touch UI building blocks: labels, buttons, pages and the popups (number pad, keyboard, dialog,
 // choice list, toast).
 #include "tui.h"
+#include "safety.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -310,6 +311,8 @@ static lv_obj_t* modalBox(int w, int h) {
   return box;
 }
 
+lv_obj_t* tPopup(int w, int h) { return modalBox(w, h); }
+
 // --- dialog
 static TAnswerCb dlgCb = nullptr;
 static int dlgArg = 0;
@@ -602,6 +605,7 @@ static void toastGone(lv_timer_t* t) {
 }
 
 void tToast(const char* text, bool bad) {
+  if (bad) safetyFx(FX_REFUSED);
   if (toast) toastGone(nullptr);
   toast = lv_obj_create(lv_layer_top());
   lv_obj_remove_style_all(toast);

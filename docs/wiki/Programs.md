@@ -40,6 +40,23 @@ A channel that finishes earlier keeps its last target until the other one is don
 A Sequence can be turned into a Timeline (*Convert to Timeline* on the web page): the same temperatures and
 times; "wait for bottom" is dropped. A Timeline can't be turned back.
 
+## Fan
+
+With a cooling fan configured (S3: an optional pin set to *Fan (on / off)* or *Fan (PWM)*,
+[Hardware](Hardware-S3.md#optional-pins-and-the-cooling-fan)) every phase and step has a **Fan** option: the fan
+runs while that phase / step runs. It is only shown when a fan output exists; a program keeps its Fan marks
+otherwise (`"fan": true` in the program file). Touch: the *Option* column of the Sequence editor (*Wait*,
+*Action*, *Fan*), the Fan entry of the row menu, a *Fan* mark on a Timeline step; web: the *Fan* checkbox.
+
+After a run the fan can go on until the channels are cool (*Run the fan after a program*, default 60 °C, at most
+30 min). A new run, manual mode or an autotune that heats ends it. The fan's state is shown on the main screen
+(*Fan*, with the speed when there is a tach input), on the web page (chip *Fan on* by the run state) and in
+`status`.
+
+| | |
+|---|---|
+| <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/20c-edit-seq-fan-dark.png"><img src="img/touch/20c-edit-seq-fan-light.png" alt="Touch: Sequence editor with the Fan option" width="360"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/21c-rowmenu-fan-dark.png"><img src="img/touch/21c-rowmenu-fan-light.png" alt="Touch: row menu with the Fan entry" width="360"></picture> |
+
 ## Ramps
 
 - The **first ramp** of a channel, and the first ramp after Idle, starts at its **measured** temperature; later
@@ -75,7 +92,24 @@ holds. After the run the device asks whether to **save the changes** into the pr
 
 Each channel of the program applies its own **end action**: *keep the last setpoint*, *go to an end setpoint*
 or *outputs off*. With "keep" or "end setpoint" the channel goes on in manual mode with that setpoint (its
-manual button is on; switch it off when you are done). The alarm plays three short beeps.
+manual button is on; switch it off when you are done). The alarm plays its three "finished" tones.
+
+### Run report
+
+When a run ends (finished or stopped) the device works out a short **report**, per channel:
+
+- the **highest temperature** and the run time it happened,
+- the **largest deviation from the setpoint in the holds** (counted from 5 s into each hold),
+- the **steepest rise** over 5 s, in °C/s;
+
+and the highest temperature of the monitor channel, if it is on. A channel that measured nothing is left out.
+A run you resumed after a reset reports the part after the resume.
+
+The report is written to the event log (and so into the SD run log as event rows) and stays until the device
+restarts or another run starts. Touch: tap the **Finished / Stopped** badge. Web: the **Last run** block on the
+Dashboard. Serial: `report`. `/api/live` has it as `report` ([Web API](Web-API.md)).
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/31b-run-report-dark.png"><img src="img/touch/31b-run-report-light.png" alt="Touch: run report" width="360"></picture>
 
 ## Manual setpoint
 

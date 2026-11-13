@@ -123,6 +123,10 @@ class RunEngine {
   bool pauseMsg() const;          // the pause asks for "Action required"
   const char* pauseText() const;  // its custom text ("" if none)
   bool waiting() const;           // Sequence: waiting for the bottom to reach its target
+  // The cooling fan (spec 9.25): the run is active (running or paused) and its current phase (Sequence) or
+  // the current step of either channel (Timeline) has "fan". Read from the position, so it holds after a
+  // resume and run edits too; false after the end.
+  bool fanWanted() const;
   StageInfo seq() const;          // Sequence: phase + stage
   StageInfo lane(int ch) const;   // Timeline: step + stage of a channel
   float elapsed() const { return el_; }  // run time (includes pauses and waits)

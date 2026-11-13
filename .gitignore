@@ -7,6 +7,8 @@
 
 # generated from web/ by tools/web_embed.py before each build
 src/web_assets.h
+# generated from web/src/ by tools/web_join.py (called by web_embed.py, build_site.py, the wiki's mock device)
+/web/index.html
 
 # KiCad: local history, backups, ERC reports
 hardware/**/.history/

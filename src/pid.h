@@ -45,6 +45,8 @@ class Pid {
   float output() const { return out_; }
   float lastFf() const { return ff_; }  // feed-forward of the last update (0 = none)
   bool running() const { return !first_; }  // updated at least once since the last reset
+  // the measurement stepped to a new level (a jump accepted by the input filter): the derivative starts from it
+  void rebase(float pv) { if (!first_) prevPv_ = pv; }
 
  private:
   bool first_ = true;
