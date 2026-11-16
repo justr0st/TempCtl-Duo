@@ -411,6 +411,7 @@ lv_obj_t* displayCreate() {
   lv_obj_set_size(dBright, TUI_SMALL ? 140 : 220, 18);
   lv_slider_set_range(dBright, 10, 255);
   lv_obj_set_style_pad_all(dBright, 6, LV_PART_KNOB);
+  lv_obj_set_style_margin_hor(dBright, 12, 0);  // the knob reaches past the bar's ends (clipped at the maximum)
   lv_obj_set_ext_click_area(dBright, 12);
   lv_obj_add_event_cb(dBright, onBright, LV_EVENT_VALUE_CHANGED, nullptr);
   lv_obj_add_event_cb(dBright, onBright, LV_EVENT_RELEASED, nullptr);
@@ -1075,6 +1076,7 @@ static void onChip(lv_event_t*) {
           onChipPick, 0);
 }
 // sound volume, key beep, optional pins and the cooling fan (spec 9.25)
+static lv_obj_t *sKeyTone, *sKeyMs, *rKeyTone, *rKeyMs;
 static lv_obj_t *sVol, *sKey, *sFanAfter, *sFanBelow, *sFanMax, *sFanSpeed, *sIo[IO_PINS_MAX];
 static lv_obj_t *rEstop, *rRelay, *rSound, *rVol, *rKey, *rPins, *rIo[IO_PINS_MAX], *rFan[5];
 static bool applyChecked(const Settings& in) {  // validate (a message on a refusal), store, save
@@ -1091,18 +1093,40 @@ static bool applyChecked(const Settings& in) {  // validate (a message on a refu
   saveSettingsAndNotify();
   return true;
 }
-static void onVolPick(int i, int) {
-  if (i < 0) return;
+static bool sysLoading = false;
+static void onVol(lv_event_t*) {  // the slider: applied on release, the test beep as a preview
+  if (sysLoading) return;
   Settings s;
   settingsCopy(s);
-  s.volume = (uint8_t)(i + 1);
+  s.volume = (uint8_t)lv_slider_get_value(sVol);
   if (applyChecked(s)) safetyBeepTest();
   systemShow();
 }
-static void onVol(lv_event_t*) {
+static const uint16_t KEY_HZ[6] = {1000, 1500, 2000, 2500, 3000, 4000};
+static const uint8_t KEY_MS[5] = {10, 20, 30, 50, 80};
+static void onKeyPick(int i, int what) {
+  if (i < 0) return;
   Settings s;
   settingsCopy(s);
-  tChoice("Alarm sound volume", "1 (quietest)\n2\n3\n4\n5 (loudest)", s.volume - 1, onVolPick, 0);
+  if (what == 0) s.keyTone = KEY_HZ[i];
+  else s.keyMs = KEY_MS[i];
+  if (applyChecked(s)) safetyKeyTest(s.keyTone, s.keyMs);
+  systemShow();
+}
+static void onKeyOpt(lv_event_t* e) {
+  const int what = (int)(intptr_t)lv_event_get_user_data(e);
+  Settings s;
+  settingsCopy(s);
+  int sel = 0;
+  if (what == 0) {
+    for (int i = 0; i < 6; ++i)
+      if (KEY_HZ[i] == s.keyTone) sel = i;
+    tChoice("Key beep tone", "1000 Hz (low)\n1500 Hz\n2000 Hz\n2500 Hz\n3000 Hz\n4000 Hz (high)", sel, onKeyPick, 0);
+  } else {
+    for (int i = 0; i < 5; ++i)
+      if (KEY_MS[i] == s.keyMs) sel = i;
+    tChoice("Key beep length", "10 ms (shortest)\n20 ms\n30 ms\n50 ms\n80 ms (longest)", sel, onKeyPick, 1);
+  }
 }
 static void onIoPick(int i, int pin) {
   if (i < 0) return;
@@ -1354,7 +1378,7 @@ lv_obj_t* systemCreate() {
   r = settingRow(p.body, "Manual mode timeout", "Manual mode ends after this long without a touch, web or serial action (a beep 1 min before)");
   lv_obj_set_style_pad_top(r, G, 0);
   sIdle = tButton(r, "", onIdle, nullptr, CW2, BH);
-  sEstop = sSound = sRelay = sChip = sVol = sKey = nullptr;
+  sEstop = sSound = sRelay = sChip = sVol = sKey = sKeyTone = sKeyMs = nullptr;
   // (on the S3 the pins decide: the rows of a function that has no pin are hidden, see systemShow)
   const BoardLimits lim = boardLimits();
   if (lim.ioN || safetyEstopWired()) {
@@ -1367,14 +1391,27 @@ lv_obj_t* systemCreate() {
   }
   if (lim.ioN || safetySoundWired()) {
     r = rSound = settingRow(p.body, "Alarm sound", "Faults, E-stop, \"Action required\", run finished. A touch silences it");
+    lv_obj_set_style_pad_top(r, G, 0);
     sSound = tSwitch(r, onSafetySw);
     r = rVol = settingRow(p.body, "Sound volume", "Alarms always play at full volume");
-    sVol = tButton(r, "", onVol, nullptr, CW2, BH);
+    lv_obj_set_style_pad_ver(r, 8, 0);  // the knob reaches above / below the bar
+    sVol = lv_slider_create(r);
+    lv_obj_set_size(sVol, TUI_SMALL ? 120 : 180, 18);
+    lv_slider_set_range(sVol, 1, 5);
+    lv_obj_set_style_pad_all(sVol, 6, LV_PART_KNOB);
+    lv_obj_set_style_margin_hor(sVol, 12, 0);  // the knob reaches past the bar's ends (clipped at the maximum)
+    lv_obj_set_ext_click_area(sVol, 12);
+    lv_obj_add_event_cb(sVol, onVol, LV_EVENT_RELEASED, nullptr);
     r = rKey = settingRow(p.body, "Key beep", "A short beep on the touch-screen buttons");
     sKey = tSwitch(r, onSafetySw);
+    r = rKeyTone = settingRow(p.body, "Key beep tone", "Lower is softer on the ears");
+    sKeyTone = tButton(r, "", onKeyOpt, (void*)(intptr_t)0, CW2, BH);
+    r = rKeyMs = settingRow(p.body, "Key beep length", nullptr);
+    sKeyMs = tButton(r, "", onKeyOpt, (void*)(intptr_t)1, CW2, BH);
   }
   if (safetyChipTempWired()) {
     r = settingRow(p.body, "Chip temperature warning", "ESP32-S3 internal sensor");
+    lv_obj_set_style_pad_top(r, G, 0);
     sChip = tButton(r, "", onChip, nullptr, CW2, BH);
   }
   rPins = nullptr;
@@ -1434,9 +1471,16 @@ void systemShow() {
   if (sSound) tSetChecked(sSound, s.sound != 0);
   if (sRelay) tSetChecked(sRelay, s.relay != 0);
   if (sKey) tSetChecked(sKey, s.keyBeep != 0);
-  if (sVol) {
-    snprintf(b, sizeof(b), "%u / 5", s.volume);
-    tButtonText(sVol, b);
+  if (sVol && !lv_obj_has_state(sVol, LV_STATE_PRESSED)) {
+    sysLoading = true;
+    lv_slider_set_value(sVol, s.volume, LV_ANIM_OFF);
+    sysLoading = false;
+  }
+  if (sKeyTone) {
+    snprintf(b, sizeof(b), "%u Hz", s.keyTone);
+    tButtonText(sKeyTone, b);
+    snprintf(b, sizeof(b), "%u ms", s.keyMs);
+    tButtonText(sKeyMs, b);
   }
   if (boardLimits().ioN) {
     static const char* const FN[] = {"Not used", "SSR relay", "E-stop", "Buzzer", "Fan", "Fan (PWM)", "Fan speed"};
@@ -1445,6 +1489,8 @@ void systemShow() {
     if (rSound) tSetHidden(rSound, !safetySoundWired());
     if (rVol) tSetHidden(rVol, !safetySoundWired());
     if (rKey) tSetHidden(rKey, !safetySoundWired());
+    if (rKeyTone) tSetHidden(rKeyTone, !safetySoundWired());
+    if (rKeyMs) tSetHidden(rKeyMs, !safetySoundWired());
     for (int i = 0; i < boardLimits().ioN && i < IO_PINS_MAX; ++i)
       if (sIo[i]) tButtonText(sIo[i], FN[s.ioFn[i] < IO_FN_COUNT ? s.ioFn[i] : 0]);
     const bool fan = fanWired();

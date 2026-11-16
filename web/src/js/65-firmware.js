@@ -128,21 +128,28 @@ function updSystem(){
       {k:'safety.manualIdleMin',l:'… after',t:'num',min:2,max:1440,u:'min',def:30,show:g=>g('safety.manualIdle')},
       {k:'safety.estop',l:'E-stop input',t:'sw',w:true,show:()=>!!CFG.limits.estop,h:'Normally closed contact between the E-stop pin and GND. Open contact or a broken wire: all outputs and the SSR supply relay off, a running program stops.'},
       {k:'safety.relay',l:'SSR supply relay',t:'sw',def:true,w:true,show:()=>!!CFG.limits.relay,h:'An active-high DC solid-state relay in the common +5 V supply of both SSR inputs: on while a local channel heats, off at once on a fault or E-stop (covers a stuck SSR input or driver; a shorted SSR output needs a contactor). Switch it off only when no relay is fitted: the relay pin then stays low — with a relay fitted, the heaters would get no power.'},
-      {k:'safety.sound',l:'Alarm sound',t:'sw',def:true,w:true,show:()=>!!CFG.limits.sound,h:'Faults and E-stop: three long beeps every 3 s. “Action required” and the manual-mode warning: two short beeps every 10 s. Run finished: three short beeps. A touch or a web action silences the current alarm.'},
-      {k:'safety.volume',l:'Sound volume',t:'sel',num:true,def:3,w:true,o:[[1,'1 (quietest)'],[2,'2'],[3,'3'],[4,'4'],[5,'5 (loudest)']],show:()=>!!CFG.limits.sound,h:'Alarms (faults, E-stop) always play at full volume.'},
-      {k:'safety.keyBeep',l:'Key beep',t:'sw',def:true,w:true,show:()=>!!CFG.limits.sound,h:'A short beep on the touch-screen buttons.'},
       {k:'safety.chipWarn',l:'Warn when the chip gets hot',t:'sw',def:true,w:true,show:()=>!!L.chipTemp,h:'The ESP32-S3’s internal temperature sensor, read every 30 s: a warning in the log above the limit.'},
       {k:'safety.chipMaxC',l:'… above',t:'num',min:40,max:120,u:'°C',def:80,show:g=>!!L.chipTemp&&g('safety.chipWarn')}],
-      extra:`<div class="row" id="beepRow"><button id="bBeep">Test beep</button><span class="msg" id="beepMsg"></span></div>`},
-     {h:'Optional pins',show:()=>!!(CFG.limits.ioGpio&&CFG.limits.ioGpio.length),note:'What each spare pin of the board does. A function can be on one pin only.',
+      }],
+      {title:'Safety',auto:true,top:'<p class="live1" id="safeLive"></p>'});
+    // Sound and Optional pins: cards of their own (hidden in updSystem when the board has no sound / no optional pins)
+    mkForm('sound',$('sSound'),[{h:'',fields:[
+      {k:'safety.sound',l:'Alarm sound',t:'sw',def:true,w:true,h:'Faults and E-stop: three long beeps every 3 s. “Action required” and the manual-mode warning: two short beeps every 10 s. Run finished: three short beeps. A touch or a web action silences the current alarm.'},
+      {k:'safety.volume',l:'Sound volume',t:'range',min:1,max:5,step:1,def:3,w:true,h:'1 (quietest) … 5 (loudest). Alarms (faults, E-stop) always play at full volume.'},
+      {k:'safety.keyBeep',l:'Key beep',t:'sw',def:true,w:true,h:'A short beep on the touch-screen buttons.'},
+      {k:'safety.keyTone',l:'Key beep tone',t:'sel',num:true,def:2000,w:true,o:[[1000,'1000 Hz (low)'],[1500,'1500 Hz'],[2000,'2000 Hz'],[2500,'2500 Hz'],[3000,'3000 Hz'],[4000,'4000 Hz (high)']]},
+      {k:'safety.keyMs',l:'Key beep length',t:'sel',num:true,def:20,w:true,o:[[10,'10 ms (shortest)'],[20,'20 ms'],[30,'30 ms'],[50,'50 ms'],[80,'80 ms (longest)']]}],
+      extra:`<div class="row" id="beepRow"><button id="bBeep">Test beep</button><button id="bKeyBeep">Test key beep</button><span class="msg" id="beepMsg"></span></div>`}],
+      {title:'Sound',auto:true});
+    mkForm('pins',$('sPins'),[{h:'',note:'What each spare pin of the board does. A function can be on one pin only.',
       fields:(L.ioGpio||[]).map((pin,i)=>({k:'io.fn.'+i,l:'GPIO '+pin,t:'sel',w:true,o:IO_FN}))},
      {h:'Cooling fan',show:()=>!!CFG.limits.fan,fields:[
       {k:'fan.afterRun',l:'Run the fan after a program',t:'sw',def:true,w:true,h:'The fan keeps running after the program ends, until every channel is cool.'},
       {k:'fan.offBelow',l:'… until every channel is below',t:'num',min:30,max:200,step:1,u:'°C',def:60,w:true,show:g=>g('fan.afterRun')},
       {k:'fan.maxMin',l:'… at most',t:'num',min:1,max:240,step:1,u:'min',def:30,w:true,show:g=>g('fan.afterRun')},
       {k:'fan.speed',l:'Fan speed (PWM fan)',t:'num',min:20,max:100,step:1,u:'%',def:100,w:true,show:()=>((CFG.io&&CFG.io.fn)||[]).includes('fanPwm')}]}],
-      {title:'Safety',auto:true,top:'<p class="live1" id="safeLive"></p>'});
-    if($('bBeep')) $('bBeep').onclick=async()=>{ try{ const r=await api('/api/beep',{}); setMsg('beepMsg',r.err||'',!!r.err); }catch(e){ setMsg('beepMsg','No answer from the device.',true); } };
+      {title:'Optional pins',auto:true});
+    for(const [id,b] of [['bBeep',{}],['bKeyBeep',{key:true}]]) if($(id)) $(id).onclick=async()=>{ try{ const r=await api('/api/beep',b); setMsg('beepMsg',r.err||'',!!r.err); }catch(e){ setMsg('beepMsg','No answer from the device.',true); } };
     mkForm('disp',$('sDisp'),[{h:'',fields:[
       {k:'display.accent',l:'Accent colour',t:'accent',h:'Used on the touch screen and on this page; the channel colours follow from it.'},
       {k:'display.themeDark',l:'Touch screen theme',t:'theme',def:true},
@@ -153,7 +160,8 @@ function updSystem(){
   const sf=live.safety||{}, L=CFG.limits||{}, sl=[];
   if(L.estop) sl.push(sf.estop?'<span class="msg bad" style="margin:0">E-stop active</span>':`E-stop contact ${sf.contact||'–'}${CFG.safety&&CFG.safety.estop?'':' (input not watched)'}`);
   if(sf.chipC!=null) sl.push(`chip ${f1(sf.chipC)} °C${sf.chipHot?' <span class="msg bad" style="margin:0">hot</span>':''}`);
-  if($('beepRow')) $('beepRow').hidden=!L.sound;
+  $('sSound').hidden=!L.sound; $('sPins').hidden=!(L.ioGpio&&L.ioGpio.length);
+  for(const [id,on] of [['jumpSound',L.sound],['jumpPins',L.ioGpio&&L.ioGpio.length]]) if($(id)) $(id).hidden=!on;
   if(live.fan) sl.push('fan '+(live.fan.on?'on':'off')+(live.fan.rpm!=null?' · '+live.fan.rpm+' rpm':''));
   if(live.relay!=null) sl.push('SSR supply relay '+(live.relay?'on':'off'));
   if(sf.muted) sl.push('alarm silenced');

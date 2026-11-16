@@ -17,7 +17,7 @@
 void safetyBegin();                       // buzzer channel + 10 ms timer (once, early in setup)
 // from the settings (after ioConfigure: the E-stop and buzzer pins are known): E-stop watched, sounds on,
 // volume 1 ... 5, a click on every touch-screen button
-void safetyConfigure(bool estop, bool sound, uint8_t volume, bool keyBeep);
+void safetyConfigure(bool estop, bool sound, uint8_t volume, bool keyBeep, uint16_t keyHz, uint8_t keyMs);
 bool safetyEstopWired();                  // an optional pin has the E-stop function now
 bool safetyEstop();                       // E-stop active (enabled and contact open)
 bool safetyEstopRaw();                    // contact open now (also when not enabled; for the settings page)
@@ -38,6 +38,7 @@ enum SoundFx : uint8_t {
 };
 void safetyFx(SoundFx fx);
 void safetyBeepTest();                    // = safetyFx(FX_TEST)
+void safetyKeyTest(uint16_t hz, uint8_t ms);  // the key beep once (tone / length preview), also with the sound off; 0 Hz = the set one
 
 void safetyActivity();                    // the user did something (touch, web action, serial command)
 uint32_t safetyLastActivityMs();

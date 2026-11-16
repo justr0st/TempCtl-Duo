@@ -936,6 +936,7 @@ static lv_obj_t* edCreate() {
   lv_obj_set_style_pad_hor(edBody, TUI_SMALL ? 4 : 6, 0);
   lv_obj_set_style_pad_bottom(edBody, 6, 0);
   lv_obj_set_scroll_dir(edBody, LV_DIR_VER);
+  tScrollArrows(edBody);
   return edScr;
 }
 

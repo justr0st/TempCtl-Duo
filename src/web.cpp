@@ -1361,7 +1361,9 @@ static void handleOtaSdInstall() {
 
 // POST /api/beep: one short test beep (Settings page)
 static void handleBeep() {
-  safetyBeepTest();
+  JsonDocument b;
+  if (parseBody(b) && b["key"].as<bool>()) safetyKeyTest(0, 0);
+  else safetyBeepTest();
   JsonDocument d;
   d["ok"] = safetySoundWired();
   if (!safetySoundWired()) d["err"] = "no buzzer on this board";

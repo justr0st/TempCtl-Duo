@@ -598,7 +598,7 @@ static void manualSwitch(int ch, bool on) {
 static void applySettings(const Settings& prev, bool first) {
   // first the optional pins (relay, E-stop, buzzer, fan: io_pins.h), then what uses them
   ioConfigure(s.ioFn);
-  safetyConfigure(s.estop != 0, s.sound != 0, s.volume, s.keyBeep != 0);
+  safetyConfigure(s.estop != 0, s.sound != 0, s.volume, s.keyBeep != 0, s.keyTone, s.keyMs);
   localCtrlRelayEnable(s.relay != 0);
   modbusBusBegin(bus, s);
   eng.setBand(s.bottomBand);

@@ -49,7 +49,7 @@ at most 3 s worth of readings. If a valid reading then arrives, it is the **new 
 real — and the median filter and the PID's derivative start again from it. If bad readings go on for *Sensor
 fault after* seconds while the channel heats, the channel gets a **sensor fault** (*reading jumps* when the
 cause was a jump). A held-back reading above the cut-off still switches the power off for that moment: the
-hold never weakens the cut-off. The monitor channel uses the same filter, but without the jump check.
+hold never weakens the cut-off. After a longer stretch of faults (a thermocouple plugged back in) and after boot, a valid reading is not taken at once: the readings must stay steady for about 1 s first (contact transients are skipped), the channel shows no reading meanwhile. The monitor channel uses the same filter, but without the jump check.
 
 ### PID and SSR
 

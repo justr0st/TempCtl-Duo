@@ -173,6 +173,7 @@ bool safetyEstopWired() { return ioPin(IO_ESTOP) >= 0; }
 bool safetySoundWired() { return ioPin(IO_BUZZER) >= 0; }
 void safetyFx(SoundFx) {}
 void safetyBeepTest() {}
+void safetyKeyTest(uint16_t, uint8_t) {}
 bool fanWired() { return ioPin(IO_FAN) >= 0 || ioPin(IO_FAN_PWM) >= 0; }
 bool fanOn() { return false; }
 int fanRpm() { return -1; }
@@ -366,6 +367,8 @@ int main() {
   type("set b.local.jumpMax=900\r");                   // outside 0 ... 500: refused
   type("set safety.volume=5 safety.keyBeep=off\r");
   type("set safety.volume=9\r");
+  type("set safety.keyTone=1500 safety.keyMs=50\r");
+  type("set safety.keyTone=1234\r");  // not in the list: refused
   type("get safety\r");
   type("get io\r");
   type("set io.fn0=relay io.fn1=estop io.fn2=fanPwm\r");

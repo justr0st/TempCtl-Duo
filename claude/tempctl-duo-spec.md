@@ -2463,6 +2463,13 @@ editor (tables + chart handles, drafts, undo/redo, run edits, start without savi
   pin functions, buzzer tones / volume, bad readings (a reattach spike still gets through: next version).
   Wiki: fan wiring diagram (s3-fan), optional-pin defaults marked in the relay / E-stop / buzzer diagrams,
   "Connect only what you need" in the S3 and CYD hardware pages.
+- **1.0.69** (2026-11-16; after 1.0.68 = b9c25fd): see 9.30 - settling after a reattach: a valid reading after
+  faults is no longer taken as the new level at once (a contact transient of 150 degC got through); the first
+  readings after boot settle the same way (first value about 1 s later). Host tests extended.
+  Also see 9.31 - sound settings (key beep tone `safety.keyTone` 1000 ... 4000 Hz, default 2000 (was 3000), and
+  length `safety.keyMs` 10 ... 80 ms, default 20; the volume a slider; all sound settings one group; web cards
+  Sound and Optional pins) and scroll arrows on every scrolling touch page. Rost tested on the S3: reattach
+  settling, key beep tone / length, volume slider, scroll arrows, the web cards.
 - Next: Rost set up the GitHub secrets and disconnected Workers Builds (2026-10-20); the first release run follows the push.
   Open: the older untested points (Modbus beta, runs on the CYD, ...).
 - Tested with the host mock (Playwright): table edit → unsaved → undo / redo, target and hold drags,
@@ -3078,6 +3085,69 @@ No behaviour change.
   scope, joined in the order of the include lines; `web/src/README.md`). `tools/web_join.py` writes
   `web/index.html`, which is now generated and ignored by git; `web_embed.py` (every firmware build),
   `build_site.py` and the mock device join first. The first join was byte-identical to the page before.
+
+### 9.30 Settling after a reattach (Rost 2026-11-16; version 1.0.69)
+
+Cause (found in 1.0.68 on the S3): after a stretch of converter faults longer than the hold, or faults up to the
+hold count followed by a jump, `TcFilter` took the first valid reading as the new level unchecked. A contact
+transient when a thermocouple is plugged back in (150+ degC at 25 degC room) became the level and the jump check
+then compared against it.
+
+Rule (`src/tc_filter.h`): without a trusted reference a valid reading is not accepted at once. This applies
+to (a) a valid reading after more than `holdReads()` bad readings, (b) a valid jump after a stretch that
+contained a converter fault and reached the hold count, (c) the first readings after `reset()` / boot. The filter
+then settles: the whole chain of valid readings must stay inside a band (max - min) of `SETTLE_TOL` = the smaller
+of `maxJump` (if > 0) and 10 degC, for `SETTLE_MS` = 1000 ms and at least `SETTLE_READS` = 3 readings (real
+ramps are 1-3 degC/s, so 10 degC over 1 s is safe while heating; a slowly decaying transient in steps below
+`maxJump` does not settle until it is flat). The new level is the median of the chain's last (up to 9) readings
+(`newLevel()`, the median filter starts again, the PID rebases). A reading that would widen the band beyond the
+tolerance restarts the chain with it; a converter fault ends it.
+
+- While settling `update()` returns Hold within the hold count (if there was a value), otherwise Lost; the value
+  is not updated and `fresh()` is false, so the control waits / the output is off. Settling counts as bad for
+  `badTooLong()` (the bad stretch only ends with the accepted level): a sensor that keeps spiking while heating still
+  gives the sensor fault after `local.badSec`. A channel that is off just shows "no reading".
+- Cut-off: the unsettled valid reading is exposed through `pending()` (as a held-back jump is), so
+  `local_ctrl.cpp` still switches the power off for a reading above the cut-off; the accepted level is checked as
+  before (`fresh && pv > maxTemp` latches the over-temperature fault).
+- A jump of valid readings only (no fault) keeps the 1.0.68 rule: held for the hold count, then the new level.
+- Boot: the first value appears about 1 s later than before (a reading interval longer than 333 ms: 3 readings).
+  Nothing depends on an immediate first value (the "link ok" check and run start use `fresh()` / `everGood()`).
+- Host tests: reattach transient, slowly decaying transient, stable reattach, hot reattach, alternating spikes,
+  fault restarts, reset, monitor tolerance.
+
+### 9.31 Sound settings, scroll arrows (Rost 2026-11-13; version 1.0.69)
+
+Rost: the key beep was too high (3000 Hz). New settings (group `safety`, JSON / console / web / touch):
+- `safety.keyTone` in Hz: 1000, 1500, **2000** (default), 2500, 3000, 4000. `safety.keyMs` in ms: 10, **20** (default),
+  30, 50, 80. `settingsValidate` moves any other value to the nearest allowed one (a tone of 3400 becomes 3000; the
+  console `set` refuses a value outside the list: `K_SET`). `safetyConfigure()` hands them to the sound engine (the key
+  note `N_KEY` in `safety.cpp` is no longer constant).
+- Preview: choosing a tone or length on the touch screen plays the key beep once with the chosen values
+  (`safetyKeyTest(hz, ms)`, also with the sound or the key beep off, like the test beep). The web page has a second
+  button "Test key beep" (`POST /api/beep` with `{"key":true}`) next to "Test beep".
+- Volume `safety.volume` 1 ... 5 is a slider (touch: LVGL slider, applied on release with the test beep as a
+  preview; web: range input with the number shown).
+- Touch System page: tone and length are pop-up lists (`tChoice`) like the other choices. The sound rows (alarm sound,
+  volume, key beep, tone, length) are one group, with the small gap above it that the other System groups have
+  (`G` = 10 / 20 px), and the chip warning follows after another gap. The touch sliders (volume, brightness) keep
+  12 px beside them: the knob reaches past the bar (was clipped at the maximum). Web Settings: cards of their own
+  (Rost) - "Sound" (same rows, selects for tone and length, both test buttons) and "Optional pins" (GPIO
+  functions and the cooling fan), each hidden when the board has no sound / no optional pins; Safety keeps
+  manual timeout, E-stop, relay, chip warning and the live line.
+- CYD: its speaker connector is on the same LEDC channel, so the same settings and tones apply; the CYD's
+  `safetySoundWired()` is always true.
+
+Scroll arrows (touch UI, both boards): `tScrollArrows(scroller)` in `tui_widgets.cpp` adds a small up and down
+triangle (LV_SYMBOL_UP / DOWN of the built-in Montserrat 16 (S3) / 12 (CYD): no new flash for fonts) as floating
+children of the scroller's parent (not clickable, not scrollable, ignore the layout), centred over its top / bottom
+edge, 70 % opaque, in the named style `S_.scrollArrow` (text colour = theme text colour). The up arrow shows while
+`lv_obj_get_scroll_top() > 2`, the down arrow while `lv_obj_get_scroll_bottom() > 2`. They are updated on
+SCROLL / SIZE_CHANGED / LAYOUT_CHANGED / CHILD_CHANGED of the scroller and by one 300 ms timer for all of them
+(content that shows or hides). Applied in `tPageCreate()` (every page body: menu, log, display, network, system,
+programs, channels), the program editor body and the pop-up choice list (`tChoice`). Up to 12 scrollers at a time.
+- Host tests: defaults, nearest-value validation, JSON round trip; console host: `set safety.keyTone` accepted /
+  refused. UI host: the wiki pictures show the arrows.
 
 ## 10. Open items carried over from TempCtl
 

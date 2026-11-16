@@ -89,7 +89,7 @@ static void initStyles() {
   lv_style_t* all[] = {&S_.scr, &S_.panel, &S_.sunk, &S_.btn, &S_.btnPressed, &S_.btnPri, &S_.btnDanger, &S_.btnDis,
                        &S_.btnChecked, &S_.muted, &S_.small, &S_.title, &S_.danger, &S_.amber, &S_.ok, &S_.acc, &S_.ring, &S_.cell, &S_.btnOn[0], &S_.btnOn[1], &S_.tileOn[0], &S_.tileOn[1],
                        &S_.pv[0], &S_.pv[1], &S_.sp[0], &S_.sp[1], &S_.barBg, &S_.bar[0], &S_.bar[1], &S_.overlay,
-                       &S_.dialog, &S_.listRow, &S_.sep, &S_.qr};
+                       &S_.dialog, &S_.listRow, &S_.sep, &S_.qr, &S_.scrollArrow};
   for (lv_style_t* st : all) lv_style_init(st);
   // geometry and fonts (colours: recolour())
   lv_style_set_text_font(&S_.scr, &tfont_14);
@@ -140,6 +140,10 @@ static void initStyles() {
   lv_style_set_border_width(&S_.overlay, 0);
   lv_style_set_radius(&S_.overlay, 0);
   lv_style_set_pad_all(&S_.overlay, 0);
+
+  lv_style_set_text_opa(&S_.scrollArrow, LV_OPA_80);
+  lv_style_set_bg_opa(&S_.scrollArrow, LV_OPA_80);
+  lv_style_set_radius(&S_.scrollArrow, LV_RADIUS_CIRCLE);
 
   lv_style_set_bg_opa(&S_.dialog, LV_OPA_COVER);
   lv_style_set_border_width(&S_.dialog, 1);
@@ -193,6 +197,8 @@ static void recolour() {
   lv_style_set_border_color(&S_.btnChecked, col[C_ACC]);
   lv_style_set_text_color(&S_.btnChecked, col[C_TEXT]);
   lv_style_set_text_color(&S_.muted, col[C_MUTED]);
+  lv_style_set_text_color(&S_.scrollArrow, col[C_TEXT]);
+  lv_style_set_bg_color(&S_.scrollArrow, col[C_BG]);
   lv_style_set_text_color(&S_.danger, col[C_DANGER]);
   lv_style_set_text_color(&S_.amber, col[C_AMBER]);
   lv_style_set_text_color(&S_.ok, col[C_OK]);

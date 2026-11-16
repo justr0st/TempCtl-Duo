@@ -1259,6 +1259,7 @@ bool safetySoundWired() { return ioPin(IO_BUZZER) >= 0; }
 bool safetyChipTempWired() { return SCREEN_W > 400; }
 void safetyFx(SoundFx f) { ++fxCount[f]; }
 void safetyBeepTest() { safetyFx(FX_TEST); }
+void safetyKeyTest(uint16_t, uint8_t) {}
 
 // firmware update (ota.h, sdlog.h)
 #include "ota.h"
