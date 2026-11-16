@@ -41,8 +41,10 @@ Set on the web *Settings › Safety*, the touch *Menu › System* or with `set s
 | **E-stop input** (S3, optional pin: GPIO5 by default) | off | NC contact to GND. Open contact or broken wire: SSRs and the relay off at once, run stopped, manual and autotune off, Modbus outputs off; nothing can be switched on while it is open |
 | **SSR supply relay** (S3, optional pin: GPIO4 by default) | on | on while a local channel heats or autotune runs; off when none does and at once on any local fault or E-stop. Off only when no relay is fitted |
 | **Alarm sound** (S3 optional pin: GPIO6 by default, CYD speaker P4) | on | fault / E-stop: 3 long beeps every 3 s; "Action required" and the timeout warning: 2 short beeps every 10 s; run finished: three rising tones; each has its own pitch. Any touch, web action or serial command silences the current alarm. *Test beep* on the web page (it plays even with the sound off) |
-| **Sound volume** (`safety.volume`) | 3 | 1 (quietest) … 5. **Alarms (faults, E-stop) always play at full volume** |
+| **Sound volume** (`safety.volume`) | 3 | 1 (quietest) … 5, a slider. **Alarms (faults, E-stop) always play at full volume** |
 | **Key beep** (`safety.keyBeep`) | on | a short beep on a completed tap on the touch screen; a refused action or error message plays a low tone, a successful save a rising one. It never interrupts an alarm |
+| **Key beep tone** (`safety.keyTone`) | 2000 Hz | 1000, 1500, 2000, 2500, 3000 or 4000 Hz; lower is softer. Changing it plays the beep once |
+| **Key beep length** (`safety.keyMs`) | 20 ms | 10, 20, 30, 50 or 80 ms |
 | **Chip temperature warning** (S3) | on, 80 °C | the ESP32-S3's own temperature, read every 30 s; a warning event above the limit |
 
 **Optional pins (S3).** GPIO 4, 5 and 6 each get a function in *Settings › Safety › Optional pins* (touch: *Menu

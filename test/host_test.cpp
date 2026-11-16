@@ -1750,6 +1750,13 @@ static void testBothIdle() {
 
 // ------------------------------------------------------------------ thermocouple input filter (tc_filter.h, 1.0.68)
 
+// feeds steady readings every 100 ms until the filter has settled (11 readings = 1 s); t = time of the last one
+static TcIn tcSettle(TcFilter& f, const TcFilterCfg& c, float v, uint32_t& t) {
+  TcIn r = f.update(c, true, v, t);
+  for (int i = 0; i < 10; ++i) r = f.update(c, true, v, t += 100);
+  return r;
+}
+
 static void testTcFilter() {
   // hold count: the median's window, 2 without the median, at most 3 s worth of readings, at least 1
   CHECK(TcFilter::holdReads(TcFilterCfg{true, 5, 100, 25, 3}) == 5);
@@ -1768,7 +1775,9 @@ static void testTcFilter() {
     TcFilter f;
     uint32_t t = 1000;
     CHECK(isnan(f.value()) && !f.everGood() && !f.fresh(c, t));
-    CHECK(f.update(c, true, 100, t) == TcIn::Good && near(f.value(), 100) && f.fresh(c, t) && !f.newLevel());
+    CHECK(f.update(c, true, 100, t) == TcIn::Lost && isnan(f.value()) && !f.fresh(c, t));  // (settling after boot)
+    for (int i = 0; i < 9; ++i) CHECK(f.update(c, true, 100, t += 100) == TcIn::Lost);
+    CHECK(f.update(c, true, 100, t += 100) == TcIn::Good && near(f.value(), 100) && f.fresh(c, t) && !f.newLevel());
     for (float v : {101.f, 99.f, 100.f}) CHECK(f.update(c, true, v, t += 100) == TcIn::Good);
     CHECK(near(f.value(), 100));  // (4 readings: still the last one)
     CHECK(f.update(c, true, 120, t += 100) == TcIn::Good && near(f.value(), 100));  // spike of 20: median
@@ -1781,7 +1790,7 @@ static void testTcFilter() {
     const TcFilterCfg c{true, 5, 100, 25, 3};
     TcFilter f;
     uint32_t t = 0;
-    for (int i = 0; i < 6; ++i) f.update(c, true, 100, t += 100);
+    tcSettle(f, c, 100, t);
     for (int i = 0; i < 5; ++i) {
       CHECK(f.update(c, true, 200, t += 100) == TcIn::Hold);
       CHECK(near(f.value(), 100) && near(f.pending(), 200) && !f.fresh(c, t) && !f.newLevel());
@@ -1797,49 +1806,141 @@ static void testTcFilter() {
     // jumpMax 0: not checked
     const TcFilterCfg n{false, 3, 100, 0, 3};
     TcFilter g;
-    g.update(n, true, 20, 100);
-    CHECK(g.update(n, true, 400, 200) == TcIn::Good && near(g.value(), 400) && !g.newLevel());
+    uint32_t u = 0;
+    tcSettle(g, n, 20, u);
+    CHECK(g.update(n, true, 400, u += 100) == TcIn::Good && near(g.value(), 400) && !g.newLevel());
   }
   // invalid readings: Hold for the hold count (2 without the median), then Lost; back after the gap = new level
   {
     const TcFilterCfg c{false, 3, 100, 25, 3};
     TcFilter f;
     CHECK(f.update(c, false, NAN, 100) == TcIn::Lost);  // never a good one: lost at once
-    CHECK(f.update(c, true, 50, 200) == TcIn::Good && !f.newLevel());
-    CHECK(f.update(c, false, NAN, 300) == TcIn::Hold && near(f.value(), 50) && !f.fresh(c, 300));
-    CHECK(f.update(c, true, NAN, 400) == TcIn::Hold);  // (NaN from a "good" frame counts as invalid)
-    CHECK(f.update(c, false, NAN, 500) == TcIn::Lost && near(f.value(), 50));
-    CHECK(f.update(c, false, NAN, 600) == TcIn::Lost);
-    CHECK(f.update(c, true, 52, 700) == TcIn::Good && f.newLevel() && near(f.value(), 52));
+    uint32_t t = 200;
+    CHECK(tcSettle(f, c, 50, t) == TcIn::Good && !f.newLevel());
+    CHECK(f.update(c, false, NAN, t += 100) == TcIn::Hold && near(f.value(), 50) && !f.fresh(c, t));
+    CHECK(f.update(c, true, NAN, t += 100) == TcIn::Hold);  // (NaN from a "good" frame counts as invalid)
+    CHECK(f.update(c, false, NAN, t += 100) == TcIn::Lost && near(f.value(), 50));
+    CHECK(f.update(c, false, NAN, t += 100) == TcIn::Lost);
+    // back after the gap: settles first, then the new level
+    t += 100;
+    CHECK(tcSettle(f, c, 52, t) == TcIn::Good && f.newLevel() && near(f.value(), 52));
     // within the hold and back: not a new level
-    CHECK(f.update(c, false, NAN, 800) == TcIn::Hold);
-    CHECK(f.update(c, true, 53, 900) == TcIn::Good && !f.newLevel());
+    CHECK(f.update(c, false, NAN, t += 100) == TcIn::Hold);
+    CHECK(f.update(c, true, 53, t += 100) == TcIn::Good && !f.newLevel());
   }
   // badTooLong: bad readings without a break for badSec
   {
     const TcFilterCfg c{true, 3, 100, 25, 3};
     TcFilter f;
-    f.update(c, true, 100, 900);
-    CHECK(!f.badTooLong(c, 900));
-    uint32_t t = 1000;
-    for (; t < 4000; t += 100) {
+    uint32_t t = 0;
+    tcSettle(f, c, 100, t);
+    CHECK(!f.badTooLong(c, t));
+    t += 100;
+    for (const uint32_t end = t + 3000; t < end; t += 100) {
       f.update(c, false, NAN, t);
       CHECK(!f.badTooLong(c, t));
     }
     f.update(c, false, NAN, t);
     CHECK(f.badTooLong(c, t));  // 3 s after the first bad one
     f.update(c, true, 100, t += 100);
+    CHECK(f.badTooLong(c, t));  // (settling counts as bad)
+    tcSettle(f, c, 100, t);
     CHECK(!f.badTooLong(c, t));
     // held-back jumps count as bad readings too
     const TcFilterCfg j{true, 9, 100, 25, 1};
     TcFilter g;
-    for (int i = 0; i < 3; ++i) g.update(j, true, 100, 100 * i);
-    g.update(j, true, 300, 1000);
-    g.update(j, true, 300, 1500);
-    CHECK(!g.badTooLong(j, 1500) && g.update(j, true, 300, 2000) == TcIn::Hold && g.badTooLong(j, 2000));
+    uint32_t u = 0;
+    tcSettle(g, j, 100, u);
+    const uint32_t u0 = u + 100;
+    g.update(j, true, 300, u0);
+    g.update(j, true, 300, u0 + 500);
+    CHECK(!g.badTooLong(j, u0 + 500) && g.update(j, true, 300, u0 + 1000) == TcIn::Hold && g.badTooLong(j, u0 + 1000));
     // reset: as new
     g.reset();
     CHECK(!g.everGood() && g.bad() == 0 && isnan(g.value()));
+  }
+  // settling after a reattach (1.0.69, spec 9.30)
+  {
+    const TcFilterCfg c{true, 5, 100, 25, 3};
+    TcFilter f;
+    uint32_t t = 0;
+    tcSettle(f, c, 25, t);
+    CHECK(near(f.value(), 25));
+    // unplugged (faults), plugged back in with a contact transient: 150 is never taken
+    for (int i = 0; i < 12; ++i) f.update(c, false, NAN, t += 100);
+    bool seen150 = false;
+    TcIn r = TcIn::Lost;
+    const float seq[] = {150, 26, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25};
+    uint32_t t1 = 0;
+    int n = 0;
+    for (float v : seq) {
+      r = f.update(c, true, v, t += 100);
+      if (!t1) t1 = t;
+      if (r == TcIn::Good) {
+        if (f.value() > 100) seen150 = true;
+        break;
+      }
+      CHECK(r == TcIn::Lost && near(f.value(), 25) && !f.fresh(c, t));
+      ++n;
+    }
+    CHECK(!seen150 && r == TcIn::Good && near(f.value(), 25) && f.newLevel());
+    CHECK(t - t1 >= 1000 && n >= 10);  // 1 s after the first reading
+    // a stable reattach settles after 1 s (11 readings at 100 ms)
+    TcFilter g;
+    t = 0;
+    tcSettle(g, c, 25, t);
+    for (int i = 0; i < 12; ++i) g.update(c, false, NAN, t += 100);
+    CHECK(g.update(c, true, 24, t += 100) == TcIn::Lost);
+    for (int i = 0; i < 9; ++i) CHECK(g.update(c, true, 24.5f, t += 100) == TcIn::Lost);
+    CHECK(g.update(c, true, 24, t += 100) == TcIn::Good && near(g.value(), 24.5f) && g.newLevel() && g.fresh(c, t));
+    // ... also at a hot level
+    TcFilter h;
+    t = 0;
+    tcSettle(h, c, 25, t);
+    for (int i = 0; i < 12; ++i) h.update(c, false, NAN, t += 100);
+    t += 100;
+    CHECK(tcSettle(h, c, 200, t) == TcIn::Good && near(h.value(), 200));
+    // faults up to the hold count, then a jump: not taken at once, the reading is held for the caller's cut-off
+    TcFilter k;
+    t = 0;
+    tcSettle(k, c, 25, t);
+    for (int i = 0; i < 5; ++i) k.update(c, false, NAN, t += 100);  // hold = 5
+    CHECK(k.update(c, true, 150, t += 100) == TcIn::Lost && near(k.value(), 25) && near(k.pending(), 150));
+    CHECK(k.update(c, true, 26, t += 100) == TcIn::Lost && near(k.pending(), 26));
+    // alternating spikes never settle; badTooLong after badSec
+    TcFilter m;
+    t = 0;
+    tcSettle(m, c, 25, t);
+    for (int i = 0; i < 12; ++i) m.update(c, false, NAN, t += 100);
+    for (int i = 0; i < 60; ++i) CHECK(m.update(c, true, i % 2 ? 25.f : 150.f, t += 100) == TcIn::Lost);
+    CHECK(m.badTooLong(c, t) && near(m.value(), 25));
+    // a slowly decaying transient (each step < 25 degC) does not settle until the readings are flat
+    TcFilter d;
+    t = 0;
+    tcSettle(d, c, 25, t);
+    for (int i = 0; i < 12; ++i) d.update(c, false, NAN, t += 100);
+    for (float v : {150.f, 135.f, 120.f, 105.f, 90.f, 75.f, 60.f, 45.f, 30.f, 26.f, 25.f, 25.f, 25.f, 25.f, 25.f, 25.f, 25.f, 25.f})
+      CHECK(d.update(c, true, v, t += 100) == TcIn::Lost && near(d.value(), 25));
+    TcIn dr = TcIn::Lost;
+    for (int i = 0; i < 5 && dr != TcIn::Good; ++i) dr = d.update(c, true, 25, t += 100);
+    CHECK(dr == TcIn::Good && d.value() > 24 && d.value() < 27);
+    // a fault restarts the settling
+    TcFilter q;
+    t = 0;
+    for (int i = 0; i < 8; ++i) q.update(c, true, 25, t += 100);
+    q.update(c, false, NAN, t += 100);
+    for (int i = 0; i < 10; ++i) CHECK(q.update(c, true, 25, t += 100) == TcIn::Lost);
+    CHECK(q.update(c, true, 25, t += 100) == TcIn::Good);
+    // first readings after reset() settle again; a monitor-style config (maxJump 0) uses the 10 degC tolerance
+    const TcFilterCfg mc{false, 3, 250, 0, 1};
+    TcFilter w;
+    t = 0;
+    CHECK(w.update(mc, true, 20, t) == TcIn::Lost && w.update(mc, true, 40, t += 250) == TcIn::Lost);  // 20 degC apart
+    CHECK(w.update(mc, true, 41, t += 250) == TcIn::Lost && w.update(mc, true, 41, t += 250) == TcIn::Lost);
+    CHECK(w.update(mc, true, 42, t += 250) == TcIn::Lost);  // (750 ms since 40)
+    CHECK(w.update(mc, true, 42, t += 250) == TcIn::Good && near(w.value(), 41));  // (median of the chain)
+    w.reset();
+    CHECK(isnan(w.value()) && w.update(mc, true, 20, 0) == TcIn::Lost);
   }
 }
 
@@ -1849,7 +1950,7 @@ static void testIoFanSettings() {
   Settings s;
   char msg[200];
   settingsDefaults(s, S3);
-  CHECK(s.volume == 3 && s.keyBeep == 1);
+  CHECK(s.volume == 3 && s.keyBeep == 1 && s.keyTone == 2000 && s.keyMs == 20);
   CHECK(s.ioFn[0] == IO_RELAY && s.ioFn[1] == IO_ESTOP && s.ioFn[2] == IO_BUZZER);
   CHECK(s.fanAfterRun == 1 && near(s.fanOffBelow, 60) && s.fanMaxMin == 30 && s.fanSpeed == 100);
   CHECK(near(s.ch[0].loc.jumpMax, 25) && s.ch[0].loc.badSec == 3 && s.ch[1].loc.readMs == 100);
@@ -1865,6 +1966,8 @@ static void testIoFanSettings() {
   settingsDefaults(s, S3);
   s.volume = 0;
   s.keyBeep = 7;
+  s.keyTone = 3400;
+  s.keyMs = 0;
   s.fanOffBelow = 10;
   s.fanMaxMin = 0;
   s.fanSpeed = 5;
@@ -1873,6 +1976,7 @@ static void testIoFanSettings() {
   s.ch[0].loc.badSec = 0;
   s.ch[1].loc.badSec = 99;
   settingsValidate(s, S3, msg, sizeof(msg));
+  CHECK(s.keyTone == 3000 && s.keyMs == 10);  // the nearest allowed value
   CHECK(s.volume == 1 && s.keyBeep == 1 && near(s.fanOffBelow, 30) && s.fanMaxMin == 1 && s.fanSpeed == 20);
   CHECK(near(s.ch[0].loc.jumpMax, 500) && near(s.ch[1].loc.jumpMax, 25) && s.ch[0].loc.badSec == 1 && s.ch[1].loc.badSec == 30);
   s.volume = 9;
@@ -1917,6 +2021,8 @@ static void testIoFanSettings() {
   settingsDefaults(a, S3);
   a.volume = 5;
   a.keyBeep = 0;
+  a.keyTone = 1500;
+  a.keyMs = 50;
   a.ioFn[0] = IO_FAN_PWM;
   a.ioFn[1] = IO_ESTOP;
   a.ioFn[2] = IO_FAN_TACH;
@@ -1932,6 +2038,7 @@ static void testIoFanSettings() {
   CHECK(!strcmp(d["io"]["fn"][0] | "", "fanPwm") && !strcmp(d["io"]["fn"][2] | "", "fanTach") && d["io"]["fn"].size() == 3);
   CHECK(d["safety"]["volume"] == 5 && d["safety"]["keyBeep"] == false && d["fan"]["maxMin"] == 90);
   roundTrip(a, b, false);
+  CHECK(b.keyTone == 1500 && b.keyMs == 50 && d["safety"]["keyTone"] == 1500);
   CHECK(b.volume == 5 && b.keyBeep == 0 && b.ioFn[0] == IO_FAN_PWM && b.ioFn[1] == IO_ESTOP && b.ioFn[2] == IO_FAN_TACH);
   CHECK(b.fanAfterRun == 0 && near(b.fanOffBelow, 45.5f) && b.fanMaxMin == 90 && b.fanSpeed == 60);
   CHECK(b.ch[0].loc.jumpMax == 0 && near(b.ch[1].loc.jumpMax, 40) && b.ch[1].loc.badSec == 10 && b.ch[0].loc.badSec == 3);
@@ -1943,6 +2050,7 @@ static void testIoFanSettings() {
   Settings c;
   settingsDefaults(c, S3);
   CHECK(settingsFromJson(e.as<JsonObjectConst>(), c, msg, sizeof(msg)));
+  CHECK(c.keyTone == 2000 && c.keyMs == 20);
   CHECK(c.volume == 3 && c.keyBeep == 1 && c.fanMaxMin == 30 && c.ch[0].loc.badSec == 3);
   CHECK(c.ioFn[0] == IO_FAN && c.ioFn[1] == IO_ESTOP && c.ioFn[2] == IO_BUZZER);
   // unknown function names and too long lists are refused

@@ -187,6 +187,8 @@ struct Settings {
   float chipMaxC;
   uint8_t volume;         // buzzer volume 1 ... 5 (alarms always play at 5)
   uint8_t keyBeep;        // 1: a short beep on every touch-screen button
+  uint16_t keyTone;       // key beep tone in Hz: 1000, 1500, 2000 (default), 2500, 3000, 4000
+  uint8_t keyMs;          // key beep length in ms: 10, 20 (default), 30, 50, 80
 
   // Optional pins and the cooling fan (spec 9.25)
   uint8_t ioFn[IO_PINS_MAX];  // IoFn of each optional pin of the board (BoardLimits::ioGpio)

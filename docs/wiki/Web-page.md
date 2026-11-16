@@ -160,10 +160,13 @@ moves, Shift + drag zooms to a range, double click shows all; *Crop to view* + *
 - **Wi-Fi**: on / off (off: no network, no access point, no scan — the page loses its connection unless it runs
   over USB; switch it on again on the touch screen or with `wifi on`), network (with scan), password, access point
   password, host name, fixed IP.
-- **Safety**: manual mode timeout, E-stop, SSR supply relay, alarm sound (with **sound volume**, **key beep**
-  and a test beep), chip temperature ([Safety](Safety.md)); on the S3 the **optional pins** (what GPIO 4, 5, 6
-  do) and the **cooling fan** (run after a program, until every channel is below, at most, PWM speed). E-stop,
-  relay and sound appear only when a pin has that function. A line shows the fan's state and rpm.
+- **Safety**: manual mode timeout, E-stop, SSR supply relay, chip temperature ([Safety](Safety.md)). E-stop and
+  relay appear only when a pin has that function. A line shows the E-stop contact, the relay and the fan's state
+  and rpm.
+- **Sound** (when the board has a buzzer or speaker): alarm sound, **sound volume** slider, **key beep** with its
+  tone and length, test buttons.
+- **Optional pins** (S3): what GPIO 4, 5, 6 do, and the **cooling fan** (run after a program, until every channel
+  is below, at most, PWM speed).
 - **Display** (applied at once): accent colour, theme, brightness, rotation, screen check, SPI clock.
 - **Clock**: the time zone for local times (SD run logs, backups).
 

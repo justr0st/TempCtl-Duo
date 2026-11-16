@@ -114,7 +114,8 @@ window opens and deleted when it closes (RAM on the CYD: one code at a time ther
   window (2 without the median), at most 3 s worth; then a valid reading is the new level (the median
   starts again, the PID rebases its derivative) and without one the input is lost. `badTooLong()` (bad for
   `local.badSec`) is the sensor fault. A held reading above the cut-off still switches the power off for that
-  step.
+  step. After a stretch of faults and after boot the new level must settle first (`SETTLE_MS` 1 s, at least 3 readings
+  inside a band of 10 degC or `jumpMax` if smaller, the median is the new level; spec 9.30): until then *Lost* / *Hold*, `pending()` holds the reading.
 - **Heartbeat**: the control task reports to the local task on every pass and inside its long bus requests. A
   heating local channel without a report for 10 s gets the fault *control task stopped* (`FAULT_CONTROL` in
   `runaway.h`); before, it kept its last setpoint for good.
@@ -127,7 +128,10 @@ window opens and deleted when it closes (RAM on the CYD: one code at a time ther
   phase / step has the fan option; after a run until the hottest reading of all channels and the monitor is below
   `fan.offBelow`, at most `fan.maxMin`; ends at once on a new run, manual mode or an autotune that heats.
 - **Buzzer** (`src/safety.cpp`): sounds are note lists (Hz, ms) on a 10 ms tick (the E-stop is read every 50
-  ms); `safety.volume` 1 … 5 is the PWM duty (2 / 6 / 16 / 48 / 128 of 255), alarms always play at 5.
+  ms); `safety.volume` 1 … 5 is the PWM duty (2 / 6 / 16 / 48 / 128 of 255), alarms always play at 5. The key beep's tone and
+  length are `safety.keyTone` / `safety.keyMs` (`safetyConfigure`); the touch settings preview them with `safetyKeyTest`.
+- **Scroll arrows** (`tScrollArrows`, `src/tui_widgets.cpp`): floating up / down triangles over the edges of every scrolling
+  touch page (and the pop-up list) while it can scroll that way; style `S_.scrollArrow`.
 - **Run report** (`src/run_stats.h`, pure, host-tested): per channel the highest PV and its run time, the
   largest deviation from the setpoint in holds (from 5 s into a hold), the steepest rise over 5 s; the
   monitor's highest PV. It is written to the event log when a run ends, and is in `/api/live` (`report`).

@@ -3,8 +3,14 @@
 //
 // A bad reading is one the converter reports as faulty, or a valid one that differs from the last accepted
 // reading by more than maxJump (an implausible jump). The first holdReads() bad readings in a row are held
-// back: the value stays, update() returns Hold and the caller keeps its output. After that a valid reading
-// is accepted as the new level (the median starts again with it); without a valid one the input is Lost.
+// back: the value stays, update() returns Hold and the caller keeps its output. After that the input is Lost
+// until a new level has settled (1.0.69, spec 9.30): after a stretch of bad readings with converter faults
+// (a thermocouple plugged back in) and for the very first readings after reset(), valid readings are not taken
+// at once - a contact transient would become the level. They are accepted when they have agreed with each
+// other for SETTLE_MS and at least SETTLE_READS in a row: the whole chain stays inside a band of SETTLE_TOL
+// (the smaller of maxJump and 10 degC). The new level is the median of the chain's last readings; the median
+// filter starts again with it. A reading that would widen the band, or a fault, restarts the settling. A jump
+// of valid readings only (no fault) is still taken as the new level after the hold.
 // badTooLong(): bad readings without a break for badSec seconds - the caller's sensor fault.
 #pragma once
 #include <math.h>
@@ -28,14 +34,19 @@ class TcFilter {
  public:
   static constexpr uint32_t FRESH_MS = 1000;   // a reading counts as current this long ...
   static constexpr uint32_t HOLD_MAX_MS = 3000;  // the output is never kept longer than this without a reading
+  static constexpr uint32_t SETTLE_MS = 1000;    // a new level must stay steady this long ...
+  static constexpr uint8_t SETTLE_READS = 3;     // ... over at least this many readings
+  static constexpr float SETTLE_TOL = 10.0f;     // degC: widest spread of the settling chain (maxJump if smaller)
 
   void reset() {
     medN_ = 0;
     bad_ = 0;
     everGood_ = false;
     newLevel_ = false;
+    faulted_ = settling_ = false;
+    candN_ = 0;
     value_ = last_ = pending_ = NAN;
-    lastGoodMs_ = badSinceMs_ = 0;
+    lastGoodMs_ = badSinceMs_ = candSinceMs_ = 0;
   }
 
   // ... at long read intervals two intervals and a half
@@ -59,8 +70,43 @@ class TcFilter {
     if (!ok || isnan(tempC)) {
       pending_ = NAN;
       markBad(nowMs);
+      faulted_ = true;
+      settling_ = false;  // a fault restarts the settling
+      candN_ = 0;
       if (bad_ > hold) medN_ = 0;
       return everGood_ && bad_ <= hold ? TcIn::Hold : TcIn::Lost;
+    }
+    if (!everGood_ || bad_ > hold || (faulted_ && bad_ >= hold && jumpFrom(c, tempC))) {
+      // no trusted reference: the reading has to settle first
+      const float tol = c.maxJump > 0 && c.maxJump < SETTLE_TOL ? c.maxJump : SETTLE_TOL;
+      if (!settling_ || fmaxf(candMax_, tempC) - fminf(candMin_, tempC) > tol) {
+        settling_ = true;  // (a new chain: the reading would widen the band too far)
+        candN_ = 0;
+        candSinceMs_ = nowMs;
+        candMin_ = candMax_ = tempC;
+      }
+      candMin_ = fminf(candMin_, tempC);
+      candMax_ = fmaxf(candMax_, tempC);
+      for (int k = 0; k < 8; ++k) cand_[k] = cand_[k + 1];
+      cand_[8] = tempC;
+      if (candN_ < 255) ++candN_;
+      if (candN_ < SETTLE_READS || nowMs - candSinceMs_ < SETTLE_MS) {
+        pending_ = tempC;  // (a held-back reading above the cut-off still counts for the caller)
+        markBad(nowMs);
+        return everGood_ && bad_ <= hold ? TcIn::Hold : TcIn::Lost;
+      }
+      medN_ = 0;  // settled: the median of the chain's last readings is the new level
+      newLevel_ = everGood_;
+      {
+        const int n = candN_ >= 9 ? 9 : (candN_ | 1) > candN_ ? candN_ - 1 : candN_;  // (largest odd count)
+        tempC = medianOf(cand_ + 9 - n, n);
+      }
+      settling_ = false;
+      candN_ = 0;
+      bad_ = 0;
+      faulted_ = false;
+      pending_ = NAN;
+      return accept(c, tempC, nowMs);
     }
     const bool jump = everGood_ && c.maxJump > 0 && !isnan(last_) && fabsf(tempC - last_) > c.maxJump;
     if (jump && bad_ < hold) {  // held back; the reading after the hold is taken as it is
@@ -73,26 +119,13 @@ class TcFilter {
       newLevel_ = everGood_;
     }
     bad_ = 0;
+    faulted_ = false;
     pending_ = NAN;
-    last_ = tempC;
-    float t = tempC;
-    if (c.median) {
-      const uint8_t w = c.medianN >= 3 && c.medianN <= 9 ? c.medianN : 3;
-      for (int k = 0; k < 8; ++k) med_[k] = med_[k + 1];
-      med_[8] = tempC;
-      if (medN_ < 9) ++medN_;
-      if (medN_ >= w) t = medianOf(med_ + 9 - w, w);
-    } else {
-      medN_ = 0;
-    }
-    value_ = t;
-    lastGoodMs_ = nowMs;
-    everGood_ = true;
-    return TcIn::Good;
+    return accept(c, tempC, nowMs);
   }
 
   float value() const { return value_; }      // filtered, of the accepted readings (NaN: none yet)
-  float pending() const { return pending_; }  // the valid reading held back as a jump (NaN: none)
+  float pending() const { return pending_; }  // the valid reading held back as a jump / not yet settled (NaN: none)
   bool everGood() const { return everGood_; }
   bool newLevel() const { return newLevel_; }  // the last update() accepted a jump / the first reading after a gap
   uint8_t bad() const { return bad_; }
@@ -118,6 +151,27 @@ class TcFilter {
   }
 
  private:
+  bool jumpFrom(const TcFilterCfg& c, float tempC) const {
+    return c.maxJump > 0 && !isnan(last_) && fabsf(tempC - last_) > c.maxJump;
+  }
+  TcIn accept(const TcFilterCfg& c, float tempC, uint32_t nowMs) {
+    last_ = tempC;
+    float t = tempC;
+    if (c.median) {
+      const uint8_t w = c.medianN >= 3 && c.medianN <= 9 ? c.medianN : 3;
+      for (int k = 0; k < 8; ++k) med_[k] = med_[k + 1];
+      med_[8] = tempC;
+      if (medN_ < 9) ++medN_;
+      if (medN_ >= w) t = medianOf(med_ + 9 - w, w);
+    } else {
+      medN_ = 0;
+    }
+    value_ = t;
+    lastGoodMs_ = nowMs;
+    everGood_ = true;
+    return TcIn::Good;
+  }
+
   void markBad(uint32_t nowMs) {
     if (!bad_) badSinceMs_ = nowMs;
     if (bad_ < 255) ++bad_;
@@ -127,6 +181,10 @@ class TcFilter {
   uint8_t medN_ = 0;
   uint8_t bad_ = 0;    // bad readings in a row
   bool everGood_ = false, newLevel_ = false;
+  bool faulted_ = false;   // a converter fault in the current stretch of bad readings
+  bool settling_ = false;  // valid readings are being checked for a steady level
+  uint8_t candN_ = 0;      // readings in a row within the tolerance of each other
   float value_ = NAN, last_ = NAN, pending_ = NAN;
-  uint32_t lastGoodMs_ = 0, badSinceMs_ = 0;
+  float cand_[9] = {}, candMin_ = NAN, candMax_ = NAN;  // the settling chain: last readings, band
+  uint32_t lastGoodMs_ = 0, badSinceMs_ = 0, candSinceMs_ = 0;
 };

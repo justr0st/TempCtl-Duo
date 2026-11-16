@@ -39,7 +39,7 @@ extern const lv_font_t tfont_12, tfont_14, tfont_16b, tfont_20c, tfont_28c, tfon
 // Named styles (colours come only from these; themeApply() recolours them)
 struct TStyles {
   lv_style_t scr, panel, sunk, btn, btnPressed, btnPri, btnDanger, btnDis, btnChecked, muted, small, title, danger,
-      amber, ok, acc, ring, cell, btnOn[2], tileOn[2], pv[2], sp[2], barBg, bar[2], overlay, dialog, listRow, sep, qr;
+      amber, ok, acc, ring, cell, btnOn[2], tileOn[2], pv[2], sp[2], barBg, bar[2], overlay, dialog, listRow, sep, qr, scrollArrow;
 };
 extern TStyles S_;
 
@@ -68,7 +68,9 @@ struct TPage {
   lv_obj_t* title;
   lv_obj_t* body;
 };
-TPage tPageCreate(const char* title, lv_event_cb_t back);
+TPage tPageCreate(const char* title, lv_event_cb_t back);  // (its body gets the scroll arrows)
+// A small up / down triangle over the edge of a vertically scrolling object while it can scroll that way
+void tScrollArrows(lv_obj_t* scroller);
 
 // Popups (on the top layer; one modal at a time, closed with tModalClose)
 // An empty popup box (w x h, centred, flex column) on the dark overlay, for pages of their own (QR codes)

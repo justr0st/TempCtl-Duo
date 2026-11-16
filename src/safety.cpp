@@ -41,7 +41,8 @@ static const Note N_ALARM[] = {{2700, 400}, {0, 200}, {2700, 400}, {0, 200}, {27
 static const Note N_ACTION[] = {{2000, 150}, {0, 150}, {2000, 150}, {0, 9550}};
 // run finished: C, E, G rising (7th octave: where small piezos are loud)
 static const Note N_FINISHED[] = {{2093, 120}, {0, 40}, {2637, 120}, {0, 40}, {3136, 240}};
-static const Note N_KEY[] = {{3000, 20}};
+static Note N_KEYTEST[] = {{2000, 20}};  // the preview in the settings
+static Note N_KEY[] = {{2000, 20}};  // tone / length: safety.keyTone / keyMs (safetyConfigure)
 static const Note N_OK[] = {{2349, 60}, {0, 30}, {3136, 90}};  // D, G: a fourth up
 static const Note N_REFUSED[] = {{440, 160}};
 static const Note N_TEST[] = {{2700, 200}};  // the alarm's tone, at the set volume
@@ -49,10 +50,10 @@ static const Note N_TEST[] = {{2700, 200}};  // the alarm's tone, at the set vol
 static const Sound S_ALARM = SOUND(N_ALARM, true, true, 0);
 static const Sound S_ACTION = SOUND(N_ACTION, true, false, 0);
 // one-shots, by SoundFx; FX_FINISHED (internal) after them
-static constexpr int FX_FINISHED = FX_TEST + 1, FX_N = FX_FINISHED + 1;
+static constexpr int FX_FINISHED = FX_TEST + 1, FX_KEYTEST = FX_FINISHED + 1, FX_N = FX_KEYTEST + 1;
 static const Sound S_FX[FX_N] = {
     SOUND(N_KEY, false, false, 1), SOUND(N_OK, false, false, 2), SOUND(N_REFUSED, false, false, 2),
-    SOUND(N_TEST, false, false, 4), SOUND(N_FINISHED, false, false, 3),
+    SOUND(N_TEST, false, false, 4), SOUND(N_FINISHED, false, false, 3), SOUND(N_KEYTEST, false, false, 4),
 };
 // requests from any task; the tick takes them (a request that comes in while the tick clears it is lost: a
 // click, not a safety matter)
@@ -168,12 +169,14 @@ void safetyBegin() {
   if (esp_timer_create(&a, &h) == ESP_OK) esp_timer_start_periodic(h, TICK_MS * 1000);
 }
 
-void safetyConfigure(bool estop, bool sound, uint8_t vol, bool keyBeep) {
+void safetyConfigure(bool estop, bool sound, uint8_t vol, bool keyBeep, uint16_t keyHz, uint8_t keyMs) {
   estopEnabled = estop && safetyEstopWired();
   estopOn = estopEnabled && estopRaw;
   soundEnabled = sound;
   volume = vol >= 1 && vol <= 5 ? vol : 3;
   keyBeepOn = keyBeep;
+  N_KEY[0].hz = keyHz >= 200 && keyHz <= 8000 ? keyHz : 2000;
+  N_KEY[0].ms = keyMs >= 5 && keyMs <= 200 ? keyMs : 20;
 }
 
 bool safetyEstopWired() { return ioPin(IO_ESTOP) >= 0; }
@@ -193,6 +196,10 @@ void safetyFx(SoundFx fx) {
   fxReq[fx] = true;
 }
 void safetyBeepTest() { safetyFx(FX_TEST); }
+void safetyKeyTest(uint16_t hz, uint8_t ms) {
+  N_KEYTEST[0] = hz ? Note{hz, ms} : N_KEY[0];
+  fxReq[FX_KEYTEST] = true;
+}
 
 void safetyActivity() {
   lastActivity = millis();

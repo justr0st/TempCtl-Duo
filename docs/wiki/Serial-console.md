@@ -59,6 +59,7 @@ New in 1.0.68 (the `help settings` text lists the ranges):
 | `io.fn0`, `io.fn1`, `io.fn2` | S3: what GPIO 4, 5, 6 do: `off`, `relay`, `estop`, `buzzer`, `fan`, `fanPwm`, `fanTach`; one function per pin |
 | `fan.afterRun`, `fan.offBelow`, `fan.maxMin`, `fan.speed` | cooling fan: run after a program, until every channel is below (30 … 200 °C), at most (1 … 240 min), PWM speed (20 … 100 %) |
 | `safety.volume`, `safety.keyBeep` | buzzer volume 1 … 5 (alarms always play at 5), a short beep on the touch-screen buttons |
+| `safety.keyTone`, `safety.keyMs` | key beep tone (1000, 1500, 2000, 2500, 3000, 4000 Hz) and length (10, 20, 30, 50, 80 ms) |
 
 ## API mode
 

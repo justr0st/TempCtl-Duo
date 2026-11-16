@@ -7,6 +7,9 @@ display and safety. The pictures show the S3 (480×320); the CYD has the same sc
 **Touch rule:** a press counts where it is released. Slide your finger off a button (more than about 10 px)
 and nothing happens — a safe way to cancel a press.
 
+**Scrolling:** a page that is longer than the screen scrolls with a finger slide; a small triangle at the bottom
+edge shows that there is more below, one at the top edge that there is more above (each only while that way is possible).
+
 ## Main screen
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="img/touch/03-running-dark.png"><img src="img/touch/03-running-light.png" alt="Main screen during a run" width="480"></picture>
@@ -136,8 +139,8 @@ web page too), upside down, live chart period, the automatic **screen check**, t
 
 In groups: polling interval, "bottom reached" band and the setpoint margin below the cut-off; **OTA update** (S3: the newest release over Wi-Fi) and
 **Firmware update** from the SD card; **Backup to SD card** and **Restore from SD card**; time zone; the safety
-settings (manual mode timeout, E-stop input, SSR supply relay, alarm sound with **sound volume** 1 … 5 and
-**key beep**, chip temperature warning); on the S3 the **optional pins** (what GPIO 4, 5, 6 do) and the
+settings (manual mode timeout, E-stop input, SSR supply relay, alarm sound with a **sound volume** slider 1 … 5, the
+**key beep** with its **tone** and **length** (pop-up lists; one group), chip temperature warning); on the S3 the **optional pins** (what GPIO 4, 5, 6 do) and the
 **cooling fan** (run after a program, until every channel is below, at most, PWM speed; shown when a fan output is
 set); device info and restart. E-stop, relay and sound rows appear only when a pin has that function.
 

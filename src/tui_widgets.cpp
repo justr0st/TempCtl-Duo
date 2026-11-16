@@ -253,6 +253,62 @@ void tSetChecked(lv_obj_t* o, bool on) {
   else lv_obj_remove_state(o, LV_STATE_CHECKED);
 }
 
+// ---- scroll arrows: one pair per scrolling object, updated on scroll / size / layout changes and every 300 ms
+// (content that appears or hides without either)
+struct ScrollArrows {
+  lv_obj_t *sc, *up, *dn;
+};
+static ScrollArrows arrows[12];
+static lv_timer_t* arrowTimer = nullptr;
+static void arrowUpdate(ScrollArrows& a) {
+  const bool u = lv_obj_get_scroll_top(a.sc) > 2, d = lv_obj_get_scroll_bottom(a.sc) > 2;
+  if (u) lv_obj_align_to(a.up, a.sc, LV_ALIGN_TOP_MID, 0, 1);
+  if (d) lv_obj_align_to(a.dn, a.sc, LV_ALIGN_BOTTOM_MID, 0, -1);
+  tSetHidden(a.up, !u);
+  tSetHidden(a.dn, !d);
+}
+static void arrowTick(lv_timer_t*) {
+  for (ScrollArrows& a : arrows)
+    if (a.sc) arrowUpdate(a);
+}
+static void onScrollEv(lv_event_t* e) {
+  lv_obj_t* sc = (lv_obj_t*)lv_event_get_target(e);
+  for (ScrollArrows& a : arrows) {
+    if (a.sc != sc) continue;
+    if (lv_event_get_code(e) == LV_EVENT_DELETE) a.sc = nullptr;  // (the arrows are children of its parent: they go with it)
+    else arrowUpdate(a);
+    return;
+  }
+}
+void tScrollArrows(lv_obj_t* sc) {
+  ScrollArrows* a = nullptr;
+  for (ScrollArrows& x : arrows)
+    if (!x.sc) {
+      a = &x;
+      break;
+    }
+  if (!a) return;
+  lv_obj_t* par = lv_obj_get_parent(sc);
+  for (int i = 0; i < 2; ++i) {
+    lv_obj_t* l = lv_label_create(par);  // (a pill in the page colour: readable over the rows below it)
+    lv_label_set_text(l, i ? LV_SYMBOL_DOWN : LV_SYMBOL_UP);
+    lv_obj_add_style(l, &S_.scrollArrow, 0);
+    lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);  // (linked anyway: tfont_16b's fallback)
+    lv_obj_set_style_pad_hor(l, TUI_SMALL ? 10 : 14, 0);
+    lv_obj_set_style_pad_ver(l, 1, 0);
+    lv_obj_set_clickable(l, false);
+    lv_obj_set_scrollable(l, false);
+    lv_obj_set_floating(l, true);
+    lv_obj_set_hidden(l, true);
+    (i ? a->dn : a->up) = l;
+  }
+  a->sc = sc;
+  static const lv_event_code_t codes[] = {LV_EVENT_SCROLL, LV_EVENT_SIZE_CHANGED, LV_EVENT_LAYOUT_CHANGED,
+                                          LV_EVENT_CHILD_CHANGED, LV_EVENT_DELETE};
+  for (lv_event_code_t c : codes) lv_obj_add_event_cb(sc, onScrollEv, c, nullptr);
+  if (!arrowTimer) arrowTimer = lv_timer_create(arrowTick, 300, nullptr);
+}
+
 TPage tPageCreate(const char* title, lv_event_cb_t back) {
   TPage p;
   p.scr = lv_obj_create(nullptr);
@@ -274,6 +330,7 @@ TPage tPageCreate(const char* title, lv_event_cb_t back) {
   lv_obj_set_style_pad_top(p.body, 2, 0);
   lv_obj_set_style_pad_gap(p.body, 2, 0);  // setting rows close together
   lv_obj_set_scroll_dir(p.body, LV_DIR_VER);
+  tScrollArrows(p.body);
   return p;
 }
 
@@ -565,6 +622,7 @@ void tChoice(const char* title, const char* items, int sel, TChoiceCb cb, int ar
   lv_obj_set_flex_grow(list, 1);
   lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_scroll_dir(list, LV_DIR_VER);
+  tScrollArrows(list);
   int i = 0;
   const char* p = items;
   lv_obj_t* selRow = nullptr;

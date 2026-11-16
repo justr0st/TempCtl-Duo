@@ -140,6 +140,8 @@ void settingsDefaults(Settings& s, const BoardLimits& lim) {
   s.chipMaxC = 80;
   s.volume = 3;
   s.keyBeep = 1;
+  s.keyTone = 2000;
+  s.keyMs = 20;
   for (int i = 0; i < IO_PINS_MAX; ++i) s.ioFn[i] = i < lim.ioN ? lim.ioDef[i] : (uint8_t)IO_NONE;
   s.fanAfterRun = 1;
   s.fanOffBelow = 60;
@@ -382,6 +384,18 @@ bool settingsValidate(Settings& s, const BoardLimits& lim, char* msg, size_t n) 
   if (s.pollMs < pollMinMs(s)) s.pollMs = pollMinMs(s);
   clampv<uint8_t>(s.volume, 1, 5);
   s.keyBeep = s.keyBeep ? 1 : 0;
+  {  // the nearest allowed key beep tone / length
+    static const uint16_t TONES[] = {1000, 1500, 2000, 2500, 3000, 4000};
+    static const uint8_t LENS[] = {10, 20, 30, 50, 80};
+    uint16_t bt = TONES[0];
+    for (uint16_t t : TONES)
+      if (abs((int)t - (int)s.keyTone) < abs((int)bt - (int)s.keyTone)) bt = t;
+    s.keyTone = bt;
+    uint8_t bl = LENS[0];
+    for (uint8_t l : LENS)
+      if (abs((int)l - (int)s.keyMs) < abs((int)bl - (int)s.keyMs)) bl = l;
+    s.keyMs = bl;
+  }
   // optional pins: only the board's, every function on one pin at most (fan / fanPwm: one fan output)
   {
     bool used[IO_FN_COUNT] = {};
@@ -637,6 +651,8 @@ void settingsToJson(const Settings& s, JsonObject o, bool forApi) {
   sf["chipMaxC"] = s.chipMaxC;
   sf["volume"] = s.volume;
   sf["keyBeep"] = s.keyBeep != 0;
+  sf["keyTone"] = s.keyTone;
+  sf["keyMs"] = s.keyMs;
   JsonArray iof = o["io"]["fn"].to<JsonArray>();
   for (int i = 0; i < IO_PINS_MAX; ++i) iof.add(ioFnName(s.ioFn[i]));
   JsonObject fn = o["fan"].to<JsonObject>();
@@ -882,6 +898,8 @@ bool settingsFromJson(JsonObjectConst o, Settings& s, char* msg, size_t n) {
     R.num(sf, "safety.", "chipMaxC", s.chipMaxC);
     R.num(sf, "safety.", "volume", s.volume);
     R.flag(sf, "safety.", "keyBeep", s.keyBeep);
+    R.num(sf, "safety.", "keyTone", s.keyTone);
+    R.num(sf, "safety.", "keyMs", s.keyMs);
   }
   JsonObjectConst io = R.obj(o, "", "io");
   if (!io.isNull() && !io["fn"].isNull()) {  // {"fn":["relay","estop","fanPwm"]}: one name per optional pin
